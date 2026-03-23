@@ -1,0 +1,978 @@
+# =============================================================================
+#  aegion.yaml  —  Complete configuration reference
+#
+#  PHILOSOPHY
+#  ──────────────────────────────────────────────────────────────────────────
+#  This file is the ignition key, not the engine.
+#
+#  It contains only what Aegion needs before the database exists:
+#    • Server binding, TLS, CORS
+#    • Database connection
+#    • Encryption secrets
+#    • Bootstrap operator credentials
+#    • SMTP connection credentials
+#    • Module-level enable flags + their infrastructure-level settings
+#
+#  Everything that is "runtime config" (OAuth2 clients, social login providers,
+#  SAML metadata, policy namespaces, proxy rules, identity schemas, roles,
+#  notification templates, webhook endpoints) lives in Postgres and is managed
+#  through the admin panel at /aegion. No restart needed for those changes.
+#
+#  Each module has its own top-level key. Set enabled: true to compile it in.
+#  Changing enabled flags requires a rebuild (build tags). Every other value
+#  in a module block can be changed at runtime via the admin panel — the yaml
+#  values here are the startup defaults that seed the database on first boot.
+#
+#  Environment variable override pattern:
+#    database.url  →  AEGION_DATABASE_URL
+#    oauth2.issuer →  AEGION_OAUTH2_ISSUER
+# =============================================================================
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SERVER
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  port: 8080
+  host: 0.0.0.0                  # Use 127.0.0.1 to restrict to localhost only
+
+  tls:
+    enabled: false
+    cert:
+      path: ""                   # /path/to/tls.crt  (PEM-encoded)
+      base64: ""                 # Alternative: base64-encoded cert inline
+    key:
+      path: ""                   # /path/to/tls.key  (PEM-encoded)
+      base64: ""
+    # Minimum TLS version: TLS1.2 | TLS1.3
+    min_version: TLS1.2
+
+  cors:
+    enabled: true
+    allowed_origins:
+      - http://localhost:3000
+      # - https://app.yourdomain.com
+      # - https://*.yourdomain.com   (wildcard subdomains)
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Authorization
+      - Content-Type
+      - Cookie
+      - X-Session-Token
+      - X-CSRF-Token
+    exposed_headers:
+      - Content-Type
+      - Set-Cookie
+    allow_credentials: true
+    max_age: 300                 # Preflight cache seconds
+
+  # Request lifecycle timeouts
+  request_timeout: 60s
+  read_timeout: 30s
+  write_timeout: 60s
+  idle_timeout: 120s
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DATABASE
+#  Migrations run automatically on startup for all enabled modules.
+# ─────────────────────────────────────────────────────────────────────────────
+database:
+  url: postgres://aegion:secret@postgres:5432/aegion?sslmode=disable
+  # Supported DSN schemes:
+  #   postgres://   — PostgreSQL (recommended for production)
+  #   mysql://      — MySQL 8.0+
+  #   cockroach://  — CockroachDB
+  #   sqlite://     — SQLite (development only, not for production)
+  #
+  # Connection pool
+  max_open_connections: 25
+  max_idle_connections: 10
+  connection_max_lifetime: 1h
+  connection_max_idle_time: 5m
+  #
+  # Set true to only run pending migrations then exit.
+  # Use as a Kubernetes init container before starting the main pod.
+  migrate_only: false
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECRETS
+#  Rotate by prepending a new value — old values stay for decryption.
+#  All values must be at least 32 characters.
+#  NEVER commit real secrets to version control.
+# ─────────────────────────────────────────────────────────────────────────────
+secrets:
+  # Signs session cookies, CSRF tokens, and logout tokens.
+  cookie:
+    - CHANGE-ME-cookie-secret-at-least-32-chars
+    # - previous-cookie-secret        # Keep for rotation — decrypts old cookies
+
+  # AES-GCM / XChaCha20 encryption of sensitive database fields:
+  # TOTP secrets, OIDC access/refresh/id tokens, JWK private keys.
+  cipher:
+    - CHANGE-ME-cipher-secret-at-least-32-chars
+    # - previous-cipher-secret
+
+  # Fallback secret used for HMAC signing of anything not covered above.
+  default:
+    - CHANGE-ME-default-secret-at-least-32-chars
+
+  # Encryption algorithm for field-level encryption.
+  # xchacha20-poly1305 (default, recommended — nonce-extended, harder to misuse)
+  # aes-gcm (alternative — standard AES-256-GCM)
+  cipher_algorithm: xchacha20-poly1305
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  OPERATOR BOOTSTRAP
+#  Created once on first boot if the operator identity does not already exist.
+#  After first boot these values are ignored entirely.
+#  Change the password immediately after first login via /aegion → Settings.
+# ─────────────────────────────────────────────────────────────────────────────
+operator:
+  username: admin
+  email: admin@example.com
+  password: CHANGE-ME-before-production    # Minimum 12 characters
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PUBLIC BASE URL
+#  Aegion's externally reachable origin. Used as:
+#    - OIDC issuer claim (iss) in tokens
+#    - SAML Service Provider entity ID and ACS base
+#    - Redirect base for self-service flows
+#    - JWKS endpoint advertised to OAuth2 clients
+#    - Callback URLs registered with social providers
+# ─────────────────────────────────────────────────────────────────────────────
+public_url: http://localhost:8080
+# Production example: public_url: https://auth.yourdomain.com
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  UI (SELF-SERVICE FLOW ENDPOINTS)
+#  Where Aegion redirects browsers to render auth forms.
+#  Your frontend owns these pages; it calls Aegion's API to drive each flow.
+#  These seed the database on first boot and can be changed later in the
+#  admin panel under Settings → Flows without restarting.
+# ─────────────────────────────────────────────────────────────────────────────
+ui:
+  login: http://localhost:3000/auth/login
+  registration: http://localhost:3000/auth/registration
+  settings: http://localhost:3000/auth/settings
+  recovery: http://localhost:3000/auth/recovery
+  verification: http://localhost:3000/auth/verification
+  error: http://localhost:3000/auth/error
+
+  # Where to send the user after a successful flow if no return_to was set
+  default_return_url: http://localhost:3000/
+
+  # Whitelist of domains/origins allowed as return_to values.
+  # Aegion rejects any return_to that does not match — prevents open redirect.
+  allowed_return_urls:
+    - http://localhost:3000
+    # - https://app.yourdomain.com
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SESSION
+# ─────────────────────────────────────────────────────────────────────────────
+session:
+  # How long sessions stay valid after creation.
+  lifespan: 24h
+
+  cookie:
+    name: aegion_session
+    domain: ""                   # Empty = use the request's Host header
+    path: /
+    # SameSite policy:
+    #   Lax    — Safe default. Works with top-level navigations.
+    #   Strict — Maximum protection. Breaks flows triggered from third-party links.
+    #   None   — Required for cross-site iframes. Requires Secure flag (HTTPS).
+    same_site: Lax
+    persistent: true             # False = session cookie (expires on browser close)
+
+  whoami:
+    # Minimum AAL a session must have to be considered valid on /sessions/whoami.
+    # aal1 = any single factor. aal2 = requires second factor if identity has MFA.
+    required_aal: aal1
+
+  # Enable a signed JWT representation of the session, returned alongside the
+  # opaque session token. Useful for stateless verification without a DB lookup.
+  tokenize:
+    enabled: false
+    ttl: 5m                      # Keep short — JWTs cannot be revoked mid-life
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  TOKENS  (JWT signing key management)
+# ─────────────────────────────────────────────────────────────────────────────
+tokens:
+  # RS256 = RSA 2048-bit   ES256 = ECDSA P-256 (smaller, faster verification)
+  # The keypair is auto-generated on first boot if none exists.
+  algorithm: RS256
+
+  access_ttl: 15m               # Keep short — verified locally, no revocation call
+  refresh_ttl: 720h             # 30 days. Set -1 for non-expiring (not recommended).
+  id_token_ttl: 1h              # OIDC ID token TTL
+  auth_code_ttl: 10m            # OAuth2 authorization code TTL
+
+  # How long a retiring key stays in JWKS for verification after rotation.
+  # Downstream services caching the old public key will auto-recover within this window.
+  key_rotation_grace_period: 24h
+
+  # jwt    → self-contained, verified locally by your app using JWKS public key
+  # opaque → random string, must call /oauth2/introspect on every request
+  # jwt is the default and recommended strategy — no round-trip to Aegion per request.
+  access_token_strategy: jwt
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  HASHERS  (password hashing)
+# ─────────────────────────────────────────────────────────────────────────────
+hashers:
+  # argon2id — memory-hard, OWASP recommended (default)
+  # bcrypt   — widely supported alternative
+  algorithm: argon2id
+
+  argon2:
+    memory: 131072               # KiB — 128 MiB. OWASP minimum is 19 MiB (19456).
+    iterations: 1                # Time cost. Aegion auto-tunes with expected_duration.
+    parallelism: 4               # Should match GOMAXPROCS (number of CPU cores).
+    salt_length: 16              # Bytes
+    key_length: 32               # Output bytes
+    # Target hash duration. Aegion adjusts memory/iterations on startup to hit this.
+    # Lower values increase brute-force risk. 500ms is a reasonable production value.
+    expected_duration: 500ms
+    # Max memory Aegion will dedicate to concurrent hashing operations.
+    dedicated_memory: 1GB
+
+  bcrypt:
+    cost: 12                     # Min 10. Each +1 doubles hashing time.
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  COURIER  (notification delivery infrastructure)
+#  Credentials live here — they're needed before the DB exists.
+#  Template content, retry policy, and from-address are managed in the admin panel.
+# ─────────────────────────────────────────────────────────────────────────────
+courier:
+  # SMTP connection URL format:
+  #   smtp://user:pass@host:587/       → STARTTLS (most common for port 587)
+  #   smtps://user:pass@host:465/      → Implicit TLS
+  #   smtp://host:25/                  → No auth, no TLS (local only / dev)
+  smtp_url: smtps://user:password@smtp.example.com:465/
+  # Dev: smtp://localhost:1025/        → MailHog / Mailpit
+
+  from_address: noreply@example.com
+  from_name: My Application
+
+  # Worker tuning — how aggressively the background delivery worker runs
+  worker:
+    pull_count: 10               # Messages to process per tick
+    pull_wait: 1s                # Interval between ticks
+    max_retries: 5               # Attempts before marking a message 'abandoned'
+
+  # SMS delivery — provider credentials.
+  # The HTTP request template (body, headers, auth) is configured in the admin panel.
+  sms:
+    enabled: false
+    provider_url: ""             # e.g. https://api.twilio.com/2010-04-01/Accounts/ACxxx/Messages.json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SECURITY  (cross-cutting security posture)
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  # Return identical error responses for unknown-email vs wrong-password logins.
+  # Prevents user enumeration via response differences or timing attacks.
+  account_enumeration_mitigation: true
+
+  login:
+    max_attempts: 10             # Consecutive failures before temporary lockout
+    lockout_duration: 15m        # How long the lockout lasts
+    ip_rate_limit:
+      enabled: true
+      max_per_minute: 20         # Max login attempts per IP per minute
+
+  registration:
+    ip_rate_limit:
+      enabled: true
+      max_per_hour: 10           # Max signups per IP per hour (before any session)
+
+  # HaveIBeenPwned password check — k-anonymity (only a 5-char hash prefix sent)
+  haveibeenpwned:
+    enabled: true
+    host: api.pwnedpasswords.com  # Override to self-hosted HIBP instance if needed
+    max_breaches: 0              # 0 = any breach triggers rejection
+    ignore_network_errors: true  # Don't block login if HIBP is unreachable
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  CACHE  (optional — Redis)
+#  Adds distributed session caching, rate-limit state sharing across replicas,
+#  and a token revocation bloom filter. Without Redis everything falls back to
+#  Postgres — correct but slower under high concurrent load.
+# ─────────────────────────────────────────────────────────────────────────────
+cache:
+  enabled: false
+  # URL formats:
+  #   redis://:password@host:6379/0        plain
+  #   rediss://:password@host:6380/0       TLS
+  #   redis+sentinel://s1:26379,s2:26379/mymaster/0   HA sentinel
+  url: redis://:@redis:6379/0
+
+  pool:
+    max_connections: 10
+    min_idle: 2
+    max_idle_time: 5m
+
+  # TTL for cached session records — must be <= session.lifespan.
+  # Cached sessions may lag behind revocations by up to this duration.
+  session_ttl: 5m
+
+  # Bloom filter for token revocation — reduces DB lookups to near-zero for valid tokens.
+  # A false positive (valid token treated as revoked) is corrected on the next request.
+  revocation_bloom_filter:
+    enabled: true
+    expected_items: 1000000      # Expected number of revoked tokens in the filter
+    false_positive_rate: 0.001   # 0.1% — trades memory for accuracy
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  EVENTS  (optional — Kafka or Redis Streams)
+#  Domain event streaming for audit tails, analytics, and webhook delivery.
+#  Which event types to emit and webhook endpoints are configured in the admin panel.
+# ─────────────────────────────────────────────────────────────────────────────
+events:
+  enabled: false
+
+  # kafka | redis_streams
+  driver: kafka
+
+  kafka:
+    brokers:
+      - kafka:9092
+    tls:
+      enabled: false
+      cert_path: ""
+      key_path: ""
+      ca_path: ""
+
+  redis_streams:
+    # Leave empty to reuse cache.url when cache is enabled.
+    url: ""
+
+  # Topic names. Override to match your Kafka naming conventions.
+  topics:
+    users: aegion.users
+    sessions: aegion.sessions
+    tokens: aegion.tokens
+    oauth2: aegion.oauth2
+    policy: aegion.policy
+    flows: aegion.flows
+
+
+# =============================================================================
+#  MODULES
+#  Each module block has:
+#    enabled: true/false   — build-time flag (requires rebuild to change)
+#    ... sub-config        — infrastructure defaults seeded to DB on first boot,
+#                            editable at runtime via the admin panel
+# =============================================================================
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PASSWORD AUTH
+#  Always available when Aegion runs — not a separate build module.
+#  But its behaviour is configurable here.
+# ─────────────────────────────────────────────────────────────────────────────
+password:
+  enabled: true
+
+  # Minimum password length in characters.
+  min_length: 8
+
+  # Reject passwords that are too similar to the user's own email or username.
+  # Prevents "myemail@gmail.com" → password "gmail".
+  identifier_similarity_check: true
+
+  # HaveIBeenPwned check is inherited from security.haveibeenpwned above.
+  # Override here if you want different behaviour specifically for password auth.
+  haveibeenpwned:
+    enabled: true
+    max_breaches: 0
+    ignore_network_errors: true
+
+  # After-registration hook: automatically issue a session after password signup.
+  # Set false if you require email verification before allowing login.
+  auto_session_after_registration: true
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MFA  (multi-factor authentication)
+#  Build tag: mfa
+#  Provides: TOTP, WebAuthn-as-2FA, and backup recovery codes.
+# ─────────────────────────────────────────────────────────────────────────────
+mfa:
+  enabled: false
+
+  # Minimum AAL required to access settings flows (profile changes, password change).
+  # aal1 = any single factor. aal2 = requires 2FA if the identity has it enrolled.
+  # Raising this to aal2 means users must complete MFA before changing their password.
+  settings_privileged_session_max_age: 15m
+
+  totp:
+    enabled: true
+    # Issuer name shown in authenticator apps (Google Authenticator, Authy, etc.)
+    issuer: "My Application"
+
+  # Backup / recovery codes — single-use codes for when TOTP device is lost.
+  # These are second-factor credentials, not a recovery mechanism.
+  lookup_secret:
+    enabled: true
+    # How many codes to generate per enrollment
+    code_count: 12
+    # Code length in characters
+    code_length: 8
+
+  # WebAuthn as second factor (hardware keys like YubiKey used for MFA step).
+  # Platform authenticators (Touch ID as 2FA) also work here.
+  # Note: For passwordless passkeys as a first factor, see the passkeys: block.
+  webauthn_second_factor:
+    enabled: false
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PASSKEYS  (WebAuthn platform authenticators as first-factor passwordless auth)
+#  Build tag: passkeys
+#  Provides: Touch ID, Face ID, Windows Hello, hardware security keys as
+#            primary authentication — no password required.
+# ─────────────────────────────────────────────────────────────────────────────
+passkeys:
+  enabled: false
+
+  rp:
+    # Relying Party ID — MUST match the effective domain of your application.
+    # CRITICAL: this cannot be changed after passkeys are enrolled.
+    # Users on app.example.com must use id: app.example.com (or example.com for subdomain sharing).
+    id: localhost
+
+    # Human-readable name shown in the browser's passkey prompt.
+    display_name: "My Application"
+
+    # Allowed origins for passkey registration and authentication.
+    # Must include the full origin (scheme + host + port) of your app.
+    origins:
+      - http://localhost:3000
+      # - https://app.example.com
+
+  # Allow users to use passkeys as a first-factor (passwordless).
+  # When false, passkeys are only usable as a second factor (see mfa.webauthn_second_factor).
+  passwordless: true
+
+  # User verification requirement for the browser prompt.
+  # preferred — ask for UV if the authenticator supports it (default)
+  # required  — always require fingerprint/PIN/biometric
+  # discouraged — skip UV (not recommended for passwordless)
+  user_verification: preferred
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MAGIC LINK / CODE AUTH  (passwordless email and SMS one-time codes)
+#  Build tag: magic_link
+#  Provides: email magic links, email OTPs, SMS OTPs for login and registration.
+# ─────────────────────────────────────────────────────────────────────────────
+magic_link:
+  enabled: false
+
+  # Use 'code' (6-digit OTP in email/SMS — user types it in) or
+  # 'link' (clickable URL in email — user clicks it).
+  # Both can be enabled simultaneously for different flows.
+  strategy: code                 # code | link
+
+  # Whether codes can be used as a first-factor (passwordless login).
+  passwordless_enabled: false
+
+  # Whether codes can be used as a second factor (MFA via email/SMS).
+  mfa_enabled: false
+
+  # How long a code / link is valid before it expires.
+  lifespan: 15m
+
+  # OTP code length in digits (when strategy: code).
+  code_length: 6
+
+  # Whether codes survive a page refresh (useful for native apps).
+  code_reuse: false
+
+  # Maximum number of times a code can be requested before lockout.
+  max_requests_per_flow: 5
+
+  # Channel priority when an identity has both email and phone.
+  # email | sms | auto (uses email if available, falls back to sms)
+  default_channel: email
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SOCIAL LOGIN  (OIDC providers as first-factor auth)
+#  Build tag: social
+#  Providers are configured in the admin panel at runtime.
+#  The settings here control how the social login strategy behaves globally.
+# ─────────────────────────────────────────────────────────────────────────────
+social:
+  enabled: false
+
+  # When a user registers via a social provider, automatically create an Aegion
+  # session after registration without requiring a separate login step.
+  auto_session_after_registration: true
+
+  # PKCE mode for all social providers unless overridden per-provider in admin panel.
+  # auto  — enable PKCE if the provider's discovery document supports it (recommended)
+  # force — always use PKCE regardless of provider discovery
+  # never — never use PKCE (some legacy providers don't support it)
+  default_pkce_mode: auto
+
+  # Where to source claims when building the Aegion identity.
+  # id_token  — use claims from the OIDC ID token (default, no extra request)
+  # userinfo  — call the provider's userinfo endpoint (slower, but more complete)
+  default_claims_source: id_token
+
+  # Link matching — when a user signs in with a social provider and an identity
+  # with the same email already exists, should Aegion link the accounts?
+  # If false, the user gets an error and must log in with their original method first.
+  link_existing_account_on_email_match: false
+
+  # Jsonnet mapper used when a provider-specific mapper is not configured.
+  # file:// | base64:// | https://
+  default_mapper_url: ""
+
+  # Supported providers (all require client_id + client_secret via admin panel):
+  # google, github, github-app, gitlab, microsoft, discord, slack, facebook,
+  # apple, spotify, linkedin, linkedin_v2, x, twitch, auth0, salesforce,
+  # vk, yandex, netid, dingtalk, patreon, lark, line, amazon, generic
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SSO / SAML  (enterprise SAML 2.0 identity providers)
+#  Build tag: sso
+#  IdP connections are configured in the admin panel at runtime.
+#  The settings here define Aegion's Service Provider (SP) identity.
+# ─────────────────────────────────────────────────────────────────────────────
+sso:
+  enabled: false
+
+  saml:
+    enabled: true
+
+    # Aegion's Service Provider metadata.
+    # These values form Aegion's SAML identity — tell your IdP about these.
+    sp:
+      # Entity ID is the unique identifier for this SP.
+      # Defaults to public_url + /saml/metadata if left empty.
+      entity_id: ""
+
+      # Assertion Consumer Service (ACS) URL pattern:
+      #   {public_url}/saml/{provider_id}/acs
+      # This is computed automatically — configure it in your IdP.
+
+      # SP signing certificate (optional but strongly recommended).
+      # Used to sign AuthnRequests and decrypt encrypted assertions.
+      certificate:
+        path: ""                 # /path/to/sp-cert.pem
+        base64: ""
+      private_key:
+        path: ""                 # /path/to/sp-key.pem
+        base64: ""
+
+      # Require the IdP to sign its assertions.
+      want_assertions_signed: true
+      # Require the IdP to encrypt its assertions.
+      want_assertions_encrypted: false
+
+    # Metadata refresh interval for IdP metadata fetched from a URL.
+    metadata_refresh_interval: 24h
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  OAUTH2 / OIDC SERVER  (Aegion as an authorization server — Hydra-equivalent)
+#  Build tag: oauth2
+#  OAuth2 clients are registered in the admin panel at runtime.
+# ─────────────────────────────────────────────────────────────────────────────
+oauth2:
+  enabled: false
+
+  # The OIDC issuer identifier — must match public_url in most deployments.
+  # This becomes the iss claim in all tokens and the value in
+  # /.well-known/openid-configuration.
+  issuer: http://localhost:8080
+
+  # URLs Aegion redirects to for login and consent UI decisions.
+  # Your app renders these pages and calls Aegion's API to accept/reject.
+  urls:
+    login: http://localhost:3000/oauth2/login
+    consent: http://localhost:3000/oauth2/consent
+    logout: http://localhost:3000/oauth2/logout
+    error: http://localhost:3000/oauth2/error
+    post_logout_redirect: http://localhost:3000/
+
+  # Scopes this server supports. openid, offline, and offline_access are always
+  # included. Add custom scopes your applications will request.
+  scopes:
+    - openid
+    - offline
+    - offline_access
+    - profile
+    - email
+    - address
+    - phone
+
+  pkce:
+    # Enforce PKCE for all public clients (empty or missing client_secret).
+    enforced_for_public_clients: true
+    # Enforce PKCE for all clients regardless of type (RFC 9700 recommended).
+    enforced: false
+
+  refresh_token:
+    # Rotate refresh tokens on every use. The old token is immediately invalidated.
+    rotation_enabled: true
+    # Grace period for refresh token reuse — handles race conditions in mobile apps
+    # where a response is lost and the client retries with the same token.
+    # 0s = no grace period. 2m is a safe value for mobile clients.
+    grace_period: 0s
+
+  token_hook:
+    # Optional webhook called before each token issuance.
+    # Use to add custom claims, enforce business logic, or log issuance events.
+    enabled: false
+    url: ""                      # https://your-app.com/hooks/oauth2/token
+    method: POST
+    auth:
+      type: ""                   # api_key | basic_auth
+      config: {}
+
+  # Subject identifier strategy for OIDC sub claims.
+  subject_identifiers:
+    # public   — same sub value across all OAuth2 clients (simpler)
+    # pairwise — different sub per client (stronger privacy, more complex)
+    supported_types:
+      - public
+      # - pairwise
+    pairwise:
+      # Salt used to compute pairwise subjects. Must be stable — changing it
+      # breaks all pairwise subjects for existing users.
+      salt: ""                   # Required if pairwise is in supported_types
+
+  # Claims advertised in /.well-known/openid-configuration and accessible
+  # in userinfo responses.
+  oidc_discovery:
+    supported_claims:
+      - sub
+      - iss
+      - aud
+      - iat
+      - exp
+      - email
+      - email_verified
+      - name
+      - given_name
+      - family_name
+      - nickname
+      - picture
+      - website
+      - phone_number
+      - phone_number_verified
+      - birthdate
+      - locale
+      - zoneinfo
+      - updated_at
+
+  # Key sets to broadcast at /.well-known/jwks.json
+  jwks:
+    broadcast_keys:
+      - aegion.openid.id-token
+      # - aegion.jwt.access-token    # Uncomment if using JWT access tokens
+
+  # Access token format.
+  # jwt    — self-contained, verified locally (default, recommended)
+  # opaque — random string, must call /oauth2/introspect on each request
+  access_token_strategy: jwt
+
+  # Include custom claims from the consent session's access_token field
+  # in the JWT payload. Empty list = include all claims granted at consent.
+  allowed_top_level_claims: []
+
+  # Device Authorization Grant (RFC 8628) — for CLIs, smart TVs, input-limited devices
+  device_authorization:
+    enabled: false
+    token_polling_interval: 5s   # Minimum interval devices must wait between polls
+    # The device code endpoint: GET {public_url}/oauth2/device
+    # User code entry URL shown to the user: {public_url}/oauth2/device/verify
+
+  # JWT Bearer Grant (RFC 7523) — exchange a third-party JWT for an Aegion token
+  # without a full authorization flow. Used for service-to-service federation.
+  # Trusted issuers are configured via the admin panel.
+  jwt_bearer:
+    enabled: false
+
+  # Dynamic Client Registration (RFC 7591)
+  # Allows clients to register programmatically without admin panel interaction.
+  # Only enable this if you have a specific use case that requires it.
+  dynamic_client_registration:
+    enabled: false
+    # Scopes to grant dynamically registered clients by default.
+    default_scope: []
+
+  # Never expose internal Go error details in OAuth2 error responses.
+  # Enable only in development to aid debugging — never in production.
+  expose_internal_errors: false
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  INTROSPECTION  (RFC 7662 token introspection endpoint)
+#  Build tag: introspect
+#  Adds POST /oauth2/introspect — returns token metadata for any client.
+#  Use when your service cannot do local JWT verification, or when you need
+#  real-time revocation checks that local JWKS verification cannot provide.
+# ─────────────────────────────────────────────────────────────────────────────
+introspection:
+  enabled: false
+
+  # Who can call the introspection endpoint.
+  # authenticated_clients — only registered OAuth2 clients with their credentials
+  # any                   — any caller (not recommended — leaks token metadata)
+  access: authenticated_clients
+
+  # Cache introspection results in Redis for this duration (requires cache.enabled).
+  # Reduces DB load at the cost of delaying revocation propagation by this window.
+  cache_ttl: 0s                  # 0s = no caching
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  POLICY ENGINE  (authorization — RBAC, ABAC, ReBAC)
+#  Build tag: policy
+# ─────────────────────────────────────────────────────────────────────────────
+policy:
+  enabled: false
+
+  # Default authorization model used for check requests that don't specify one.
+  # rbac  — roles and permissions (good for most applications)
+  # abac  — attribute-based rules using CEL expressions
+  # rebac — Zanzibar-style relation tuple store (good for ownership graphs)
+  # All three models can coexist and be queried independently.
+  default_model: rbac
+
+  rbac:
+    enabled: true
+
+    # Roles seeded to the database on first boot if they don't already exist.
+    # Full role management (add/edit/delete, assign permissions) is in the admin panel.
+    seed_roles:
+      - name: admin
+        description: Full access to all resources
+      - name: user
+        description: Standard authenticated user
+      - name: viewer
+        description: Read-only access
+
+  abac:
+    enabled: false
+    # Rules are defined via the admin panel as CEL expressions, e.g.:
+    #   subject.roles.exists(r, r == "admin") || resource.owner_id == subject.id
+
+  rebac:
+    # Zanzibar-style tuple store. Namespace definitions (OPL config) are managed
+    # in the admin panel. Seed namespaces here for first boot only.
+    enabled: false
+    seed_namespaces:
+      - name: files
+      - name: organizations
+      - name: projects
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PROXY  (identity-aware reverse proxy — Oathkeeper-equivalent)
+#  Build tag: proxy
+#  Access rules (match/authenticate/authorize/mutate pipelines per route)
+#  are defined in the admin panel at runtime.
+#  The settings here configure the proxy engine's global behaviour.
+# ─────────────────────────────────────────────────────────────────────────────
+proxy:
+  enabled: false
+
+  # Default timeout for upstream requests. Override per-rule in admin panel.
+  upstream_timeout: 30s
+
+  # Whether to pass the original Host header to the upstream service.
+  preserve_host: true
+
+  # Authenticator handlers available to rules.
+  authenticators:
+    anonymous:
+      enabled: true              # Passes through with subject = "anonymous"
+    bearer_token:
+      enabled: true              # Validates JWT from Authorization: Bearer <token>
+      config:
+        jwks_urls:
+          - http://localhost:8080/.well-known/jwks.json
+        # Validate aud claim against this list. Empty = accept any audience.
+        target_audience: []
+        # none | hierarchy | wildcard — how to evaluate scope requirements
+        scope_strategy: none
+    cookie_session:
+      enabled: true              # Validates Aegion session cookie
+      config:
+        check_session_url: http://localhost:8080/sessions/whoami
+        preserve_path: true
+        # Only validate cookies with these names
+        only:
+          - aegion_session
+    noop:
+      enabled: true              # Skips authentication entirely (for public routes)
+
+  # Authorizer handlers available to rules.
+  authorizers:
+    allow:
+      enabled: true              # Permits all authenticated requests
+    deny:
+      enabled: true              # Rejects all requests
+    keto_engine:
+      enabled: false             # Uses Aegion's own policy engine for authorization
+      config:
+        base_url: http://localhost:8080
+    remote_json:
+      enabled: true              # POSTs to an external URL for authorization decisions
+    cel:
+      enabled: false             # Evaluates a CEL expression against session claims
+
+  # Mutator handlers — transform the request before forwarding to upstream.
+  mutators:
+    noop:
+      enabled: true              # Passes the request through unmodified
+    header:
+      enabled: true              # Injects headers from session claims
+    cookie:
+      enabled: false             # Sets additional cookies on the forwarded request
+    id_token:
+      enabled: false             # Issues a new signed JWT containing session claims
+      config:
+        issuer_url: http://localhost:8080
+        jwks_url: http://localhost:8080/.well-known/jwks.json
+        # Go template for the JWT claims payload
+        claims: |
+          {
+            "sub": "{{ print .Subject }}",
+            "session": {{ .Extra | toJson }}
+          }
+        ttl: 60s
+    hydrator:
+      enabled: false             # Enriches session by calling your app before forwarding
+      config:
+        api:
+          url: ""
+          retry:
+            give_up_after: 2s
+            max_delay: 100ms
+
+  # Error handling when a proxy rule fails authentication or authorization.
+  errors:
+    fallback: json               # json | redirect | www_authenticate
+    handlers:
+      unauthorized:
+        handler: json
+      forbidden:
+        handler: json
+      not_found:
+        handler: json
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ADMIN DASHBOARD
+#  Build tag: admin
+#  The /aegion SPA served by the main binary.
+# ─────────────────────────────────────────────────────────────────────────────
+admin:
+  enabled: true                  # Disable only if you want a headless deployment
+
+  # URL path where the dashboard is served. Must start with /.
+  path: /aegion
+
+  # Admin session lifespan — shorter than end-user sessions to reduce blast radius.
+  session_lifespan: 8h
+
+  # Require 2FA (if enrolled) for admin dashboard access regardless of
+  # the identity's own MFA configuration.
+  require_mfa: false
+
+  # Minimum AAL required for admin session.
+  required_aal: aal1
+
+  cors:
+    enabled: true
+    allowed_origins:
+      - http://localhost:3000
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  OBSERVABILITY
+# ─────────────────────────────────────────────────────────────────────────────
+log:
+  # panic | fatal | error | warn | info | debug | trace
+  level: info
+  # json (production) | text (human-readable in development)
+  format: json
+  # NEVER enable in production — logs raw session tokens, secrets, and passwords.
+  leak_sensitive_values: false
+
+tracing:
+  # otel | jaeger | zipkin | datadog — empty string disables tracing.
+  provider: ""
+  service_name: aegion
+
+  otel:
+    server_url: http://localhost:4318    # OpenTelemetry collector HTTP endpoint
+    insecure: true                       # Set false when collector uses TLS
+    sampling_ratio: 1.0                  # 1.0 = trace all requests, 0.1 = 10%
+
+  jaeger:
+    local_agent_address: localhost:6831
+
+  zipkin:
+    server_url: http://localhost:9411/api/v2/spans
+
+  datadog:
+    use_128_bit_trace_id: true
+
+metrics:
+  enabled: true
+  path: /metrics                 # Prometheus scrape endpoint
+
+profiling:
+  # pprof Go runtime profiling endpoints. Expose only on internal networks.
+  enabled: false
+  path: /debug/pprof             # NEVER expose this to the public internet
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  FEATURE FLAGS
+#  Opt-in for experimental or performance-sensitive features.
+# ─────────────────────────────────────────────────────────────────────────────
+feature_flags:
+  # Cache /sessions/whoami responses briefly to reduce DB load.
+  # Warning: revoked sessions may appear valid for up to cacheable_sessions_max_age.
+  cacheable_sessions: false
+  cacheable_sessions_max_age: 0s
+
+  # Use the continue_with flow transition model (Kratos v1.1+ pattern).
+  # Enables cleaner multi-step flow resumption. Recommended for new deployments.
+  use_continue_with_transitions: true
+
+  # Lazy-load identity credentials and addresses only when needed.
+  # Reduces DB read overhead for high-volume session validation paths.
+  lazy_loading: true
