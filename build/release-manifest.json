@@ -1,0 +1,27 @@
+{
+  "version": "1.0.0",
+  "release_date": "2026-01-01",
+  "images": {
+    "core": {
+      "tag": "aegion/aegion-core:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "password": {
+      "tag": "aegion/aegion-password:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "magic_link": {
+      "tag": "aegion/aegion-magic-link:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "admin": {
+      "tag": "aegion/aegion-admin:1.0.0",
+      "digest": "sha256:placeholder"
+    }
+  },
+  "compatibility": {
+    "min_core_version": "1.0.0",
+    "postgres_versions": ["14", "15", "16"],
+    "redis_versions": ["6", "7"]
+  }
+}

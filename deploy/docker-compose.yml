@@ -1,0 +1,103 @@
+# =============================================================================
+# Aegion Development Environment
+# Brings up core + postgres + redis + mailpit for local development
+# =============================================================================
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Aegion Core
+  # ─────────────────────────────────────────────────────────────────────────
+  aegion:
+    build:
+      context: ..
+      dockerfile: build/Dockerfile.core
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../configs/aegion.yaml:/config/aegion.yaml:ro
+      - aegion-data:/data
+    environment:
+      AEGION_DATABASE_URL: postgres://aegion:aegion@postgres:5432/aegion?sslmode=disable
+      AEGION_CACHE_URL: redis://redis:6379/0
+      AEGION_LOG_LEVEL: debug
+      AEGION_LOG_FORMAT: text
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aegion-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aegion
+      POSTGRES_USER: aegion
+      POSTGRES_PASSWORD: aegion
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegion -d aegion"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aegion-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis Cache
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aegion-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Mailpit - Email Testing
+  # Catches all outbound emails for development
+  # ─────────────────────────────────────────────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    networks:
+      - aegion-network
+    restart: unless-stopped
+
+# ─────────────────────────────────────────────────────────────────────────
+# Networks
+# ─────────────────────────────────────────────────────────────────────────
+networks:
+  aegion-network:
+    driver: bridge
+
+# ─────────────────────────────────────────────────────────────────────────
+# Volumes
+# ─────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres-data:
+  redis-data:
+  aegion-data:
