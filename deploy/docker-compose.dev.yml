@@ -1,0 +1,100 @@
+# =============================================================================
+# Aegion Identity Platform - Development Overrides
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# =============================================================================
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL - Expose port for local tools
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    ports:
+      - "5432:5432"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis - Expose port for debugging
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    ports:
+      - "6379:6379"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Aegion Core - Development configuration
+  # ─────────────────────────────────────────────────────────────────────────
+  aegion:
+    build:
+      context: ..
+      dockerfile: build/Dockerfile.core
+    ports:
+      - "8080:8080"
+      - "6060:6060"   # pprof debug port
+    environment:
+      AEGION_LOG_LEVEL: debug
+      AEGION_LOG_FORMAT: text
+      AEGION_DEBUG_PPROF: "true"
+      AEGION_DATABASE_URL: postgres://aegion:aegion@postgres:5432/aegion?sslmode=disable
+      AEGION_CACHE_URL: redis://redis:6379/0
+      # Development secrets (DO NOT USE IN PRODUCTION)
+      AEGION_SECRETS_COOKIE: dev-cookie-secret-change-me-32chars!
+      AEGION_SECRETS_CIPHER: dev-cipher-secret-change-me-32chars!
+      AEGION_SECRETS_INTERNAL: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/aegion.yaml:/config/aegion.yaml:ro
+      - ../configs/schemas:/config/schemas:ro
+      - aegion-data:/data
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Password Module - Development
+  # ─────────────────────────────────────────────────────────────────────────
+  module-password:
+    build:
+      context: ..
+      dockerfile: modules/password/Dockerfile
+    ports:
+      - "9001:9001"
+    environment:
+      MODULE_LOG_LEVEL: debug
+      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/modules/password.yaml:/config/password.yaml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Magic Link Module - Development
+  # ─────────────────────────────────────────────────────────────────────────
+  module-magic-link:
+    build:
+      context: ..
+      dockerfile: modules/magic_link/Dockerfile
+    ports:
+      - "9002:9002"
+    environment:
+      MODULE_LOG_LEVEL: debug
+      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/modules/magic_link.yaml:/config/magic_link.yaml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Admin Module - Development
+  # ─────────────────────────────────────────────────────────────────────────
+  module-admin:
+    build:
+      context: ..
+      dockerfile: modules/admin/Dockerfile
+    ports:
+      - "9003:9003"
+    environment:
+      MODULE_LOG_LEVEL: debug
+      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/modules/admin.yaml:/config/admin.yaml:ro
+      - ../modules/admin/ui/dist:/app/ui:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Mailpit - Email Testing UI
+  # ─────────────────────────────────────────────────────────────────────────
+  mailpit:
+    profiles: []  # Enable in dev (override the 'dev' profile restriction)
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP

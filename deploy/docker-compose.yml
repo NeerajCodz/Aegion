@@ -1,103 +1,217 @@
 # =============================================================================
-# Aegion Development Environment
-# Brings up core + postgres + redis + mailpit for local development
+# Aegion Identity Platform - Docker Compose
+# Base configuration for all environments
+# =============================================================================
+# Usage:
+#   Development: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 # =============================================================================
 
 services:
   # ─────────────────────────────────────────────────────────────────────────
-  # Aegion Core
+  # PostgreSQL 15 Database
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aegion}
+      POSTGRES_USER: ${POSTGRES_USER:-aegion}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegion}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegion} -d ${POSTGRES_DB:-aegion}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - aegion_modules
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis 7 Cache
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - aegion_modules
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Aegion Core Service
+  # Main orchestrator for identity management
   # ─────────────────────────────────────────────────────────────────────────
   aegion:
+    image: ${AEGION_IMAGE:-aegion/core}:${AEGION_VERSION:-latest}
     build:
       context: ..
       dockerfile: build/Dockerfile.core
-    ports:
-      - "8080:8080"
-    volumes:
-      - ../configs/aegion.yaml:/config/aegion.yaml:ro
-      - aegion-data:/data
+      args:
+        VERSION: ${AEGION_VERSION:-dev}
     environment:
-      AEGION_DATABASE_URL: postgres://aegion:aegion@postgres:5432/aegion?sslmode=disable
+      AEGION_DATABASE_URL: postgres://${POSTGRES_USER:-aegion}:${POSTGRES_PASSWORD:-aegion}@postgres:5432/${POSTGRES_DB:-aegion}?sslmode=disable
       AEGION_CACHE_URL: redis://redis:6379/0
-      AEGION_LOG_LEVEL: debug
-      AEGION_LOG_FORMAT: text
+      AEGION_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+      AEGION_LOG_FORMAT: ${AEGION_LOG_FORMAT:-json}
+      AEGION_SECRETS_COOKIE: ${AEGION_SECRETS_COOKIE:-}
+      AEGION_SECRETS_CIPHER: ${AEGION_SECRETS_CIPHER:-}
+      AEGION_SECRETS_INTERNAL: ${AEGION_SECRETS_INTERNAL:-}
+    volumes:
+      - aegion-data:/data
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["/app/aegion", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
-      - aegion-network
+      - aegion_modules
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PostgreSQL Database
+  # Password Module
+  # Handles password-based authentication
   # ─────────────────────────────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
+  module-password:
+    image: ${AEGION_IMAGE:-aegion/module-password}:${AEGION_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: modules/password/Dockerfile
+      args:
+        VERSION: ${AEGION_VERSION:-dev}
     environment:
-      POSTGRES_DB: aegion
-      POSTGRES_USER: aegion
-      POSTGRES_PASSWORD: aegion
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      MODULE_PORT: 9001
+      MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+      AEGION_CORE_URL: http://aegion:8080
+      AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+    depends_on:
+      aegion:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aegion -d aegion"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
-      - aegion-network
+      - aegion_modules
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Redis Cache
+  # Magic Link Module
+  # Handles passwordless authentication via email/SMS
   # ─────────────────────────────────────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    ports:
-      - "6379:6379"
+  module-magic-link:
+    image: ${AEGION_IMAGE:-aegion/module-magic-link}:${AEGION_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: modules/magic_link/Dockerfile
+      args:
+        VERSION: ${AEGION_VERSION:-dev}
+    environment:
+      MODULE_PORT: 9002
+      MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+      AEGION_CORE_URL: http://aegion:8080
+      AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+    depends_on:
+      aegion:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
-      - aegion-network
+      - aegion_modules
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Mailpit - Email Testing
-  # Catches all outbound emails for development
+  # Admin Module
+  # Admin dashboard and management API
+  # ─────────────────────────────────────────────────────────────────────────
+  module-admin:
+    image: ${AEGION_IMAGE:-aegion/module-admin}:${AEGION_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: modules/admin/Dockerfile
+      args:
+        VERSION: ${AEGION_VERSION:-dev}
+    environment:
+      MODULE_PORT: 9003
+      MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+      AEGION_CORE_URL: http://aegion:8080
+      AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+    depends_on:
+      aegion:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - aegion_modules
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Mailpit - Email Testing (Development only, override in prod)
   # ─────────────────────────────────────────────────────────────────────────
   mailpit:
     image: axllent/mailpit:latest
-    ports:
-      - "8025:8025"   # Web UI
-      - "1025:1025"   # SMTP
+    profiles:
+      - dev
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
     networks:
-      - aegion-network
+      - aegion_modules
     restart: unless-stopped
 
 # ─────────────────────────────────────────────────────────────────────────
 # Networks
 # ─────────────────────────────────────────────────────────────────────────
 networks:
-  aegion-network:
+  aegion_modules:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
 # ─────────────────────────────────────────────────────────────────────────
 # Volumes
 # ─────────────────────────────────────────────────────────────────────────
 volumes:
   postgres-data:
+    name: aegion_postgres_data
   redis-data:
+    name: aegion_redis_data
   aegion-data:
+    name: aegion_core_data
