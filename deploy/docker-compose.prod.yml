@@ -1,0 +1,193 @@
+# =============================================================================
+# Aegion Identity Platform - Production Overrides
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL - Production settings
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    # No exposed ports in production
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=16MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+      -c max_connections=200
+      -c log_statement=mod
+      -c log_min_duration_statement=1000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis - Production settings
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    # No exposed ports in production
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 384mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Aegion Core - Production
+  # ─────────────────────────────────────────────────────────────────────────
+  aegion:
+    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/core:${AEGION_VERSION}
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+      replicas: 1
+    environment:
+      AEGION_LOG_LEVEL: info
+      AEGION_LOG_FORMAT: json
+      AEGION_DEBUG_PPROF: "false"
+      # Secrets from files
+      AEGION_SECRETS_COOKIE_FILE: /run/secrets/aegion_cookie_secret
+      AEGION_SECRETS_CIPHER_FILE: /run/secrets/aegion_cipher_secret
+      AEGION_SECRETS_INTERNAL_FILE: /run/secrets/aegion_internal_secret
+    secrets:
+      - aegion_cookie_secret
+      - aegion_cipher_secret
+      - aegion_internal_secret
+    volumes:
+      - aegion-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Password Module - Production
+  # ─────────────────────────────────────────────────────────────────────────
+  module-password:
+    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-password:${AEGION_VERSION}
+    # No exposed ports in production
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    environment:
+      MODULE_LOG_LEVEL: info
+      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
+    secrets:
+      - aegion_internal_secret
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "5"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Magic Link Module - Production
+  # ─────────────────────────────────────────────────────────────────────────
+  module-magic-link:
+    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-magic-link:${AEGION_VERSION}
+    # No exposed ports in production
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    environment:
+      MODULE_LOG_LEVEL: info
+      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
+    secrets:
+      - aegion_internal_secret
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "5"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Admin Module - Production
+  # ─────────────────────────────────────────────────────────────────────────
+  module-admin:
+    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-admin:${AEGION_VERSION}
+    # No exposed ports in production (accessed through core)
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    environment:
+      MODULE_LOG_LEVEL: info
+      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
+    secrets:
+      - aegion_internal_secret
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "5"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Mailpit - Disabled in production
+  # ─────────────────────────────────────────────────────────────────────────
+  mailpit:
+    profiles:
+      - disabled  # Never runs in production
+
+# ─────────────────────────────────────────────────────────────────────────
+# Secrets (Docker Swarm or file-based)
+# ─────────────────────────────────────────────────────────────────────────
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  aegion_cookie_secret:
+    file: ./secrets/aegion_cookie_secret.txt
+  aegion_cipher_secret:
+    file: ./secrets/aegion_cipher_secret.txt
+  aegion_internal_secret:
+    file: ./secrets/aegion_internal_secret.txt

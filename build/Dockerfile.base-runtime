@@ -1,0 +1,30 @@
+# =============================================================================
+# Aegion Base Runtime Image
+# Minimal image for running compiled binaries
+# =============================================================================
+FROM debian:bookworm-slim AS runtime
+
+# Install CA certificates and create non-root user
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 1000 -s /sbin/nologin aegion
+
+# Set timezone
+ENV TZ=UTC
+
+# Create directories
+RUN mkdir -p /app /config /data && \
+    chown -R aegion:aegion /app /config /data
+
+# Switch to non-root user
+USER aegion
+
+# Working directory
+WORKDIR /app
+
+# Labels
+LABEL org.opencontainers.image.title="Aegion Base Runtime" \
+      org.opencontainers.image.description="Minimal runtime image for Aegion modules" \
+      org.opencontainers.image.vendor="Aegion"

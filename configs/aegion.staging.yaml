@@ -1,0 +1,274 @@
+# =============================================================================
+# aegion.staging.yaml — Staging Environment Configuration
+#
+# Production-like settings with debug options enabled.
+# Uses test email provider (mailhog/mailpit) for email testing.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# YAML Anchors — Shared Values
+# -----------------------------------------------------------------------------
+x-timeouts: &default-timeouts
+  request_timeout: 60s
+  read_timeout: 30s
+  write_timeout: 60s
+  idle_timeout: 120s
+
+x-rate-limits: &staging-rate-limits
+  login:
+    requests: 10
+    period: 1m
+  registration:
+    requests: 5
+    period: 1h
+  email_delivery:
+    requests: 10
+    period: 1h
+
+# -----------------------------------------------------------------------------
+# Module Versions (use latest or specific versions for testing)
+# -----------------------------------------------------------------------------
+module_versions:
+  password:   "${AEGION_MODULE_PASSWORD_VERSION:-latest}"
+  magic_link: "${AEGION_MODULE_MAGIC_LINK_VERSION:-latest}"
+  admin:      "${AEGION_MODULE_ADMIN_VERSION:-latest}"
+
+module_registry:
+  base_url: "${AEGION_MODULE_REGISTRY:-ghcr.io/aegion}"
+  pull_policy: "always"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  port: ${AEGION_PORT:-8080}
+  host: 0.0.0.0
+
+  # TLS — Enable for staging to test TLS configuration
+  tls:
+    enabled: ${AEGION_TLS_ENABLED:-true}
+    cert_file: ${AEGION_TLS_CERT_FILE:-/etc/aegion/tls/tls.crt}
+    key_file: ${AEGION_TLS_KEY_FILE:-/etc/aegion/tls/tls.key}
+    min_version: "1.2"
+
+  cors:
+    enabled: true
+    allowed_origins:
+      - ${AEGION_CORS_ORIGIN:-https://staging.example.com}
+      - https://staging-admin.example.com
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Authorization
+      - Content-Type
+      - Cookie
+      - X-Session-Token
+      - X-CSRF-Token
+      - X-Debug-Token
+    allow_credentials: true
+    max_age: 300
+
+  <<: *default-timeouts
+
+  internal_network:
+    name: aegion_modules
+    subnet: 172.20.0.0/16
+    health_check_interval: 5s
+    health_check_timeout: 3s
+    health_check_failures: 3
+    restart_on_failure: true
+    startup_timeout: 45s
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+database:
+  url: ${AEGION_DATABASE_URL:-postgres://aegion:aegion@postgres:5432/aegion_staging?sslmode=require}
+  max_open_connections: 30
+  max_idle_connections: 15
+  connection_max_lifetime: 1h
+  connection_max_idle_time: 5m
+  migrate_only: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cache Configuration (Redis)
+# ─────────────────────────────────────────────────────────────────────────────
+cache:
+  enabled: true
+  url: ${AEGION_REDIS_URL:-redis://redis:6379/0}
+  key_prefix: "aegion:staging:"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets — Use environment variables
+# ─────────────────────────────────────────────────────────────────────────────
+secrets:
+  cookie:
+    - ${AEGION_SECRET_COOKIE_1:-staging-cookie-secret-32chars!!}
+  cipher:
+    - ${AEGION_SECRET_CIPHER_1:-staging-cipher-secret-32chars!!}
+  internal:
+    - ${AEGION_SECRET_INTERNAL_1:-staging-internal-secret-32char!}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging — Debug level with text format for readability
+# ─────────────────────────────────────────────────────────────────────────────
+log:
+  level: ${AEGION_LOG_LEVEL:-debug}
+  format: ${AEGION_LOG_FORMAT:-text}
+  include_request_id: true
+  # Enable request/response logging for debugging
+  log_requests: true
+  log_responses: true
+  # Show SQL queries for debugging
+  log_sql: ${AEGION_LOG_SQL:-false}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Debug Options — Staging-specific
+# ─────────────────────────────────────────────────────────────────────────────
+debug:
+  enabled: true
+  # Enable debug endpoints (profiling, etc.)
+  endpoints: true
+  pprof_enabled: true
+  pprof_path: /debug/pprof
+  # Allow debug headers in requests
+  allow_debug_headers: true
+  # Detailed error messages (NOT for production)
+  detailed_errors: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap Operator
+# ─────────────────────────────────────────────────────────────────────────────
+operator:
+  email: ${AEGION_OPERATOR_EMAIL:-admin@staging.example.com}
+  password: ${AEGION_OPERATOR_PASSWORD:-StagingAdmin123!}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Courier (Email/SMS) — Mailhog/Mailpit for testing
+# ─────────────────────────────────────────────────────────────────────────────
+courier:
+  smtp:
+    # Mailhog/Mailpit for email testing
+    host: ${AEGION_SMTP_HOST:-mailhog}
+    port: ${AEGION_SMTP_PORT:-1025}
+    from_address: ${AEGION_SMTP_FROM_ADDRESS:-noreply@staging.example.com}
+    from_name: ${AEGION_SMTP_FROM_NAME:-Aegion Staging}
+    auth:
+      enabled: false
+    tls:
+      enabled: false
+  # Log all outgoing emails for debugging
+  log_messages: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sessions — Secure but with debugging options
+# ─────────────────────────────────────────────────────────────────────────────
+sessions:
+  cookie:
+    name: aegion_session_staging
+    path: /
+    same_site: lax
+    secure: ${AEGION_COOKIE_SECURE:-true}
+    http_only: true
+    domain: ${AEGION_COOKIE_DOMAIN:-}
+  lifespan: 24h
+  idle_timeout: 2h
+  remember_me_lifespan: 720h
+  max_per_user: 10
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Identity Schemas
+# ─────────────────────────────────────────────────────────────────────────────
+identity:
+  default_schema: default
+  schemas:
+    - id: default
+      url: file:///config/schemas/default.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Settings — Relaxed for testing but still secure
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  account_enumeration_mitigation: true
+  
+  csrf:
+    enabled: true
+    token_length: 32
+    cookie_name: aegion_csrf_staging
+    secure: ${AEGION_COOKIE_SECURE:-true}
+    same_site: lax
+
+  rate_limits:
+    <<: *staging-rate-limits
+    global:
+      requests: 200
+      period: 1m
+    password_reset:
+      requests: 5
+      period: 1h
+    api:
+      requests: 120
+      period: 1m
+
+  brute_force:
+    max_attempts: 10
+    lockout_duration: 15m
+    progressive_lockout: true
+    max_lockout_duration: 1h
+
+  headers:
+    content_security_policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    x_frame_options: "SAMEORIGIN"
+    x_content_type_options: "nosniff"
+    referrer_policy: "strict-origin-when-cross-origin"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module Enable Flags
+# ─────────────────────────────────────────────────────────────────────────────
+password:
+  enabled: true
+  min_length: 8
+  require_uppercase: true
+  require_lowercase: true
+  require_number: true
+  require_special: false
+  hibp_enabled: true
+  history_count: 5
+
+magic_link:
+  enabled: true
+  code_length: 6
+  code_charset: "0123456789"
+  link_lifespan: 15m
+  code_lifespan: 15m
+
+admin:
+  enabled: true
+  path: ${AEGION_ADMIN_PATH:-/aegion}
+  session_lifespan: 4h
+  require_reauth: true
+  reauth_timeout: 10m
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Observability — Full metrics and tracing for debugging
+# ─────────────────────────────────────────────────────────────────────────────
+observability:
+  metrics:
+    enabled: true
+    path: /metrics
+    # Allow all IPs in staging for easier debugging
+    allowed_ips: []
+
+  tracing:
+    enabled: ${AEGION_TRACING_ENABLED:-true}
+    endpoint: ${AEGION_TRACING_ENDPOINT:-http://jaeger:14268/api/traces}
+    sample_rate: 1.0  # Sample all requests in staging
+
+  health:
+    path: /health
+    detailed: true  # Show detailed health info in staging

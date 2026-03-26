@@ -1,0 +1,182 @@
+{{/*
+  Base Email Template for Aegion Identity Platform
+  Variables:
+    - .Title: Email title/subject
+    - .Content: Main content block (HTML)
+    - .Footer: Optional footer text
+    - .Year: Current year for copyright
+*/}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>{{.Title}}</title>
+  <style>
+    /* Reset */
+    body, table, td, p, a, li { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+
+    /* Base */
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      background-color: #f4f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333333;
+    }
+
+    /* Container */
+    .email-wrapper {
+      width: 100%;
+      background-color: #f4f7fa;
+      padding: 40px 0;
+    }
+
+    .email-container {
+      max-width: 600px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+      overflow: hidden;
+    }
+
+    /* Header */
+    .email-header {
+      background-color: #2563eb;
+      padding: 32px 40px;
+      text-align: center;
+    }
+
+    .email-header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: 600;
+    }
+
+    /* Body */
+    .email-body {
+      padding: 40px;
+    }
+
+    .email-body h2 {
+      margin: 0 0 16px 0;
+      color: #1f2937;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .email-body p {
+      margin: 0 0 16px 0;
+      color: #4b5563;
+      font-size: 16px;
+    }
+
+    /* Button */
+    .btn {
+      display: inline-block;
+      padding: 14px 32px;
+      background-color: #2563eb;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 500;
+      margin: 16px 0;
+    }
+
+    .btn:hover {
+      background-color: #1d4ed8;
+    }
+
+    /* Code Block */
+    .code-block {
+      display: inline-block;
+      padding: 16px 32px;
+      background-color: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: 4px;
+      color: #1f2937;
+      margin: 16px 0;
+    }
+
+    /* Footer */
+    .email-footer {
+      padding: 24px 40px;
+      background-color: #f9fafb;
+      border-top: 1px solid #e5e7eb;
+      text-align: center;
+    }
+
+    .email-footer p {
+      margin: 0 0 8px 0;
+      color: #6b7280;
+      font-size: 14px;
+    }
+
+    .email-footer a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+
+    /* Responsive */
+    @media only screen and (max-width: 620px) {
+      .email-container {
+        width: 100% !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+      }
+
+      .email-header,
+      .email-body,
+      .email-footer {
+        padding: 24px !important;
+      }
+
+      .code-block {
+        font-size: 22px;
+        padding: 12px 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td align="center">
+          <div class="email-container">
+            <!-- Header -->
+            <div class="email-header">
+              <h1>{{.Title}}</h1>
+            </div>
+
+            <!-- Body -->
+            <div class="email-body">
+              {{.Content}}
+            </div>
+
+            <!-- Footer -->
+            <div class="email-footer">
+              {{if .Footer}}
+              <p>{{.Footer}}</p>
+              {{end}}
+              <p>&copy; {{.Year}} Aegion. All rights reserved.</p>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>

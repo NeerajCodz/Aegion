@@ -1,0 +1,64 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+/aegion
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+/rust/*/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node (Admin SPA)
+node_modules/
+modules/admin/ui/dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Secrets - NEVER commit
+*.pem
+*.key
+secrets/
+
+# Build artifacts
+/build/release/
+*.tar.gz
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# Session/cache files
+*.pid

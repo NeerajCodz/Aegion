@@ -1,0 +1,61 @@
+# =============================================================================
+# Aegion Core Dockerfile
+# Builds the main core binary with embedded Rust engines
+# =============================================================================
+
+# Stage 1: Build Rust libraries
+FROM aegion/base:latest AS rust-builder
+
+WORKDIR /build/rust
+
+# Copy Rust source
+COPY rust/ ./
+
+# Build all Rust crates in release mode
+RUN cargo build --release --workspace
+
+# Stage 2: Build Go binary
+FROM aegion/base:latest AS go-builder
+
+WORKDIR /build
+
+# Copy go modules first for caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy Rust build artifacts
+COPY --from=rust-builder /build/rust/target/release/*.a /build/rust/lib/
+COPY --from=rust-builder /build/rust/target/*.h /build/rust/include/
+
+# Copy source code
+COPY . .
+
+# Set CGO flags for Rust linking
+ENV CGO_ENABLED=1
+ENV CGO_LDFLAGS="-L/build/rust/lib -lcrypto_engine -ljwt_engine"
+ENV CGO_CFLAGS="-I/build/rust/include"
+
+# Build the core binary
+ARG VERSION=dev
+RUN go build -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /build/aegion ./cmd/aegion
+
+# Stage 3: Final runtime image
+FROM aegion/base-runtime:latest
+
+# Copy binary
+COPY --from=go-builder /build/aegion /app/aegion
+
+# Copy default config
+COPY configs/aegion.yaml /config/aegion.yaml
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/app/aegion", "health"]
+
+# Entry point
+ENTRYPOINT ["/app/aegion"]
+CMD ["serve", "--config", "/config/aegion.yaml"]

@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "crypto",
+    "jwt",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/aegion-auth/aegion"
+authors = ["Aegion Authors"]
+
+[workspace.dependencies]
+# Crypto
+argon2 = { version = "0.5", features = ["std"] }
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+ring = "0.17"
+rand = "0.8"
+subtle = "2.5"
+
+# JWT
+jsonwebtoken = "9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.21"
+
+# FFI
+libc = "0.2"
+cbindgen = "0.26"
+
+# Error handling
+thiserror = "1"
+
+# Testing
+proptest = "1"

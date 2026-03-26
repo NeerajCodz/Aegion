@@ -1,0 +1,35 @@
+# =============================================================================
+# Aegion Base Build Image
+# Contains Go + Rust toolchains for building all components
+# =============================================================================
+FROM golang:1.23-bookworm AS base
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    libprotobuf-dev \
+    pkg-config \
+    libssl-dev \
+    clang \
+    lld \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go tools
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# Install Rust tools
+RUN cargo install cbindgen
+
+# Set working directory
+WORKDIR /build
+
+# Labels
+LABEL org.opencontainers.image.title="Aegion Base Build" \
+      org.opencontainers.image.description="Build image with Go and Rust toolchains" \
+      org.opencontainers.image.vendor="Aegion"

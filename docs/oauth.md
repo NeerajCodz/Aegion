@@ -335,6 +335,44 @@ If the hook returns a non-2xx status or times out, behavior depends on configura
 - `on_error: ignore` (default) — token issuance continues without additional claims
 - `on_error: reject` — token issuance fails with `server_error`
 
+### Webhook signature verification
+
+When `token_hook.verify_signature: true` is enabled, Aegion signs the webhook request and expects the webhook endpoint to verify it:
+
+```
+POST <hook_url>
+Content-Type: application/json
+X-Aegion-Signature: t=1742912521,v1=<hmac_sha256_signature>
+X-Aegion-Request-Id: req_abc123
+```
+
+The signature is computed as:
+```
+signature = HMAC-SHA256(token_hook.signing_secret, timestamp + "." + request_body)
+```
+
+The webhook endpoint should:
+1. Extract the timestamp `t` and signature `v1` from the header
+2. Reject requests with timestamps older than 5 minutes (replay protection)
+3. Compute the expected signature using the shared `signing_secret`
+4. Compare signatures using constant-time comparison
+5. Reject if signatures don't match
+
+This prevents man-in-the-middle attacks on the webhook request path and ensures the claims returned are from the authentic hook endpoint.
+
+**Configuration:**
+```yaml
+oauth2:
+  token_hook:
+    enabled: true
+    url: "https://hooks.example.com/token-claims"
+    signing_secret: "<shared-secret>"
+    verify_signature: true
+    signature_header: "X-Aegion-Signature"  # customizable
+    timeout: 2s
+    on_error: ignore
+```
+
 ---
 
 ## OIDC discovery

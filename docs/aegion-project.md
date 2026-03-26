@@ -138,10 +138,15 @@ The architecture is deliberate: broad orchestration in Go, critical inner loops 
 | Rate limits + brute-force + enumeration mitigation | `security`, `cache`, `core` | `security.md`, `config.md` |
 | CAPTCHA controls | `security` | `security.md`, `config.md` |
 | IP allowlist/blocklist + suspicious login detection | `security`, `admin` | `security.md`, `admin.md` |
+| Geographic access restrictions (geo-fencing) | `security` | `security.md`, `config.md` |
+| Rate limit bypass for trusted IPs | `security`, `core` | `security.md`, `config.md` |
+| Passwordless-only enforcement | `password`, `passkeys` | `security.md`, `config.md` |
 | Field-level encryption at rest | crypto engine | `security.md`, `architecture.md`, `config.md` |
 | Append-only audit trail + admin action trace | `core`, `admin` | `security.md`, `admin.md`, `aegion-db-schema.md` |
-| Admin session hardening + re-auth gates | `admin`, `mfa` | `admin.md`, `config.md`, `security.md` |
+| Admin session hardening + re-auth gates + CSP | `admin`, `mfa` | `admin.md`, `config.md`, `security.md` |
 | Proxy-stage authz enforcement | `proxy`, `policy` | `proxy.md`, `policy.md` |
+| Webhook signature verification (token hooks) | `oauth2` | `oauth.md`, `config.md` |
+| TLS certificate pinning (inter-module) | `core`, all modules | `inter-module-communication.md`, `config.md` |
 
 This matrix is the completeness contract: security is documented by feature, module, and spec location.
 

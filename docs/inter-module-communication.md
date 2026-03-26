@@ -422,6 +422,53 @@ Core is the only single point of failure. Core should be run with multiple repli
 - **Least-privilege Postgres roles**: Each module connects to Postgres with its own role, granted only the permissions it needs (SELECT on foreign tables, full access on its own tables)
 - **No secret sharing between modules**: Cipher keys and cookie secrets live only in core; modules request cryptographic operations from core via gRPC rather than receiving raw key material
 
+### TLS certificate pinning (optional defense-in-depth)
+
+For additional security in zero-trust environments, module-to-module gRPC connections can enforce TLS certificate pinning:
+
+```yaml
+internal_network:
+  tls:
+    enabled: true
+    mutual_tls: true
+    certificate_pinning:
+      enabled: true
+      validation_mode: "strict"  # strict | permissive
+      trusted_fingerprints:
+        - "sha256:ABC123..."
+        - "sha256:DEF456..."
+      pin_rotation_grace_period: 24h
+```
+
+**How it works:**
+1. Core generates a self-signed CA certificate at first boot (or uses provided CA)
+2. Each module receives a unique certificate signed by the CA
+3. Module-to-module gRPC connections validate:
+   - Certificate chain to trusted CA
+   - Certificate fingerprint matches pinned set
+   - Certificate not expired or revoked
+4. Invalid certificates result in connection refusal (fail-closed)
+
+**Pin rotation:**
+1. Generate new CA and module certificates
+2. Add new certificate fingerprints to `trusted_fingerprints` array
+3. Deploy configuration update (no restart required - hot reload)
+4. After `pin_rotation_grace_period`, remove old fingerprints
+5. Old certificates continue working during grace period
+
+**Benefits:**
+- Prevents compromised module from accepting traffic with stolen private key
+- Protects against CA compromise (defense-in-depth)
+- Enables cryptographic proof of module identity
+- Audit trail for certificate lifecycle events
+
+**Trade-offs:**
+- Increased operational complexity (certificate lifecycle management)
+- Slight performance overhead (additional validation per connection)
+- Pin rotation requires coordination across all module instances
+
+Recommended for high-security environments (financial services, healthcare, government) or when modules are deployed across untrusted networks.
+
 ---
 
 ## Summary
