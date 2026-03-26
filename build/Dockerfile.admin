@@ -1,0 +1,59 @@
+# Multi-stage build for Aegion Admin Module
+# Stage 1: Build SPA
+FROM node:20-alpine AS spa-builder
+WORKDIR /app
+
+# Copy package files for dependency installation
+COPY modules/admin/spa/package*.json ./
+RUN npm ci --only=production
+
+# Copy SPA source code and build
+COPY modules/admin/spa/ ./
+RUN npm run build
+
+# Stage 2: Build Go application
+FROM golang:1.22-alpine AS go-builder
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Copy Go modules files for dependency download
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Copy built SPA from previous stage
+COPY --from=spa-builder /app/dist modules/admin/spa/dist
+
+# Build the Go binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o admin \
+    ./modules/admin/cmd/admin
+
+# Stage 3: Runtime image
+FROM gcr.io/distroless/static-debian12
+
+# Copy timezone data and certificates from builder
+COPY --from=go-builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=go-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Copy the binary from the builder stage
+COPY --from=go-builder /app/admin /admin
+
+# Create non-root user
+USER 65534:65534
+
+# Expose port
+EXPOSE 8082
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/admin", "--version"]
+
+# Set entrypoint
+ENTRYPOINT ["/admin"]
