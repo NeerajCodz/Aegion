@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"aegion/modules/admin/store"
+	"github.com/aegion/aegion/modules/admin/store"
 )
 
 // Errors for the admin service.
