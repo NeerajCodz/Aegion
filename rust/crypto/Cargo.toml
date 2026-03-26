@@ -1,0 +1,26 @@
+[package]
+name = "aegion-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Aegion cryptographic primitives: Argon2id hashing, XChaCha20-Poly1305 encryption"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+argon2.workspace = true
+chacha20poly1305.workspace = true
+rand.workspace = true
+subtle.workspace = true
+libc.workspace = true
+thiserror.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[build-dependencies]
+cbindgen.workspace = true

@@ -1,0 +1,29 @@
+[defines]
+# We don't have any special defines
+
+[export]
+include = [
+    "CryptoResult",
+    "BytesResult",
+]
+
+[export.rename]
+
+[fn]
+prefix = ""
+
+[struct]
+
+[enum]
+
+[parse]
+parse_deps = false
+include = []
+expand = []
+
+[parse.expand]
+crates = []
+
+language = "C"
+style = "both"
+cpp_compat = false
