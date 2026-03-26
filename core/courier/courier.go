@@ -249,7 +249,7 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 // sendEmail sends an email via SMTP.
 func (c *Courier) sendEmail(to, subject, body string) error {
 	from := fmt.Sprintf("%s <%s>", c.smtp.FromName, c.smtp.FromAddress)
-	
+
 	msg := fmt.Sprintf("From: %s\r\n"+
 		"To: %s\r\n"+
 		"Subject: %s\r\n"+
@@ -304,7 +304,7 @@ func (c *Courier) markSent(ctx context.Context, id uuid.UUID) {
 // markFailed marks a message as failed.
 func (c *Courier) markFailed(ctx context.Context, id uuid.UUID, sendCount int, err error) {
 	sendCount++
-	
+
 	if sendCount >= c.maxRetries {
 		c.db.Exec(ctx, `
 			UPDATE core_courier_messages

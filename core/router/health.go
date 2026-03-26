@@ -14,9 +14,9 @@ type HealthStatus struct {
 
 // ReadinessStatus represents the readiness check response.
 type ReadinessStatus struct {
-	Status     string                     `json:"status"`
-	Checks     map[string]ComponentStatus `json:"checks"`
-	Timestamp  string                     `json:"timestamp"`
+	Status    string                     `json:"status"`
+	Checks    map[string]ComponentStatus `json:"checks"`
+	Timestamp string                     `json:"timestamp"`
 }
 
 // ComponentStatus represents the health of a component.
@@ -113,7 +113,7 @@ func (r *Router) handleMetrics(w http.ResponseWriter, req *http.Request) {
 	// TODO: Integrate with prometheus/client_golang
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	
+
 	// Basic metrics placeholder
 	w.Write([]byte("# HELP aegion_up Aegion server is up\n"))
 	w.Write([]byte("# TYPE aegion_up gauge\n"))
@@ -138,26 +138,26 @@ func itoa(i int) string {
 	if i == 0 {
 		return "0"
 	}
-	
+
 	negative := i < 0
 	if negative {
 		i = -i
 	}
-	
+
 	var buf [20]byte
 	pos := len(buf)
-	
+
 	for i > 0 {
 		pos--
 		buf[pos] = byte('0' + i%10)
 		i /= 10
 	}
-	
+
 	if negative {
 		pos--
 		buf[pos] = '-'
 	}
-	
+
 	return string(buf[pos:])
 }
 

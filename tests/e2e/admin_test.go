@@ -65,7 +65,7 @@ func createAdminTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 			}
 
 			token = strings.TrimPrefix(token, "Bearer ")
-			
+
 			// Verify admin token
 			var userID, role string
 			err := suite.Pool.QueryRow(context.Background(),
@@ -236,7 +236,7 @@ func createAdminTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 			var identity Identity
 			err := suite.Pool.QueryRow(context.Background(),
 				`SELECT id, email, name, created_at, updated_at FROM identities WHERE id = $1`,
-				identityID).Scan(&identity.ID, &identity.Email, &identity.Name, 
+				identityID).Scan(&identity.ID, &identity.Email, &identity.Name,
 				&identity.CreatedAt, &identity.UpdatedAt)
 
 			if err != nil {
@@ -829,8 +829,8 @@ func TestSessionManagementByAdmin(t *testing.T) {
 		t.Fatalf("Failed to create test identity: %v", err)
 	}
 
-	session1, _ := fixtures.CreateSession(ctx, identity.ID)
-	session2, _ := fixtures.CreateSession(ctx, identity.ID)
+	_, _ = fixtures.CreateSession(ctx, identity.ID)
+	_, _ = fixtures.CreateSession(ctx, identity.ID)
 
 	t.Run("list sessions for identity", func(t *testing.T) {
 		req := AdminSessionRequest{

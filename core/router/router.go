@@ -61,9 +61,9 @@ type CORSConfig struct {
 
 // RateLimitConfig holds rate limiting settings.
 type RateLimitConfig struct {
-	Enabled       bool
+	Enabled           bool
 	RequestsPerSecond float64
-	Burst         int
+	Burst             int
 }
 
 // DefaultConfig returns sensible defaults.

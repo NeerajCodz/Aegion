@@ -46,47 +46,47 @@ pub fn constant_time_compare_hmac(computed: &[u8], provided: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_equal_bytes() {
         let a = b"hello world";
         let b = b"hello world";
         assert!(constant_time_compare(a, b));
     }
-    
+
     #[test]
     fn test_unequal_bytes() {
         let a = b"hello world";
         let b = b"hello worle";
         assert!(!constant_time_compare(a, b));
     }
-    
+
     #[test]
     fn test_different_lengths() {
         let a = b"short";
         let b = b"much longer string";
         assert!(!constant_time_compare(a, b));
     }
-    
+
     #[test]
     fn test_empty() {
         assert!(constant_time_compare(b"", b""));
         assert!(!constant_time_compare(b"", b"a"));
     }
-    
+
     #[test]
     fn test_string_comparison() {
         assert!(constant_time_compare_str("secret", "secret"));
         assert!(!constant_time_compare_str("secret", "secre"));
         assert!(!constant_time_compare_str("secret", "Secret"));
     }
-    
+
     #[test]
     fn test_hmac_comparison() {
         let hmac1 = [0x01, 0x02, 0x03, 0x04];
         let hmac2 = [0x01, 0x02, 0x03, 0x04];
         let hmac3 = [0x01, 0x02, 0x03, 0x05];
-        
+
         assert!(constant_time_compare_hmac(&hmac1, &hmac2));
         assert!(!constant_time_compare_hmac(&hmac1, &hmac3));
     }

@@ -7,22 +7,22 @@ use thiserror::Error;
 pub enum CryptoError {
     #[error("password hashing failed: {0}")]
     HashError(String),
-    
+
     #[error("password verification failed")]
     VerificationFailed,
-    
+
     #[error("encryption failed: {0}")]
     EncryptionFailed(String),
-    
+
     #[error("decryption failed: {0}")]
     DecryptionFailed(String),
-    
+
     #[error("invalid key length: expected {expected}, got {actual}")]
     InvalidKeyLength { expected: usize, actual: usize },
-    
+
     #[error("invalid ciphertext")]
     InvalidCiphertext,
-    
+
     #[error("random number generation failed")]
     RngError,
 }

@@ -39,10 +39,10 @@ type Handler func(ctx context.Context, event Event) error
 
 // Subscription represents a subscription to event types.
 type Subscription struct {
-	ID           string
-	Subscriber   string
-	EventTypes   []string
-	Handler      Handler
+	ID         string
+	Subscriber string
+	EventTypes []string
+	Handler    Handler
 }
 
 // Bus is the event bus implementation.
@@ -263,7 +263,7 @@ func (b *Bus) markDelivered(ctx context.Context, deliveryID uuid.UUID) {
 // markFailed marks a delivery as failed and schedules retry.
 func (b *Bus) markFailed(ctx context.Context, deliveryID uuid.UUID, attemptCount int, err error) {
 	attemptCount++
-	
+
 	if attemptCount >= b.maxRetries {
 		// Dead letter
 		b.db.Exec(ctx, `

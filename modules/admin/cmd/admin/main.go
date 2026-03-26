@@ -39,9 +39,10 @@ type Config struct {
 		IdleTimeout  time.Duration `yaml:"idle_timeout"`
 	} `yaml:"server"`
 	Admin struct {
-		Enabled         bool          `yaml:"enabled"`
-		Path            string        `yaml:"path"`
-		SessionLifespan time.Duration `yaml:"session_lifespan"`
+		Enabled          bool          `yaml:"enabled"`
+		BootstrapEnabled bool          `yaml:"bootstrap_enabled"`
+		Path             string        `yaml:"path"`
+		SessionLifespan  time.Duration `yaml:"session_lifespan"`
 	} `yaml:"admin"`
 	Core struct {
 		ServiceURL string `yaml:"service_url"`
@@ -122,9 +123,7 @@ func main() {
 	// Initialize service layer
 	adminStore := store.New(db)
 	adminService := service.New(adminStore, service.Config{
-		SessionLifespan: cfg.Admin.SessionLifespan,
-		CoreServiceURL:  cfg.Core.ServiceURL,
-		CoreAPIKey:      cfg.Core.APIKey,
+		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
 	adminHandler := handler.New(adminService)
 

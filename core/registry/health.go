@@ -16,9 +16,9 @@ type HealthChecker struct {
 	timeout  time.Duration
 	client   *http.Client
 
-	stopCh chan struct{}
-	wg     sync.WaitGroup
-	mu     sync.Mutex
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
+	mu      sync.Mutex
 	running bool
 }
 

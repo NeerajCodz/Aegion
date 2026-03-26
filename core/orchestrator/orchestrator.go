@@ -13,12 +13,12 @@ import (
 )
 
 var (
-	ErrModuleNotFound      = errors.New("module not found")
+	ErrModuleNotFound       = errors.New("module not found")
 	ErrModuleAlreadyRunning = errors.New("module is already running")
-	ErrModuleNotRunning    = errors.New("module is not running")
-	ErrOrchestratorClosed  = errors.New("orchestrator is closed")
-	ErrStartFailed         = errors.New("failed to start module")
-	ErrStopFailed          = errors.New("failed to stop module")
+	ErrModuleNotRunning     = errors.New("module is not running")
+	ErrOrchestratorClosed   = errors.New("orchestrator is closed")
+	ErrStartFailed          = errors.New("failed to start module")
+	ErrStopFailed           = errors.New("failed to stop module")
 )
 
 // ModuleState represents the current state of a module.
@@ -35,15 +35,15 @@ const (
 
 // ModuleStatus contains status information for a module.
 type ModuleStatus struct {
-	ModuleID     string        `json:"module_id"`
-	ContainerID  string        `json:"container_id,omitempty"`
-	State        ModuleState   `json:"state"`
-	Health       string        `json:"health,omitempty"`
-	IPAddress    string        `json:"ip_address,omitempty"`
-	Ports        []string      `json:"ports,omitempty"`
-	StartedAt    time.Time     `json:"started_at,omitempty"`
-	RestartCount int           `json:"restart_count"`
-	Error        string        `json:"error,omitempty"`
+	ModuleID     string      `json:"module_id"`
+	ContainerID  string      `json:"container_id,omitempty"`
+	State        ModuleState `json:"state"`
+	Health       string      `json:"health,omitempty"`
+	IPAddress    string      `json:"ip_address,omitempty"`
+	Ports        []string    `json:"ports,omitempty"`
+	StartedAt    time.Time   `json:"started_at,omitempty"`
+	RestartCount int         `json:"restart_count"`
+	Error        string      `json:"error,omitempty"`
 }
 
 // Orchestrator manages module container lifecycle.
@@ -71,9 +71,9 @@ type moduleInstance struct {
 
 // Config holds orchestrator configuration.
 type Config struct {
-	ConfigPath   string
-	Registry     *registry.Registry
-	TokenSecret  []byte
+	ConfigPath  string
+	Registry    *registry.Registry
+	TokenSecret []byte
 }
 
 // New creates a new orchestrator.

@@ -15,17 +15,17 @@ import (
 
 	"github.com/google/uuid"
 
-	"aegion/modules/password/store"
+	"github.com/aegion/aegion/modules/password/store"
 )
 
 var (
-	ErrPasswordTooShort      = errors.New("password is too short")
-	ErrPasswordTooWeak       = errors.New("password does not meet complexity requirements")
-	ErrPasswordBreached      = errors.New("password has been found in a data breach")
-	ErrPasswordReused        = errors.New("password was used recently")
-	ErrPasswordSimilar       = errors.New("password is too similar to identifier")
-	ErrInvalidCredentials    = errors.New("invalid credentials")
-	ErrIdentityNotFound      = errors.New("identity not found")
+	ErrPasswordTooShort   = errors.New("password is too short")
+	ErrPasswordTooWeak    = errors.New("password does not meet complexity requirements")
+	ErrPasswordBreached   = errors.New("password has been found in a data breach")
+	ErrPasswordReused     = errors.New("password was used recently")
+	ErrPasswordSimilar    = errors.New("password is too similar to identifier")
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrIdentityNotFound   = errors.New("identity not found")
 )
 
 // Config holds password service configuration.
@@ -47,9 +47,9 @@ type Hasher interface {
 
 // Service handles password authentication.
 type Service struct {
-	store    *store.Store
-	hasher   Hasher
-	config   Config
+	store  *store.Store
+	hasher Hasher
+	config Config
 }
 
 // New creates a new password service.
@@ -60,7 +60,7 @@ func New(store *store.Store, hasher Hasher, config Config) *Service {
 	if config.HistoryCount == 0 {
 		config.HistoryCount = 5
 	}
-	
+
 	return &Service{
 		store:  store,
 		hasher: hasher,
@@ -74,13 +74,13 @@ func (s *Service) Register(ctx context.Context, identityID uuid.UUID, identifier
 	if err := s.ValidatePassword(ctx, password, identifier); err != nil {
 		return err
 	}
-	
+
 	// Hash password
 	hash, err := s.hasher.Hash(password)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
-	
+
 	// Create credential
 	cred := &store.Credential{
 		ID:         uuid.New(),
@@ -90,7 +90,7 @@ func (s *Service) Register(ctx context.Context, identityID uuid.UUID, identifier
 		CreatedAt:  time.Now().UTC(),
 		UpdatedAt:  time.Now().UTC(),
 	}
-	
+
 	return s.store.Create(ctx, cred)
 }
 
@@ -106,16 +106,16 @@ func (s *Service) Verify(ctx context.Context, identifier, password string) (uuid
 		}
 		return uuid.Nil, err
 	}
-	
+
 	valid, err := s.hasher.Verify(password, cred.Hash)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to verify password: %w", err)
 	}
-	
+
 	if !valid {
 		return uuid.Nil, ErrInvalidCredentials
 	}
-	
+
 	return cred.IdentityID, nil
 }
 
@@ -128,39 +128,39 @@ func (s *Service) ChangePassword(ctx context.Context, identityID uuid.UUID, oldP
 		}
 		return err
 	}
-	
+
 	// Verify old password
 	valid, err := s.hasher.Verify(oldPassword, cred.Hash)
 	if err != nil || !valid {
 		return ErrInvalidCredentials
 	}
-	
+
 	// Validate new password
 	if err := s.ValidatePassword(ctx, newPassword, cred.Identifier); err != nil {
 		return err
 	}
-	
+
 	// Check against history
 	if err := s.checkHistory(ctx, cred.ID, newPassword); err != nil {
 		return err
 	}
-	
+
 	// Hash new password
 	newHash, err := s.hasher.Hash(newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
-	
+
 	// Add old hash to history
 	if err := s.store.AddToHistory(ctx, cred.ID, cred.Hash); err != nil {
 		return err
 	}
-	
+
 	// Update credential
 	if err := s.store.Update(ctx, cred.ID, newHash); err != nil {
 		return err
 	}
-	
+
 	// Cleanup old history
 	return s.store.CleanupHistory(ctx, cred.ID, s.config.HistoryCount)
 }
@@ -175,28 +175,28 @@ func (s *Service) ResetPassword(ctx context.Context, identityID uuid.UUID, newPa
 		}
 		return err
 	}
-	
+
 	// Validate new password
 	if err := s.ValidatePassword(ctx, newPassword, cred.Identifier); err != nil {
 		return err
 	}
-	
+
 	// Check against history
 	if err := s.checkHistory(ctx, cred.ID, newPassword); err != nil {
 		return err
 	}
-	
+
 	// Hash new password
 	newHash, err := s.hasher.Hash(newPassword)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
-	
+
 	// Add old hash to history
 	if err := s.store.AddToHistory(ctx, cred.ID, cred.Hash); err != nil {
 		return err
 	}
-	
+
 	// Update credential
 	return s.store.Update(ctx, cred.ID, newHash)
 }
@@ -207,31 +207,31 @@ func (s *Service) ValidatePassword(ctx context.Context, password, identifier str
 	if len(password) < s.config.MinLength {
 		return ErrPasswordTooShort
 	}
-	
+
 	// Complexity checks
 	if err := s.checkComplexity(password); err != nil {
 		return err
 	}
-	
+
 	// Similarity check
 	if err := s.checkSimilarity(password, identifier); err != nil {
 		return err
 	}
-	
+
 	// HIBP check
 	if s.config.HIBPEnabled {
 		if err := s.checkHIBP(ctx, password); err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
 // checkComplexity validates password complexity requirements.
 func (s *Service) checkComplexity(password string) error {
 	var hasUpper, hasLower, hasNumber, hasSpecial bool
-	
+
 	for _, c := range password {
 		switch {
 		case unicode.IsUpper(c):
@@ -244,7 +244,7 @@ func (s *Service) checkComplexity(password string) error {
 			hasSpecial = true
 		}
 	}
-	
+
 	if s.config.RequireUppercase && !hasUpper {
 		return ErrPasswordTooWeak
 	}
@@ -257,7 +257,7 @@ func (s *Service) checkComplexity(password string) error {
 	if s.config.RequireSpecial && !hasSpecial {
 		return ErrPasswordTooWeak
 	}
-	
+
 	return nil
 }
 
@@ -265,18 +265,18 @@ func (s *Service) checkComplexity(password string) error {
 func (s *Service) checkSimilarity(password, identifier string) error {
 	passwordLower := strings.ToLower(password)
 	identifierLower := strings.ToLower(identifier)
-	
+
 	// Extract username part from email
 	if idx := strings.Index(identifierLower, "@"); idx > 0 {
 		identifierLower = identifierLower[:idx]
 	}
-	
+
 	// Check if password contains identifier or vice versa
 	if strings.Contains(passwordLower, identifierLower) ||
 		strings.Contains(identifierLower, passwordLower) {
 		return ErrPasswordSimilar
 	}
-	
+
 	return nil
 }
 
@@ -285,20 +285,20 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 	// SHA-1 hash of password
 	hash := sha1.Sum([]byte(password))
 	hashStr := strings.ToUpper(hex.EncodeToString(hash[:]))
-	
+
 	prefix := hashStr[:5]
 	suffix := hashStr[5:]
-	
+
 	// Query HIBP API
 	url := fmt.Sprintf("https://api.pwnedpasswords.com/range/%s", prefix)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		// Don't fail registration if HIBP is unavailable
 		return nil
 	}
 	req.Header.Set("User-Agent", "Aegion-Identity-Server")
-	
+
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -306,16 +306,16 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 		return nil
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil
 	}
-	
+
 	// Check if suffix is in response
 	lines := strings.Split(string(body), "\n")
 	for _, line := range lines {
@@ -324,7 +324,7 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 			return ErrPasswordBreached
 		}
 	}
-	
+
 	return nil
 }
 
@@ -334,7 +334,7 @@ func (s *Service) checkHistory(ctx context.Context, credID uuid.UUID, password s
 	if err != nil {
 		return err
 	}
-	
+
 	for _, hash := range history {
 		valid, err := s.hasher.Verify(password, hash)
 		if err != nil {
@@ -344,7 +344,7 @@ func (s *Service) checkHistory(ctx context.Context, credID uuid.UUID, password s
 			return ErrPasswordReused
 		}
 	}
-	
+
 	return nil
 }
 

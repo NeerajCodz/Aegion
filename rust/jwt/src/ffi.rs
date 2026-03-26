@@ -5,12 +5,10 @@ use std::ffi::{CStr, CString};
 use std::ptr;
 use std::slice;
 
-use crate::{
-    generate_ec_keypair, generate_key_id, sign_jwt, verify_jwt,
-    to_jwk, to_jwks, jwks::jwks_to_json,
-};
+use crate::keygen::generate_key_id;
 use crate::sign::Claims;
 use crate::verify::VerifyOptions;
+use crate::{generate_ec_keypair, sign_jwt, to_jwk, verify_jwt};
 
 /// Result structure for string operations
 #[repr(C)]
@@ -60,18 +58,18 @@ pub unsafe extern "C" fn jwt_generate_ec_keypair(key_id: *const c_char) -> KeyPa
             Err(_) => return error_keypair_result(-1),
         }
     };
-    
+
     match generate_ec_keypair(&key_id_str) {
         Ok(kp) => {
             let alg = CString::new(kp.algorithm).unwrap();
             let kid = CString::new(kp.key_id).unwrap();
-            
+
             let priv_len = kp.private_key_der.len();
             let pub_len = kp.public_key_der.len();
-            
+
             let priv_box = kp.private_key_der.into_boxed_slice();
             let pub_box = kp.public_key_der.into_boxed_slice();
-            
+
             KeyPairResult {
                 error_code: 0,
                 algorithm: alg.into_raw(),
@@ -118,32 +116,50 @@ pub unsafe extern "C" fn jwt_sign(
     key_id: *const c_char,
 ) -> JwtResult {
     if claims_json.is_null() || algorithm.is_null() || private_key.is_null() {
-        return JwtResult { error_code: -1, result: ptr::null_mut() };
+        return JwtResult {
+            error_code: -1,
+            result: ptr::null_mut(),
+        };
     }
-    
+
     let claims_str = match CStr::from_ptr(claims_json).to_str() {
         Ok(s) => s,
-        Err(_) => return JwtResult { error_code: -9, result: ptr::null_mut() },
+        Err(_) => {
+            return JwtResult {
+                error_code: -9,
+                result: ptr::null_mut(),
+            }
+        }
     };
-    
+
     let claims: Claims = match serde_json::from_str(claims_str) {
         Ok(c) => c,
-        Err(_) => return JwtResult { error_code: -9, result: ptr::null_mut() },
+        Err(_) => {
+            return JwtResult {
+                error_code: -9,
+                result: ptr::null_mut(),
+            }
+        }
     };
-    
+
     let alg_str = match CStr::from_ptr(algorithm).to_str() {
         Ok(s) => s,
-        Err(_) => return JwtResult { error_code: -5, result: ptr::null_mut() },
+        Err(_) => {
+            return JwtResult {
+                error_code: -5,
+                result: ptr::null_mut(),
+            }
+        }
     };
-    
+
     let key_slice = slice::from_raw_parts(private_key, private_key_len);
-    
+
     let kid = if key_id.is_null() {
         None
     } else {
         CStr::from_ptr(key_id).to_str().ok()
     };
-    
+
     match sign_jwt(&claims, alg_str, key_slice, kid) {
         Ok(token) => {
             let c_token = CString::new(token).unwrap();
@@ -185,19 +201,19 @@ pub unsafe extern "C" fn jwt_verify(
             key_id: ptr::null_mut(),
         };
     }
-    
+
     let token_str = match CStr::from_ptr(token).to_str() {
         Ok(s) => s,
         Err(_) => return error_claims_result(-4),
     };
-    
+
     let alg_str = match CStr::from_ptr(algorithm).to_str() {
         Ok(s) => s,
         Err(_) => return error_claims_result(-5),
     };
-    
+
     let key_slice = slice::from_raw_parts(public_key, public_key_len);
-    
+
     let options = VerifyOptions {
         issuer: if issuer.is_null() {
             None
@@ -207,22 +223,27 @@ pub unsafe extern "C" fn jwt_verify(
         audience: if audience.is_null() {
             None
         } else {
-            CStr::from_ptr(audience).to_str().ok().map(|s| s.to_string())
+            CStr::from_ptr(audience)
+                .to_str()
+                .ok()
+                .map(|s| s.to_string())
         },
         leeway,
         ignore_exp: false,
         ignore_nbf: false,
     };
-    
+
     match verify_jwt(token_str, alg_str, key_slice, &options) {
         Ok(result) => {
             let claims_json = serde_json::to_string(&result.claims).unwrap();
             let c_claims = CString::new(claims_json).unwrap();
-            
-            let c_kid = result.header.kid
+
+            let c_kid = result
+                .header
+                .kid
                 .map(|k| CString::new(k).unwrap().into_raw())
                 .unwrap_or(ptr::null_mut());
-            
+
             ClaimsResult {
                 error_code: 0,
                 claims_json: c_claims.into_raw(),
@@ -257,25 +278,38 @@ pub unsafe extern "C" fn jwt_to_jwk(
     public_key_len: size_t,
 ) -> JwtResult {
     if algorithm.is_null() || public_key.is_null() {
-        return JwtResult { error_code: -1, result: ptr::null_mut() };
+        return JwtResult {
+            error_code: -1,
+            result: ptr::null_mut(),
+        };
     }
-    
+
     let alg_str = match CStr::from_ptr(algorithm).to_str() {
         Ok(s) => s,
-        Err(_) => return JwtResult { error_code: -5, result: ptr::null_mut() },
+        Err(_) => {
+            return JwtResult {
+                error_code: -5,
+                result: ptr::null_mut(),
+            }
+        }
     };
-    
+
     let kid_str = if key_id.is_null() {
         generate_key_id()
     } else {
         match CStr::from_ptr(key_id).to_str() {
             Ok(s) => s.to_string(),
-            Err(_) => return JwtResult { error_code: -1, result: ptr::null_mut() },
+            Err(_) => {
+                return JwtResult {
+                    error_code: -1,
+                    result: ptr::null_mut(),
+                }
+            }
         }
     };
-    
+
     let pub_key = slice::from_raw_parts(public_key, public_key_len);
-    
+
     // Create a minimal keypair just for JWK conversion
     let keypair = crate::KeyPair {
         algorithm: alg_str.to_string(),
@@ -283,20 +317,21 @@ pub unsafe extern "C" fn jwt_to_jwk(
         private_key_der: vec![], // Not needed for JWK
         public_key_der: pub_key.to_vec(),
     };
-    
+
     match to_jwk(&keypair) {
-        Ok(jwk) => {
-            match serde_json::to_string(&jwk) {
-                Ok(json) => {
-                    let c_json = CString::new(json).unwrap();
-                    JwtResult {
-                        error_code: 0,
-                        result: c_json.into_raw(),
-                    }
+        Ok(jwk) => match serde_json::to_string(&jwk) {
+            Ok(json) => {
+                let c_json = CString::new(json).unwrap();
+                JwtResult {
+                    error_code: 0,
+                    result: c_json.into_raw(),
                 }
-                Err(_) => JwtResult { error_code: -9, result: ptr::null_mut() },
             }
-        }
+            Err(_) => JwtResult {
+                error_code: -9,
+                result: ptr::null_mut(),
+            },
+        },
         Err(e) => JwtResult {
             error_code: e.to_error_code(),
             result: ptr::null_mut(),
@@ -334,10 +369,18 @@ pub unsafe extern "C" fn jwt_free_keypair(result: KeyPairResult) {
         drop(CString::from_raw(result.key_id));
     }
     if !result.private_key.is_null() {
-        drop(Vec::from_raw_parts(result.private_key, result.private_key_len, result.private_key_len));
+        drop(Vec::from_raw_parts(
+            result.private_key,
+            result.private_key_len,
+            result.private_key_len,
+        ));
     }
     if !result.public_key.is_null() {
-        drop(Vec::from_raw_parts(result.public_key, result.public_key_len, result.public_key_len));
+        drop(Vec::from_raw_parts(
+            result.public_key,
+            result.public_key_len,
+            result.public_key_len,
+        ));
     }
 }
 

@@ -87,7 +87,7 @@ func NewMigrator(db *DB, migrations embed.FS, basePath string) *Migrator {
 func (m *Migrator) Migrate(ctx context.Context) error {
 	// Acquire advisory lock to prevent concurrent migrations
 	lockID := int64(6832918273645123) // Unique lock ID for Aegion migrations
-	
+
 	conn, err := m.db.Pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to acquire connection: %w", err)

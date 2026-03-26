@@ -33,14 +33,14 @@ type Endpoint struct {
 
 // Module represents a registered service module.
 type Module struct {
-	ID           string       `json:"id"`
-	Name         string       `json:"name"`
-	Version      string       `json:"version"`
-	Endpoints    []Endpoint   `json:"endpoints"`
-	HealthURL    string       `json:"health_url"`
-	Status       ModuleStatus `json:"status"`
-	RegisteredAt time.Time    `json:"registered_at"`
-	LastHealthAt time.Time    `json:"last_health_at"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Version      string            `json:"version"`
+	Endpoints    []Endpoint        `json:"endpoints"`
+	HealthURL    string            `json:"health_url"`
+	Status       ModuleStatus      `json:"status"`
+	RegisteredAt time.Time         `json:"registered_at"`
+	LastHealthAt time.Time         `json:"last_health_at"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
@@ -76,11 +76,11 @@ type DeregistrationResponse struct {
 
 // HealthCheckResult represents the result of a health check.
 type HealthCheckResult struct {
-	ModuleID  string       `json:"module_id"`
-	Status    ModuleStatus `json:"status"`
-	CheckedAt time.Time    `json:"checked_at"`
+	ModuleID  string        `json:"module_id"`
+	Status    ModuleStatus  `json:"status"`
+	CheckedAt time.Time     `json:"checked_at"`
 	Latency   time.Duration `json:"latency"`
-	Error     string       `json:"error,omitempty"`
+	Error     string        `json:"error,omitempty"`
 }
 
 // ModuleQuery is used to filter modules when listing.

@@ -23,7 +23,7 @@ pub struct Jwk {
     /// Algorithm
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alg: Option<String>,
-    
+
     // EC keys (P-256, P-384, P-521)
     /// EC curve name
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,10 +34,10 @@ pub struct Jwk {
     /// EC y coordinate (base64url)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y: Option<String>,
-    
+
     // OKP keys (Ed25519, X25519)
     // Uses crv and x fields
-    
+
     // RSA keys
     /// RSA modulus (base64url)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,15 +76,15 @@ pub fn to_jwk(keypair: &KeyPair) -> Result<Jwk, JwtError> {
 fn ec_to_jwk(keypair: &KeyPair, curve: &str) -> Result<Jwk, JwtError> {
     // EC public key is in uncompressed form: 0x04 || x || y
     let public_key = &keypair.public_key_der;
-    
+
     if public_key.is_empty() || public_key[0] != 0x04 {
         return Err(JwtError::InvalidKey);
     }
-    
+
     let coord_len = (public_key.len() - 1) / 2;
     let x = &public_key[1..1 + coord_len];
     let y = &public_key[1 + coord_len..];
-    
+
     Ok(Jwk {
         kty: "EC".into(),
         kid: Some(keypair.key_id.clone()),
@@ -117,9 +117,9 @@ fn ed25519_to_jwk(keypair: &KeyPair) -> Result<Jwk, JwtError> {
 pub fn to_jwks(keypairs: &[KeyPair]) -> Result<Jwks, JwtError> {
     let keys = keypairs
         .iter()
-        .map(|kp| to_jwk(kp))
+        .map(to_jwk)
         .collect::<Result<Vec<_>, _>>()?;
-    
+
     Ok(Jwks { keys })
 }
 
@@ -137,31 +137,31 @@ pub fn jwks_to_json_pretty(jwks: &Jwks) -> Result<String, JwtError> {
 mod tests {
     use super::*;
     use crate::keygen::{generate_ec_keypair, generate_ed25519_keypair};
-    
+
     #[test]
     fn test_ec_to_jwk() {
         let keypair = generate_ec_keypair("ec-key-1").unwrap();
         let jwk = to_jwk(&keypair).unwrap();
-        
+
         assert_eq!(jwk.kty, "EC");
         assert_eq!(jwk.kid, Some("ec-key-1".into()));
         assert_eq!(jwk.alg, Some("ES256".into()));
         assert_eq!(jwk.crv, Some("P-256".into()));
         assert!(jwk.x.is_some());
         assert!(jwk.y.is_some());
-        
+
         // x and y should be 32 bytes each (base64url encoded)
         let x_bytes = URL_SAFE_NO_PAD.decode(jwk.x.as_ref().unwrap()).unwrap();
         let y_bytes = URL_SAFE_NO_PAD.decode(jwk.y.as_ref().unwrap()).unwrap();
         assert_eq!(x_bytes.len(), 32);
         assert_eq!(y_bytes.len(), 32);
     }
-    
+
     #[test]
     fn test_ed25519_to_jwk() {
         let keypair = generate_ed25519_keypair("ed-key-1").unwrap();
         let jwk = to_jwk(&keypair).unwrap();
-        
+
         assert_eq!(jwk.kty, "OKP");
         assert_eq!(jwk.kid, Some("ed-key-1".into()));
         assert_eq!(jwk.alg, Some("EdDSA".into()));
@@ -169,26 +169,26 @@ mod tests {
         assert!(jwk.x.is_some());
         assert!(jwk.y.is_none()); // Ed25519 doesn't have y
     }
-    
+
     #[test]
     fn test_to_jwks() {
         let keypair1 = generate_ec_keypair("key1").unwrap();
         let keypair2 = generate_ec_keypair("key2").unwrap();
-        
+
         let jwks = to_jwks(&[keypair1, keypair2]).unwrap();
-        
+
         assert_eq!(jwks.keys.len(), 2);
         assert_eq!(jwks.keys[0].kid, Some("key1".into()));
         assert_eq!(jwks.keys[1].kid, Some("key2".into()));
     }
-    
+
     #[test]
     fn test_jwks_serialization() {
         let keypair = generate_ec_keypair("test").unwrap();
         let jwks = to_jwks(&[keypair]).unwrap();
-        
+
         let json = jwks_to_json(&jwks).unwrap();
-        
+
         // Should be valid JSON
         let parsed: Jwks = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.keys.len(), 1);

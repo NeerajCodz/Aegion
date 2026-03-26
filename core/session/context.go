@@ -25,11 +25,11 @@ const (
 
 // Context provides session context to handlers.
 type Context struct {
-	SessionID   uuid.UUID
-	IdentityID  uuid.UUID
-	AAL         AAL
-	RequestID   string
-	IsAdmin     bool
+	SessionID  uuid.UUID
+	IdentityID uuid.UUID
+	AAL        AAL
+	RequestID  string
+	IsAdmin    bool
 }
 
 // InjectHeaders adds signed session context headers for module communication.
@@ -39,9 +39,9 @@ func InjectHeaders(r *http.Request, session *Session, secret []byte) {
 	}
 
 	headers := map[string]string{
-		"Session-ID":   session.ID.String(),
-		"Identity-ID":  session.IdentityID.String(),
-		"AAL":          string(session.AAL),
+		"Session-ID":  session.ID.String(),
+		"Identity-ID": session.IdentityID.String(),
+		"AAL":         string(session.AAL),
 	}
 
 	for key, value := range headers {
@@ -65,7 +65,7 @@ func VerifyHeaders(r *http.Request, secret []byte) (*Context, error) {
 	// Verify signature
 	expectedSig := signHeaders(headers, secret)
 	actualSig := r.Header.Get(HeaderPrefix + "Signature")
-	
+
 	if !hmac.Equal([]byte(expectedSig), []byte(actualSig)) {
 		return nil, ErrSessionInvalid
 	}

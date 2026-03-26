@@ -681,8 +681,8 @@ func writeError(w http.ResponseWriter, status int, message string, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	resp := map[string]interface{}{
-		"error":   message,
-		"code":    status,
+		"error": message,
+		"code":  status,
 	}
 	if err != nil {
 		resp["details"] = err.Error()

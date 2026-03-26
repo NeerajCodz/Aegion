@@ -50,28 +50,28 @@ const (
 
 // Session represents an authenticated session.
 type Session struct {
-	ID              uuid.UUID          `json:"id"`
-	Token           string             `json:"-"`
-	IdentityID      uuid.UUID          `json:"identity_id"`
-	AAL             AAL                `json:"aal"`
-	IssuedAt        time.Time          `json:"issued_at"`
-	ExpiresAt       time.Time          `json:"expires_at"`
-	AuthenticatedAt time.Time          `json:"authenticated_at"`
-	LogoutToken     string             `json:"-"`
-	Devices         []DeviceInfo       `json:"devices"`
-	Active          bool               `json:"active"`
-	IsImpersonation bool               `json:"is_impersonation,omitempty"`
-	ImpersonatorID  *uuid.UUID         `json:"impersonator_id,omitempty"`
+	ID              uuid.UUID           `json:"id"`
+	Token           string              `json:"-"`
+	IdentityID      uuid.UUID           `json:"identity_id"`
+	AAL             AAL                 `json:"aal"`
+	IssuedAt        time.Time           `json:"issued_at"`
+	ExpiresAt       time.Time           `json:"expires_at"`
+	AuthenticatedAt time.Time           `json:"authenticated_at"`
+	LogoutToken     string              `json:"-"`
+	Devices         []DeviceInfo        `json:"devices"`
+	Active          bool                `json:"active"`
+	IsImpersonation bool                `json:"is_impersonation,omitempty"`
+	ImpersonatorID  *uuid.UUID          `json:"impersonator_id,omitempty"`
 	AuthMethods     []SessionAuthMethod `json:"authentication_methods"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
 }
 
 // SessionAuthMethod records an authentication method used.
 type SessionAuthMethod struct {
-	Method       AuthMethod `json:"method"`
-	AALContrib   AAL        `json:"aal_contributed"`
-	CompletedAt  time.Time  `json:"completed_at"`
+	Method      AuthMethod `json:"method"`
+	AALContrib  AAL        `json:"aal_contributed"`
+	CompletedAt time.Time  `json:"completed_at"`
 }
 
 // DeviceInfo contains device fingerprint information.
@@ -123,7 +123,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 // Create creates a new session for an identity.
 func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthMethod, device DeviceInfo) (*Session, error) {
 	now := time.Now().UTC()
-	
+
 	session := &Session{
 		ID:              uuid.New(),
 		Token:           m.generateToken(),
@@ -179,7 +179,7 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 // Get retrieves a session by token.
 func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 	session := &Session{}
-	
+
 	err := m.db.QueryRow(ctx, `
 		SELECT id, token, identity_id, aal, issued_at, expires_at,
 			   authenticated_at, logout_token, devices, active,
@@ -330,7 +330,7 @@ func (m *Manager) GetFromRequest(ctx context.Context, r *http.Request) (*Session
 // SetCookie sets the session cookie on a response.
 func (m *Manager) SetCookie(w http.ResponseWriter, session *Session) {
 	signedToken := m.signToken(session.Token)
-	
+
 	cookie := &http.Cookie{
 		Name:     m.cookieConfig.Name,
 		Value:    signedToken,

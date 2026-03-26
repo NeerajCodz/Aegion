@@ -12,21 +12,21 @@ import (
 
 // Config represents the complete Aegion configuration.
 type Config struct {
-	ModuleVersions  map[string]string `yaml:"module_versions"`
-	ModuleRegistry  ModuleRegistry    `yaml:"module_registry"`
-	Server          ServerConfig      `yaml:"server"`
-	Database        DatabaseConfig    `yaml:"database"`
-	Cache           CacheConfig       `yaml:"cache"`
-	Secrets         SecretsConfig     `yaml:"secrets"`
-	Log             LogConfig         `yaml:"log"`
-	Operator        OperatorConfig    `yaml:"operator"`
-	Courier         CourierConfig     `yaml:"courier"`
-	Sessions        SessionsConfig    `yaml:"sessions"`
-	Identity        IdentityConfig    `yaml:"identity"`
-	Security        SecurityConfig    `yaml:"security"`
-	Password        PasswordConfig    `yaml:"password"`
-	MagicLink       MagicLinkConfig   `yaml:"magic_link"`
-	Admin           AdminConfig       `yaml:"admin"`
+	ModuleVersions map[string]string `yaml:"module_versions"`
+	ModuleRegistry ModuleRegistry    `yaml:"module_registry"`
+	Server         ServerConfig      `yaml:"server"`
+	Database       DatabaseConfig    `yaml:"database"`
+	Cache          CacheConfig       `yaml:"cache"`
+	Secrets        SecretsConfig     `yaml:"secrets"`
+	Log            LogConfig         `yaml:"log"`
+	Operator       OperatorConfig    `yaml:"operator"`
+	Courier        CourierConfig     `yaml:"courier"`
+	Sessions       SessionsConfig    `yaml:"sessions"`
+	Identity       IdentityConfig    `yaml:"identity"`
+	Security       SecurityConfig    `yaml:"security"`
+	Password       PasswordConfig    `yaml:"password"`
+	MagicLink      MagicLinkConfig   `yaml:"magic_link"`
+	Admin          AdminConfig       `yaml:"admin"`
 }
 
 // ModuleRegistry configures where to pull module images from.
@@ -78,12 +78,12 @@ type InternalNetConfig struct {
 
 // DatabaseConfig configures the database connection.
 type DatabaseConfig struct {
-	URL                 string   `yaml:"url"`
-	MaxOpenConns        int      `yaml:"max_open_connections"`
-	MaxIdleConns        int      `yaml:"max_idle_connections"`
-	ConnMaxLifetime     Duration `yaml:"connection_max_lifetime"`
-	ConnMaxIdleTime     Duration `yaml:"connection_max_idle_time"`
-	MigrateOnly         bool     `yaml:"migrate_only"`
+	URL             string   `yaml:"url"`
+	MaxOpenConns    int      `yaml:"max_open_connections"`
+	MaxIdleConns    int      `yaml:"max_idle_connections"`
+	ConnMaxLifetime Duration `yaml:"connection_max_lifetime"`
+	ConnMaxIdleTime Duration `yaml:"connection_max_idle_time"`
+	MigrateOnly     bool     `yaml:"migrate_only"`
 }
 
 // CacheConfig configures the Redis cache.
@@ -119,11 +119,11 @@ type CourierConfig struct {
 
 // SMTPConfig configures SMTP delivery.
 type SMTPConfig struct {
-	Host        string     `yaml:"host"`
-	Port        int        `yaml:"port"`
-	FromAddress string     `yaml:"from_address"`
-	FromName    string     `yaml:"from_name"`
-	Auth        SMTPAuth   `yaml:"auth"`
+	Host        string   `yaml:"host"`
+	Port        int      `yaml:"port"`
+	FromAddress string   `yaml:"from_address"`
+	FromName    string   `yaml:"from_name"`
+	Auth        SMTPAuth `yaml:"auth"`
 }
 
 // SMTPAuth configures SMTP authentication.

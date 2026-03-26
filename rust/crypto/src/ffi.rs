@@ -8,8 +8,8 @@ use std::ffi::{CStr, CString};
 use std::ptr;
 use std::slice;
 
-use crate::{hash_password, verify_password, encrypt_field, decrypt_field, constant_time_compare};
 use crate::encrypt::generate_key;
+use crate::{constant_time_compare, decrypt_field, encrypt_field, hash_password, verify_password};
 
 /// Result structure for functions that return strings
 #[repr(C)]
@@ -48,15 +48,17 @@ pub unsafe extern "C" fn crypto_hash_password(password: *const c_char) -> Crypto
             result: ptr::null_mut(),
         };
     }
-    
+
     let password_str = match CStr::from_ptr(password).to_str() {
         Ok(s) => s,
-        Err(_) => return CryptoResult {
-            error_code: -1,
-            result: ptr::null_mut(),
-        },
+        Err(_) => {
+            return CryptoResult {
+                error_code: -1,
+                result: ptr::null_mut(),
+            }
+        }
     };
-    
+
     match hash_password(password_str) {
         Ok(hash) => {
             let c_hash = CString::new(hash).unwrap();
@@ -90,17 +92,17 @@ pub unsafe extern "C" fn crypto_verify_password(
     if password.is_null() || hash.is_null() {
         return -1;
     }
-    
+
     let password_str = match CStr::from_ptr(password).to_str() {
         Ok(s) => s,
         Err(_) => return -1,
     };
-    
+
     let hash_str = match CStr::from_ptr(hash).to_str() {
         Ok(s) => s,
         Err(_) => return -1,
     };
-    
+
     match verify_password(password_str, hash_str) {
         Ok(true) => 1,
         Ok(false) => 0,
@@ -133,7 +135,7 @@ pub unsafe extern "C" fn crypto_encrypt_field(
             result: ptr::null_mut(),
         };
     }
-    
+
     let key_slice = slice::from_raw_parts(key, 32);
     let plaintext_slice = slice::from_raw_parts(plaintext, plaintext_len);
     let aad_opt = if aad.is_null() || aad_len == 0 {
@@ -141,7 +143,7 @@ pub unsafe extern "C" fn crypto_encrypt_field(
     } else {
         Some(slice::from_raw_parts(aad, aad_len))
     };
-    
+
     match encrypt_field(key_slice, plaintext_slice, aad_opt) {
         Ok(ciphertext) => {
             let c_str = CString::new(ciphertext).unwrap();
@@ -178,22 +180,24 @@ pub unsafe extern "C" fn crypto_decrypt_field(
             len: 0,
         };
     }
-    
+
     let key_slice = slice::from_raw_parts(key, 32);
     let ciphertext_str = match CStr::from_ptr(ciphertext).to_str() {
         Ok(s) => s,
-        Err(_) => return BytesResult {
-            error_code: -1,
-            data: ptr::null_mut(),
-            len: 0,
-        },
+        Err(_) => {
+            return BytesResult {
+                error_code: -1,
+                data: ptr::null_mut(),
+                len: 0,
+            }
+        }
     };
     let aad_opt = if aad.is_null() || aad_len == 0 {
         None
     } else {
         Some(slice::from_raw_parts(aad, aad_len))
     };
-    
+
     match decrypt_field(key_slice, ciphertext_str, aad_opt) {
         Ok(plaintext) => {
             let len = plaintext.len();
@@ -226,7 +230,7 @@ pub unsafe extern "C" fn crypto_generate_key(out: *mut u8) -> c_int {
     if out.is_null() {
         return -1;
     }
-    
+
     match generate_key() {
         Ok(key) => {
             ptr::copy_nonoverlapping(key.as_ptr(), out, 32);
@@ -257,11 +261,15 @@ pub unsafe extern "C" fn crypto_constant_time_compare(
     if a.is_null() || b.is_null() {
         return 0;
     }
-    
+
     let a_slice = slice::from_raw_parts(a, len);
     let b_slice = slice::from_raw_parts(b, len);
-    
-    if constant_time_compare(a_slice, b_slice) { 1 } else { 0 }
+
+    if constant_time_compare(a_slice, b_slice) {
+        1
+    } else {
+        0
+    }
 }
 
 // ============================================================================

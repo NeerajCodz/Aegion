@@ -35,18 +35,18 @@ type DockerClient struct {
 
 // ContainerInfo holds container state information.
 type ContainerInfo struct {
-	ID          string
-	Name        string
-	State       string
-	Status      string
-	Health      string
-	IPAddress   string
-	Ports       []string
-	Created     time.Time
-	StartedAt   time.Time
-	FinishedAt  time.Time
-	ExitCode    int
-	Error       string
+	ID           string
+	Name         string
+	State        string
+	Status       string
+	Health       string
+	IPAddress    string
+	Ports        []string
+	Created      time.Time
+	StartedAt    time.Time
+	FinishedAt   time.Time
+	ExitCode     int
+	Error        string
 	RestartCount int
 }
 
@@ -204,11 +204,11 @@ func (d *DockerClient) buildHealthCheck(cfg *ModuleConfig) *container.HealthConf
 	}
 
 	return &container.HealthConfig{
-		Test:          []string{"CMD-SHELL", fmt.Sprintf("wget -q --spider http://localhost%s || exit 1", cfg.HealthCheck.Endpoint)},
-		Interval:      cfg.HealthCheck.Interval,
-		Timeout:       cfg.HealthCheck.Timeout,
-		Retries:       cfg.HealthCheck.Retries,
-		StartPeriod:   cfg.HealthCheck.StartPeriod,
+		Test:        []string{"CMD-SHELL", fmt.Sprintf("wget -q --spider http://localhost%s || exit 1", cfg.HealthCheck.Endpoint)},
+		Interval:    cfg.HealthCheck.Interval,
+		Timeout:     cfg.HealthCheck.Timeout,
+		Retries:     cfg.HealthCheck.Retries,
+		StartPeriod: cfg.HealthCheck.StartPeriod,
 	}
 }
 

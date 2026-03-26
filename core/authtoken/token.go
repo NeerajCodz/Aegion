@@ -13,16 +13,16 @@ import (
 )
 
 var (
-	ErrInvalidToken   = errors.New("invalid token")
-	ErrExpiredToken   = errors.New("token expired")
-	ErrInvalidSecret  = errors.New("invalid secret")
-	ErrModuleIDEmpty  = errors.New("module ID cannot be empty")
+	ErrInvalidToken  = errors.New("invalid token")
+	ErrExpiredToken  = errors.New("token expired")
+	ErrInvalidSecret = errors.New("invalid secret")
+	ErrModuleIDEmpty = errors.New("module ID cannot be empty")
 )
 
 const (
-	DefaultTTL        = 5 * time.Minute
-	TokenSeparator    = "."
-	SignatureLength   = 32 // SHA256 produces 32 bytes
+	DefaultTTL      = 5 * time.Minute
+	TokenSeparator  = "."
+	SignatureLength = 32 // SHA256 produces 32 bytes
 )
 
 // Token represents a decoded internal auth token.
@@ -34,9 +34,9 @@ type Token struct {
 
 // Generator creates and validates internal auth tokens.
 type Generator struct {
-	secrets    [][]byte
-	ttl        time.Duration
-	mu         sync.RWMutex
+	secrets [][]byte
+	ttl     time.Duration
+	mu      sync.RWMutex
 }
 
 // GeneratorConfig holds token generator configuration.
@@ -134,7 +134,7 @@ func (g *Generator) Validate(tokenStr string) (*Token, error) {
 
 	// Verify signature against all secrets (supports rotation)
 	payload := buildPayload(moduleID, timestamp)
-	
+
 	g.mu.RLock()
 	secrets := g.secrets
 	g.mu.RUnlock()

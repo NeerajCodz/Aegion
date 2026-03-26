@@ -43,7 +43,7 @@ func createSessionTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 	// Session validation endpoint
 	r.Get("/api/v1/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		sessionID := chi.URLParam(r, "id")
-		
+
 		// Query session from database
 		var session SessionResponse
 		var identityEmail, identityName string
@@ -413,11 +413,11 @@ func TestSessionListByIdentity(t *testing.T) {
 		sessionIDs := make(map[string]bool)
 		for _, session := range listResp.Sessions {
 			sessionIDs[session.ID] = true
-			
+
 			if session.Identity.Email != identity.Email {
 				t.Errorf("Expected identity email %s, got %s", identity.Email, session.Identity.Email)
 			}
-			
+
 			if !session.Active {
 				t.Error("Expected all sessions to be active")
 			}

@@ -74,7 +74,7 @@ func (h *Handler) RevokeAllIdentitySessions(w http.ResponseWriter, r *http.Reque
 	// Log the action
 	ipAddress := IPAddressFromContext(r.Context())
 	h.logAction(r.Context(), &operator.ID, "revoke_all", "session", "", map[string]interface{}{
-		"identity_id":     identityID.String(),
+		"identity_id":      identityID.String(),
 		"sessions_revoked": count,
 	}, ipAddress)
 

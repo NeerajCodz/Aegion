@@ -7,31 +7,31 @@ use thiserror::Error;
 pub enum JwtError {
     #[error("key generation failed: {0}")]
     KeyGenerationFailed(String),
-    
+
     #[error("signing failed: {0}")]
     SigningFailed(String),
-    
+
     #[error("verification failed: {0}")]
     VerificationFailed(String),
-    
+
     #[error("invalid token format")]
     InvalidTokenFormat,
-    
+
     #[error("invalid algorithm: {0}")]
     InvalidAlgorithm(String),
-    
+
     #[error("invalid key")]
     InvalidKey,
-    
+
     #[error("token expired")]
     TokenExpired,
-    
+
     #[error("token not yet valid")]
     TokenNotYetValid,
-    
+
     #[error("JSON serialization error: {0}")]
     JsonError(String),
-    
+
     #[error("base64 decode error")]
     Base64Error,
 }

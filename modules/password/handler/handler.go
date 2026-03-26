@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"aegion/modules/password/service"
+	"github.com/aegion/aegion/modules/password/service"
 )
 
 // Handler handles password authentication HTTP requests.
@@ -83,7 +83,7 @@ func (h *Handler) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: Create identity first, then register password
 	// For now, this is a placeholder that would integrate with core identity creation
-	
+
 	// Generate identity ID (in real implementation, this comes from core)
 	identityID := uuid.New()
 
@@ -122,7 +122,7 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			// Use generic error to prevent account enumeration
-			h.writeError(w, http.StatusUnauthorized, "invalid_credentials", 
+			h.writeError(w, http.StatusUnauthorized, "invalid_credentials",
 				"The provided credentials are invalid. Check for spelling mistakes or use another login method.")
 			return
 		}

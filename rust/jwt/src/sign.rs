@@ -70,7 +70,7 @@ impl Default for Claims {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        
+
         Claims {
             iss: None,
             sub: None,
@@ -105,43 +105,44 @@ pub fn sign_jwt(
     let header = JwtHeader::new(algorithm, key_id);
     let header_json = serde_json::to_string(&header)?;
     let payload_json = serde_json::to_string(claims)?;
-    
+
     let header_b64 = URL_SAFE_NO_PAD.encode(header_json.as_bytes());
     let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
-    
+
     let signing_input = format!("{}.{}", header_b64, payload_b64);
-    
+
     let signature = match algorithm {
         "ES256" => sign_es256(&signing_input, private_key_pkcs8)?,
         "EdDSA" => sign_eddsa(&signing_input, private_key_pkcs8)?,
         _ => return Err(JwtError::InvalidAlgorithm(algorithm.to_string())),
     };
-    
+
     let signature_b64 = URL_SAFE_NO_PAD.encode(&signature);
-    
+
     Ok(format!("{}.{}", signing_input, signature_b64))
 }
 
 /// Sign using ES256 (ECDSA P-256 with SHA-256)
 fn sign_es256(signing_input: &str, private_key_pkcs8: &[u8]) -> Result<Vec<u8>, JwtError> {
-    let key_pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, private_key_pkcs8)
-        .map_err(|e| JwtError::InvalidKey)?;
-    
     let rng = ring::rand::SystemRandom::new();
+    let key_pair =
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, private_key_pkcs8, &rng)
+            .map_err(|_| JwtError::InvalidKey)?;
+
     let signature = key_pair
         .sign(&rng, signing_input.as_bytes())
         .map_err(|e| JwtError::SigningFailed(format!("{:?}", e)))?;
-    
+
     Ok(signature.as_ref().to_vec())
 }
 
 /// Sign using EdDSA (Ed25519)
 fn sign_eddsa(signing_input: &str, private_key_pkcs8: &[u8]) -> Result<Vec<u8>, JwtError> {
-    let key_pair = Ed25519KeyPair::from_pkcs8(private_key_pkcs8)
-        .map_err(|e| JwtError::InvalidKey)?;
-    
+    let key_pair =
+        Ed25519KeyPair::from_pkcs8(private_key_pkcs8).map_err(|_| JwtError::InvalidKey)?;
+
     let signature = key_pair.sign(signing_input.as_bytes());
-    
+
     Ok(signature.as_ref().to_vec())
 }
 
@@ -149,21 +150,27 @@ fn sign_eddsa(signing_input: &str, private_key_pkcs8: &[u8]) -> Result<Vec<u8>, 
 mod tests {
     use super::*;
     use crate::keygen::generate_ec_keypair;
-    
+
     #[test]
     fn test_sign_jwt_es256() {
         let keypair = generate_ec_keypair("test-key").unwrap();
-        
+
         let mut claims = Claims::default();
         claims.iss = Some("aegion".into());
         claims.sub = Some("user-123".into());
-        
-        let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, Some(&keypair.key_id)).unwrap();
-        
+
+        let token = sign_jwt(
+            &claims,
+            "ES256",
+            &keypair.private_key_der,
+            Some(&keypair.key_id),
+        )
+        .unwrap();
+
         // Token should have 3 parts
         let parts: Vec<&str> = token.split('.').collect();
         assert_eq!(parts.len(), 3);
-        
+
         // Decode and verify header
         let header_json = URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
         let header: JwtHeader = serde_json::from_slice(&header_json).unwrap();
@@ -171,31 +178,35 @@ mod tests {
         assert_eq!(header.typ, "JWT");
         assert_eq!(header.kid, Some("test-key".into()));
     }
-    
+
     #[test]
     fn test_sign_jwt_with_custom_claims() {
         let keypair = generate_ec_keypair("test-key").unwrap();
-        
+
         let mut claims = Claims::default();
         claims.sub = Some("user-456".into());
-        claims.custom.insert("role".into(), serde_json::json!("admin"));
-        claims.custom.insert("permissions".into(), serde_json::json!(["read", "write"]));
-        
+        claims
+            .custom
+            .insert("role".into(), serde_json::json!("admin"));
+        claims
+            .custom
+            .insert("permissions".into(), serde_json::json!(["read", "write"]));
+
         let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, None).unwrap();
-        
+
         let parts: Vec<&str> = token.split('.').collect();
         let payload_json = URL_SAFE_NO_PAD.decode(parts[1]).unwrap();
         let decoded: serde_json::Value = serde_json::from_slice(&payload_json).unwrap();
-        
+
         assert_eq!(decoded["sub"], "user-456");
         assert_eq!(decoded["role"], "admin");
     }
-    
+
     #[test]
     fn test_invalid_algorithm() {
         let keypair = generate_ec_keypair("test").unwrap();
         let claims = Claims::default();
-        
+
         let result = sign_jwt(&claims, "RS256", &keypair.private_key_der, None);
         assert!(matches!(result, Err(JwtError::InvalidAlgorithm(_))));
     }

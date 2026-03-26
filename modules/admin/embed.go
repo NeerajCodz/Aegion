@@ -1,4 +1,4 @@
-package main
+package admin
 
 import (
 	"embed"
@@ -6,6 +6,7 @@ import (
 )
 
 // Embed the SPA dist files at build time
+//
 //go:embed spa/dist/*
 var spaFiles embed.FS
 

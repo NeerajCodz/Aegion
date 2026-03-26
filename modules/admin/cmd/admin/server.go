@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
+	admin "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 )
 
@@ -25,11 +27,11 @@ type Server struct {
 }
 
 type RegistrationRequest struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Version   string     `json:"version"`
-	Endpoints []Endpoint `json:"endpoints"`
-	HealthURL string     `json:"health_url"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Version   string            `json:"version"`
+	Endpoints []Endpoint        `json:"endpoints"`
+	HealthURL string            `json:"health_url"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
@@ -75,7 +77,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		
+
 		// HSTS for production
 		if r.TLS != nil {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -95,9 +97,22 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 }
 
 func (s *Server) logRequest(next http.Handler) http.Handler {
-	return middleware.RequestLogger(&middleware.DefaultLogFormatter{
-		Logger: log.Logger,
-	})(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+		defer func() {
+			log.Info().
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Int("status", ww.Status()).
+				Int("bytes", ww.BytesWritten()).
+				Dur("duration", time.Since(start)).
+				Msg("request completed")
+		}()
+
+		next.ServeHTTP(ww, r)
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +163,7 @@ func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
 	// For SPA routes that don't match files, serve index.html
 	// This allows client-side routing to work
 	path := strings.TrimPrefix(r.URL.Path, s.Config.Admin.Path)
-	
+
 	// Only serve SPA fallback for admin paths
 	if strings.HasPrefix(r.URL.Path, s.Config.Admin.Path) {
 		// Check if this is an API call that shouldn't get the SPA
@@ -156,12 +171,12 @@ func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		
+
 		// Serve index.html for SPA routing
 		indexHandler := NewSPAFileServer()
 		indexHandler.ServeHTTP(w, &http.Request{
 			Method: "GET",
-			URL:    &http.URL{Path: "/index.html"},
+			URL:    &url.URL{Path: "/index.html"},
 			Header: r.Header,
 		})
 		return
@@ -245,7 +260,7 @@ type SPAFileServer struct {
 
 func NewSPAFileServer() *SPAFileServer {
 	return &SPAFileServer{
-		fileServer: http.FileServer(http.FS(GetSPAFiles())),
+		fileServer: http.FileServer(http.FS(admin.GetSPAFiles())),
 	}
 }
 
@@ -256,7 +271,7 @@ func (spa *SPAFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if the file exists
-	if _, err := GetSPAFiles().Open(path); err != nil {
+	if _, err := admin.GetSPAFiles().Open(path); err != nil {
 		// File doesn't exist, check if it's a potential route
 		ext := filepath.Ext(path)
 		if ext == "" || ext == ".html" {

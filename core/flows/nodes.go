@@ -40,23 +40,23 @@ type Node struct {
 
 // NodeAttributes holds the attributes for a UI node
 type NodeAttributes struct {
-	Name        string    `json:"name,omitempty"`
-	Type        InputType `json:"type,omitempty"`
-	Value       any       `json:"value,omitempty"`
-	Required    bool      `json:"required,omitempty"`
-	Disabled    bool      `json:"disabled,omitempty"`
-	Pattern     string    `json:"pattern,omitempty"`
-	Autocomplete string   `json:"autocomplete,omitempty"`
-	Label       string    `json:"label,omitempty"`
-	Placeholder string    `json:"placeholder,omitempty"`
-	MaxLength   int       `json:"maxlength,omitempty"`
-	MinLength   int       `json:"minlength,omitempty"`
-	Href        string    `json:"href,omitempty"`
-	Src         string    `json:"src,omitempty"`
-	Alt         string    `json:"alt,omitempty"`
-	ID          string    `json:"id,omitempty"`
-	OnClick     string    `json:"onclick,omitempty"`
-	NodeValue   string    `json:"node_value,omitempty"`
+	Name         string    `json:"name,omitempty"`
+	Type         InputType `json:"type,omitempty"`
+	Value        any       `json:"value,omitempty"`
+	Required     bool      `json:"required,omitempty"`
+	Disabled     bool      `json:"disabled,omitempty"`
+	Pattern      string    `json:"pattern,omitempty"`
+	Autocomplete string    `json:"autocomplete,omitempty"`
+	Label        string    `json:"label,omitempty"`
+	Placeholder  string    `json:"placeholder,omitempty"`
+	MaxLength    int       `json:"maxlength,omitempty"`
+	MinLength    int       `json:"minlength,omitempty"`
+	Href         string    `json:"href,omitempty"`
+	Src          string    `json:"src,omitempty"`
+	Alt          string    `json:"alt,omitempty"`
+	ID           string    `json:"id,omitempty"`
+	OnClick      string    `json:"onclick,omitempty"`
+	NodeValue    string    `json:"node_value,omitempty"`
 }
 
 // NodeMeta holds metadata about a UI node

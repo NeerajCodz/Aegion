@@ -336,11 +336,11 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		`CREATE VIEW IF NOT EXISTS identities AS SELECT 
 			id, email, name, state, created_at, updated_at 
 			FROM core_identities`,
-		
+
 		`CREATE VIEW IF NOT EXISTS identity_credentials AS SELECT 
 			id, identity_id, 'password' as type, password_hash, created_at, updated_at
 			FROM module_password_credentials`,
-		
+
 		`CREATE VIEW IF NOT EXISTS sessions AS SELECT 
 			id, token, identity_id, aal, expires_at, active, authenticated_at as created_at, expires_at as updated_at
 			FROM core_sessions`,
@@ -507,7 +507,7 @@ func (c *APIClient) PostRaw(path, body string) (*http.Response, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Add stored cookies
 	for _, cookie := range c.Cookies {
 		req.AddCookie(cookie)
@@ -767,11 +767,13 @@ func (f *TestFixtures) CreateOperator(ctx context.Context, identityID uuid.UUID,
 
 // Identity represents a test identity
 type Identity struct {
-	ID     uuid.UUID
-	Email  string
-	Name   string
-	State  string
-	Traits map[string]interface{}
+	ID        uuid.UUID
+	Email     string
+	Name      string
+	State     string
+	Traits    map[string]interface{}
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Session represents a test session

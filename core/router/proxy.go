@@ -36,8 +36,8 @@ type ModuleProxyConfig struct {
 
 // ModuleProxy forwards requests to module containers.
 type ModuleProxy struct {
-	config   ModuleProxyConfig
-	logger   zerolog.Logger
+	config    ModuleProxyConfig
+	logger    zerolog.Logger
 	transport *http.Transport
 }
 
@@ -152,7 +152,7 @@ func (p *ModuleProxy) injectSessionHeaders(req *http.Request) {
 // addForwardedHeaders adds X-Forwarded-* headers.
 func (p *ModuleProxy) addForwardedHeaders(req, originalReq *http.Request) {
 	clientIP := getClientIP(originalReq)
-	
+
 	if prior := originalReq.Header.Get("X-Forwarded-For"); prior != "" {
 		req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
 	} else {

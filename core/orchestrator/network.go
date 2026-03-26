@@ -157,10 +157,10 @@ func (n *NetworkManager) GetNetworkInfo(ctx context.Context) (*NetworkInfo, erro
 	// Get connected containers
 	for id, container := range inspect.Containers {
 		info.Containers = append(info.Containers, NetworkContainer{
-			ID:        id,
-			Name:      container.Name,
-			IPv4:      container.IPv4Address,
-			IPv6:      container.IPv6Address,
+			ID:         id,
+			Name:       container.Name,
+			IPv4:       container.IPv4Address,
+			IPv6:       container.IPv6Address,
 			MacAddress: container.MacAddress,
 		})
 	}

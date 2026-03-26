@@ -42,7 +42,7 @@ func (s *Store) Create(ctx context.Context, cred *Credential) error {
 		INSERT INTO pwd_credentials (id, identity_id, identifier, hash, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`, cred.ID, cred.IdentityID, cred.Identifier, cred.Hash, cred.CreatedAt, cred.UpdatedAt)
-	
+
 	if err != nil {
 		// Check for unique constraint violation
 		if isDuplicateKeyError(err) {
@@ -50,14 +50,14 @@ func (s *Store) Create(ctx context.Context, cred *Credential) error {
 		}
 		return err
 	}
-	
+
 	return nil
 }
 
 // GetByIdentifier retrieves a credential by identifier (email, username).
 func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*Credential, error) {
 	cred := &Credential{}
-	
+
 	err := s.db.QueryRow(ctx, `
 		SELECT id, identity_id, identifier, hash, created_at, updated_at
 		FROM pwd_credentials
@@ -66,21 +66,21 @@ func (s *Store) GetByIdentifier(ctx context.Context, identifier string) (*Creden
 		&cred.ID, &cred.IdentityID, &cred.Identifier, &cred.Hash,
 		&cred.CreatedAt, &cred.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrCredentialNotFound
 		}
 		return nil, err
 	}
-	
+
 	return cred, nil
 }
 
 // GetByIdentityID retrieves a credential by identity ID.
 func (s *Store) GetByIdentityID(ctx context.Context, identityID uuid.UUID) (*Credential, error) {
 	cred := &Credential{}
-	
+
 	err := s.db.QueryRow(ctx, `
 		SELECT id, identity_id, identifier, hash, created_at, updated_at
 		FROM pwd_credentials
@@ -89,14 +89,14 @@ func (s *Store) GetByIdentityID(ctx context.Context, identityID uuid.UUID) (*Cre
 		&cred.ID, &cred.IdentityID, &cred.Identifier, &cred.Hash,
 		&cred.CreatedAt, &cred.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrCredentialNotFound
 		}
 		return nil, err
 	}
-	
+
 	return cred, nil
 }
 
@@ -107,15 +107,15 @@ func (s *Store) Update(ctx context.Context, credID uuid.UUID, newHash string) er
 		SET hash = $1, updated_at = NOW()
 		WHERE id = $2
 	`, newHash, credID)
-	
+
 	if err != nil {
 		return err
 	}
-	
+
 	if result.RowsAffected() == 0 {
 		return ErrCredentialNotFound
 	}
-	
+
 	return nil
 }
 
@@ -145,7 +145,7 @@ func (s *Store) GetHistory(ctx context.Context, credID uuid.UUID, limit int) ([]
 	if limit == 0 {
 		limit = 5
 	}
-	
+
 	rows, err := s.db.Query(ctx, `
 		SELECT hash FROM pwd_history
 		WHERE credential_id = $1
@@ -156,7 +156,7 @@ func (s *Store) GetHistory(ctx context.Context, credID uuid.UUID, limit int) ([]
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var hashes []string
 	for rows.Next() {
 		var hash string
@@ -165,7 +165,7 @@ func (s *Store) GetHistory(ctx context.Context, credID uuid.UUID, limit int) ([]
 		}
 		hashes = append(hashes, hash)
 	}
-	
+
 	return hashes, rows.Err()
 }
 
@@ -191,8 +191,7 @@ func isDuplicateKeyError(err error) bool {
 		return false
 	}
 	// Simple string check for now
-	return err.Error() != "" && (
-		contains(err.Error(), "duplicate key") ||
+	return err.Error() != "" && (contains(err.Error(), "duplicate key") ||
 		contains(err.Error(), "23505"))
 }
 

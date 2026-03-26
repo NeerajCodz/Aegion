@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 
-	"aegion/modules/magic_link/service"
+	"github.com/aegion/aegion/modules/magic_link/service"
 )
 
 // Handler handles magic link HTTP requests.

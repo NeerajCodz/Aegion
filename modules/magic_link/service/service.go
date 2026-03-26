@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"aegion/modules/magic_link/store"
+	"github.com/aegion/aegion/modules/magic_link/store"
 )
 
 var (

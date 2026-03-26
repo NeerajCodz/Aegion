@@ -32,9 +32,9 @@ type Rotator struct {
 	eventBus     *eventbus.Bus
 	gracePeriod  time.Duration
 	sourceModule string
-	
-	mu            sync.Mutex
-	rotationTimer *time.Timer
+
+	mu             sync.Mutex
+	rotationTimer  *time.Timer
 	previousSecret []byte
 }
 
@@ -170,12 +170,12 @@ func (r *Rotator) RotateWithCallback(ctx context.Context, newSecret []byte, onCo
 // ForceComplete immediately completes any pending rotation.
 func (r *Rotator) ForceComplete(ctx context.Context) {
 	r.mu.Lock()
-	
+
 	if r.rotationTimer != nil {
 		r.rotationTimer.Stop()
 		r.rotationTimer = nil
 	}
-	
+
 	currentSecret := r.previousSecret
 	r.mu.Unlock()
 
