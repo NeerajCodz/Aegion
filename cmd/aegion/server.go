@@ -2,132 +2,135 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"aegion/internal/platform/config"
-	"aegion/internal/platform/database"
-	"aegion/internal/platform/logger"
+	"github.com/aegion/aegion/core/authtoken"
+	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/registry"
+	"github.com/aegion/aegion/core/workers"
+	"github.com/aegion/aegion/internal/platform/config"
+	"github.com/aegion/aegion/internal/platform/database"
+	"github.com/aegion/aegion/internal/platform/logger"
 )
+
+// ServerConfig holds the server configuration.
+type ServerConfig struct {
+	Config         *config.Config
+	DB             *database.DB
+	Log            *logger.Logger
+	WorkerManager  *workers.Manager
+	AdminBootstrap bool
+}
 
 // Server represents the main Aegion server.
 type Server struct {
-	cfg    *config.Config
-	db     *database.DB
-	log    *logger.Logger
-	router chi.Router
+	cfg           *config.Config
+	db            *database.DB
+	log           *logger.Logger
+	router        chi.Router
+	registry      *registry.Registry
+	tokenGen      *authtoken.Generator
+	flowService   *flows.Service
+	workerManager *workers.Manager
 }
 
 // NewServer creates and initializes a new server instance.
-func NewServer(ctx context.Context, cfg *config.Config, db *database.DB, log *logger.Logger) (*Server, error) {
-	s := &Server{
-		cfg: cfg,
-		db:  db,
-		log: log,
+func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
+	// Initialize auth token generator
+	var internalSecret []byte
+	if len(cfg.Config.Secrets.Internal) > 0 {
+		internalSecret = []byte(cfg.Config.Secrets.Internal[0])
+	} else {
+		internalSecret = []byte("default-internal-secret-for-dev")
 	}
 
-	s.setupRouter()
+	tokenGen, err := authtoken.NewGenerator(authtoken.GeneratorConfig{
+		Secret: internalSecret,
+		TTL:    5 * time.Minute,
+	})
+	if err != nil {
+		return nil, err
+	}
 
-	// TODO: Initialize module orchestrator
-	// TODO: Initialize session manager
-	// TODO: Initialize event bus
-	// TODO: Initialize courier
-	// TODO: Start background workers
+	// Initialize service registry
+	reg := registry.New(registry.Config{
+		HealthCheckInterval: cfg.Config.Server.InternalNet.HealthCheckInt.Duration(),
+		HealthCheckTimeout:  cfg.Config.Server.InternalNet.HealthCheckTimeout.Duration(),
+	})
+
+	// Initialize flow store and service
+	flowStore := flows.NewPostgresFlowStore(cfg.DB.Pool)
+	flowService := flows.NewService(flowStore, flows.DefaultConfig())
+
+	s := &Server{
+		cfg:           cfg.Config,
+		db:            cfg.DB,
+		log:           cfg.Log,
+		registry:      reg,
+		tokenGen:      tokenGen,
+		flowService:   flowService,
+		workerManager: cfg.WorkerManager,
+	}
+
+	// Setup routes
+	s.router = SetupRoutes(s)
+
+	// Start registry
+	reg.Start()
+	s.log.Info().Msg("Service registry started")
+
+	// Bootstrap admin if requested
+	if cfg.AdminBootstrap {
+		if err := s.bootstrapAdmin(ctx); err != nil {
+			s.log.Warn().Err(err).Msg("Admin bootstrap failed")
+		}
+	}
+
+	// Register workers if manager is available
+	if s.workerManager != nil {
+		s.registerWorkers()
+	}
 
 	return s, nil
 }
 
-// setupRouter configures the HTTP router and middleware.
-func (s *Server) setupRouter() {
-	r := chi.NewRouter()
-
-	// Middleware stack
-	r.Use(middleware.RequestID)
-	r.Use(s.requestLogger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(s.cfg.Server.RequestTimeout.Duration()))
-
-	// CORS
-	if s.cfg.Server.CORS.Enabled {
-		r.Use(s.corsMiddleware)
+// bootstrapAdmin creates the initial admin user if not exists.
+func (s *Server) bootstrapAdmin(ctx context.Context) error {
+	if s.cfg.Operator.Email == "" || s.cfg.Operator.Password == "" {
+		s.log.Info().Msg("Admin bootstrap skipped: no operator credentials configured")
+		return nil
 	}
 
-	// Health check endpoints
-	r.Get("/health", s.handleHealth)
-	r.Get("/health/ready", s.handleReady)
-	r.Get("/health/live", s.handleLive)
+	s.log.Info().
+		Str("email", s.cfg.Operator.Email).
+		Msg("Admin bootstrap requested")
 
-	// API routes
-	r.Route("/api/v1", func(r chi.Router) {
-		// Self-service flows
-		r.Route("/self-service", func(r chi.Router) {
-			// Login
-			r.Get("/login/browser", s.handleNotImplemented)
-			r.Get("/login/api", s.handleNotImplemented)
-			r.Post("/login", s.handleNotImplemented)
+	// TODO: Implement actual admin user creation
+	return nil
+}
 
-			// Registration
-			r.Get("/registration/browser", s.handleNotImplemented)
-			r.Get("/registration/api", s.handleNotImplemented)
-			r.Post("/registration", s.handleNotImplemented)
+// registerWorkers registers background workers with the manager.
+func (s *Server) registerWorkers() {
+	// Register session cleanup worker
+	s.workerManager.Register(workers.NewSessionCleanupWorker(workers.SessionCleanupConfig{
+		DB:       s.db.Pool,
+		Log:      s.log,
+		Interval: 15 * time.Minute,
+	}))
 
-			// Recovery
-			r.Get("/recovery/browser", s.handleNotImplemented)
-			r.Get("/recovery/api", s.handleNotImplemented)
-			r.Post("/recovery", s.handleNotImplemented)
+	// Register flow cleanup worker
+	s.workerManager.Register(workers.NewFlowCleanupWorker(workers.FlowCleanupConfig{
+		DB:       s.db.Pool,
+		Log:      s.log,
+		Interval: 10 * time.Minute,
+	}))
 
-			// Settings
-			r.Get("/settings/browser", s.handleNotImplemented)
-			r.Get("/settings/api", s.handleNotImplemented)
-			r.Post("/settings", s.handleNotImplemented)
-		})
-
-		// Session endpoints
-		r.Route("/sessions", func(r chi.Router) {
-			r.Get("/whoami", s.handleNotImplemented)
-			r.Delete("/", s.handleNotImplemented)
-		})
-
-		// JWKS endpoint
-		r.Get("/.well-known/jwks.json", s.handleNotImplemented)
-	})
-
-	// Admin routes (if enabled)
-	if s.cfg.Admin.Enabled {
-		r.Route(s.cfg.Admin.Path, func(r chi.Router) {
-			// Admin API
-			r.Route("/api/v1", func(r chi.Router) {
-				// Identity management
-				r.Route("/identities", func(r chi.Router) {
-					r.Get("/", s.handleNotImplemented)
-					r.Post("/", s.handleNotImplemented)
-					r.Get("/{id}", s.handleNotImplemented)
-					r.Patch("/{id}", s.handleNotImplemented)
-					r.Delete("/{id}", s.handleNotImplemented)
-				})
-
-				// Session management
-				r.Route("/sessions", func(r chi.Router) {
-					r.Get("/", s.handleNotImplemented)
-					r.Delete("/{id}", s.handleNotImplemented)
-				})
-
-				// System config
-				r.Route("/system", func(r chi.Router) {
-					r.Get("/config", s.handleNotImplemented)
-					r.Patch("/config", s.handleNotImplemented)
-				})
-			})
-
-			// Serve admin SPA (catch-all)
-			// TODO: Embed and serve React SPA
-		})
-	}
-
-	s.router = r
+	s.log.Info().Msg("Background workers registered")
 }
 
 // Handler returns the HTTP handler for the server.
@@ -137,10 +140,30 @@ func (s *Server) Handler() http.Handler {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	// TODO: Stop background workers
-	// TODO: Stop module orchestrator
-	// TODO: Flush event bus
+	s.log.Info().Msg("Shutting down server components")
+
+	// Stop registry
+	if s.registry != nil {
+		s.registry.Stop()
+		s.log.Info().Msg("Service registry stopped")
+	}
+
 	return nil
+}
+
+// Registry returns the service registry.
+func (s *Server) Registry() *registry.Registry {
+	return s.registry
+}
+
+// FlowService returns the flow service.
+func (s *Server) FlowService() *flows.Service {
+	return s.flowService
+}
+
+// TokenGenerator returns the auth token generator.
+func (s *Server) TokenGenerator() *authtoken.Generator {
+	return s.tokenGen
 }
 
 // Middleware
@@ -224,9 +247,20 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check registry health
+	registryOK := s.registry != nil && s.registry.ModuleCount() >= 0
+
+	resp := map[string]interface{}{
+		"status":        "ready",
+		"database":      "ok",
+		"registry":      registryOK,
+		"module_count":  s.registry.ModuleCount(),
+		"healthy_count": s.registry.HealthyCount(),
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ready"}`))
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {

@@ -12,9 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"aegion/internal/platform/config"
-	"aegion/internal/platform/database"
-	"aegion/internal/platform/logger"
+	"github.com/aegion/aegion/core/workers"
+	"github.com/aegion/aegion/internal/platform/config"
+	"github.com/aegion/aegion/internal/platform/database"
+	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 //go:embed migrations/*.sql
@@ -25,20 +26,36 @@ var (
 	buildTime = "unknown"
 )
 
-func main() {
-	// Parse command line flags
-	configPath := flag.String("config", "aegion.yaml", "Path to configuration file")
-	migrateOnly := flag.Bool("migrate", false, "Run migrations and exit")
-	showVersion := flag.Bool("version", false, "Show version and exit")
-	flag.Parse()
+// Command line flags
+type flags struct {
+	configPath     string
+	migrateOnly    bool
+	showVersion    bool
+	adminBootstrap bool
+	enableWorkers  bool
+}
 
-	if *showVersion {
+func parseFlags() *flags {
+	f := &flags{}
+	flag.StringVar(&f.configPath, "config", "aegion.yaml", "Path to configuration file")
+	flag.BoolVar(&f.migrateOnly, "migrate", false, "Run migrations and exit")
+	flag.BoolVar(&f.showVersion, "version", false, "Show version and exit")
+	flag.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
+	flag.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
+	flag.Parse()
+	return f
+}
+
+func main() {
+	f := parseFlags()
+
+	if f.showVersion {
 		fmt.Printf("Aegion %s (built %s)\n", version, buildTime)
 		os.Exit(0)
 	}
 
 	// Load configuration
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(f.configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
 		os.Exit(1)
@@ -58,7 +75,9 @@ func main() {
 
 	log.Info().
 		Str("version", version).
-		Str("config", *configPath).
+		Str("config", f.configPath).
+		Bool("workers", f.enableWorkers).
+		Bool("admin_bootstrap", f.adminBootstrap).
 		Msg("Starting Aegion")
 
 	// Create context with cancellation
@@ -86,15 +105,37 @@ func main() {
 	}
 	log.Info().Msg("Migrations complete")
 
-	if *migrateOnly || cfg.Database.MigrateOnly {
+	if f.migrateOnly || cfg.Database.MigrateOnly {
 		log.Info().Msg("Migrate-only mode, exiting")
 		return
 	}
 
-	// Initialize server
-	server, err := NewServer(ctx, cfg, db, log)
+	// Initialize worker manager
+	var workerMgr *workers.Manager
+	if f.enableWorkers {
+		workerMgr = workers.NewManager(workers.ManagerConfig{
+			DB:  db.Pool,
+			Log: log,
+		})
+		log.Info().Msg("Worker manager initialized")
+	}
+
+	// Initialize server with worker manager
+	server, err := NewServer(ctx, &ServerConfig{
+		Config:         cfg,
+		DB:             db,
+		Log:            log,
+		WorkerManager:  workerMgr,
+		AdminBootstrap: f.adminBootstrap,
+	})
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize server")
+	}
+
+	// Start workers if enabled
+	if workerMgr != nil {
+		workerMgr.Start(ctx)
+		log.Info().Msg("Background workers started")
 	}
 
 	// Start HTTP server
@@ -123,23 +164,28 @@ func main() {
 		}
 	}()
 
+	// Setup lifecycle manager
+	lifecycle := NewLifecycle(&LifecycleConfig{
+		Log:           log,
+		Server:        server,
+		HTTPServer:    httpServer,
+		WorkerManager: workerMgr,
+	})
+
 	// Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	sig := <-sigCh
 
-	log.Info().Msg("Shutting down...")
+	log.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
 
-	// Graceful shutdown
+	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Error during server shutdown")
-	}
-
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Error during HTTP shutdown")
+	if err := lifecycle.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("Error during shutdown")
+		os.Exit(1)
 	}
 
 	log.Info().Msg("Shutdown complete")
