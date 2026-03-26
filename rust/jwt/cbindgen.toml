@@ -1,0 +1,18 @@
+[defines]
+
+[export]
+include = [
+    "JwtResult",
+    "KeyPairResult",
+    "ClaimsResult",
+]
+
+[fn]
+prefix = ""
+
+[parse]
+parse_deps = false
+
+language = "C"
+style = "both"
+cpp_compat = false
