@@ -60,7 +60,7 @@ func parseLevel(level string) zerolog.Level {
 }
 
 // With returns a logger with the given fields.
-func (l *Logger) With() *zerolog.Context {
+func (l *Logger) With() zerolog.Context {
 	return l.zl.With()
 }
 
