@@ -30,9 +30,19 @@ vendor/
 Thumbs.db
 
 # Rust
-/rust/*/target/
+rust/target/
+rust/*/target/
+**/target/
 **/*.rs.bk
 Cargo.lock
+
+# Rust build artifacts
+*.rlib
+*.rmeta
+*.d
+*.lib
+*.a
+*.dll.lib
 
 # Node (Admin SPA)
 node_modules/
