@@ -115,10 +115,7 @@ fn ed25519_to_jwk(keypair: &KeyPair) -> Result<Jwk, JwtError> {
 
 /// Convert multiple key pairs to JWKS format
 pub fn to_jwks(keypairs: &[KeyPair]) -> Result<Jwks, JwtError> {
-    let keys = keypairs
-        .iter()
-        .map(to_jwk)
-        .collect::<Result<Vec<_>, _>>()?;
+    let keys = keypairs.iter().map(to_jwk).collect::<Result<Vec<_>, _>>()?;
 
     Ok(Jwks { keys })
 }
