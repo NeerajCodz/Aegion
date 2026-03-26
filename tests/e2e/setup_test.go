@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 // Package e2e provides end-to-end tests for the Aegion identity platform.
 package e2e
 

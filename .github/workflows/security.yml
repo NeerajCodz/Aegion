@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: '1.22'
   RUST_VERSION: 'stable'
 
 jobs:
@@ -68,14 +68,19 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          cargo install cargo-audit
+          cargo install cargo-deny
 
       - name: Run cargo audit
         run: cargo audit --deny warnings
 
       - name: Install cargo-deny
         run: cargo install cargo-deny
+
+      - name: Run cargo audit
+        run: cargo audit --deny warnings
 
       - name: Run cargo deny
         run: cargo deny check advisories
