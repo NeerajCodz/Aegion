@@ -214,16 +214,16 @@ mod tests {
     #[test]
     fn test_sign_with_invalid_key() {
         let claims = Claims::default();
-        
+
         // Test with empty key
         let result = sign_jwt(&claims, "ES256", &[], None);
         assert!(result.is_err());
-        
+
         // Test with wrong key format
         let invalid_key = vec![0x00; 32]; // Just random bytes, not a valid PKCS#8 key
         let result = sign_jwt(&claims, "ES256", &invalid_key, None);
         assert!(result.is_err());
-        
+
         // Test with key for wrong algorithm (EdDSA key used for ES256)
         let ed_keypair = crate::keygen::generate_ed25519_keypair("test").unwrap();
         let result = sign_jwt(&claims, "ES256", &ed_keypair.private_key_der, None);
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn test_sign_jwt_comprehensive() {
         let keypair = generate_ec_keypair("comprehensive-test").unwrap();
-        
+
         // Test with all standard claims populated
         let mut claims = Claims::default();
         claims.iss = Some("test-issuer".into());
@@ -241,28 +241,42 @@ mod tests {
         claims.aud = Some("test-audience".into());
         claims.jti = Some("unique-jwt-id".into());
         claims.sid = Some("session-123".into());
-        
+
         // Add custom claims
-        claims.custom.insert("role".into(), serde_json::json!("admin"));
-        claims.custom.insert("permissions".into(), serde_json::json!(["read", "write", "delete"]));
-        claims.custom.insert("metadata".into(), serde_json::json!({
-            "version": "1.0",
-            "features": ["jwt", "auth"]
-        }));
-        
-        let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, Some(&keypair.key_id)).unwrap();
-        
+        claims
+            .custom
+            .insert("role".into(), serde_json::json!("admin"));
+        claims.custom.insert(
+            "permissions".into(),
+            serde_json::json!(["read", "write", "delete"]),
+        );
+        claims.custom.insert(
+            "metadata".into(),
+            serde_json::json!({
+                "version": "1.0",
+                "features": ["jwt", "auth"]
+            }),
+        );
+
+        let token = sign_jwt(
+            &claims,
+            "ES256",
+            &keypair.private_key_der,
+            Some(&keypair.key_id),
+        )
+        .unwrap();
+
         // Verify token structure
         let parts: Vec<&str> = token.split('.').collect();
         assert_eq!(parts.len(), 3);
-        
+
         // Decode and verify all parts
         let header_json = URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
         let header: JwtHeader = serde_json::from_slice(&header_json).unwrap();
         assert_eq!(header.alg, "ES256");
         assert_eq!(header.typ, "JWT");
         assert_eq!(header.kid, Some(keypair.key_id));
-        
+
         let payload_json = URL_SAFE_NO_PAD.decode(parts[1]).unwrap();
         let decoded_claims: serde_json::Value = serde_json::from_slice(&payload_json).unwrap();
         assert_eq!(decoded_claims["iss"], "test-issuer");
@@ -274,15 +288,21 @@ mod tests {
     #[test]
     fn test_sign_jwt_eddsa() {
         let keypair = crate::keygen::generate_ed25519_keypair("eddsa-test").unwrap();
-        
+
         let mut claims = Claims::default();
         claims.sub = Some("eddsa-user".into());
-        
-        let token = sign_jwt(&claims, "EdDSA", &keypair.private_key_der, Some(&keypair.key_id)).unwrap();
-        
+
+        let token = sign_jwt(
+            &claims,
+            "EdDSA",
+            &keypair.private_key_der,
+            Some(&keypair.key_id),
+        )
+        .unwrap();
+
         let parts: Vec<&str> = token.split('.').collect();
         assert_eq!(parts.len(), 3);
-        
+
         let header_json = URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
         let header: JwtHeader = serde_json::from_slice(&header_json).unwrap();
         assert_eq!(header.alg, "EdDSA");
@@ -291,35 +311,35 @@ mod tests {
     #[test]
     fn test_claims_default_values() {
         let claims = Claims::default();
-        
+
         // Should have reasonable default timestamps
         assert!(claims.iat.is_some());
         assert!(claims.nbf.is_some());
         assert!(claims.exp.is_some());
-        
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-            
+
         // Times should be reasonable (within a few seconds of now)
         let iat = claims.iat.unwrap();
         let nbf = claims.nbf.unwrap();
         let exp = claims.exp.unwrap();
-        
+
         assert!(iat <= now + 5); // Should not be in the future by much
         assert!(iat >= now - 5); // Should not be in the past by much
         assert_eq!(iat, nbf); // Should be the same
         assert!(exp > now); // Should be in the future
         assert!(exp <= now + 3700); // Should be about an hour from now
-        
+
         // Optional claims should be None
         assert!(claims.iss.is_none());
         assert!(claims.sub.is_none());
         assert!(claims.aud.is_none());
         assert!(claims.jti.is_none());
         assert!(claims.sid.is_none());
-        
+
         // Custom claims should be empty
         assert!(claims.custom.is_empty());
     }

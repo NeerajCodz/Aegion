@@ -205,7 +205,7 @@ mod tests {
     fn test_empty_password() {
         let empty_password = "";
         let hash = hash_password(empty_password).unwrap();
-        
+
         assert!(hash.starts_with("$argon2id$"));
         assert!(verify_password("", &hash).unwrap());
         assert!(!verify_password("not empty", &hash).unwrap());
@@ -215,7 +215,7 @@ mod tests {
     fn test_unicode_password() {
         let unicode_password = "café🔐汉字パスワード";
         let hash = hash_password(unicode_password).unwrap();
-        
+
         assert!(verify_password(unicode_password, &hash).unwrap());
         assert!(!verify_password("cafe", &hash).unwrap());
     }
@@ -225,7 +225,7 @@ mod tests {
         // Create a 1KB password
         let long_password = "a".repeat(1024);
         let hash = hash_password(&long_password).unwrap();
-        
+
         assert!(verify_password(&long_password, &hash).unwrap());
         assert!(!verify_password("short", &hash).unwrap());
     }
@@ -235,11 +235,11 @@ mod tests {
         // Create a hash string that looks like it's using a different algorithm
         // This is a simplified test - in reality we'd need a real bcrypt hash
         let fake_bcrypt_hash = "$2b$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW";
-        
+
         // This should fail to parse rather than indicate rehash needed
         let result = needs_rehash(fake_bcrypt_hash);
         assert!(result.is_err()); // Should error on invalid format
-        
+
         // Test with malformed argon2id hash
         let malformed = "$argon2id$v=19$invalid$salt$hash";
         let result = needs_rehash(malformed);
@@ -247,16 +247,16 @@ mod tests {
         assert!(result.is_err() || result.unwrap());
     }
 
-    #[test] 
+    #[test]
     fn test_needs_rehash_edge_cases() {
         // Test with empty string
         let result = needs_rehash("");
         assert!(result.is_err());
-        
+
         // Test with invalid format
         let result = needs_rehash("not-a-hash");
         assert!(result.is_err());
-        
+
         // Test with minimal but weak params (below defaults)
         let weak_hash = hash_password_with_params("test", 1024, 1, 1).unwrap();
         assert!(needs_rehash(&weak_hash).unwrap());

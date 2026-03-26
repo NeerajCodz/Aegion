@@ -118,7 +118,7 @@ mod tests {
         let empty1 = b"";
         let empty2 = b"";
         let non_empty = b"not empty";
-        
+
         assert!(constant_time_compare(empty1, empty2));
         assert!(!constant_time_compare(empty1, non_empty));
         assert!(!constant_time_compare(non_empty, empty1));
@@ -141,19 +141,19 @@ mod tests {
         // Test with empty slices
         let empty = &[];
         assert!(constant_time_compare_hmac(empty, empty));
-        
+
         // Test with different lengths (triggers dummy comparison)
         let short = &[0x01, 0x02];
         let long = &[0x01, 0x02, 0x03, 0x04, 0x05];
         assert!(!constant_time_compare_hmac(short, long));
         assert!(!constant_time_compare_hmac(long, short));
-        
+
         // Test real HMAC-sized data (32 bytes)
         let hmac1 = [0xFF; 32];
         let hmac2 = [0xFF; 32];
         let mut hmac3 = [0xFF; 32];
         hmac3[31] = 0xFE; // Change last byte
-        
+
         assert!(constant_time_compare_hmac(&hmac1, &hmac2));
         assert!(!constant_time_compare_hmac(&hmac1, &hmac3));
     }

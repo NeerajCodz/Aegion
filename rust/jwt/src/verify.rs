@@ -289,28 +289,34 @@ mod tests {
     fn test_verify_malformed_token() {
         let keypair = generate_ec_keypair("test").unwrap();
         let options = VerifyOptions::default();
-        
+
         // Test various malformed token formats
         let malformed_tokens = vec![
-            "", // Empty
-            "single.part", // Too few parts
-            "too.many.parts.here", // Too many parts
-            "invalid-base64!.payload.signature", // Invalid base64 in header
-            "header.invalid-base64!.signature", // Invalid base64 in payload
+            "",                                                        // Empty
+            "single.part",                                             // Too few parts
+            "too.many.parts.here",                                     // Too many parts
+            "invalid-base64!.payload.signature",                       // Invalid base64 in header
+            "header.invalid-base64!.signature",                        // Invalid base64 in payload
             "header.payload.invalid-base64!", // Invalid base64 in signature
-            "not-json.payload.signature", // Invalid JSON in header
+            "not-json.payload.signature",     // Invalid JSON in header
             "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.not-json.signature", // Invalid JSON in payload
         ];
-        
+
         for token in malformed_tokens {
             let result = verify_jwt(token, "ES256", &keypair.public_key_der, &options);
             assert!(result.is_err(), "Expected error for token: {}", token);
         }
-        
+
         // Test with wrong algorithm in header
         let keypair_eddsa = crate::keygen::generate_ed25519_keypair("eddsa").unwrap();
-        let eddsa_token = sign_jwt(&Claims::default(), "EdDSA", &keypair_eddsa.private_key_der, None).unwrap();
-        
+        let eddsa_token = sign_jwt(
+            &Claims::default(),
+            "EdDSA",
+            &keypair_eddsa.private_key_der,
+            None,
+        )
+        .unwrap();
+
         // Try to verify EdDSA token as ES256
         let result = verify_jwt(&eddsa_token, "ES256", &keypair.public_key_der, &options);
         assert!(result.is_err());
@@ -319,12 +325,12 @@ mod tests {
     #[test]
     fn test_verify_comprehensive_options() {
         let keypair = generate_ec_keypair("options-test").unwrap();
-        
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-            
+
         // Create claims with specific values for testing
         let mut claims = Claims::default();
         claims.iss = Some("test-issuer".into());
@@ -332,9 +338,9 @@ mod tests {
         claims.exp = Some(now + 3600); // 1 hour from now
         claims.nbf = Some(now - 10); // 10 seconds ago
         claims.iat = Some(now - 10);
-        
+
         let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, None).unwrap();
-        
+
         // Test with matching issuer and audience
         let options = VerifyOptions {
             issuer: Some("test-issuer".into()),
@@ -345,7 +351,7 @@ mod tests {
         };
         let result = verify_jwt(&token, "ES256", &keypair.public_key_der, &options);
         assert!(result.is_ok());
-        
+
         // Test with wrong issuer
         let options = VerifyOptions {
             issuer: Some("wrong-issuer".into()),
@@ -353,7 +359,7 @@ mod tests {
         };
         let result = verify_jwt(&token, "ES256", &keypair.public_key_der, &options);
         assert!(result.is_err());
-        
+
         // Test with wrong audience
         let options = VerifyOptions {
             audience: Some("wrong-audience".into()),
@@ -361,17 +367,18 @@ mod tests {
         };
         let result = verify_jwt(&token, "ES256", &keypair.public_key_der, &options);
         assert!(result.is_err());
-        
+
         // Test leeway functionality
         let mut claims_future = Claims::default();
         claims_future.nbf = Some(now + 30); // 30 seconds in the future
-        let future_token = sign_jwt(&claims_future, "ES256", &keypair.private_key_der, None).unwrap();
-        
+        let future_token =
+            sign_jwt(&claims_future, "ES256", &keypair.private_key_der, None).unwrap();
+
         // Without leeway, should fail
         let options = VerifyOptions::default();
         let result = verify_jwt(&future_token, "ES256", &keypair.public_key_der, &options);
         assert!(result.is_err());
-        
+
         // With sufficient leeway, should pass
         let options = VerifyOptions {
             leeway: 60, // 60 seconds
@@ -384,21 +391,22 @@ mod tests {
     #[test]
     fn test_verify_time_edge_cases() {
         let keypair = generate_ec_keypair("time-test").unwrap();
-        
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         // Test expired token
         let mut expired_claims = Claims::default();
         expired_claims.exp = Some(now - 1); // Expired 1 second ago
-        let expired_token = sign_jwt(&expired_claims, "ES256", &keypair.private_key_der, None).unwrap();
-        
+        let expired_token =
+            sign_jwt(&expired_claims, "ES256", &keypair.private_key_der, None).unwrap();
+
         let options = VerifyOptions::default();
         let result = verify_jwt(&expired_token, "ES256", &keypair.public_key_der, &options);
         assert!(matches!(result, Err(JwtError::TokenExpired)));
-        
+
         // But should work when ignoring expiration
         let options = VerifyOptions {
             ignore_exp: true,
@@ -406,16 +414,17 @@ mod tests {
         };
         let result = verify_jwt(&expired_token, "ES256", &keypair.public_key_der, &options);
         assert!(result.is_ok());
-        
+
         // Test not-yet-valid token
         let mut future_claims = Claims::default();
         future_claims.nbf = Some(now + 3600); // Valid in 1 hour
-        let future_token = sign_jwt(&future_claims, "ES256", &keypair.private_key_der, None).unwrap();
-        
+        let future_token =
+            sign_jwt(&future_claims, "ES256", &keypair.private_key_der, None).unwrap();
+
         let options = VerifyOptions::default();
         let result = verify_jwt(&future_token, "ES256", &keypair.public_key_der, &options);
         assert!(matches!(result, Err(JwtError::TokenNotYetValid)));
-        
+
         // But should work when ignoring nbf
         let options = VerifyOptions {
             ignore_nbf: true,
@@ -429,15 +438,15 @@ mod tests {
     fn test_verify_with_wrong_public_key() {
         let keypair1 = generate_ec_keypair("key1").unwrap();
         let keypair2 = generate_ec_keypair("key2").unwrap();
-        
+
         let claims = Claims::default();
         let token = sign_jwt(&claims, "ES256", &keypair1.private_key_der, None).unwrap();
-        
+
         // Verify with wrong public key should fail
         let options = VerifyOptions::default();
         let result = verify_jwt(&token, "ES256", &keypair2.public_key_der, &options);
         assert!(result.is_err());
-        
+
         // Verify with correct public key should work
         let result = verify_jwt(&token, "ES256", &keypair1.public_key_der, &options);
         assert!(result.is_ok());
@@ -446,25 +455,36 @@ mod tests {
     #[test]
     fn test_verify_result_contents() {
         let keypair = generate_ec_keypair("result-test").unwrap();
-        
+
         let mut claims = Claims::default();
         claims.iss = Some("result-issuer".into());
         claims.sub = Some("result-user".into());
-        claims.custom.insert("role".into(), serde_json::json!("tester"));
-        
-        let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, Some(&keypair.key_id)).unwrap();
-        
+        claims
+            .custom
+            .insert("role".into(), serde_json::json!("tester"));
+
+        let token = sign_jwt(
+            &claims,
+            "ES256",
+            &keypair.private_key_der,
+            Some(&keypair.key_id),
+        )
+        .unwrap();
+
         let options = VerifyOptions::default();
         let result = verify_jwt(&token, "ES256", &keypair.public_key_der, &options).unwrap();
-        
+
         // Check header
         assert_eq!(result.header.alg, "ES256");
         assert_eq!(result.header.typ, "JWT");
         assert_eq!(result.header.kid, Some(keypair.key_id));
-        
+
         // Check claims
         assert_eq!(result.claims.iss, Some("result-issuer".into()));
         assert_eq!(result.claims.sub, Some("result-user".into()));
-        assert_eq!(result.claims.custom.get("role"), Some(&serde_json::json!("tester")));
+        assert_eq!(
+            result.claims.custom.get("role"),
+            Some(&serde_json::json!("tester"))
+        );
     }
 }

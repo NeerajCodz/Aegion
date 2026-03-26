@@ -239,10 +239,10 @@ mod tests {
     fn test_encrypt_empty_data() {
         let key = generate_key().unwrap();
         let empty_data = b"";
-        
+
         let ciphertext = encrypt_field(&key, empty_data, None).unwrap();
         let decrypted = decrypt_field(&key, &ciphertext, None).unwrap();
-        
+
         assert_eq!(empty_data.as_slice(), decrypted.as_slice());
     }
 
@@ -251,10 +251,10 @@ mod tests {
         let key = generate_key().unwrap();
         // Create 1MB of data
         let large_data = vec![0x42u8; 1024 * 1024];
-        
+
         let ciphertext = encrypt_field(&key, &large_data, None).unwrap();
         let decrypted = decrypt_field(&key, &ciphertext, None).unwrap();
-        
+
         assert_eq!(large_data, decrypted);
     }
 
@@ -264,18 +264,18 @@ mod tests {
         let key_too_short = [0u8; 16];
         let key_too_long = [0u8; 64];
         let empty_key = [];
-        
+
         let plaintext = b"test data";
-        
+
         // Encryption should fail with wrong key lengths
         assert!(encrypt_field(&key_too_short, plaintext, None).is_err());
         assert!(encrypt_field(&key_too_long, plaintext, None).is_err());
         assert!(encrypt_field(&empty_key, plaintext, None).is_err());
-        
+
         // Decryption should also fail with wrong key lengths
         let valid_key = generate_key().unwrap();
         let valid_ciphertext = encrypt_field(&valid_key, plaintext, None).unwrap();
-        
+
         assert!(decrypt_field(&key_too_short, &valid_ciphertext, None).is_err());
         assert!(decrypt_field(&key_too_long, &valid_ciphertext, None).is_err());
         assert!(decrypt_field(&empty_key, &valid_ciphertext, None).is_err());
@@ -287,22 +287,22 @@ mod tests {
         let plaintext = b"sensitive data";
         let correct_aad = b"user_id:123";
         let wrong_aad = b"user_id:456";
-        
+
         // Encrypt with AAD
         let ciphertext = encrypt_field(&key, plaintext, Some(correct_aad)).unwrap();
-        
+
         // Decrypt with correct AAD should work
         let decrypted = decrypt_field(&key, &ciphertext, Some(correct_aad)).unwrap();
         assert_eq!(plaintext.as_slice(), decrypted.as_slice());
-        
+
         // Decrypt with wrong AAD should fail
         let result = decrypt_field(&key, &ciphertext, Some(wrong_aad));
         assert!(result.is_err());
-        
+
         // Decrypt without AAD when it was encrypted with AAD should fail
         let result = decrypt_field(&key, &ciphertext, None);
         assert!(result.is_err());
-        
+
         // Test the reverse: encrypt without AAD, decrypt with AAD
         let ciphertext_no_aad = encrypt_field(&key, plaintext, None).unwrap();
         let result = decrypt_field(&key, &ciphertext_no_aad, Some(correct_aad));
@@ -312,13 +312,13 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_edge_cases() {
         let key = generate_key().unwrap();
-        
+
         // Test with single byte
         let single_byte = [0xAB];
         let ciphertext = encrypt_field(&key, &single_byte, None).unwrap();
         let decrypted = decrypt_field(&key, &ciphertext, None).unwrap();
         assert_eq!(single_byte.as_slice(), decrypted.as_slice());
-        
+
         // Test with maximum practical data size (16MB)
         let large_data = vec![0x55u8; 16 * 1024 * 1024];
         let ciphertext = encrypt_field(&key, &large_data, None).unwrap();
@@ -332,11 +332,11 @@ mod tests {
         let key1 = generate_key().unwrap();
         let key2 = generate_key().unwrap();
         let key3 = generate_key().unwrap();
-        
+
         assert_ne!(key1, key2);
         assert_ne!(key2, key3);
         assert_ne!(key1, key3);
-        
+
         // All keys should be exactly KEY_SIZE bytes
         assert_eq!(key1.len(), KEY_SIZE);
         assert_eq!(key2.len(), KEY_SIZE);
