@@ -1,0 +1,232 @@
+syntax = "proto3";
+
+package aegion.core.session;
+
+option go_package = "github.com/aegion/aegion/internal/proto/core";
+
+// SessionService provides session resolution and management for modules.
+// Modules call this to resolve session context from tokens.
+service SessionService {
+  // Resolve a session token to session context
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+  
+  // Create a new session for an identity
+  rpc Create(CreateSessionRequest) returns (CreateSessionResponse);
+  
+  // Update session (e.g., upgrade AAL after MFA)
+  rpc Update(UpdateSessionRequest) returns (UpdateSessionResponse);
+  
+  // Revoke a session
+  rpc Revoke(RevokeSessionRequest) returns (RevokeSessionResponse);
+  
+  // Revoke all sessions for an identity
+  rpc RevokeAll(RevokeAllRequest) returns (RevokeAllResponse);
+  
+  // List active sessions for an identity
+  rpc List(ListSessionsRequest) returns (ListSessionsResponse);
+}
+
+message ResolveRequest {
+  // Session token (from cookie or header)
+  string token = 1;
+  
+  // Required minimum AAL (optional)
+  string required_aal = 2;
+}
+
+message ResolveResponse {
+  // Whether the session is valid
+  bool valid = 1;
+  
+  // Session context if valid
+  SessionContext session = 2;
+  
+  // Error code if invalid
+  string error_code = 3;
+  
+  // Human-readable error message
+  string error_message = 4;
+}
+
+message SessionContext {
+  // Session ID
+  string id = 1;
+  
+  // Identity ID
+  string identity_id = 2;
+  
+  // Current Authentication Assurance Level
+  string aal = 3;
+  
+  // Authentication methods used in this session
+  repeated AuthMethod auth_methods = 4;
+  
+  // Session issue timestamp
+  int64 issued_at = 5;
+  
+  // Session expiry timestamp
+  int64 expires_at = 6;
+  
+  // Last authentication timestamp
+  int64 authenticated_at = 7;
+  
+  // Identity traits (email, name, etc.)
+  map<string, string> traits = 8;
+  
+  // Identity metadata (public)
+  map<string, string> metadata = 9;
+  
+  // Whether this is an impersonation session
+  bool is_impersonation = 10;
+  
+  // Original admin identity ID if impersonation
+  string impersonator_id = 11;
+}
+
+message AuthMethod {
+  // Method type (password, totp, webauthn, etc.)
+  string method = 1;
+  
+  // AAL contributed by this method
+  string aal_contributed = 2;
+  
+  // When this method was completed
+  int64 completed_at = 3;
+}
+
+message CreateSessionRequest {
+  // Identity ID to create session for
+  string identity_id = 1;
+  
+  // Initial authentication method
+  string auth_method = 2;
+  
+  // Initial AAL
+  string aal = 3;
+  
+  // Device info
+  DeviceInfo device = 4;
+  
+  // Session lifetime in seconds (0 = use default)
+  int64 lifetime_seconds = 5;
+  
+  // Whether this is an impersonation session
+  bool is_impersonation = 6;
+  
+  // Admin identity ID if impersonation
+  string impersonator_id = 7;
+}
+
+message CreateSessionResponse {
+  // Created session
+  SessionContext session = 1;
+  
+  // Session token to set in cookie
+  string token = 2;
+  
+  // CSRF token for this session
+  string csrf_token = 3;
+}
+
+message UpdateSessionRequest {
+  // Session ID to update
+  string session_id = 1;
+  
+  // New AAL after step-up
+  string new_aal = 2;
+  
+  // Auth method that was added
+  AuthMethod added_method = 3;
+  
+  // Updated device info
+  DeviceInfo device = 4;
+}
+
+message UpdateSessionResponse {
+  // Updated session
+  SessionContext session = 1;
+  
+  // Whether update succeeded
+  bool success = 2;
+}
+
+message RevokeSessionRequest {
+  // Session ID to revoke
+  string session_id = 1;
+  
+  // Reason for revocation
+  string reason = 2;
+}
+
+message RevokeSessionResponse {
+  bool success = 1;
+}
+
+message RevokeAllRequest {
+  // Identity ID to revoke all sessions for
+  string identity_id = 1;
+  
+  // Optionally exclude a specific session (e.g., current session)
+  string exclude_session_id = 2;
+  
+  // Reason for revocation
+  string reason = 3;
+}
+
+message RevokeAllResponse {
+  // Number of sessions revoked
+  int32 revoked_count = 1;
+}
+
+message ListSessionsRequest {
+  // Identity ID to list sessions for
+  string identity_id = 1;
+  
+  // Include revoked/expired sessions
+  bool include_inactive = 2;
+  
+  // Pagination
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListSessionsResponse {
+  repeated SessionInfo sessions = 1;
+  string next_page_token = 2;
+}
+
+message SessionInfo {
+  string id = 1;
+  string aal = 2;
+  repeated AuthMethod auth_methods = 3;
+  int64 issued_at = 4;
+  int64 expires_at = 5;
+  int64 authenticated_at = 6;
+  bool active = 7;
+  DeviceInfo device = 8;
+  bool is_impersonation = 9;
+  string impersonator_id = 10;
+}
+
+message DeviceInfo {
+  // Client IP address
+  string ip_address = 1;
+  
+  // User agent string
+  string user_agent = 2;
+  
+  // Parsed device type
+  string device_type = 3;
+  
+  // Parsed browser
+  string browser = 4;
+  
+  // Parsed OS
+  string os = 5;
+  
+  // Last seen timestamp
+  int64 last_seen_at = 6;
+  
+  // Geographic location (if available)
+  string location = 7;
+}
