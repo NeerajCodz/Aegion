@@ -1,0 +1,269 @@
+# =============================================================================
+# aegion.test.yaml — Test Environment Configuration
+#
+# Optimized for automated testing with fast execution.
+# Uses in-memory/SQLite storage for speed.
+# Rate limiting disabled for unrestricted test execution.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# YAML Anchors — Shared Values
+# -----------------------------------------------------------------------------
+x-timeouts: &fast-timeouts
+  request_timeout: 5s
+  read_timeout: 2s
+  write_timeout: 5s
+  idle_timeout: 10s
+
+x-disabled-rate-limits: &disabled-rate-limits
+  login:
+    enabled: false
+  registration:
+    enabled: false
+  email_delivery:
+    enabled: false
+
+# -----------------------------------------------------------------------------
+# Module Versions (always latest for testing)
+# -----------------------------------------------------------------------------
+module_versions:
+  password:   "latest"
+  magic_link: "latest"
+  admin:      "latest"
+
+module_registry:
+  base_url: ""
+  pull_policy: "never"  # Use local images for testing
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  port: ${AEGION_TEST_PORT:-8081}
+  host: 127.0.0.1
+
+  # TLS disabled for testing
+  tls:
+    enabled: false
+
+  cors:
+    enabled: true
+    allowed_origins:
+      - "*"
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - "*"
+    allow_credentials: true
+    max_age: 0
+
+  <<: *fast-timeouts
+
+  internal_network:
+    name: aegion_test_modules
+    subnet: 172.21.0.0/16
+    health_check_interval: 1s
+    health_check_timeout: 1s
+    health_check_failures: 1
+    restart_on_failure: false
+    startup_timeout: 5s
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database Configuration — SQLite for fast isolated tests
+# ─────────────────────────────────────────────────────────────────────────────
+database:
+  # SQLite in-memory for fastest tests
+  # Use file::memory:?cache=shared for shared connection
+  url: ${AEGION_TEST_DATABASE_URL:-sqlite://file::memory:?cache=shared}
+  # For persistent test database:
+  # url: sqlite:///tmp/aegion_test.db
+  max_open_connections: 1
+  max_idle_connections: 1
+  connection_max_lifetime: 0
+  connection_max_idle_time: 0
+  migrate_only: false
+  # Auto-migrate on startup for tests
+  auto_migrate: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cache Configuration — In-memory for testing
+# ─────────────────────────────────────────────────────────────────────────────
+cache:
+  # Use in-memory cache for testing (no Redis required)
+  enabled: true
+  driver: memory
+  # Or use Redis if needed:
+  # url: redis://localhost:6379/15
+  key_prefix: "aegion:test:"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets — Static values for deterministic tests
+# ─────────────────────────────────────────────────────────────────────────────
+secrets:
+  cookie:
+    - test-cookie-secret-exactly-32ch!
+  cipher:
+    - test-cipher-secret-exactly-32ch!
+  internal:
+    - test-internal-secret-exactly32ch!
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging — Minimal logging for cleaner test output
+# ─────────────────────────────────────────────────────────────────────────────
+log:
+  level: ${AEGION_TEST_LOG_LEVEL:-warn}
+  format: text
+  include_request_id: false
+  # Suppress noisy logs during tests
+  suppress_startup: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Debug Options — Disabled for clean test runs
+# ─────────────────────────────────────────────────────────────────────────────
+debug:
+  enabled: false
+  endpoints: false
+  pprof_enabled: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap Operator — Predictable values for tests
+# ─────────────────────────────────────────────────────────────────────────────
+operator:
+  email: test-admin@aegion.test
+  password: TestAdmin123!
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Courier (Email/SMS) — Mock/stub for testing
+# ─────────────────────────────────────────────────────────────────────────────
+courier:
+  # Use stub driver that captures emails in memory
+  driver: stub
+  smtp:
+    host: localhost
+    port: 1025
+    from_address: noreply@aegion.test
+    from_name: Aegion Test
+    auth:
+      enabled: false
+  # Store sent messages in memory for test assertions
+  capture_messages: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sessions — Fast expiry for testing session lifecycle
+# ─────────────────────────────────────────────────────────────────────────────
+sessions:
+  cookie:
+    name: aegion_test_session
+    path: /
+    same_site: lax
+    secure: false
+    http_only: true
+  # Short lifespans for testing expiry behavior
+  lifespan: 5m
+  idle_timeout: 1m
+  remember_me_lifespan: 30m
+  max_per_user: 0  # Unlimited for testing
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Identity Schemas
+# ─────────────────────────────────────────────────────────────────────────────
+identity:
+  default_schema: default
+  schemas:
+    - id: default
+      url: file:///config/schemas/default.json
+    # Test-specific schema for edge cases
+    - id: test_extended
+      url: file:///config/schemas/test_extended.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Settings — Disabled/relaxed for testing
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  # Disable enumeration mitigation for predictable test responses
+  account_enumeration_mitigation: false
+  
+  csrf:
+    enabled: false  # Disable CSRF for easier API testing
+
+  # Rate limiting DISABLED for tests
+  rate_limits:
+    enabled: false
+    <<: *disabled-rate-limits
+    global:
+      enabled: false
+    password_reset:
+      enabled: false
+    api:
+      enabled: false
+
+  brute_force:
+    enabled: false
+    max_attempts: 0  # Disabled
+    lockout_duration: 0
+
+  headers:
+    # Minimal headers for testing
+    x_content_type_options: "nosniff"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module Enable Flags — Minimal complexity for testing
+# ─────────────────────────────────────────────────────────────────────────────
+password:
+  enabled: true
+  min_length: 4  # Weak passwords allowed in tests
+  require_uppercase: false
+  require_lowercase: false
+  require_number: false
+  require_special: false
+  # Disable HIBP for faster tests
+  hibp_enabled: false
+  history_count: 0
+
+magic_link:
+  enabled: true
+  code_length: 4  # Short codes for testing
+  code_charset: "0123456789"
+  # Very short expiry for testing expiration
+  link_lifespan: 1m
+  code_lifespan: 1m
+
+admin:
+  enabled: true
+  path: /aegion
+  session_lifespan: 30m
+  require_reauth: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Observability — Minimal for tests
+# ─────────────────────────────────────────────────────────────────────────────
+observability:
+  metrics:
+    enabled: false
+  
+  tracing:
+    enabled: false
+
+  health:
+    path: /health
+    detailed: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test-specific Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+test:
+  # Seed data for tests
+  seed_data: true
+  # Deterministic randomness for reproducible tests
+  random_seed: 12345
+  # Skip slow operations
+  skip_slow_checks: true
+  # Predictable timestamps for testing
+  fixed_time: false
+  # Mock external services
+  mock_external: true
