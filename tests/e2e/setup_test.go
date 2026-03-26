@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -286,6 +287,64 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
 
+		// Recovery codes (for recovery tests)
+		`CREATE TABLE IF NOT EXISTS recovery_codes (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			identity_id UUID NOT NULL REFERENCES core_identities(id) ON DELETE CASCADE,
+			code VARCHAR(20) NOT NULL,
+			token VARCHAR(255) NOT NULL UNIQUE,
+			used BOOLEAN DEFAULT false,
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		// Admin users (for admin tests)
+		`CREATE TABLE IF NOT EXISTS admin_users (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			username VARCHAR(100) NOT NULL UNIQUE,
+			password_hash VARCHAR(255) NOT NULL,
+			role VARCHAR(50) NOT NULL DEFAULT 'operator',
+			active BOOLEAN DEFAULT true,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		// Admin sessions (for admin tests)
+		`CREATE TABLE IF NOT EXISTS admin_sessions (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id UUID NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+			token VARCHAR(255) NOT NULL UNIQUE,
+			role VARCHAR(50) NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			active BOOLEAN DEFAULT true,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		// Flows table (for test flows)
+		`CREATE TABLE IF NOT EXISTS flows (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			type VARCHAR(50) NOT NULL,
+			state VARCHAR(50) NOT NULL,
+			csrf_token VARCHAR(255),
+			issued_at TIMESTAMPTZ DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		// Create simplified aliases for testing
+		`CREATE VIEW IF NOT EXISTS identities AS SELECT 
+			id, email, name, state, created_at, updated_at 
+			FROM core_identities`,
+		
+		`CREATE VIEW IF NOT EXISTS identity_credentials AS SELECT 
+			id, identity_id, 'password' as type, password_hash, created_at, updated_at
+			FROM module_password_credentials`,
+		
+		`CREATE VIEW IF NOT EXISTS sessions AS SELECT 
+			id, token, identity_id, aal, expires_at, active, authenticated_at as created_at, expires_at as updated_at
+			FROM core_sessions`,
+
 		// Create indexes
 		`CREATE INDEX IF NOT EXISTS idx_identities_state ON core_identities(state)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_identity ON core_sessions(identity_id)`,
@@ -318,6 +377,10 @@ func (ts *TestSuite) CleanupDatabase(t *testing.T) {
 
 	ctx := context.Background()
 	tables := []string{
+		"admin_sessions",
+		"admin_users",
+		"recovery_codes",
+		"flows",
 		"admin_audit_logs",
 		"admin_operators",
 		"core_recovery_tokens",
@@ -414,6 +477,82 @@ func (c *APIClient) Put(path string, body interface{}) (*http.Response, error) {
 // Delete performs a DELETE request
 func (c *APIClient) Delete(path string) (*http.Response, error) {
 	return c.Request(http.MethodDelete, path, nil)
+}
+
+// PostWithHeaders performs a POST request with custom headers
+func (c *APIClient) PostWithHeaders(path string, body interface{}, headers map[string]string) (*http.Response, error) {
+	return c.RequestWithHeaders(http.MethodPost, path, body, headers)
+}
+
+// GetWithHeaders performs a GET request with custom headers
+func (c *APIClient) GetWithHeaders(path string, headers map[string]string) (*http.Response, error) {
+	return c.RequestWithHeaders(http.MethodGet, path, nil, headers)
+}
+
+// PutWithHeaders performs a PUT request with custom headers
+func (c *APIClient) PutWithHeaders(path string, body interface{}, headers map[string]string) (*http.Response, error) {
+	return c.RequestWithHeaders(http.MethodPut, path, body, headers)
+}
+
+// DeleteWithHeaders performs a DELETE request with custom headers
+func (c *APIClient) DeleteWithHeaders(path string, headers map[string]string) (*http.Response, error) {
+	return c.RequestWithHeaders(http.MethodDelete, path, nil, headers)
+}
+
+// PostRaw performs a POST request with raw string body
+func (c *APIClient) PostRaw(path, body string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, c.BaseURL+path, strings.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Add stored cookies
+	for _, cookie := range c.Cookies {
+		req.AddCookie(cookie)
+	}
+
+	return c.HTTPClient.Do(req)
+}
+
+// RequestWithHeaders performs a request with custom headers
+func (c *APIClient) RequestWithHeaders(method, path string, body interface{}, headers map[string]string) (*http.Response, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal body: %w", err)
+		}
+		bodyReader = bytes.NewReader(jsonBody)
+	}
+
+	req, err := http.NewRequest(method, c.BaseURL+path, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set custom headers
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	// Set content type for body requests
+	if body != nil && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Add stored cookies
+	for _, cookie := range c.Cookies {
+		req.AddCookie(cookie)
+	}
+
+	// Add CSRF token if available
+	if c.CSRFToken != "" {
+		req.Header.Set("X-CSRF-Token", c.CSRFToken)
+	}
+
+	return c.HTTPClient.Do(req)
 }
 
 // ParseJSONResponse parses a JSON response into the provided struct
