@@ -552,7 +552,7 @@ func TestTokenUniqueness(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		token, err := gen.Generate("test")
 		require.NoError(t, err)
-		
+
 		// Each token should be unique (due to timestamp precision)
 		assert.False(t, tokens[token], "token should be unique: %s", token)
 		tokens[token] = true
