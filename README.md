@@ -1,5 +1,10 @@
 # Aegion - Identity and Access Platform
 
+[![CI](https://github.com/aegion/aegion/actions/workflows/ci.yml/badge.svg)](https://github.com/aegion/aegion/actions/workflows/ci.yml)
+[![Build](https://github.com/aegion/aegion/actions/workflows/build.yml/badge.svg)](https://github.com/aegion/aegion/actions/workflows/build.yml)
+[![Security](https://github.com/aegion/aegion/actions/workflows/security.yml/badge.svg)](https://github.com/aegion/aegion/actions/workflows/security.yml)
+[![Release](https://github.com/aegion/aegion/actions/workflows/release.yml/badge.svg)](https://github.com/aegion/aegion/actions/workflows/release.yml)
+
 > One container. One port. One config file. Complete auth.
 
 Aegion is a self-hosted identity and access platform. It replaces Auth0, the Ory stack, and Supabase Auth with a single Go binary you own and run yourself.
