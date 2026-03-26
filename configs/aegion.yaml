@@ -1,0 +1,191 @@
+# =============================================================================
+# aegion.yaml — Development Configuration
+#
+# This configuration is optimized for local development.
+# For production, see configs/aegion.prod.yaml.example
+# =============================================================================
+
+# Module versions (use 'latest' for development)
+module_versions:
+  password:   "latest"
+  magic_link: "latest"
+  admin:      "latest"
+
+# Module registry (use local Docker for development)
+module_registry:
+  base_url: ""
+  pull_policy: "if-not-present"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  port: 8080
+  host: 0.0.0.0
+
+  tls:
+    enabled: false
+
+  cors:
+    enabled: true
+    allowed_origins:
+      - http://localhost:3000
+      - http://localhost:5173
+      - http://127.0.0.1:3000
+      - http://127.0.0.1:5173
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Authorization
+      - Content-Type
+      - Cookie
+      - X-Session-Token
+      - X-CSRF-Token
+    allow_credentials: true
+    max_age: 300
+
+  request_timeout: 60s
+  read_timeout: 30s
+  write_timeout: 60s
+  idle_timeout: 120s
+
+  internal_network:
+    name: aegion_modules
+    subnet: 172.20.0.0/16
+    health_check_interval: 5s
+    health_check_timeout: 2s
+    health_check_failures: 3
+    restart_on_failure: true
+    startup_timeout: 30s
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+database:
+  url: postgres://aegion:aegion@localhost:5432/aegion?sslmode=disable
+  max_open_connections: 25
+  max_idle_connections: 10
+  connection_max_lifetime: 1h
+  connection_max_idle_time: 5m
+  migrate_only: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cache Configuration (Redis)
+# ─────────────────────────────────────────────────────────────────────────────
+cache:
+  enabled: true
+  url: redis://localhost:6379/0
+  key_prefix: "aegion:"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets (CHANGE THESE IN PRODUCTION!)
+# ─────────────────────────────────────────────────────────────────────────────
+secrets:
+  cookie:
+    - dev-cookie-secret-change-me-32chars!
+  cipher:
+    - dev-cipher-secret-change-me-32chars!
+  internal:
+    - dev-internal-secret-change-me-32ch!
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
+log:
+  level: debug
+  format: text  # text | json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap Operator
+# Created on first boot when no admin exists
+# ─────────────────────────────────────────────────────────────────────────────
+operator:
+  email: admin@localhost
+  password: admin123!
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Courier (Email/SMS)
+# ─────────────────────────────────────────────────────────────────────────────
+courier:
+  smtp:
+    host: localhost
+    port: 1025
+    from_address: noreply@aegion.local
+    from_name: Aegion
+    # No auth for Mailpit
+    auth:
+      enabled: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sessions
+# ─────────────────────────────────────────────────────────────────────────────
+sessions:
+  cookie:
+    name: aegion_session
+    path: /
+    same_site: lax
+    secure: false  # Set true in production
+    http_only: true
+  lifespan: 24h
+  idle_timeout: 2h
+  remember_me_lifespan: 720h
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Identity Schemas
+# ─────────────────────────────────────────────────────────────────────────────
+identity:
+  default_schema: default
+  schemas:
+    - id: default
+      url: file:///config/schemas/default.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Settings
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  account_enumeration_mitigation: true
+  
+  rate_limits:
+    login:
+      requests: 20
+      period: 1m
+    registration:
+      requests: 10
+      period: 1h
+    email_delivery:
+      requests: 10
+      period: 1h
+    
+  brute_force:
+    max_attempts: 10
+    lockout_duration: 15m
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module Enable Flags
+# ─────────────────────────────────────────────────────────────────────────────
+password:
+  enabled: true
+  min_length: 8
+  require_uppercase: false
+  require_lowercase: false
+  require_number: false
+  require_special: false
+  hibp_enabled: true
+  history_count: 5
+
+magic_link:
+  enabled: true
+  code_length: 6
+  code_charset: "0123456789"
+  link_lifespan: 15m
+  code_lifespan: 15m
+
+admin:
+  enabled: true
+  path: /aegion
+  session_lifespan: 4h
