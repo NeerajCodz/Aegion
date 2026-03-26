@@ -154,6 +154,119 @@ This describes a strong Phase-1 style deployment with admin UI and modern login,
 
 ---
 
+## Advanced security configuration examples
+
+### High-security deployment (passwordless + geo-fencing + mTLS)
+
+```yaml
+# Disable password authentication entirely
+password:
+  enabled: false
+
+# Require passkeys for all users
+passkeys:
+  enabled: true
+  require_for_new_users: true
+
+# MFA mandatory for elevated operations
+mfa:
+  enabled: true
+  require_for_admin: true
+
+# Geographic access restrictions
+security:
+  geo_restrictions:
+    enabled: true
+    allowed_countries: ["US", "CA", "GB", "DE"]
+    trusted_ip_bypass:
+      - "10.0.0.0/8"
+  rate_limits:
+    bypass_cidrs:
+      - "10.0.0.0/8"
+      - "192.168.1.0/24"
+
+# Inter-module TLS certificate pinning
+internal_network:
+  tls:
+    enabled: true
+    mutual_tls: true
+    certificate_pinning:
+      enabled: true
+      validation_mode: "strict"
+
+# OAuth2 webhook signature verification
+oauth2:
+  enabled: true
+  token_hook:
+    enabled: true
+    url: "https://hooks.internal.example.com/claims"
+    verify_signature: true
+    signing_secret: "${OAUTH2_HOOK_SECRET}"
+    on_error: reject
+
+# Admin SPA hardening
+admin:
+  enabled: true
+  session:
+    max_lifetime: 4h
+    require_aal2: true
+    require_reauth_for_sensitive_ops: true
+    reauth_timeout: 15m
+  csp:
+    enabled: true
+    strict_mode: true
+    report_uri: "https://csp-reports.example.com/report"
+```
+
+### Compliance-focused deployment (audit + encryption + retention)
+
+```yaml
+# Field-level encryption for all sensitive data
+secrets:
+  cipher:
+    algorithm: "xchacha20poly1305"
+    keys:
+      - id: "2026-03"
+        key: "${CIPHER_KEY_CURRENT}"
+      - id: "2026-02"
+        key: "${CIPHER_KEY_PREVIOUS}"  # Keep for decryption
+
+# Comprehensive audit logging
+audit:
+  enabled: true
+  log_all_reads: true  # Including SELECT queries
+  retention_days: 2555  # 7 years for compliance
+  append_only_enforcement: true
+  postgres_rls: true  # Row-level security enforcement
+
+# Session and token lifecycle
+sessions:
+  max_lifetime: 12h
+  idle_timeout: 30m
+  absolute_timeout: 24h
+  
+oauth2:
+  access_token_ttl: 5m  # Short-lived for zero-trust
+  refresh_token_rotation: true
+  refresh_token_grace_period: 0  # No grace period
+  
+# Mandatory MFA for all users
+mfa:
+  enabled: true
+  require_enrollment_within: 72h
+  allowed_factors: ["totp", "webauthn"]  # No SMS in high-security mode
+
+# SCIM provisioning with auto-deprovisioning
+sso:
+  enabled: true
+  scim:
+    enabled: true
+    auto_deprovision: true
+    deprovision_grace_period: 0
+```
+
+---
+
 ## Anti-patterns
 
 - Treating module enable flags as runtime toggles

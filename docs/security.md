@@ -252,3 +252,58 @@ Per-identity and global IP allow/block lists. An identity with an allowlist can 
 ### Suspicious login detection
 
 Tracks login history per identity. Login from unusual IP, unusual geography, or unusual time triggers configurable response: step-up auth challenge (require MFA even without enrollment) or notification email. Thresholds configurable.
+
+### Geographic access restrictions
+
+Restrict authentication to specific countries or regions using geographic IP lookup.
+
+**Configuration options:**
+- Per-identity geo-fencing: restrict individual identities to specific countries
+- Global geo-allowlist: only allow authentication from specified countries
+- Global geo-blocklist: deny authentication from specified countries
+- Exception rules: trusted IPs bypass geo restrictions
+
+Geographic lookups use MaxMind GeoIP2 database (updated monthly). Restrictions are evaluated before authentication logic runs. Denied requests are logged with country code for audit purposes.
+
+**Use cases:**
+- Comply with data residency requirements
+- Prevent access from high-risk jurisdictions
+- Enforce location-based access policies for contractors
+- Block regions with no legitimate user base
+
+### Rate limit bypass for trusted sources
+
+Configurable IP allowlist for rate limit exemptions:
+
+```yaml
+security:
+  rate_limits:
+    bypass_cidrs:
+      - "10.0.0.0/8"      # Internal monitoring
+      - "172.16.0.0/12"   # VPN
+      - "192.168.1.0/24"  # Office network
+```
+
+Bypassed IPs are logged separately to maintain audit trail. This prevents legitimate internal traffic (monitoring, load testing, automated scripts) from triggering rate limits while maintaining protection against external attacks.
+
+### Passwordless-only enforcement
+
+Force passkey-only authentication by disabling password method entirely:
+
+```yaml
+password:
+  enabled: false
+
+passkeys:
+  enabled: true
+  require_for_new_users: true
+```
+
+When password module is disabled:
+- Registration flows require passkey enrollment
+- Password recovery flows are unavailable
+- Existing password credentials remain in database but cannot be used
+- Admin can still force-reset identities to passkey-only state
+- Social/SAML login continues to work (external authentication)
+
+This provides the highest security posture by eliminating password-based attacks entirely. Recommended for high-security environments where all users have compatible devices.
