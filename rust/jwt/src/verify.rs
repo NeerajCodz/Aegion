@@ -195,9 +195,11 @@ mod tests {
     fn test_verify_jwt_es256() {
         let keypair = generate_ec_keypair("test-key").unwrap();
 
-        let mut claims = Claims::default();
-        claims.iss = Some("aegion".into());
-        claims.sub = Some("user-123".into());
+        let claims = Claims {
+            iss: Some("aegion".into()),
+            sub: Some("user-123".into()),
+            ..Claims::default()
+        };
 
         let token = sign_jwt(
             &claims,
@@ -218,8 +220,10 @@ mod tests {
     fn test_verify_with_issuer_check() {
         let keypair = generate_ec_keypair("test").unwrap();
 
-        let mut claims = Claims::default();
-        claims.iss = Some("aegion".into());
+        let claims = Claims {
+            iss: Some("aegion".into()),
+            ..Claims::default()
+        };
 
         let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, None).unwrap();
 
@@ -242,8 +246,10 @@ mod tests {
     fn test_expired_token() {
         let keypair = generate_ec_keypair("test").unwrap();
 
-        let mut claims = Claims::default();
-        claims.exp = Some(0); // Expired long ago
+        let claims = Claims {
+            exp: Some(0), // Expired long ago
+            ..Claims::default()
+        };
 
         let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, None).unwrap();
 
@@ -277,8 +283,10 @@ mod tests {
     fn test_decode_unverified() {
         let keypair = generate_ec_keypair("test").unwrap();
 
-        let mut claims = Claims::default();
-        claims.sub = Some("user-999".into());
+        let claims = Claims {
+            sub: Some("user-999".into()),
+            ..Claims::default()
+        };
 
         let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, None).unwrap();
 
@@ -333,12 +341,14 @@ mod tests {
             .as_secs();
 
         // Create claims with specific values for testing
-        let mut claims = Claims::default();
-        claims.iss = Some("test-issuer".into());
-        claims.aud = Some("test-audience".into());
-        claims.exp = Some(now + 3600); // 1 hour from now
-        claims.nbf = Some(now - 10); // 10 seconds ago
-        claims.iat = Some(now - 10);
+        let claims = Claims {
+            iss: Some("test-issuer".into()),
+            aud: Some("test-audience".into()),
+            exp: Some(now + 3600), // 1 hour from now
+            nbf: Some(now - 10),   // 10 seconds ago
+            iat: Some(now - 10),
+            ..Claims::default()
+        };
 
         let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, None).unwrap();
 
@@ -370,8 +380,10 @@ mod tests {
         assert!(result.is_err());
 
         // Test leeway functionality
-        let mut claims_future = Claims::default();
-        claims_future.nbf = Some(now + 30); // 30 seconds in the future
+        let claims_future = Claims {
+            nbf: Some(now + 30), // 30 seconds in the future
+            ..Claims::default()
+        };
         let future_token =
             sign_jwt(&claims_future, "ES256", &keypair.private_key_der, None).unwrap();
 
@@ -399,8 +411,10 @@ mod tests {
             .as_secs();
 
         // Test expired token
-        let mut expired_claims = Claims::default();
-        expired_claims.exp = Some(now - 1); // Expired 1 second ago
+        let expired_claims = Claims {
+            exp: Some(now - 1), // Expired 1 second ago
+            ..Claims::default()
+        };
         let expired_token =
             sign_jwt(&expired_claims, "ES256", &keypair.private_key_der, None).unwrap();
 
@@ -417,8 +431,10 @@ mod tests {
         assert!(result.is_ok());
 
         // Test not-yet-valid token
-        let mut future_claims = Claims::default();
-        future_claims.nbf = Some(now + 3600); // Valid in 1 hour
+        let future_claims = Claims {
+            nbf: Some(now + 3600), // Valid in 1 hour
+            ..Claims::default()
+        };
         let future_token =
             sign_jwt(&future_claims, "ES256", &keypair.private_key_der, None).unwrap();
 
@@ -457,9 +473,11 @@ mod tests {
     fn test_verify_result_contents() {
         let keypair = generate_ec_keypair("result-test").unwrap();
 
-        let mut claims = Claims::default();
-        claims.iss = Some("result-issuer".into());
-        claims.sub = Some("result-user".into());
+        let mut claims = Claims {
+            iss: Some("result-issuer".into()),
+            sub: Some("result-user".into()),
+            ..Claims::default()
+        };
         claims
             .custom
             .insert("role".into(), serde_json::json!("tester"));

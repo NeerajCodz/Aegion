@@ -51,6 +51,7 @@ func (s *Server) setupRouter() chi.Router {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Compress(5))
 	r.Use(s.securityHeaders)
 	r.Use(s.logRequest)
 
@@ -60,10 +61,13 @@ func (s *Server) setupRouter() chi.Router {
 
 	// Admin API routes
 	r.Route("/api/admin", func(r chi.Router) {
-		r.Use(security.RateLimitAdmin)
-		r.Use(security.CSRFProtection)
-		r.Use(security.SecurityAudit)
-		s.Handler.RegisterRoutes(r)
+		r.Get("/dashboard/config", s.handleDashboardConfig)
+		r.Group(func(r chi.Router) {
+			r.Use(security.RateLimitAdmin)
+			r.Use(security.CSRFProtection)
+			r.Use(security.SecurityAudit)
+			s.Handler.RegisterRoutes(r)
+		})
 	})
 
 	// Serve embedded SPA
@@ -122,7 +126,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	json.NewEncoder(w).Encode(health)
+	if err := json.NewEncoder(w).Encode(health); err != nil {
+		log.Error().Err(err).Msg("Failed to encode health response")
+	}
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +139,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if err := s.DB.Ping(ctx); err != nil {
 		log.Error().Err(err).Msg("Database health check failed")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
 			"error":  "database unavailable",
 		})
@@ -142,12 +148,41 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":    "ready",
 		"service":   "aegion-admin",
 		"database":  "connected",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"base_path": normalizeAdminPath(s.Config.Admin.Path),
+	})
+}
+
+func normalizeAdminPath(adminPath string) string {
+	trimmed := strings.TrimSpace(adminPath)
+	if trimmed == "" {
+		return "/aegion"
+	}
+
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+
+	if len(trimmed) > 1 {
+		trimmed = strings.TrimRight(trimmed, "/")
+	}
+
+	if trimmed == "" {
+		return "/aegion"
+	}
+
+	return trimmed
 }
 
 func (s *Server) spaHandler() http.Handler {
@@ -284,7 +319,7 @@ func (spa *SPAFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ext := filepath.Ext(r.URL.Path)
 	switch ext {
 	case ".js", ".css":
-		w.Header().Set("Cache-Control", "public, max-age=31536000") // 1 year
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable") // 1 year
 	case ".html":
 		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	default:

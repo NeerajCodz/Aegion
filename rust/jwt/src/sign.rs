@@ -155,9 +155,11 @@ mod tests {
     fn test_sign_jwt_es256() {
         let keypair = generate_ec_keypair("test-key").unwrap();
 
-        let mut claims = Claims::default();
-        claims.iss = Some("aegion".into());
-        claims.sub = Some("user-123".into());
+        let claims = Claims {
+            iss: Some("aegion".into()),
+            sub: Some("user-123".into()),
+            ..Claims::default()
+        };
 
         let token = sign_jwt(
             &claims,
@@ -183,8 +185,10 @@ mod tests {
     fn test_sign_jwt_with_custom_claims() {
         let keypair = generate_ec_keypair("test-key").unwrap();
 
-        let mut claims = Claims::default();
-        claims.sub = Some("user-456".into());
+        let mut claims = Claims {
+            sub: Some("user-456".into()),
+            ..Claims::default()
+        };
         claims
             .custom
             .insert("role".into(), serde_json::json!("admin"));
@@ -235,12 +239,14 @@ mod tests {
         let keypair = generate_ec_keypair("comprehensive-test").unwrap();
 
         // Test with all standard claims populated
-        let mut claims = Claims::default();
-        claims.iss = Some("test-issuer".into());
-        claims.sub = Some("user-789".into());
-        claims.aud = Some("test-audience".into());
-        claims.jti = Some("unique-jwt-id".into());
-        claims.sid = Some("session-123".into());
+        let mut claims = Claims {
+            iss: Some("test-issuer".into()),
+            sub: Some("user-789".into()),
+            aud: Some("test-audience".into()),
+            jti: Some("unique-jwt-id".into()),
+            sid: Some("session-123".into()),
+            ..Claims::default()
+        };
 
         // Add custom claims
         claims
@@ -289,8 +295,10 @@ mod tests {
     fn test_sign_jwt_eddsa() {
         let keypair = crate::keygen::generate_ed25519_keypair("eddsa-test").unwrap();
 
-        let mut claims = Claims::default();
-        claims.sub = Some("eddsa-user".into());
+        let claims = Claims {
+            sub: Some("eddsa-user".into()),
+            ..Claims::default()
+        };
 
         let token = sign_jwt(
             &claims,
