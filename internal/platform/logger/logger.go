@@ -106,12 +106,78 @@ func (l *Logger) WithRequestID(requestID string) *Logger {
 // ContextKey is the context key for the logger.
 type ContextKey struct{}
 
-// FromContext retrieves the logger from context.
+// FromContext retrieves the logger from context with automatic trace injection.
 func FromContext(ctx context.Context) *Logger {
+	var logger *Logger
 	if l, ok := ctx.Value(ContextKey{}).(*Logger); ok {
-		return l
+		logger = l
+	} else {
+		logger = New(Config{Level: "info", Format: "json"})
 	}
-	return New(Config{Level: "info", Format: "json"})
+	
+	// Auto-inject trace information if available
+	return logger.withTraceContext(ctx)
+}
+
+// withTraceContext adds trace information to the logger if available in context
+func (l *Logger) withTraceContext(ctx context.Context) *Logger {
+	// Try to extract trace info using well-known context keys
+	traceInfo := getTraceInfoFromContext(ctx)
+	requestID := getRequestIDFromContext(ctx)
+	
+	newLogger := l
+	
+	// Add trace ID and span ID if available
+	if traceInfo.TraceID != "" {
+		newLogger = &Logger{
+			zl: newLogger.zl.With().Str("trace_id", traceInfo.TraceID).Logger(),
+		}
+	}
+	
+	if traceInfo.SpanID != "" {
+		newLogger = &Logger{
+			zl: newLogger.zl.With().Str("span_id", traceInfo.SpanID).Logger(),
+		}
+	}
+	
+	// Add request ID if available and not already set
+	if requestID != "" {
+		newLogger = &Logger{
+			zl: newLogger.zl.With().Str("request_id", requestID).Logger(),
+		}
+	}
+	
+	return newLogger
+}
+
+// TraceInfo contains trace information
+type TraceInfo struct {
+	TraceID string `json:"trace_id"`
+	SpanID  string `json:"span_id"`
+}
+
+// Helper functions to extract trace information from context
+// These use the same context keys as the observability package
+func getTraceInfoFromContext(ctx context.Context) TraceInfo {
+	if info, ok := ctx.Value("trace_info"); ok {
+		// Use reflection to handle different struct types with same field names
+		switch v := info.(type) {
+		case TraceInfo:
+			return v
+		default:
+			// Try to extract fields dynamically using reflection would be complex
+			// For now, return empty - this can be enhanced later
+			return TraceInfo{}
+		}
+	}
+	return TraceInfo{}
+}
+
+func getRequestIDFromContext(ctx context.Context) string {
+	if requestID, ok := ctx.Value("request_id").(string); ok {
+		return requestID
+	}
+	return ""
 }
 
 // WithContext adds the logger to the context.

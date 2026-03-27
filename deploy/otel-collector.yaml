@@ -1,0 +1,105 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    # Batch size configuration
+    send_batch_size: 512
+    timeout: 5s
+    send_batch_max_size: 1024
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+  
+  # Add resource attributes
+  resource:
+    attributes:
+      - key: deployment.environment
+        from_attribute: deployment.environment
+        action: upsert
+      - key: service.namespace
+        value: "aegion"
+        action: upsert
+
+  # Sample traces for production
+  probabilistic_sampler:
+    sampling_percentage: 10.0
+
+exporters:
+  # Tempo for traces
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 60s
+      max_elapsed_time: 300s
+
+  # Prometheus for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: "aegion"
+    const_labels:
+      service_name: "aegion"
+
+  # Loki for logs  
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tenant_id: "aegion"
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 60s
+      max_elapsed_time: 300s
+
+  # Optional: export to OTLP endpoint (e.g., Jaeger, other vendors)
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # Optional: export to stdout for debugging
+  logging:
+    loglevel: info
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/tempo]
+      # Enable sampling for production
+      # processors: [memory_limiter, resource, probabilistic_sampler, batch]
+
+    metrics:
+      receivers: [otlp]  
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch] 
+      exporters: [loki]
+
+  extensions: []
+  
+  telemetry:
+    logs:
+      level: "info"
+    metrics:
+      level: "basic"
+      readers:
+        - periodic:
+            interval: 30s
+            exporter:
+              prometheus:
+                host: "0.0.0.0"
+                port: 8888
