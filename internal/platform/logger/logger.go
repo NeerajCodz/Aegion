@@ -159,7 +159,8 @@ type TraceInfo struct {
 // Helper functions to extract trace information from context
 // These use the same context keys as the observability package
 func getTraceInfoFromContext(ctx context.Context) TraceInfo {
-	if info, ok := ctx.Value("trace_info"); ok {
+	info := ctx.Value("trace_info")
+	if info != nil {
 		// Use reflection to handle different struct types with same field names
 		switch v := info.(type) {
 		case TraceInfo:
@@ -167,6 +168,7 @@ func getTraceInfoFromContext(ctx context.Context) TraceInfo {
 		default:
 			// Try to extract fields dynamically using reflection would be complex
 			// For now, return empty - this can be enhanced later
+			_ = v
 			return TraceInfo{}
 		}
 	}

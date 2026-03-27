@@ -220,13 +220,8 @@ func (p *Proxy) Forward(target *url.URL, w http.ResponseWriter, r *http.Request,
 		r.URL.Path = rule.ApplyRewrite(r.URL.Path)
 	}
 
-	// Create a response writer that captures the status code
-	rw := &responseWriter{
-		ResponseWriter: w,
-		statusCode:     http.StatusOK,
-	}
-
 	// Create reverse proxy
+	var responseStatus int
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			// Set target URL
@@ -271,14 +266,18 @@ func (p *Proxy) Forward(target *url.URL, w http.ResponseWriter, r *http.Request,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			// Transport errors or timeouts will be handled here
 			if r.Context().Err() == context.DeadlineExceeded {
-				rw.statusCode = http.StatusGatewayTimeout
+				responseStatus = http.StatusGatewayTimeout
 			} else {
-				rw.statusCode = http.StatusBadGateway
+				responseStatus = http.StatusBadGateway
 			}
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			responseStatus = resp.StatusCode
+			return nil
 		},
 	}
 
-	proxy.ServeHTTP(rw, r)
+	proxy.ServeHTTP(w, r)
 
 	// Check if the context was cancelled (timeout)
 	if r.Context().Err() == context.DeadlineExceeded {
@@ -286,8 +285,8 @@ func (p *Proxy) Forward(target *url.URL, w http.ResponseWriter, r *http.Request,
 	}
 
 	// Check if the response indicates failure
-	if rw.statusCode >= 500 {
-		return fmt.Errorf("upstream error: status %d", rw.statusCode)
+	if responseStatus >= 500 {
+		return fmt.Errorf("upstream error: status %d", responseStatus)
 	}
 
 	return nil
