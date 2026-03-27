@@ -3,8 +3,32 @@ package security
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
+
+const (
+	csrfHeaderName = "X-CSRF-Token"
+	csrfCookieName = "aegion_admin_csrf"
+
+	defaultRateLimitRPS   = 5.0
+	defaultRateLimitBurst = 20
+)
+
+type contextKey string
+
+const contextKeyRequestID contextKey = "aegion.admin.request_id"
 
 // Headers applies comprehensive security headers for the Admin SPA.
 func Headers(next http.Handler) http.Handler {
@@ -13,9 +37,9 @@ func Headers(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src 'self'; "+
-				"style-src 'self' 'unsafe-inline'; "+
+				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"img-src 'self' data: https:; "+
-				"font-src 'self'; "+
+				"font-src 'self' https://fonts.gstatic.com; "+
 				"connect-src 'self'; "+
 				"frame-ancestors 'none'; "+
 				"base-uri 'self'; "+
@@ -73,10 +97,10 @@ func DevHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self' 'unsafe-inline'; "+
 				"script-src 'self' 'unsafe-eval' 'unsafe-inline'; "+
-				"style-src 'self' 'unsafe-inline'; "+
+				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
 				"img-src 'self' data: https: blob:; "+
-				"font-src 'self' data:; "+
-				"connect-src 'self' ws: wss:; "+
+				"font-src 'self' data: https://fonts.gstatic.com; "+
+				"connect-src 'self' ws: wss: http: https:; "+
 				"frame-ancestors 'none'; "+
 				"base-uri 'self'; "+
 				"form-action 'self'")
@@ -100,19 +124,31 @@ func DevHeaders(next http.Handler) http.Handler {
 // CSRFProtection adds CSRF protection middleware.
 func CSRFProtection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// For non-GET requests, validate CSRF token
-		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
-			token := r.Header.Get("X-CSRF-Token")
-			if token == "" {
-				http.Error(w, "CSRF token required", http.StatusForbidden)
+		if isSafeMethod(r.Method) {
+			token, err := ensureCSRFCookie(w, r)
+			if err != nil {
+				http.Error(w, "Failed to initialize CSRF token", http.StatusInternalServerError)
 				return
 			}
+			w.Header().Set(csrfHeaderName, token)
+			next.ServeHTTP(w, r)
+			return
+		}
 
-			// Validate token against session
-			if !validateCSRFToken(r, token) {
-				http.Error(w, "Invalid CSRF token", http.StatusForbidden)
-				return
-			}
+		if isAPIKeyAuth(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		token := r.Header.Get(csrfHeaderName)
+		if token == "" {
+			http.Error(w, "CSRF token required", http.StatusForbidden)
+			return
+		}
+
+		if !validateCSRFToken(r, token) {
+			http.Error(w, "Invalid CSRF token", http.StatusForbidden)
+			return
 		}
 
 		next.ServeHTTP(w, r)
@@ -122,9 +158,12 @@ func CSRFProtection(next http.Handler) http.Handler {
 // RequestID adds a unique request ID to each request for audit correlation.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestID := generateRequestID()
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = generateRequestID()
+		}
 		w.Header().Set("X-Request-ID", requestID)
-		
+
 		// Add to context for logging
 		ctx := setRequestIDInContext(r.Context(), requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -133,16 +172,13 @@ func RequestID(next http.Handler) http.Handler {
 
 // RateLimitAdmin applies rate limiting specifically for admin endpoints.
 func RateLimitAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get identity from context
-		identityID := getIdentityFromContext(r.Context())
-		if identityID == "" {
-			http.Error(w, "Authentication required", http.StatusUnauthorized)
-			return
-		}
+	rps, burst := loadRateLimitConfig()
+	limiter := newRateLimiter(rps, burst)
 
-		// Check rate limit for this admin identity
-		if !checkAdminRateLimit(identityID, r.RemoteAddr) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := rateLimitKey(r)
+		if !limiter.allow(key) {
+			w.Header().Set("Retry-After", "1")
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -182,50 +218,240 @@ func (rw *responseWriter) WriteHeader(code int) {
 
 // isProduction checks if the application is running in production mode.
 func isProduction() bool {
-	// This would check environment variables or build tags
-	return false // Default to false for safety in development
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ENV")))
+	if env == "" {
+		env = strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ENVIRONMENT")))
+	}
+
+	return env == "prod" || env == "production"
 }
 
-// validateCSRFToken validates a CSRF token against the session.
+// validateCSRFToken validates a CSRF token against the request cookie.
 func validateCSRFToken(r *http.Request, token string) bool {
-	// This would implement actual CSRF token validation
-	// Compare against token stored in session or signed token
-	return true // Placeholder
+	cookie, err := r.Cookie(csrfCookieName)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+
+	if len(cookie.Value) != len(token) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) == 1
 }
 
 // generateRequestID generates a unique request ID.
 func generateRequestID() string {
-	// This would generate a unique ID (UUID, random string, etc.)
-	return "req-" + generateRandomString(16)
-}
-
-// generateRandomString generates a random string of given length.
-func generateRandomString(length int) string {
-	// This would implement actual random string generation
-	return "placeholder"
+	return uuid.NewString()
 }
 
 // setRequestIDInContext stores request ID in context.
 func setRequestIDInContext(ctx context.Context, requestID string) context.Context {
-	// This would use context.WithValue to store the request ID
-	return ctx
-}
-
-// getIdentityFromContext retrieves identity from context.
-func getIdentityFromContext(ctx context.Context) string {
-	// This would extract identity from context set by auth middleware
-	return ""
-}
-
-// checkAdminRateLimit checks if an admin has exceeded rate limits.
-func checkAdminRateLimit(identityID, remoteAddr string) bool {
-	// This would implement rate limiting logic
-	// Could use Redis, in-memory cache, or database
-	return true // Placeholder - allow all requests
+	return context.WithValue(ctx, contextKeyRequestID, requestID)
 }
 
 // logSecurityEvent logs security-relevant events.
 func logSecurityEvent(r *http.Request, statusCode int) {
-	// This would log to audit system
-	// Include: timestamp, IP, user agent, endpoint, response code, etc.
+	event := log.Info()
+	if statusCode >= http.StatusBadRequest {
+		event = log.Warn()
+	}
+
+	event.
+		Str("request_id", r.Header.Get("X-Request-ID")).
+		Str("method", r.Method).
+		Str("path", r.URL.Path).
+		Str("ip", getClientIP(r)).
+		Str("user_agent", r.UserAgent()).
+		Int("status", statusCode).
+		Msg("admin security event")
+}
+
+func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) (string, error) {
+	if cookie, err := r.Cookie(csrfCookieName); err == nil && cookie.Value != "" {
+		return cookie.Value, nil
+	}
+
+	token, err := generateCSRFToken()
+	if err != nil {
+		return "", err
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookieName,
+		Value:    token,
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isProduction(),
+	})
+
+	return token, nil
+}
+
+func generateCSRFToken() (string, error) {
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(token), nil
+}
+
+func isSafeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAPIKeyAuth(r *http.Request) bool {
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	return strings.HasPrefix(auth, "Bearer aegion_")
+}
+
+type tokenBucket struct {
+	capacity float64
+	tokens   float64
+	refill   float64
+	lastFill time.Time
+	mu       sync.Mutex
+}
+
+func newTokenBucket(capacity, refill float64) *tokenBucket {
+	return &tokenBucket{
+		capacity: capacity,
+		tokens:   capacity,
+		refill:   refill,
+		lastFill: time.Now(),
+	}
+}
+
+func (b *tokenBucket) take() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(b.lastFill).Seconds()
+	if elapsed > 0 {
+		b.tokens = minFloat(b.capacity, b.tokens+(elapsed*b.refill))
+		b.lastFill = now
+	}
+
+	if b.tokens < 1 {
+		return false
+	}
+
+	b.tokens -= 1
+	return true
+}
+
+type rateLimiter struct {
+	rps     float64
+	burst   int
+	buckets map[string]*tokenBucket
+	mu      sync.RWMutex
+}
+
+func newRateLimiter(rps float64, burst int) *rateLimiter {
+	limiter := &rateLimiter{
+		rps:     rps,
+		burst:   burst,
+		buckets: make(map[string]*tokenBucket),
+	}
+
+	go limiter.cleanupLoop()
+
+	return limiter
+}
+
+func (r *rateLimiter) allow(key string) bool {
+	r.mu.RLock()
+	bucket, ok := r.buckets[key]
+	r.mu.RUnlock()
+
+	if !ok {
+		r.mu.Lock()
+		bucket, ok = r.buckets[key]
+		if !ok {
+			bucket = newTokenBucket(float64(r.burst), r.rps)
+			r.buckets[key] = bucket
+		}
+		r.mu.Unlock()
+	}
+
+	return bucket.take()
+}
+
+func (r *rateLimiter) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		now := time.Now()
+		r.mu.Lock()
+		for key, bucket := range r.buckets {
+			bucket.mu.Lock()
+			idle := now.Sub(bucket.lastFill)
+			bucket.mu.Unlock()
+			if idle > 10*time.Minute {
+				delete(r.buckets, key)
+			}
+		}
+		r.mu.Unlock()
+	}
+}
+
+func rateLimitKey(r *http.Request) string {
+	if identityID := strings.TrimSpace(r.Header.Get("X-Aegion-Session-Identity-ID")); identityID != "" {
+		return "id:" + identityID
+	}
+
+	return "ip:" + getClientIP(r)
+}
+
+func getClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+
+	return r.RemoteAddr
+}
+
+func loadRateLimitConfig() (float64, int) {
+	rps := defaultRateLimitRPS
+	if value := strings.TrimSpace(os.Getenv("AEGION_ADMIN_RATE_LIMIT_RPS")); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil && parsed > 0 {
+			rps = parsed
+		}
+	}
+
+	burst := defaultRateLimitBurst
+	if value := strings.TrimSpace(os.Getenv("AEGION_ADMIN_RATE_LIMIT_BURST")); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed > 0 {
+			burst = parsed
+		}
+	}
+
+	return rps, burst
+}
+
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -104,4 +104,4 @@ void crypto_free_string(char *s);
 /// - `len` must match the original length
 void crypto_free_bytes(uint8_t *data, size_t len);
 
-} // extern "C"
+}  // extern "C"

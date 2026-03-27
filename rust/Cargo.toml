@@ -28,7 +28,7 @@ base64 = "0.21"
 
 # FFI
 libc = "0.2"
-cbindgen = "0.26"
+cbindgen = "0.28"
 
 # Error handling
 thiserror = "1"

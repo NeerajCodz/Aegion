@@ -15,6 +15,10 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   GO_VERSION: '1.22'
   RUST_VERSION: 'stable'
@@ -141,7 +145,7 @@ jobs:
 
       - name: Upload Trivy image results
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-image-results.sarif') != ''
         with:
           sarif_file: trivy-image-results.sarif
           category: 'trivy-image'

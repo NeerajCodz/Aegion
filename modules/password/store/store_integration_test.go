@@ -22,10 +22,10 @@ func mockCommandTag(rowsAffected int64) pgconn.CommandTag {
 
 // MockRows implements pgx.Rows interface for testing
 type MockRows struct {
-	data      [][]interface{}
-	index     int
-	closed    bool
-	scanErr   error
+	data    [][]interface{}
+	index   int
+	closed  bool
+	scanErr error
 }
 
 func (m *MockRows) Scan(dest ...interface{}) error {
@@ -652,8 +652,8 @@ func TestGetHistory_QueryError(t *testing.T) {
 func TestGetHistory_ScanError(t *testing.T) {
 	scanErr := errors.New("corrupted data")
 	rows := &MockRows{
-		data:      [][]interface{}{{"hash1"}},
-		scanErr:   scanErr,
+		data:    [][]interface{}{{"hash1"}},
+		scanErr: scanErr,
 	}
 
 	mock := &MockDB{
@@ -800,10 +800,8 @@ func TestUpdateWithTimeoutContext(t *testing.T) {
 	}
 
 	store := NewWithDB(mock)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-
-	time.Sleep(time.Millisecond) // Wait for timeout
 
 	err := store.Update(ctx, uuid.New(), "newhash")
 	assert.Equal(t, context.DeadlineExceeded, err)
@@ -999,10 +997,10 @@ func TestCredentialTypeFields(t *testing.T) {
 // TestContainsEdgeCases tests contains function edge cases
 func TestContainsEdgeCases(t *testing.T) {
 	tests := []struct {
-		name      string
-		str       string
-		substr    string
-		expected  bool
+		name     string
+		str      string
+		substr   string
+		expected bool
 	}{
 		{"identical strings", "abc", "abc", true},
 		{"substring at start", "abcdef", "abc", true},

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/modules/admin/store"
@@ -268,6 +269,10 @@ var errIdentityNotFound = errors.New("identity not found")
 func (h *Handler) logAction(ctx context.Context, operatorID *uuid.UUID, action, resourceType, resourceID string, details map[string]interface{}, ipAddress string) {
 	if details == nil {
 		details = make(map[string]interface{})
+	}
+
+	if requestID := middleware.GetReqID(ctx); requestID != "" {
+		details["request_id"] = requestID
 	}
 
 	entry := &store.AuditLogEntry{

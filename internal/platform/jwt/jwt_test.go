@@ -1,7 +1,9 @@
 package jwt
 
 import (
+	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -37,8 +39,8 @@ func TestClaimsMarshalJSON(t *testing.T) {
 		expected map[string]interface{}
 	}{
 		{
-			name: "empty claims",
-			claims: Claims{},
+			name:     "empty claims",
+			claims:   Claims{},
 			expected: map[string]interface{}{},
 		},
 		{
@@ -54,7 +56,7 @@ func TestClaimsMarshalJSON(t *testing.T) {
 			},
 			expected: map[string]interface{}{
 				"iss": "aegion",
-				"sub": "user123", 
+				"sub": "user123",
 				"aud": "api",
 				"exp": int64(1234567890),
 				"iat": int64(1234567800),
@@ -82,9 +84,9 @@ func TestClaimsMarshalJSON(t *testing.T) {
 		{
 			name: "partial standard claims",
 			claims: Claims{
-				Issuer:   "aegion",
-				Subject:  "",  // Should be omitted
-				ExpiresAt: 0,   // Should be omitted
+				Issuer:    "aegion",
+				Subject:   "", // Should be omitted
+				ExpiresAt: 0,  // Should be omitted
 				NotBefore: 1234567890,
 			},
 			expected: map[string]interface{}{
@@ -97,12 +99,12 @@ func TestClaimsMarshalJSON(t *testing.T) {
 			claims: Claims{
 				Issuer: "aegion",
 				Custom: map[string]interface{}{
-					"iss": "custom-issuer", // Should override standard issuer
+					"iss":    "custom-issuer", // Should override standard issuer
 					"custom": "value",
 				},
 			},
 			expected: map[string]interface{}{
-				"iss":    "aegion", // Standard should come first, then custom overrides
+				"iss":    "custom-issuer", // Custom claims should override standard claims
 				"custom": "value",
 			},
 		},
@@ -115,22 +117,18 @@ func TestClaimsMarshalJSON(t *testing.T) {
 				t.Fatalf("MarshalJSON() error = %v", err)
 			}
 
-			var result map[string]interface{}
-			if err := json.Unmarshal(data, &result); err != nil {
-				t.Fatalf("Failed to unmarshal result: %v", err)
-			}
+			result := decodeJSONMap(t, data)
+			expected := decodeJSONMap(t, mustMarshalJSON(t, tt.expected))
 
 			// Check that all expected fields are present
-			for k, v := range tt.expected {
-				if result[k] != v {
+			for k, v := range expected {
+				if !reflect.DeepEqual(result[k], v) {
 					t.Errorf("Field %s = %v, want %v", k, result[k], v)
 				}
 			}
 
 			// For the custom override test, verify that custom claims come after standard
 			if tt.name == "custom claims override standard field names" {
-				// Re-marshal to check field ordering behavior
-				// (Note: Go's map iteration is randomized, but our logic should handle this correctly)
 				if result["iss"] != "custom-issuer" {
 					// Standard claims are set first, then custom claims override them
 					// So the final value should be from custom claims
@@ -141,14 +139,39 @@ func TestClaimsMarshalJSON(t *testing.T) {
 	}
 }
 
+func decodeJSONMap(t *testing.T, data []byte) map[string]interface{} {
+	t.Helper()
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	var result map[string]interface{}
+	if err := decoder.Decode(&result); err != nil {
+		t.Fatalf("Failed to decode JSON: %v", err)
+	}
+
+	return result
+}
+
+func mustMarshalJSON(t *testing.T, value interface{}) []byte {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("Failed to marshal JSON: %v", err)
+	}
+
+	return data
+}
+
 func TestClaimsMarshalJSONFieldOmission(t *testing.T) {
 	claims := Claims{
-		Issuer:    "",   // Empty string - should be omitted
+		Issuer:    "", // Empty string - should be omitted
 		Subject:   "sub",
-		ExpiresAt: 0,    // Zero value - should be omitted
+		ExpiresAt: 0, // Zero value - should be omitted
 		IssuedAt:  123,
-		NotBefore: 0,    // Zero value - should be omitted
-		JWTID:     "",   // Empty string - should be omitted
+		NotBefore: 0,  // Zero value - should be omitted
+		JWTID:     "", // Empty string - should be omitted
 		SessionID: "sid",
 	}
 
@@ -231,7 +254,7 @@ func TestVerifyResultStruct(t *testing.T) {
 		Issuer:  "test",
 		Subject: "user",
 	}
-	
+
 	vr := VerifyResult{
 		Claims: claims,
 		KeyID:  "key456",
@@ -252,13 +275,13 @@ func TestVerifyResultStruct(t *testing.T) {
 // and can be called without compilation errors
 func TestFunctionSignatures(t *testing.T) {
 	// Test that we can call all functions (they may fail due to missing Rust lib, but should compile)
-	
+
 	// GenerateECKeyPair
 	_, err := GenerateECKeyPair("test-key")
 	if err != nil && err != ErrKeyGenFailed {
 		t.Logf("GenerateECKeyPair returned expected error or ErrKeyGenFailed: %v", err)
 	}
-	
+
 	// Sign
 	claims := Claims{Issuer: "test"}
 	privateKey := []byte("dummy-private-key")
@@ -266,7 +289,7 @@ func TestFunctionSignatures(t *testing.T) {
 	if err != nil && err != ErrSigningFailed {
 		t.Logf("Sign returned expected error or ErrSigningFailed: %v", err)
 	}
-	
+
 	// Verify
 	opts := VerifyOptions{
 		Issuer:   "test",
@@ -277,11 +300,11 @@ func TestFunctionSignatures(t *testing.T) {
 	_, err = Verify("dummy.jwt.token", publicKey, "ES256", opts)
 	if err == nil {
 		t.Error("Verify should fail with dummy inputs")
-	} else if err != ErrVerifyFailed && err != ErrTokenExpired && err != ErrTokenNotYetValid && 
-			err != ErrInvalidToken && err != ErrInvalidAlg {
+	} else if err != ErrVerifyFailed && err != ErrTokenExpired && err != ErrTokenNotYetValid &&
+		err != ErrInvalidToken && err != ErrInvalidAlg {
 		t.Logf("Verify returned expected JWT error: %v", err)
 	}
-	
+
 	// ToJWK
 	_, err = ToJWK("ES256", "key123", publicKey)
 	// This should fail since we're using dummy data
@@ -293,7 +316,7 @@ func TestFunctionSignatures(t *testing.T) {
 func TestErrorCodeMapping(t *testing.T) {
 	// Test that our error code mappings are correct
 	// This is testing the logic in the Verify function
-	
+
 	tests := []struct {
 		name      string
 		errorCode int
@@ -322,7 +345,7 @@ func TestErrorCodeMapping(t *testing.T) {
 			default:
 				resultErr = ErrVerifyFailed
 			}
-			
+
 			if resultErr != tt.expected {
 				t.Errorf("Error code %d mapped to %v, want %v", tt.errorCode, resultErr, tt.expected)
 			}

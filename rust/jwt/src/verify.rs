@@ -165,6 +165,7 @@ fn validate_claims(claims: &Claims, options: &VerifyOptions) -> Result<(), JwtEr
 ///
 /// WARNING: Only use this for inspection or when signature verification
 /// is handled externally. Never trust the claims without verification.
+#[allow(dead_code)]
 pub fn decode_jwt_unverified(token: &str) -> Result<VerifyResult, JwtError> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {

@@ -13,7 +13,7 @@ import (
 // Test pure functions that don't require database
 func TestCredential_struct(t *testing.T) {
 	now := time.Now()
-	
+
 	cred := &Credential{
 		ID:         uuid.New(),
 		IdentityID: uuid.New(),
@@ -171,7 +171,7 @@ func TestErrorDefinitions(t *testing.T) {
 	// Verify that error constants are defined and have meaningful messages
 	assert.NotNil(t, ErrCredentialNotFound)
 	assert.NotNil(t, ErrCredentialExists)
-	
+
 	assert.Contains(t, ErrCredentialNotFound.Error(), "not found")
 	assert.Contains(t, ErrCredentialExists.Error(), "exists")
 }
@@ -215,14 +215,14 @@ func TestStoreInterface(t *testing.T) {
 
 	// Create a mock store instance
 	store := &Store{}
-	
+
 	// Verify it has all required methods (this will fail to compile if methods are missing)
 	ctx := context.Background()
 	credID := uuid.New()
 	identityID := uuid.New()
 	identifier := "user@example.com"
 	hash := "hashedpassword"
-	
+
 	// These will panic with nil database, but that's expected in unit tests
 	// We're just testing that the methods exist with correct signatures
 	assert.Panics(t, func() { store.Create(ctx, nil) })
@@ -325,10 +325,10 @@ func TestCredentialValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cred := tt.credential()
-			
+
 			// Basic validation checks that could be implemented in the store
 			hasEmptyRequiredField := cred.ID == uuid.Nil || cred.IdentityID == uuid.Nil || cred.Identifier == "" || cred.Hash == ""
-			
+
 			if tt.shouldFail {
 				assert.True(t, hasEmptyRequiredField, tt.description)
 			} else {
@@ -404,12 +404,12 @@ func TestQueryParameterValidation(t *testing.T) {
 				_, err := uuid.Parse(str)
 				isValid := err == nil && str != ""
 				assert.Equal(t, tt.isValid, isValid)
-				
+
 			case "email":
 				str := tt.input.(string)
 				isValid := str != "" // Simple validation for test
 				assert.Equal(t, tt.isValid, isValid)
-				
+
 			case "limit":
 				limit := tt.input.(int)
 				isValid := limit > 0
@@ -424,7 +424,7 @@ func TestContextHandling(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
-		
+
 		// Test that canceled context is properly handled
 		select {
 		case <-ctx.Done():
@@ -437,9 +437,9 @@ func TestContextHandling(t *testing.T) {
 	t.Run("context timeout", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 		defer cancel()
-		
+
 		time.Sleep(time.Millisecond) // Wait for timeout
-		
+
 		select {
 		case <-ctx.Done():
 			assert.Equal(t, context.DeadlineExceeded, ctx.Err())
@@ -451,7 +451,7 @@ func TestContextHandling(t *testing.T) {
 	t.Run("context with values", func(t *testing.T) {
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, "key", "value")
-		
+
 		value := ctx.Value("key")
 		assert.Equal(t, "value", value)
 	})
@@ -461,12 +461,12 @@ func TestContextHandling(t *testing.T) {
 func TestTimeHandling(t *testing.T) {
 	t.Run("credential timestamps", func(t *testing.T) {
 		now := time.Now()
-		
+
 		cred := &Credential{
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
-		
+
 		assert.True(t, cred.CreatedAt.Equal(now))
 		assert.True(t, cred.UpdatedAt.Equal(now))
 	})
@@ -475,7 +475,7 @@ func TestTimeHandling(t *testing.T) {
 		time1 := time.Now()
 		time.Sleep(time.Millisecond)
 		time2 := time.Now()
-		
+
 		assert.True(t, time2.After(time1))
 		assert.True(t, time1.Before(time2))
 	})
@@ -486,7 +486,7 @@ func TestHistorySliceOperations(t *testing.T) {
 	t.Run("append to history", func(t *testing.T) {
 		history := []string{"hash1", "hash2"}
 		history = append(history, "hash3")
-		
+
 		assert.Equal(t, 3, len(history))
 		assert.Equal(t, "hash3", history[2])
 	})
@@ -494,11 +494,11 @@ func TestHistorySliceOperations(t *testing.T) {
 	t.Run("limit history size", func(t *testing.T) {
 		history := []string{"hash1", "hash2", "hash3", "hash4", "hash5", "hash6"}
 		limit := 5
-		
+
 		if len(history) > limit {
 			history = history[len(history)-limit:]
 		}
-		
+
 		assert.Equal(t, limit, len(history))
 		assert.Equal(t, "hash2", history[0]) // Should keep the most recent entries
 	})
@@ -506,13 +506,13 @@ func TestHistorySliceOperations(t *testing.T) {
 	t.Run("reverse chronological order", func(t *testing.T) {
 		// Test that history is returned in reverse chronological order (most recent first)
 		history := []string{"oldest", "older", "newer", "newest"}
-		
+
 		// Simulate reverse order for most recent first
 		reversed := make([]string, len(history))
 		for i, j := 0, len(history)-1; i < len(history); i, j = i+1, j-1 {
 			reversed[i] = history[j]
 		}
-		
+
 		assert.Equal(t, "newest", reversed[0])
 		assert.Equal(t, "oldest", reversed[len(reversed)-1])
 	})
@@ -522,7 +522,7 @@ func TestHistorySliceOperations(t *testing.T) {
 func BenchmarkSliceContains(b *testing.B) {
 	slice := []string{"hash1", "hash2", "hash3", "hash4", "hash5"}
 	item := "hash3"
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sliceContains(slice, item)
@@ -538,7 +538,7 @@ func BenchmarkUUIDGeneration(b *testing.B) {
 
 func BenchmarkUUIDParsing(b *testing.B) {
 	id := uuid.New().String()
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		uuid.Parse(id)
