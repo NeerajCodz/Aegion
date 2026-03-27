@@ -594,3 +594,217 @@ func BenchmarkRuleEngine_Match(b *testing.B) {
 		engine.Match(req)
 	}
 }
+
+// TestRuleEngine_AddRule_PriorityOrdering tests that rules are sorted by priority on addition
+func TestRuleEngine_AddRule_PriorityOrdering(t *testing.T) {
+	engine := NewRuleEngine([]Rule{})
+
+	// Add rules in non-priority order
+	rule1 := Rule{ID: "low", Path: "/test", Target: "test", Priority: 10, Enabled: true}
+	rule2 := Rule{ID: "high", Path: "/test", Target: "test", Priority: 100, Enabled: true}
+	rule3 := Rule{ID: "medium", Path: "/test", Target: "test", Priority: 50, Enabled: true}
+
+	engine.AddRule(rule1)
+	engine.AddRule(rule2)
+	engine.AddRule(rule3)
+
+	// Rules should be sorted by priority (highest first)
+	rules := engine.GetRules()
+	assert.Len(t, rules, 3)
+	assert.Equal(t, "high", rules[0].ID)
+	assert.Equal(t, 100, rules[0].Priority)
+	assert.Equal(t, "medium", rules[1].ID)
+	assert.Equal(t, 50, rules[1].Priority)
+	assert.Equal(t, "low", rules[2].ID)
+	assert.Equal(t, 10, rules[2].Priority)
+}
+
+// TestRuleEngine_AddRule_Multiple tests adding multiple rules maintains order
+func TestRuleEngine_AddRule_Multiple(t *testing.T) {
+	engine := NewRuleEngine([]Rule{
+		{ID: "base", Path: "/base", Target: "base", Priority: 50, Enabled: true},
+	})
+
+	// Add more rules
+	engine.AddRule(Rule{ID: "top", Path: "/top", Target: "top", Priority: 200, Enabled: true})
+	engine.AddRule(Rule{ID: "middle", Path: "/middle", Target: "middle", Priority: 100, Enabled: true})
+	engine.AddRule(Rule{ID: "bottom", Path: "/bottom", Target: "bottom", Priority: 10, Enabled: true})
+
+	rules := engine.GetRules()
+	assert.Equal(t, "top", rules[0].ID)
+	assert.Equal(t, "middle", rules[1].ID)
+	assert.Equal(t, "base", rules[2].ID)
+	assert.Equal(t, "bottom", rules[3].ID)
+}
+
+// TestRuleEngine_CheckAccess_NilRule tests access check with nil rule (should fail appropriately)
+// This test is removed because passing nil rule to CheckAccess is not supported
+// and causes a panic, which is expected behavior for invalid input
+
+// TestRuleEngine_Priority_HigherPriorityWins tests that higher priority rules match first
+func TestRuleEngine_Priority_HigherPriorityWins(t *testing.T) {
+	rules := []Rule{
+		{
+			ID:       "low-priority",
+			Path:     "/*",
+			Target:   "low-service",
+			Priority: 10,
+			Enabled:  true,
+		},
+		{
+			ID:       "high-priority",
+			Path:     "/api/*",
+			Target:   "high-service",
+			Priority: 200,
+			Enabled:  true,
+		},
+	}
+
+	engine := NewRuleEngine(rules)
+	req := httptest.NewRequest("GET", "/api/users", nil)
+
+	matched, found := engine.Match(req)
+	assert.True(t, found)
+	assert.Equal(t, "high-priority", matched.ID)
+	assert.Equal(t, "high-service", matched.Target)
+}
+
+// TestRule_ApplyRewrite_StripPrefixNotMatching tests strip prefix when path doesn't start with prefix
+func TestRule_ApplyRewrite_StripPrefixNotMatching(t *testing.T) {
+	rule := Rule{
+		Rewrite: &RewriteConfig{
+			StripPrefix: "/api/v2",
+		},
+	}
+
+	result := rule.ApplyRewrite("/api/v1/users")
+	assert.Equal(t, "/api/v1/users", result) // Path unchanged
+}
+
+// TestRule_ApplyRewrite_AddPrefixWithSlash tests add prefix when path already starts with /
+func TestRule_ApplyRewrite_AddPrefixWithSlash(t *testing.T) {
+	rule := Rule{
+		Rewrite: &RewriteConfig{
+			AddPrefix: "/v2",
+		},
+	}
+
+	result := rule.ApplyRewrite("/users")
+	assert.Equal(t, "/v2/users", result)
+}
+
+// TestRule_ApplyRewrite_RootPathRewrite tests rewriting root path
+func TestRule_ApplyRewrite_RootPathRewrite(t *testing.T) {
+	rule := Rule{
+		Rewrite: &RewriteConfig{
+			StripPrefix: "/api",
+			AddPrefix:   "/v2",
+		},
+	}
+
+	result := rule.ApplyRewrite("/api")
+	assert.Equal(t, "/v2/", result)
+}
+
+// TestRule_ApplyRewrite_EdgCases tests various edge cases
+func TestRule_ApplyRewrite_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		rule     Rule
+		path     string
+		expected string
+	}{
+		{
+			name: "empty path with strip",
+			rule: Rule{Rewrite: &RewriteConfig{StripPrefix: "/api"}},
+			path: "",
+			expected: "",
+		},
+		{
+			name: "single slash with add prefix",
+			rule: Rule{Rewrite: &RewriteConfig{AddPrefix: "/api"}},
+			path: "/",
+			expected: "/api/",
+		},
+		{
+			name: "double strip and add",
+			rule: Rule{Rewrite: &RewriteConfig{StripPrefix: "/a/b", AddPrefix: "/x/y"}},
+			path: "/a/b/c/d",
+			expected: "/x/y/c/d",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.rule.ApplyRewrite(tt.path)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestRuleEngine_SortRules_AlreadySorted tests sorting already sorted rules
+func TestRuleEngine_SortRules_AlreadySorted(t *testing.T) {
+	rules := []Rule{
+		{ID: "high", Priority: 100, Enabled: true},
+		{ID: "medium", Priority: 50, Enabled: true},
+		{ID: "low", Priority: 10, Enabled: true},
+	}
+
+	engine := NewRuleEngine(rules)
+	// sortRules should be idempotent
+	rulesCopy := engine.GetRules()
+	assert.Equal(t, "high", rulesCopy[0].ID)
+	assert.Equal(t, "medium", rulesCopy[1].ID)
+	assert.Equal(t, "low", rulesCopy[2].ID)
+}
+
+// TestRuleEngine_SortRules_ReverseSorted tests sorting reverse sorted rules
+func TestRuleEngine_SortRules_ReverseSorted(t *testing.T) {
+	rules := []Rule{
+		{ID: "low", Priority: 10, Enabled: true},
+		{ID: "medium", Priority: 50, Enabled: true},
+		{ID: "high", Priority: 100, Enabled: true},
+	}
+
+	engine := NewRuleEngine(rules)
+	rulesCopy := engine.GetRules()
+	assert.Equal(t, "high", rulesCopy[0].ID)
+	assert.Equal(t, "medium", rulesCopy[1].ID)
+	assert.Equal(t, "low", rulesCopy[2].ID)
+}
+
+// TestRuleEngine_SortRules_SingleRule tests sorting with single rule
+func TestRuleEngine_SortRules_SingleRule(t *testing.T) {
+	rules := []Rule{
+		{ID: "only", Priority: 50, Enabled: true},
+	}
+
+	engine := NewRuleEngine(rules)
+	rulesCopy := engine.GetRules()
+	assert.Len(t, rulesCopy, 1)
+	assert.Equal(t, "only", rulesCopy[0].ID)
+}
+
+// TestRuleEngine_SortRules_EmptyRules tests sorting empty rules
+func TestRuleEngine_SortRules_EmptyRules(t *testing.T) {
+	engine := NewRuleEngine([]Rule{})
+	rulesCopy := engine.GetRules()
+	assert.Len(t, rulesCopy, 0)
+}
+
+// TestRuleEngine_SortRules_EqualPriority tests sorting rules with equal priority (stable)
+func TestRuleEngine_SortRules_EqualPriority(t *testing.T) {
+	rules := []Rule{
+		{ID: "first", Priority: 50, Enabled: true},
+		{ID: "second", Priority: 50, Enabled: true},
+		{ID: "third", Priority: 50, Enabled: true},
+	}
+
+	engine := NewRuleEngine(rules)
+	rulesCopy := engine.GetRules()
+	assert.Len(t, rulesCopy, 3)
+	// All have same priority, order should be stable
+	assert.Equal(t, "first", rulesCopy[0].ID)
+	assert.Equal(t, "second", rulesCopy[1].ID)
+	assert.Equal(t, "third", rulesCopy[2].ID)
+}

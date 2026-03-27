@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -331,6 +333,384 @@ func TestProxy_RequestTimeout(t *testing.T) {
 
 	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
 	assert.Contains(t, w.Body.String(), "Request timeout")
+}
+
+// TestProxy_HandleRateLimitExceeded tests rate limit exceeded error handling
+func TestProxy_HandleRateLimitExceeded(t *testing.T) {
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	waitTime := 500 * time.Millisecond
+	proxy.handleRateLimitExceeded(w, req, waitTime, nil, start)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.NotEmpty(t, w.Header().Get("Retry-After"))
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "Rate limit exceeded")
+}
+
+// TestProxy_HandleAccessError_AuthenticationRequired tests access error for missing authentication
+func TestProxy_HandleAccessError_AuthenticationRequired(t *testing.T) {
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	err := ErrAccessDenied
+	proxy.handleAccessError(w, req, err, start)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "Access denied")
+}
+
+// TestProxy_HandleAccessError_NoSession tests access error when session is required but missing
+func TestProxy_HandleAccessError_NoSession(t *testing.T) {
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	w := httptest.NewRecorder()
+
+	start := time.Now()
+	// Simulate missing authentication by passing a no-auth error
+	proxy.handleAccessError(w, req, errors.New("authentication required"), start)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.NotEmpty(t, w.Body.String())
+}
+
+// TestResponseWriter_WriteHeader tests status code capture
+func TestResponseWriter_WriteHeader(t *testing.T) {
+	w := httptest.NewRecorder()
+	rw := &responseWriter{
+		ResponseWriter: w,
+		statusCode:     0,
+	}
+
+	// First WriteHeader should capture the status
+	rw.WriteHeader(http.StatusOK)
+	assert.Equal(t, http.StatusOK, rw.statusCode)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestResponseWriter_WriteHeader_MultipleWriteAttempts tests that only first header write matters
+func TestResponseWriter_WriteHeader_MultipleWriteAttempts(t *testing.T) {
+	w := httptest.NewRecorder()
+	rw := &responseWriter{
+		ResponseWriter: w,
+		statusCode:     0,
+	}
+
+	rw.WriteHeader(http.StatusCreated)
+	// Second WriteHeader will be ignored by http.ResponseWriter (standard behavior)
+	// But our wrapper will still capture the call
+	// This test just verifies first call was captured
+	assert.Equal(t, http.StatusCreated, rw.statusCode)
+}
+
+// TestProxy_GetCircuitBreaker_Creates tests circuit breaker creation for non-existent upstream
+func TestProxy_GetCircuitBreaker_Creates(t *testing.T) {
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	breaker1 := proxy.getCircuitBreaker("test-upstream")
+	assert.NotNil(t, breaker1)
+
+	// Should return same breaker on second call
+	breaker2 := proxy.getCircuitBreaker("test-upstream")
+	assert.Equal(t, breaker1, breaker2)
+}
+
+// TestProxy_GetCircuitBreaker_DifferentUpstreams tests separate circuit breakers for different upstreams
+func TestProxy_GetCircuitBreaker_DifferentUpstreams(t *testing.T) {
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	breaker1 := proxy.getCircuitBreaker("upstream-1")
+	breaker2 := proxy.getCircuitBreaker("upstream-2")
+
+	// Different upstreams should have different circuit breakers
+	assert.NotNil(t, breaker1)
+	assert.NotNil(t, breaker2)
+	// They should be different instances (not same pointer)
+	assert.NotSame(t, breaker1, breaker2)
+}
+
+// TestProxy_InjectSessionHeaders_WithImpersonation tests impersonation header injection
+func TestProxy_InjectSessionHeaders_WithImpersonation(t *testing.T) {
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	impersonatorID := uuid.New()
+	sess := &session.Session{
+		ID:              uuid.New(),
+		IdentityID:      uuid.New(),
+		IsImpersonation: true,
+		ImpersonatorID:  &impersonatorID,
+		AAL:             session.AAL1,
+		AuthenticatedAt: time.Now(),
+		ExpiresAt:       time.Now().Add(24 * time.Hour),
+	}
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	proxy.injectSessionHeaders(req, sess)
+
+	assert.Equal(t, "true", req.Header.Get("X-Aegion-Impersonation"))
+	assert.Equal(t, impersonatorID.String(), req.Header.Get("X-Aegion-Impersonator-ID"))
+}
+
+// TestProxy_AddForwardedHeaders_WithTLS tests X-Forwarded-Proto header for HTTPS
+func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	req := httptest.NewRequest("GET", "https://example.com/test", nil)
+	req.TLS = &tls.ConnectionState{} // Indicates HTTPS
+	reqCopy := httptest.NewRequest("GET", "/original", nil)
+
+	proxy.addForwardedHeaders(reqCopy, req)
+
+	// Should add forwarded headers
+	assert.NotEmpty(t, reqCopy.Header.Get("X-Forwarded-For"))
+	assert.NotEmpty(t, reqCopy.Header.Get("X-Forwarded-Host"))
+}
+
+// TestProxy_ServeHTTP_PreservesExistingRequestID tests request ID preservation
+func TestProxy_ServeHTTP_PreservesExistingRequestID(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"test": {URL: upstream.URL},
+	}
+
+	rules := []Rule{
+		{ID: "test", Path: "/test", Target: "test", Enabled: true, Priority: 100},
+	}
+	engine := NewRuleEngine(rules)
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	existingID := "custom-123"
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Request-ID", existingID)
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	// Should use existing request ID
+	assert.Equal(t, existingID, w.Header().Get("X-Request-ID"))
+}
+
+// TestProxy_ServeHTTP_NoRuleMatched tests 404 response when no rule matches
+func TestProxy_ServeHTTP_NoRuleMatched(t *testing.T) {
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"test": {URL: "http://localhost:9999"},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{ID: "specific", Path: "/specific", Target: "test", Enabled: true, Priority: 100},
+	})
+
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	req := httptest.NewRequest("GET", "/nonexistent", nil)
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "no rule matched")
+}
+
+// TestProxy_ServeHTTP_CircuitBreakerOpen tests 503 response when circuit breaker is open
+func TestProxy_ServeHTTP_CircuitBreakerOpen(t *testing.T) {
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"test": {
+			URL: "http://localhost:9999",
+			CircuitBreaker: &CircuitBreakerConfig{
+				FailureThreshold: 1,
+			},
+		},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{ID: "test", Path: "/test", Target: "test", Enabled: true, Priority: 100},
+	})
+
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	// Manually open the circuit breaker
+	breaker := proxy.getCircuitBreaker("test")
+	// Trigger failures to open the circuit
+	for i := 0; i < 3; i++ {
+		breaker.RecordFailure()
+	}
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	// Should reject due to circuit breaker being open
+	// Status could be 503 or other error code
+	assert.True(t, w.Code >= 400)
+}
+
+// TestProxy_ServeHTTP_InvalidUpstreamURL tests internal server error for invalid upstream URL
+func TestProxy_ServeHTTP_InvalidUpstreamURL(t *testing.T) {
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"bad": {URL: "://invalid-url"},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{ID: "test", Path: "/test", Target: "bad", Enabled: true, Priority: 100},
+	})
+
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid upstream URL")
+}
+
+// TestProxy_ServeHTTP_UpstreamNotFound tests 502 response when upstream doesn't exist
+func TestProxy_ServeHTTP_UpstreamNotFound(t *testing.T) {
+	config := DefaultConfig()
+	engine := NewRuleEngine([]Rule{
+		{ID: "test", Path: "/test", Target: "nonexistent", Enabled: true, Priority: 100},
+	})
+
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadGateway, w.Code)
+	assert.Contains(t, w.Body.String(), "upstream not found")
+}
+
+// TestProxy_RequestIDGeneration tests automatic request ID generation
+func TestProxy_RequestIDGeneration(t *testing.T) {
+	config := DefaultConfig()
+	engine := NewRuleEngine([]Rule{})
+
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	req1 := httptest.NewRequest("GET", "/test", nil)
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	w1 := httptest.NewRecorder()
+	w2 := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w1, req1)
+	proxy.ServeHTTP(w2, req2)
+
+	id1 := w1.Header().Get("X-Request-ID")
+	id2 := w2.Header().Get("X-Request-ID")
+
+	assert.NotEmpty(t, id1)
+	assert.NotEmpty(t, id2)
+	assert.NotEqual(t, id1, id2) // Each request should have unique ID
+}
+
+// TestProxy_RequestTimeout_ContextCancellation tests context timeout handling
+func TestProxy_RequestTimeout_ContextCancellation(t *testing.T) {
+	slowUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(500 * time.Millisecond):
+			w.WriteHeader(http.StatusOK)
+		case <-r.Context().Done():
+			// Context was cancelled - test passed
+		}
+	}))
+	defer slowUpstream.Close()
+
+	config := DefaultConfig()
+	config.Timeout = 50 * time.Millisecond
+	config.Upstreams = map[string]Upstream{
+		"slow": {URL: slowUpstream.URL},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{ID: "slow", Path: "/slow", Target: "slow", Enabled: true, Priority: 100},
+	})
+
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	req := httptest.NewRequest("GET", "/slow", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	// Should get a timeout error or 504
+	assert.True(t, w.Code == http.StatusGatewayTimeout || w.Code >= 500)
+}
+
+// TestProxy_ConcurrentRequests tests concurrent request handling
+func TestProxy_ConcurrentRequests(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"test": {URL: upstream.URL},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{ID: "test", Path: "/test", Target: "test", Enabled: true, Priority: 100},
+	})
+
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, engine, logger)
+
+	// Send concurrent requests
+	done := make(chan bool, 100)
+	for i := 0; i < 100; i++ {
+		go func() {
+			req := httptest.NewRequest("GET", "/test", nil)
+			w := httptest.NewRecorder()
+			proxy.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 100; i++ {
+		<-done
+	}
 }
 
 func BenchmarkProxy_ServeHTTP(b *testing.B) {

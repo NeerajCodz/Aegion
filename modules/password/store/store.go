@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,13 +27,25 @@ type Credential struct {
 	UpdatedAt  time.Time
 }
 
+// DB interface defines methods needed for database operations
+type DB interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, optionsAndArgs ...interface{}) pgx.Row
+	Query(ctx context.Context, sql string, optionsAndArgs ...interface{}) (pgx.Rows, error)
+}
+
 // Store handles password credential persistence.
 type Store struct {
-	db *pgxpool.Pool
+	db DB
 }
 
 // New creates a new password store.
 func New(db *pgxpool.Pool) *Store {
+	return &Store{db: db}
+}
+
+// NewWithDB creates a new password store with a custom DB interface (primarily for testing).
+func NewWithDB(db DB) *Store {
 	return &Store{db: db}
 }
 

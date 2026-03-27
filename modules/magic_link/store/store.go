@@ -47,6 +47,7 @@ type Code struct {
 // Store handles magic link/OTP persistence.
 type Store struct {
 	db          *pgxpool.Pool
+	mockDB      interface{} // Used only for testing with mock database
 	codeLength  int
 	codeCharset string
 }

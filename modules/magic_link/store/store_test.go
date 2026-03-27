@@ -558,17 +558,14 @@ func TestContext_Handling(t *testing.T) {
 	})
 	
 	t.Run("context timeout", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 		defer cancel()
 		
-		time.Sleep(time.Millisecond) // Wait for timeout
+		time.Sleep(10 * time.Millisecond) // Wait for timeout
 		
-		select {
-		case <-ctx.Done():
-			assert.Equal(t, context.DeadlineExceeded, ctx.Err())
-		default:
-			t.Error("Context should have timed out")
-		}
+		// After sleep, context should be done
+		assert.True(t, ctx.Err() != nil, "Context should have an error")
+		assert.Equal(t, context.DeadlineExceeded, ctx.Err())
 	})
 }
 
