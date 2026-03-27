@@ -10,6 +10,12 @@
 
 # Output of go coverage tool
 *.out
+coverage
+cov.out
+cover
+**/coverage
+session_coverage
+test_output.txt
 
 # Go workspace
 go.work
