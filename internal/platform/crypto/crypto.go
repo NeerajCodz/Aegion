@@ -9,7 +9,9 @@
 package crypto
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_crypto -ldl -lm
+#cgo linux LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_crypto -ldl -lm
+#cgo darwin LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_crypto -lm
+#cgo windows LDFLAGS: -L${SRCDIR}/../../../rust/target/x86_64-pc-windows-gnu/release -Wl,-Bstatic -l:libaegion_crypto.a -Wl,-Bdynamic -lws2_32 -lbcrypt -luserenv -lntdll
 #cgo CFLAGS: -I${SRCDIR}/../../../rust/crypto/include
 
 #include <stdlib.h>

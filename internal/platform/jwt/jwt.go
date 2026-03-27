@@ -7,7 +7,9 @@
 package jwt
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_jwt -ldl -lm
+#cgo linux LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_jwt -ldl -lm
+#cgo darwin LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_jwt -lm
+#cgo windows LDFLAGS: -L${SRCDIR}/../../../rust/target/x86_64-pc-windows-gnu/release -Wl,-Bstatic -l:libaegion_jwt.a -Wl,-Bdynamic -lws2_32 -lbcrypt -luserenv -lntdll
 #cgo CFLAGS: -I${SRCDIR}/../../../rust/jwt/include
 
 #include <stdlib.h>

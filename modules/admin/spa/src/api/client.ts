@@ -2,6 +2,12 @@ import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import type { ApiError } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const CSRF_COOKIE_NAME = 'aegion_admin_csrf';
+
+const getCookie = (name: string): string | null => {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+};
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -17,6 +23,11 @@ apiClient.interceptors.request.use(
     const token = localStorage.getItem('aegion_admin_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    const csrfToken = getCookie(CSRF_COOKIE_NAME);
+    if (csrfToken && config.headers) {
+      config.headers['X-CSRF-Token'] = csrfToken;
     }
     return config;
   },

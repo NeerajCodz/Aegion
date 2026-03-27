@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/modules/admin/store"
@@ -189,6 +190,9 @@ func (h *Handler) logAdminAction(r *http.Request, action, resourceType string, s
 		"path":        r.URL.Path,
 		"status_code": statusCode,
 		"user_agent":  r.UserAgent(),
+	}
+	if requestID := middleware.GetReqID(r.Context()); requestID != "" {
+		details["request_id"] = requestID
 	}
 
 	// Create audit entry

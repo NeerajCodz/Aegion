@@ -86,4 +86,4 @@ void jwt_free_keypair(KeyPairResult result);
 /// Free a ClaimsResult
 void jwt_free_claims(ClaimsResult result);
 
-} // extern "C"
+}  // extern "C"

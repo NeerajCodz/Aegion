@@ -150,4 +150,86 @@ mod tests {
         // Should be reasonable length
         assert!(id1.len() >= 20);
     }
+
+    #[test]
+    fn test_generate_multiple_keys() {
+        // Generate multiple EC keys and ensure they're all unique
+        let key1 = generate_ec_keypair("key1").unwrap();
+        let key2 = generate_ec_keypair("key2").unwrap();
+        let key3 = generate_ec_keypair("key3").unwrap();
+
+        // Keys should be different
+        assert_ne!(key1.private_key_der, key2.private_key_der);
+        assert_ne!(key2.private_key_der, key3.private_key_der);
+        assert_ne!(key1.public_key_der, key2.public_key_der);
+
+        // But algorithm should be the same
+        assert_eq!(key1.algorithm, key2.algorithm);
+        assert_eq!(key2.algorithm, key3.algorithm);
+        assert_eq!(key1.algorithm, "ES256");
+
+        // Key IDs should match what we set
+        assert_eq!(key1.key_id, "key1");
+        assert_eq!(key2.key_id, "key2");
+        assert_eq!(key3.key_id, "key3");
+    }
+
+    #[test]
+    fn test_generate_multiple_ed25519_keys() {
+        let key1 = generate_ed25519_keypair("ed1").unwrap();
+        let key2 = generate_ed25519_keypair("ed2").unwrap();
+
+        assert_eq!(key1.algorithm, "EdDSA");
+        assert_eq!(key2.algorithm, "EdDSA");
+        assert_ne!(key1.private_key_der, key2.private_key_der);
+        assert_ne!(key1.public_key_der, key2.public_key_der);
+        assert_eq!(key1.key_id, "ed1");
+        assert_eq!(key2.key_id, "ed2");
+    }
+
+    #[test]
+    fn test_rsa_keypair_not_supported() {
+        // RSA key generation should return an error
+        let result = generate_rsa_keypair("rsa-key");
+        assert!(result.is_err());
+
+        match result {
+            Err(JwtError::KeyGenerationFailed(msg)) => {
+                assert!(msg.contains("RSA"));
+                assert!(msg.contains("ES256"));
+            }
+            _ => panic!("Expected KeyGenerationFailed error"),
+        }
+    }
+
+    #[test]
+    fn test_key_generation_with_special_characters() {
+        // Test key generation with special characters in key ID
+        let special_chars = vec![
+            "key-with-dashes",
+            "key_with_underscores",
+            "key.with.dots",
+            "key123",
+            "CamelCaseKey",
+            "key/with/slashes",
+        ];
+
+        for key_id in special_chars {
+            let result = generate_ec_keypair(key_id);
+            assert!(result.is_ok(), "Failed to generate key with ID: {}", key_id);
+
+            let keypair = result.unwrap();
+            assert_eq!(keypair.key_id, key_id);
+        }
+    }
+
+    #[test]
+    fn test_key_generation_empty_key_id() {
+        // Test with empty key ID
+        let result = generate_ec_keypair("");
+        assert!(result.is_ok());
+
+        let keypair = result.unwrap();
+        assert_eq!(keypair.key_id, "");
+    }
 }

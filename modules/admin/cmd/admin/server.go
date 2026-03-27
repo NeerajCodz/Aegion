@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	admin "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
+	"github.com/aegion/aegion/modules/admin/security"
 )
 
 type Server struct {
@@ -58,6 +60,9 @@ func (s *Server) setupRouter() chi.Router {
 
 	// Admin API routes
 	r.Route("/api/admin", func(r chi.Router) {
+		r.Use(security.RateLimitAdmin)
+		r.Use(security.CSRFProtection)
+		r.Use(security.SecurityAudit)
 		s.Handler.RegisterRoutes(r)
 	})
 
@@ -71,29 +76,20 @@ func (s *Server) setupRouter() chi.Router {
 }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Security headers for admin interface
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	if isDevMode() {
+		return security.DevHeaders(next)
+	}
 
-		// HSTS for production
-		if r.TLS != nil {
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		}
+	return security.Headers(next)
+}
 
-		// CSP for admin interface
-		csp := "default-src 'self'; " +
-			"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-			"font-src 'self' https://fonts.gstatic.com; " +
-			"img-src 'self' data: https:; " +
-			"connect-src 'self'"
-		w.Header().Set("Content-Security-Policy", csp)
+func isDevMode() bool {
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ENV")))
+	if env == "" {
+		env = strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ENVIRONMENT")))
+	}
 
-		next.ServeHTTP(w, r)
-	})
+	return env == "dev" || env == "development" || env == "local"
 }
 
 func (s *Server) logRequest(next http.Handler) http.Handler {

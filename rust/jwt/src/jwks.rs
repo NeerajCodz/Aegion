@@ -126,6 +126,7 @@ pub fn jwks_to_json(jwks: &Jwks) -> Result<String, JwtError> {
 }
 
 /// Serialize JWKS to pretty JSON string
+#[allow(dead_code)]
 pub fn jwks_to_json_pretty(jwks: &Jwks) -> Result<String, JwtError> {
     serde_json::to_string_pretty(jwks).map_err(Into::into)
 }
@@ -189,5 +190,18 @@ mod tests {
         // Should be valid JSON
         let parsed: Jwks = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.keys.len(), 1);
+    }
+
+    #[test]
+    fn test_jwks_to_json_pretty() {
+        let keypair = generate_ec_keypair("pretty-key").unwrap();
+        let jwks = to_jwks(&[keypair]).unwrap();
+
+        let json = jwks_to_json_pretty(&jwks).unwrap();
+        assert!(json.contains('\n'));
+
+        let parsed: Jwks = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.keys.len(), 1);
+        assert_eq!(parsed.keys[0].kid, Some("pretty-key".into()));
     }
 }

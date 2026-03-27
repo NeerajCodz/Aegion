@@ -141,9 +141,9 @@ The embedded React admin panel (`/aegion`) implements multiple security layers:
 Content-Security-Policy: 
   default-src 'self';
   script-src 'self';
-  style-src 'self' 'unsafe-inline';
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
   img-src 'self' data: https:;
-  font-src 'self';
+  font-src 'self' https://fonts.gstatic.com;
   connect-src 'self';
   frame-ancestors 'none';
   base-uri 'self';
@@ -163,7 +163,7 @@ Permissions-Policy: geolocation=(), microphone=(), camera=()
 - HttpOnly session cookie (not accessible to JavaScript)
 - SameSite=Lax for CSRF protection
 - Secure flag enforced in production
-- X-CSRF-Token on every mutation (rotated after each write)
+- X-CSRF-Token on every mutation (double-submit cookie: `aegion_admin_csrf`)
 - Automatic logout on session expiration
 - Concurrent session limit per admin identity
 

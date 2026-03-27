@@ -12,7 +12,7 @@ on:
     branches: [main, beta]
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: '1.22'
   RUST_VERSION: 'stable'
   CARGO_TERM_COLOR: always
 
@@ -114,6 +114,18 @@ jobs:
           CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
         run: |
           go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Check coverage threshold
+        run: |
+          total=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Coverage: $total%"
+          threshold=95
+          # Use awk for floating point comparison instead of bc
+          if awk "BEGIN {exit !($total < $threshold)}"; then
+            echo "Coverage $total% is below threshold of $threshold%"
+            exit 1
+          fi
+          echo "Coverage $total% meets threshold of $threshold%"
 
       - name: Upload Go coverage
         uses: codecov/codecov-action@v4

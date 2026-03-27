@@ -263,12 +263,22 @@ func (s *Service) checkComplexity(password string) error {
 
 // checkSimilarity checks if password is too similar to identifier.
 func (s *Service) checkSimilarity(password, identifier string) error {
+	// Skip check if identifier is empty
+	if identifier == "" {
+		return nil
+	}
+
 	passwordLower := strings.ToLower(password)
 	identifierLower := strings.ToLower(identifier)
 
 	// Extract username part from email
 	if idx := strings.Index(identifierLower, "@"); idx > 0 {
 		identifierLower = identifierLower[:idx]
+	}
+
+	// Skip check if username part is too short (< 3 chars)
+	if len(identifierLower) < 3 {
+		return nil
 	}
 
 	// Check if password contains identifier or vice versa

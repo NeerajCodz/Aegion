@@ -9,7 +9,9 @@ mod error;
 mod ffi;
 mod hash;
 
-pub use compare::constant_time_compare;
+pub use compare::{
+    constant_time_compare, constant_time_compare_hmac, constant_time_compare_str,
+};
 pub use encrypt::{decrypt_field, encrypt_field};
 pub use error::CryptoError;
-pub use hash::{hash_password, verify_password};
+pub use hash::{hash_password, needs_rehash, verify_password};
