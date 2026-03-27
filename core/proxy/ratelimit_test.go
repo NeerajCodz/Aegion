@@ -254,8 +254,8 @@ func TestRateLimiter_MultipleKeys(t *testing.T) {
 
 	// 3rd request should be denied (both IP and user limits exceeded)
 	allowed, waitTime, err := limiter.Allow(req)
-	require.NoError(t, err)
 	assert.False(t, allowed)
+	assert.Equal(t, ErrRateLimitExceeded, err)
 	assert.Greater(t, waitTime, time.Duration(0))
 }
 

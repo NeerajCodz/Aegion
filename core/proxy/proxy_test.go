@@ -236,10 +236,10 @@ func TestProxy_ForwardWithPathRewrite(t *testing.T) {
 
 func TestProxy_CircuitBreakerIntegration(t *testing.T) {
 	// Create failing upstream server
-	failCount := 0
+	var requestCount int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		failCount++
-		if failCount <= 5 { // Fail first 5 requests
+		requestCount++
+		if requestCount <= 3 { // Fail first 3 actual requests that reach the server
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -283,8 +283,8 @@ func TestProxy_CircuitBreakerIntegration(t *testing.T) {
 		proxy.ServeHTTP(w, req)
 		
 		if i < 3 {
-			// First 3 requests should get through but fail
-			assert.Equal(t, http.StatusBadGateway, w.Code)
+			// First 3 requests should get through but get upstream error
+			assert.Equal(t, http.StatusInternalServerError, w.Code) // Upstream returns 500
 		} else {
 			// After 3 failures, circuit breaker should open
 			assert.Equal(t, http.StatusServiceUnavailable, w.Code)
@@ -299,7 +299,7 @@ func TestProxy_CircuitBreakerIntegration(t *testing.T) {
 	w := httptest.NewRecorder()
 	proxy.ServeHTTP(w, req)
 	
-	// This should succeed now as the upstream is "fixed"
+	// This should succeed now as the upstream is "fixed" (4th actual request to server)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 

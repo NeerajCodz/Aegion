@@ -73,9 +73,9 @@ func (m *MockHasher) Hash(password string) (string, error) {
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockHasher) Verify(password, hash string) error {
+func (m *MockHasher) Verify(password, hash string) (bool, error) {
 	args := m.Called(password, hash)
-	return args.Error(0)
+	return args.Bool(0), args.Error(1)
 }
 
 // MockHTTPClient for HIBP testing
