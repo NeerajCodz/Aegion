@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/aegion/aegion/modules/password/service"
 )
 
 // MockService implements the service interface for testing
@@ -21,17 +23,17 @@ type MockService struct {
 	mock.Mock
 }
 
-func (m *MockService) Register(ctx context.Context, identityID, identifier, password string) error {
+func (m *MockService) Register(ctx context.Context, identityID uuid.UUID, identifier, password string) error {
 	args := m.Called(ctx, identityID, identifier, password)
 	return args.Error(0)
 }
 
-func (m *MockService) Verify(ctx context.Context, identifier, password string) (string, error) {
+func (m *MockService) Verify(ctx context.Context, identifier, password string) (uuid.UUID, error) {
 	args := m.Called(ctx, identifier, password)
-	return args.String(0), args.Error(1)
+	return args.Get(0).(uuid.UUID), args.Error(1)
 }
 
-func (m *MockService) ChangePassword(ctx context.Context, identityID, oldPassword, newPassword string) error {
+func (m *MockService) ChangePassword(ctx context.Context, identityID uuid.UUID, oldPassword, newPassword string) error {
 	args := m.Called(ctx, identityID, oldPassword, newPassword)
 	return args.Error(0)
 }
@@ -39,6 +41,13 @@ func (m *MockService) ChangePassword(ctx context.Context, identityID, oldPasswor
 func (m *MockService) ValidatePassword(ctx context.Context, password, identifier string) error {
 	args := m.Called(ctx, password, identifier)
 	return args.Error(0)
+}
+
+func registerRequest(email, password string) RegisterRequest {
+	var req RegisterRequest
+	req.Traits.Email = email
+	req.Password = password
+	return req
 }
 
 func (m *MockService) Delete(ctx context.Context, identityID string) error {
@@ -53,13 +62,13 @@ func (m *MockService) ResetPassword(ctx context.Context, identityID, newPassword
 
 // Service errors for testing
 var (
-	ErrPasswordTooShort   = errors.New("password_too_short")
-	ErrPasswordTooWeak    = errors.New("password_too_weak")
-	ErrPasswordBreached   = errors.New("password_breached")
-	ErrPasswordReused     = errors.New("password_reused")
-	ErrPasswordSimilar    = errors.New("password_similar")
-	ErrInvalidCredentials = errors.New("invalid_credentials")
-	ErrIdentityNotFound   = errors.New("identity_not_found")
+	ErrPasswordTooShort   = service.ErrPasswordTooShort
+	ErrPasswordTooWeak    = service.ErrPasswordTooWeak
+	ErrPasswordBreached   = service.ErrPasswordBreached
+	ErrPasswordReused     = service.ErrPasswordReused
+	ErrPasswordSimilar    = service.ErrPasswordSimilar
+	ErrInvalidCredentials = service.ErrInvalidCredentials
+	ErrIdentityNotFound   = service.ErrIdentityNotFound
 )
 
 func TestHandler_HandleRegistration(t *testing.T) {
@@ -72,12 +81,9 @@ func TestHandler_HandleRegistration(t *testing.T) {
 	}{
 		{
 			name: "successful registration",
-			body: RegisterRequest{
-				Email:    "user@example.com",
-				Password: "SecurePass123!",
-			},
+			body: registerRequest("user@example.com", "SecurePass123!"),
 			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("string"), "user@example.com", "SecurePass123!").Return(nil)
+				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "SecurePass123!").Return(nil)
 			},
 			expectedStatus: http.StatusCreated,
 		},
@@ -90,78 +96,59 @@ func TestHandler_HandleRegistration(t *testing.T) {
 		},
 		{
 			name: "missing email",
-			body: RegisterRequest{
-				Password: "SecurePass123!",
-			},
+			body: registerRequest("", "SecurePass123!"),
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_email",
 		},
 		{
 			name: "missing password",
-			body: RegisterRequest{
-				Email: "user@example.com",
-			},
+			body: registerRequest("user@example.com", ""),
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_password",
 		},
 		{
 			name: "password too short",
-			body: RegisterRequest{
-				Email:    "user@example.com",
-				Password: "weak",
-			},
+			body: registerRequest("user@example.com", "weak"),
 			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("string"), "user@example.com", "weak").Return(ErrPasswordTooShort)
+				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "weak").Return(ErrPasswordTooShort)
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_too_short",
 		},
 		{
 			name: "password too weak",
-			body: RegisterRequest{
-				Email:    "user@example.com",
-				Password: "weakpassword",
-			},
+			body: registerRequest("user@example.com", "weakpassword"),
 			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("string"), "user@example.com", "weakpassword").Return(ErrPasswordTooWeak)
+				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "weakpassword").Return(ErrPasswordTooWeak)
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_too_weak",
 		},
 		{
 			name: "password breached",
-			body: RegisterRequest{
-				Email:    "user@example.com",
-				Password: "password123",
-			},
+			body: registerRequest("user@example.com", "password123"),
 			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("string"), "user@example.com", "password123").Return(ErrPasswordBreached)
+				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "password123").Return(ErrPasswordBreached)
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_breached",
 		},
 		{
 			name: "password similar",
-			body: RegisterRequest{
-				Email:    "user@example.com",
-				Password: "user123",
-			},
+			body: registerRequest("user@example.com", "user123"),
 			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("string"), "user@example.com", "user123").Return(ErrPasswordSimilar)
+				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "user123").Return(ErrPasswordSimilar)
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_similar",
 		},
 		{
 			name: "internal server error",
-			body: RegisterRequest{
-				Email:    "user@example.com",
-				Password: "SecurePass123!",
-			},
+			body: registerRequest("user@example.com", "SecurePass123!"),
 			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("string"), "user@example.com", "SecurePass123!").Return(errors.New("database error"))
+				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "SecurePass123!").Return(errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "internal_error",
@@ -196,7 +183,7 @@ func TestHandler_HandleRegistration(t *testing.T) {
 				var response ErrorResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Code)
+				assert.Equal(t, tt.expectedError, response.Error.Status)
 			}
 
 			service.AssertExpectations(t)
@@ -205,7 +192,7 @@ func TestHandler_HandleRegistration(t *testing.T) {
 }
 
 func TestHandler_HandleLogin(t *testing.T) {
-	identityID := uuid.New().String()
+	identityID := uuid.New()
 
 	tests := []struct {
 		name           string
@@ -239,7 +226,7 @@ func TestHandler_HandleLogin(t *testing.T) {
 			},
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_identifier",
+			expectedError:  "missing_credentials",
 		},
 		{
 			name: "missing password",
@@ -248,7 +235,7 @@ func TestHandler_HandleLogin(t *testing.T) {
 			},
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_password",
+			expectedError:  "missing_credentials",
 		},
 		{
 			name: "invalid credentials",
@@ -257,7 +244,7 @@ func TestHandler_HandleLogin(t *testing.T) {
 				Password:   "wrongpassword",
 			},
 			setupMocks: func(service *MockService) {
-				service.On("Verify", mock.Anything, "user@example.com", "wrongpassword").Return("", ErrInvalidCredentials)
+				service.On("Verify", mock.Anything, "user@example.com", "wrongpassword").Return(uuid.Nil, ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusUnauthorized,
 			expectedError:  "invalid_credentials",
@@ -269,7 +256,7 @@ func TestHandler_HandleLogin(t *testing.T) {
 				Password:   "password",
 			},
 			setupMocks: func(service *MockService) {
-				service.On("Verify", mock.Anything, "user@example.com", "password").Return("", errors.New("database error"))
+				service.On("Verify", mock.Anything, "user@example.com", "password").Return(uuid.Nil, errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "internal_error",
@@ -304,13 +291,13 @@ func TestHandler_HandleLogin(t *testing.T) {
 				var response ErrorResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Code)
+				assert.Equal(t, tt.expectedError, response.Error.Status)
 			} else if recorder.Code == http.StatusOK {
 				var response SuccessResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
 				assert.NotNil(t, response.Session)
-				assert.Equal(t, identityID, response.Session.Identity.ID)
+				assert.Equal(t, identityID.String(), response.Session.IdentityID)
 			}
 
 			service.AssertExpectations(t)
@@ -319,7 +306,8 @@ func TestHandler_HandleLogin(t *testing.T) {
 }
 
 func TestHandler_HandleChangePassword(t *testing.T) {
-	identityID := uuid.New().String()
+	identityID := uuid.New()
+	identityIDStr := identityID.String()
 
 	tests := []struct {
 		name           string
@@ -331,7 +319,7 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 	}{
 		{
 			name:   "successful password change",
-			header: identityID,
+			header: identityIDStr,
 			body: ChangePasswordRequest{
 				OldPassword: "oldpassword",
 				NewPassword: "NewSecurePass123!",
@@ -346,20 +334,20 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 			header:         "",
 			body:           ChangePasswordRequest{},
 			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_identity_id",
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "unauthorized",
 		},
 		{
 			name:           "invalid UUID in header",
 			header:         "not-a-uuid",
 			body:           ChangePasswordRequest{},
 			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "invalid_identity_id",
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "unauthorized",
 		},
 		{
 			name:           "invalid JSON",
-			header:         identityID,
+			header:         identityIDStr,
 			body:           "invalid json",
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
@@ -367,27 +355,31 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 		},
 		{
 			name:   "missing old password",
-			header: identityID,
+			header: identityIDStr,
 			body: ChangePasswordRequest{
 				NewPassword: "NewSecurePass123!",
 			},
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_old_password",
+			setupMocks: func(service *MockService) {
+				service.On("ChangePassword", mock.Anything, identityID, "", "NewSecurePass123!").Return(ErrInvalidCredentials)
+			},
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "invalid_credentials",
 		},
 		{
 			name:   "missing new password",
-			header: identityID,
+			header: identityIDStr,
 			body: ChangePasswordRequest{
 				OldPassword: "oldpassword",
 			},
-			setupMocks:     func(service *MockService) {},
+			setupMocks: func(service *MockService) {
+				service.On("ChangePassword", mock.Anything, identityID, "oldpassword", "").Return(ErrPasswordTooShort)
+			},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_new_password",
+			expectedError:  "password_too_short",
 		},
 		{
 			name:   "identity not found",
-			header: identityID,
+			header: identityIDStr,
 			body: ChangePasswordRequest{
 				OldPassword: "oldpassword",
 				NewPassword: "NewSecurePass123!",
@@ -400,7 +392,7 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 		},
 		{
 			name:   "invalid old password",
-			header: identityID,
+			header: identityIDStr,
 			body: ChangePasswordRequest{
 				OldPassword: "wrongpassword",
 				NewPassword: "NewSecurePass123!",
@@ -413,7 +405,7 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 		},
 		{
 			name:   "password reused",
-			header: identityID,
+			header: identityIDStr,
 			body: ChangePasswordRequest{
 				OldPassword: "oldpassword",
 				NewPassword: "oldpassword",
@@ -426,7 +418,7 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 		},
 		{
 			name:   "internal server error",
-			header: identityID,
+			header: identityIDStr,
 			body: ChangePasswordRequest{
 				OldPassword: "oldpassword",
 				NewPassword: "NewSecurePass123!",
@@ -470,7 +462,7 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 				var response ErrorResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Code)
+				assert.Equal(t, tt.expectedError, response.Error.Status)
 			}
 
 			service.AssertExpectations(t)
@@ -547,7 +539,7 @@ func TestHandler_handleServiceError(t *testing.T) {
 			var response ErrorResponse
 			err := json.NewDecoder(recorder.Body).Decode(&response)
 			require.NoError(t, err)
-			assert.Equal(t, tt.expectedCode, response.Error.Code)
+			assert.Equal(t, tt.expectedCode, response.Error.Status)
 		})
 	}
 }
@@ -583,22 +575,20 @@ func TestHandler_EdgeCases(t *testing.T) {
 
 		handler.HandleChangePassword(recorder, req)
 
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 
 		var response ErrorResponse
 		err := json.NewDecoder(recorder.Body).Decode(&response)
 		require.NoError(t, err)
-		assert.Equal(t, "invalid_identity_id", response.Error.Code)
+		assert.Equal(t, "unauthorized", response.Error.Status)
 	})
 
 	t.Run("missing content type", func(t *testing.T) {
 		service := &MockService{}
 		handler := &Handler{service: service}
+		service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "SecurePass123!").Return(nil)
 
-		body := RegisterRequest{
-			Email:    "user@example.com",
-			Password: "SecurePass123!",
-		}
+		body := registerRequest("user@example.com", "SecurePass123!")
 		bodyBytes, _ := json.Marshal(body)
 
 		req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
@@ -619,17 +609,14 @@ func TestHandler_Concurrency(t *testing.T) {
 	handler := &Handler{service: service}
 
 	// Setup mock for multiple concurrent calls
-	service.On("Register", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil).Times(10)
+	service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil).Times(10)
 
 	// Run 10 concurrent registration requests
 	done := make(chan bool, 10)
 	
 	for i := 0; i < 10; i++ {
 		go func(id int) {
-			body := RegisterRequest{
-				Email:    "user" + string(rune(id)) + "@example.com",
-				Password: "SecurePass123!",
-			}
+			body := registerRequest("user"+string(rune(id))+"@example.com", "SecurePass123!")
 			bodyBytes, _ := json.Marshal(body)
 
 			req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(bodyBytes))
@@ -656,12 +643,9 @@ func BenchmarkHandleRegistration(b *testing.B) {
 	service := &MockService{}
 	handler := &Handler{service: service}
 
-	service.On("Register", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 
-	body := RegisterRequest{
-		Email:    "user@example.com",
-		Password: "SecurePass123!",
-	}
+	body := registerRequest("user@example.com", "SecurePass123!")
 	bodyBytes, _ := json.Marshal(body)
 
 	b.ResetTimer()

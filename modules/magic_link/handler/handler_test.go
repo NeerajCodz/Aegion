@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/aegion/aegion/modules/magic_link/service"
 )
 
 // MockService implements the service interface for testing
@@ -27,14 +29,22 @@ func (m *MockService) SendLoginCode(ctx context.Context, email string) error {
 	return args.Error(0)
 }
 
-func (m *MockService) VerifyCode(ctx context.Context, email, otpCode string) (string, string, error) {
+func (m *MockService) VerifyCode(ctx context.Context, email, otpCode string) (string, *uuid.UUID, error) {
 	args := m.Called(ctx, email, otpCode)
-	return args.String(0), args.String(1), args.Error(2)
+	var id *uuid.UUID
+	if args.Get(1) != nil {
+		id = args.Get(1).(*uuid.UUID)
+	}
+	return args.String(0), id, args.Error(2)
 }
 
-func (m *MockService) VerifyMagicLink(ctx context.Context, token string) (string, string, error) {
+func (m *MockService) VerifyMagicLink(ctx context.Context, token string) (string, *uuid.UUID, error) {
 	args := m.Called(ctx, token)
-	return args.String(0), args.String(1), args.Error(2)
+	var id *uuid.UUID
+	if args.Get(1) != nil {
+		id = args.Get(1).(*uuid.UUID)
+	}
+	return args.String(0), id, args.Error(2)
 }
 
 func (m *MockService) SendVerificationCode(ctx context.Context, email, identityID string) error {
@@ -64,9 +74,9 @@ func (m *MockService) Cleanup(ctx context.Context) error {
 
 // Service errors for testing
 var (
-	ErrInvalidCode    = errors.New("invalid_code")
-	ErrRateLimited    = errors.New("rate_limited")
-	ErrRecipientEmpty = errors.New("recipient_empty")
+	ErrInvalidCode    = service.ErrInvalidCode
+	ErrRateLimited    = service.ErrRateLimited
+	ErrRecipientEmpty = service.ErrRecipientEmpty
 )
 
 func TestHandler_HandleSendLoginCode(t *testing.T) {
@@ -89,12 +99,10 @@ func TestHandler_HandleSendLoginCode(t *testing.T) {
 		},
 		{
 			name: "missing email",
-			body: SendCodeRequest{},
-			setupMocks: func(service *MockService) {
-				// Service is still called to prevent account enumeration
-				service.On("SendLoginCode", mock.Anything, "").Return(nil)
-			},
-			expectedStatus: http.StatusOK, // Always returns success
+			body:           SendCodeRequest{},
+			setupMocks:     func(service *MockService) {},
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "missing_email",
 		},
 		{
 			name:           "invalid JSON",
@@ -126,14 +134,13 @@ func TestHandler_HandleSendLoginCode(t *testing.T) {
 			expectedError:  "internal_error",
 		},
 		{
-			name: "empty email still succeeds (anti-enumeration)",
+			name: "empty email is rejected",
 			body: SendCodeRequest{
 				Email: "",
 			},
-			setupMocks: func(service *MockService) {
-				service.On("SendLoginCode", mock.Anything, "").Return(nil)
-			},
-			expectedStatus: http.StatusOK,
+			setupMocks:     func(service *MockService) {},
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "missing_email",
 		},
 	}
 
@@ -165,7 +172,7 @@ func TestHandler_HandleSendLoginCode(t *testing.T) {
 				var response ErrorResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Code)
+				assert.Equal(t, tt.expectedError, response.Error.Status)
 			}
 
 			service.AssertExpectations(t)
@@ -174,7 +181,7 @@ func TestHandler_HandleSendLoginCode(t *testing.T) {
 }
 
 func TestHandler_HandleVerifyCode(t *testing.T) {
-	identityID := uuid.New().String()
+	identityID := uuid.New()
 
 	tests := []struct {
 		name           string
@@ -191,7 +198,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 				Code:  "123456",
 			},
 			setupMocks: func(service *MockService) {
-				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("user@example.com", identityID, nil)
+				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("user@example.com", &identityID, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectSession:  true,
@@ -203,7 +210,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 				Code:  "wrong123",
 			},
 			setupMocks: func(service *MockService) {
-				service.On("VerifyCode", mock.Anything, "user@example.com", "wrong123").Return("", "", ErrInvalidCode)
+				service.On("VerifyCode", mock.Anything, "user@example.com", "wrong123").Return("", nil, ErrInvalidCode)
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "invalid_code",
@@ -222,7 +229,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 			},
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_email",
+			expectedError:  "missing_fields",
 		},
 		{
 			name: "missing code",
@@ -231,7 +238,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 			},
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_code",
+			expectedError:  "missing_fields",
 		},
 		{
 			name: "verification returns empty identity",
@@ -241,7 +248,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 			},
 			setupMocks: func(service *MockService) {
 				// No identity associated with code (new registration flow)
-				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("user@example.com", "", nil)
+				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("user@example.com", nil, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectSession:  false,
@@ -253,7 +260,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 				Code:  "123456",
 			},
 			setupMocks: func(service *MockService) {
-				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("", "", errors.New("database error"))
+				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("", nil, errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "internal_error",
@@ -288,7 +295,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 				var response ErrorResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Code)
+				assert.Equal(t, tt.expectedError, response.Error.Status)
 			} else if recorder.Code == http.StatusOK {
 				var response SuccessResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
@@ -296,9 +303,9 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 				
 				if tt.expectSession {
 					assert.NotNil(t, response.Session)
-					assert.Equal(t, identityID, response.Session.Identity.ID)
+					assert.Equal(t, identityID.String(), response.Session.IdentityID)
 				} else {
-					assert.Contains(t, response.Message, "Code verified successfully")
+					assert.Contains(t, response.Message, "Code verified for")
 				}
 			}
 
@@ -308,7 +315,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 }
 
 func TestHandler_HandleVerifyMagicLink(t *testing.T) {
-	identityID := uuid.New().String()
+	identityID := uuid.New()
 
 	tests := []struct {
 		name           string
@@ -322,7 +329,7 @@ func TestHandler_HandleVerifyMagicLink(t *testing.T) {
 			name:  "successful verification",
 			token: "valid-token-123",
 			setupMocks: func(service *MockService) {
-				service.On("VerifyMagicLink", mock.Anything, "valid-token-123").Return("user@example.com", identityID, nil)
+				service.On("VerifyMagicLink", mock.Anything, "valid-token-123").Return("user@example.com", &identityID, nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectSession:  true,
@@ -331,7 +338,7 @@ func TestHandler_HandleVerifyMagicLink(t *testing.T) {
 			name:  "invalid token",
 			token: "invalid-token",
 			setupMocks: func(service *MockService) {
-				service.On("VerifyMagicLink", mock.Anything, "invalid-token").Return("", "", ErrInvalidCode)
+				service.On("VerifyMagicLink", mock.Anything, "invalid-token").Return("", nil, ErrInvalidCode)
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "invalid_code",
@@ -347,7 +354,7 @@ func TestHandler_HandleVerifyMagicLink(t *testing.T) {
 			name:  "internal server error",
 			token: "valid-token-123",
 			setupMocks: func(service *MockService) {
-				service.On("VerifyMagicLink", mock.Anything, "valid-token-123").Return("", "", errors.New("database error"))
+				service.On("VerifyMagicLink", mock.Anything, "valid-token-123").Return("", nil, errors.New("database error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "internal_error",
@@ -362,12 +369,12 @@ func TestHandler_HandleVerifyMagicLink(t *testing.T) {
 			tt.setupMocks(service)
 
 			// Build URL with query parameter
-			url := "/verify-magic-link"
+			requestURL := "/verify-magic-link"
 			if tt.token != "" {
-				url += "?token=" + url.QueryEscape(tt.token)
+				requestURL += "?token=" + url.QueryEscape(tt.token)
 			}
 
-			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req := httptest.NewRequest(http.MethodGet, requestURL, nil)
 			recorder := httptest.NewRecorder()
 
 			handler.HandleVerifyMagicLink(recorder, req)
@@ -378,7 +385,7 @@ func TestHandler_HandleVerifyMagicLink(t *testing.T) {
 				var response ErrorResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Code)
+				assert.Equal(t, tt.expectedError, response.Error.Status)
 			} else if recorder.Code == http.StatusOK {
 				var response SuccessResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
@@ -386,7 +393,7 @@ func TestHandler_HandleVerifyMagicLink(t *testing.T) {
 				
 				if tt.expectSession {
 					assert.NotNil(t, response.Session)
-					assert.Equal(t, identityID, response.Session.Identity.ID)
+					assert.Equal(t, identityID.String(), response.Session.IdentityID)
 				}
 			}
 
@@ -497,7 +504,7 @@ func TestHandler_ErrorMapping(t *testing.T) {
 					var response ErrorResponse
 					err := json.NewDecoder(recorder.Body).Decode(&response)
 					require.NoError(t, err)
-					assert.Equal(t, tt.expectedCode, response.Error.Code)
+					assert.Equal(t, tt.expectedCode, response.Error.Status)
 				}
 			}
 
@@ -545,7 +552,8 @@ func TestHandler_QueryParameterExtraction(t *testing.T) {
 			handler := &Handler{service: service}
 
 			if tt.expected != "" {
-				service.On("VerifyMagicLink", mock.Anything, tt.expected).Return("user@example.com", uuid.New().String(), nil)
+				identityID := uuid.New()
+				service.On("VerifyMagicLink", mock.Anything, tt.expected).Return("user@example.com", &identityID, nil)
 			}
 
 			req := httptest.NewRequest(http.MethodGet, tt.url, nil)

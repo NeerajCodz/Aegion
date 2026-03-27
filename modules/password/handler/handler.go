@@ -2,6 +2,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,13 +12,20 @@ import (
 	"github.com/aegion/aegion/modules/password/service"
 )
 
+// Service defines the password service behavior needed by handlers.
+type Service interface {
+	Register(ctx context.Context, identityID uuid.UUID, identifier, password string) error
+	Verify(ctx context.Context, identifier, password string) (uuid.UUID, error)
+	ChangePassword(ctx context.Context, identityID uuid.UUID, oldPassword, newPassword string) error
+}
+
 // Handler handles password authentication HTTP requests.
 type Handler struct {
-	service *service.Service
+	service Service
 }
 
 // New creates a new password handler.
-func New(svc *service.Service) *Handler {
+func New(svc Service) *Handler {
 	return &Handler{service: svc}
 }
 

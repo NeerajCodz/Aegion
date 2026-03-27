@@ -2,20 +2,30 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/aegion/aegion/modules/magic_link/service"
 )
 
+// Service defines the magic link service behavior needed by handlers.
+type Service interface {
+	SendLoginCode(ctx context.Context, email string) error
+	VerifyCode(ctx context.Context, email, otpCode string) (string, *uuid.UUID, error)
+	VerifyMagicLink(ctx context.Context, token string) (string, *uuid.UUID, error)
+}
+
 // Handler handles magic link HTTP requests.
 type Handler struct {
-	service *service.Service
+	service Service
 }
 
 // New creates a new magic link handler.
-func New(svc *service.Service) *Handler {
+func New(svc Service) *Handler {
 	return &Handler{service: svc}
 }
 
