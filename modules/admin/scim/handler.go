@@ -441,7 +441,7 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/scim+json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 // writeError writes a SCIM error response.
@@ -455,5 +455,5 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, scimType, detail
 
 	w.Header().Set("Content-Type", "application/scim+json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(errorResp)
+	_ = json.NewEncoder(w).Encode(errorResp)
 }

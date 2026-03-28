@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"flag"
 	"fmt"
 	"net/http"
@@ -20,9 +19,6 @@ import (
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
 )
-
-//go:embed migrations/*.sql
-var migrations embed.FS
 
 type Config struct {
 	Database struct {

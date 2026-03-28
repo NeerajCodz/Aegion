@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -344,7 +345,9 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Log.Level = v
 	}
 	if v := os.Getenv("AEGION_SERVER_PORT"); v != "" {
-		fmt.Sscanf(v, "%d", &cfg.Server.Port)
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.Server.Port = port
+		}
 	}
 	// Cookie secrets from env (comma-separated)
 	if v := os.Getenv("AEGION_SECRETS_COOKIE"); v != "" {

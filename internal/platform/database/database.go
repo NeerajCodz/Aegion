@@ -103,7 +103,11 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 	if !acquired {
 		return fmt.Errorf("another migration is in progress")
 	}
-	defer conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", lockID)
+	defer func() {
+		if _, unlockErr := conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", lockID); unlockErr != nil {
+			_ = unlockErr
+		}
+	}()
 
 	// Ensure migrations table exists
 	if err := m.ensureMigrationsTable(ctx, conn.Conn()); err != nil {
@@ -239,7 +243,11 @@ func (m *Migrator) applyMigration(ctx context.Context, conn *pgx.Conn, mig Migra
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && rollbackErr != pgx.ErrTxClosed {
+			_ = rollbackErr
+		}
+	}()
 
 	// Execute migration SQL
 	if _, err := tx.Exec(ctx, mig.UpSQL); err != nil {
@@ -302,7 +310,11 @@ func (m *Migrator) Rollback(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && rollbackErr != pgx.ErrTxClosed {
+			_ = rollbackErr
+		}
+	}()
 
 	if _, err := tx.Exec(ctx, mig.DownSQL); err != nil {
 		return fmt.Errorf("rollback SQL failed: %w", err)

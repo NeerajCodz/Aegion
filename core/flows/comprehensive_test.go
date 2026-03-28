@@ -397,7 +397,7 @@ func TestNodeChaining_MultipleModifiers(t *testing.T) {
 func BenchmarkMultipleFlowCreations(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		NewFlow(TypeLogin, "/auth/login", 15*time.Minute)
+		_, _ = NewFlow(TypeLogin, "/auth/login", 15*time.Minute)
 	}
 }
 

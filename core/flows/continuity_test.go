@@ -374,8 +374,10 @@ func TestContinuityManager_Cleanup(t *testing.T) {
 	ctx := context.Background()
 
 	// Create containers
-	manager.Create(ctx, "test1", nil, Payload{})
-	manager.Create(ctx, "test2", nil, Payload{})
+	_, err := manager.Create(ctx, "test1", nil, Payload{})
+	require.NoError(t, err)
+	_, err = manager.Create(ctx, "test2", nil, Payload{})
+	require.NoError(t, err)
 
 	// Wait for them to expire
 	time.Sleep(10 * time.Millisecond)
@@ -475,6 +477,6 @@ func BenchmarkContinuityManager_Create(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		manager.Create(ctx, "test", nil, payload)
+		_, _ = manager.Create(ctx, "test", nil, payload)
 	}
 }

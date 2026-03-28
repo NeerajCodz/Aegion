@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"crypto/tls"
 	"errors"
 	"net/http"
@@ -23,7 +22,7 @@ func TestProxy_ServeHTTP(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "upstream response"}`))
+		_, _ = w.Write([]byte(`{"message": "upstream response"}`))
 	}))
 	defer upstream.Close()
 
@@ -118,7 +117,7 @@ func TestProxy_Forward(t *testing.T) {
 		assert.NotEmpty(t, r.Header.Get("X-Forwarded-Proto"))
 		
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("upstream response"))
+		_, _ = w.Write([]byte("upstream response"))
 	}))
 	defer upstream.Close()
 
@@ -132,7 +131,7 @@ func TestProxy_Forward(t *testing.T) {
 
 	// Create test request
 	req := httptest.NewRequest("GET", "/test", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	// Create test rule and upstream
@@ -164,7 +163,7 @@ func TestProxy_ForwardWithSessionHeaders(t *testing.T) {
 		assert.Equal(t, string(session.AAL2), r.Header.Get("X-Aegion-AAL"))
 		
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("authenticated response"))
+		_, _ = w.Write([]byte("authenticated response"))
 	}))
 	defer upstream.Close()
 
@@ -187,7 +186,7 @@ func TestProxy_ForwardWithSessionHeaders(t *testing.T) {
 	// Create test request with session
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = req.WithContext(session.WithSession(req.Context(), sess))
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	// Forward request
@@ -218,7 +217,7 @@ func TestProxy_ForwardWithPathRewrite(t *testing.T) {
 
 	// Create test request
 	req := httptest.NewRequest("GET", "/api/v1/users", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	// Create rule with rewrite
@@ -342,7 +341,7 @@ func TestProxy_HandleRateLimitExceeded(t *testing.T) {
 	proxy := NewProxy(config, nil, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	start := time.Now()
@@ -362,7 +361,7 @@ func TestProxy_HandleAccessError_AuthenticationRequired(t *testing.T) {
 	proxy := NewProxy(config, nil, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	start := time.Now()
@@ -380,7 +379,7 @@ func TestProxy_HandleAccessError_NoSession(t *testing.T) {
 	proxy := NewProxy(config, nil, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	start := time.Now()
@@ -717,7 +716,7 @@ func BenchmarkProxy_ServeHTTP(b *testing.B) {
 	// Create test upstream server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	}))
 	defer upstream.Close()
 

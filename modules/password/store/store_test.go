@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type testContextKey string
+
 // Test pure functions that don't require database
 func TestCredential_struct(t *testing.T) {
 	now := time.Now()
@@ -225,15 +227,15 @@ func TestStoreInterface(t *testing.T) {
 
 	// These will panic with nil database, but that's expected in unit tests
 	// We're just testing that the methods exist with correct signatures
-	assert.Panics(t, func() { store.Create(ctx, nil) })
-	assert.Panics(t, func() { store.GetByIdentifier(ctx, identifier) })
-	assert.Panics(t, func() { store.GetByIdentityID(ctx, identityID) })
-	assert.Panics(t, func() { store.Update(ctx, credID, hash) })
-	assert.Panics(t, func() { store.Delete(ctx, credID) })
-	assert.Panics(t, func() { store.DeleteByIdentityID(ctx, identityID) })
-	assert.Panics(t, func() { store.AddToHistory(ctx, credID, hash) })
-	assert.Panics(t, func() { store.GetHistory(ctx, credID, 5) })
-	assert.Panics(t, func() { store.CleanupHistory(ctx, credID, 5) })
+	assert.Panics(t, func() { _ = store.Create(ctx, nil) })
+	assert.Panics(t, func() { _, _ = store.GetByIdentifier(ctx, identifier) })
+	assert.Panics(t, func() { _, _ = store.GetByIdentityID(ctx, identityID) })
+	assert.Panics(t, func() { _ = store.Update(ctx, credID, hash) })
+	assert.Panics(t, func() { _ = store.Delete(ctx, credID) })
+	assert.Panics(t, func() { _ = store.DeleteByIdentityID(ctx, identityID) })
+	assert.Panics(t, func() { _ = store.AddToHistory(ctx, credID, hash) })
+	assert.Panics(t, func() { _, _ = store.GetHistory(ctx, credID, 5) })
+	assert.Panics(t, func() { _ = store.CleanupHistory(ctx, credID, 5) })
 }
 
 // Test data validation logic that might exist in store methods
@@ -450,9 +452,9 @@ func TestContextHandling(t *testing.T) {
 
 	t.Run("context with values", func(t *testing.T) {
 		ctx := context.Background()
-		ctx = context.WithValue(ctx, "key", "value")
+		ctx = context.WithValue(ctx, testContextKey("key"), "value")
 
-		value := ctx.Value("key")
+		value := ctx.Value(testContextKey("key"))
 		assert.Equal(t, "value", value)
 	})
 }
@@ -532,7 +534,7 @@ func BenchmarkSliceContains(b *testing.B) {
 func BenchmarkUUIDGeneration(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		uuid.New().String()
+		_ = uuid.New().String()
 	}
 }
 
@@ -541,6 +543,6 @@ func BenchmarkUUIDParsing(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		uuid.Parse(id)
+		_, _ = uuid.Parse(id)
 	}
 }

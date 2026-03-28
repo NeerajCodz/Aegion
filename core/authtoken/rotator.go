@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/core/eventbus"
+	"github.com/rs/zerolog/log"
 )
 
 // Event types for secret rotation.
@@ -84,14 +85,16 @@ func (r *Rotator) Rotate(ctx context.Context, newSecret []byte) error {
 
 	// Emit rotation started event
 	if r.eventBus != nil {
-		r.eventBus.Publish(ctx, eventbus.Event{
+		if err := r.eventBus.Publish(ctx, eventbus.Event{
 			Type:         EventSecretRotationStarted,
 			SourceModule: r.sourceModule,
 			EntityType:   "secret",
 			Payload: map[string]interface{}{
 				"grace_period_seconds": r.gracePeriod.Seconds(),
 			},
-		})
+		}); err != nil {
+			log.Error().Err(err).Msg("failed to publish secret rotation started event")
+		}
 	}
 
 	// Schedule removal of old secret after grace period
@@ -108,18 +111,22 @@ func (r *Rotator) completeRotation(ctx context.Context, currentSecret []byte) {
 	defer r.mu.Unlock()
 
 	// Remove old secret, keep only current
-	r.generator.SetSecrets(currentSecret)
+	if err := r.generator.SetSecrets(currentSecret); err != nil {
+		log.Error().Err(err).Msg("failed to finalize rotated secret")
+	}
 
 	r.rotationTimer = nil
 
 	// Emit rotation completed event
 	if r.eventBus != nil {
-		r.eventBus.Publish(ctx, eventbus.Event{
+		if err := r.eventBus.Publish(ctx, eventbus.Event{
 			Type:         EventSecretRotationCompleted,
 			SourceModule: r.sourceModule,
 			EntityType:   "secret",
 			Payload:      map[string]interface{}{},
-		})
+		}); err != nil {
+			log.Error().Err(err).Msg("failed to publish secret rotation completed event")
+		}
 	}
 }
 
@@ -146,14 +153,16 @@ func (r *Rotator) RotateWithCallback(ctx context.Context, newSecret []byte, onCo
 
 	// Emit rotation started event
 	if r.eventBus != nil {
-		r.eventBus.Publish(ctx, eventbus.Event{
+		if err := r.eventBus.Publish(ctx, eventbus.Event{
 			Type:         EventSecretRotationStarted,
 			SourceModule: r.sourceModule,
 			EntityType:   "secret",
 			Payload: map[string]interface{}{
 				"grace_period_seconds": r.gracePeriod.Seconds(),
 			},
-		})
+		}); err != nil {
+			log.Error().Err(err).Msg("failed to publish secret rotation started event")
+		}
 	}
 
 	// Schedule completion with callback

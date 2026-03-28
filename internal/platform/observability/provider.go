@@ -68,7 +68,7 @@ func NewProvider(ctx context.Context, config *Config) (*Provider, error) {
 	// Initialize metrics if enabled
 	if config.EnableMetrics {
 		if err := provider.initMetrics(ctx); err != nil {
-			provider.Shutdown(ctx) // Clean up what we've created so far
+			_ = provider.Shutdown(ctx) // Clean up what we've created so far
 			return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 		}
 	}
@@ -76,7 +76,7 @@ func NewProvider(ctx context.Context, config *Config) (*Provider, error) {
 	// Initialize logging if enabled
 	if config.EnableLogs {
 		if err := provider.initLogging(ctx); err != nil {
-			provider.Shutdown(ctx) // Clean up what we've created so far
+			_ = provider.Shutdown(ctx) // Clean up what we've created so far
 			return nil, fmt.Errorf("failed to initialize logging: %w", err)
 		}
 	}

@@ -2,14 +2,22 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/session"
 )
+
+type requestIDContextKey struct{}
+
+var requestIDKey = requestIDContextKey{}
+
+func withRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey, requestID)
+}
 
 // AuthMiddleware provides authentication middleware for the proxy.
 type AuthMiddleware struct {
@@ -236,7 +244,7 @@ func RequireCapabilities(capabilities ...string) func(http.Handler) http.Handler
 
 // getRequestIDFromContext extracts the request ID from the context.
 func getRequestIDFromContext(ctx context.Context) string {
-	if id := ctx.Value("request_id"); id != nil {
+	if id := ctx.Value(requestIDKey); id != nil {
 		if requestID, ok := id.(string); ok {
 			return requestID
 		}
@@ -262,20 +270,20 @@ func joinStrings(slice []string, sep string) string {
 
 // writeJSON writes a JSON response.
 func writeJSON(w http.ResponseWriter, v interface{}) error {
-	// Simple JSON encoding without external dependencies
-	// In a real implementation, you'd use encoding/json
-	
-	// For now, we'll write a simple error response
-	w.Write([]byte(`{"error":{"code":401,"message":"Authentication failed"}}`))
-	return nil
+	return json.NewEncoder(w).Encode(v)
 }
 
 // writeErrorResponse writes a standard error response.
 func writeErrorResponse(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	
-	// Simple JSON response
-	response := `{"error":{"code":` + strconv.Itoa(statusCode) + `,"message":"` + message + `"}}`
-	w.Write([]byte(response))
+
+	response := map[string]interface{}{
+		"error": map[string]interface{}{
+			"code":    statusCode,
+			"message": message,
+		},
+	}
+
+	_ = writeJSON(w, response)
 }

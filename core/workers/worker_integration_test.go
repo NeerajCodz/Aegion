@@ -3,7 +3,6 @@ package workers
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,7 +16,6 @@ import (
 
 // MockDB provides a simple in-memory database mock for testing
 type MockDB struct {
-	mu      sync.Mutex
 	data    map[string]interface{}
 	queries []string
 	results map[string]interface{}

@@ -551,7 +551,7 @@ func TestTemplateDataTypes(t *testing.T) {
 			}
 
 			if tt.hasData {
-				if tt.data != nil && len(tt.data) > 0 {
+				if len(tt.data) > 0 {
 					assert.NotNil(t, msg.TemplateData)
 				}
 			} else {

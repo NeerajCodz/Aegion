@@ -312,31 +312,31 @@ func TestStore_Interface_Methods(t *testing.T) {
 	
 	// These will panic with nil database, but we're just testing method signatures
 	assert.Panics(t, func() {
-		store.Create(ctx, "user@example.com", "login", nil, time.Hour)
+		_, _ = store.Create(ctx, "user@example.com", "login", nil, time.Hour)
 	})
 	
 	assert.Panics(t, func() {
-		store.GetByCode(ctx, "user@example.com", "123456", "login")
+		_, _ = store.GetByCode(ctx, "user@example.com", "123456", "login")
 	})
 	
 	assert.Panics(t, func() {
-		store.GetByToken(ctx, "token123")
+		_, _ = store.GetByToken(ctx, "token123")
 	})
 	
 	assert.Panics(t, func() {
-		store.MarkUsed(ctx, uuid.New())
+		_ = store.MarkUsed(ctx, uuid.New())
 	})
 	
 	assert.Panics(t, func() {
-		store.InvalidatePrevious(ctx, "user@example.com", "login")
+		_ = store.InvalidatePrevious(ctx, "user@example.com", "login")
 	})
 	
 	assert.Panics(t, func() {
-		store.CheckRateLimit(ctx, "key", 5, time.Hour)
+		_ = store.CheckRateLimit(ctx, "key", 5, time.Hour)
 	})
 	
 	assert.Panics(t, func() {
-		store.Cleanup(ctx)
+		_, _ = store.Cleanup(ctx)
 	})
 }
 
@@ -676,13 +676,13 @@ func BenchmarkCryptoRand(b *testing.B) {
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rand.Read(buffer)
+		_, _ = rand.Read(buffer)
 	}
 }
 
 func BenchmarkBase64Encoding(b *testing.B) {
 	data := make([]byte, 32)
-	rand.Read(data)
+	_, _ = rand.Read(data)
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -693,6 +693,6 @@ func BenchmarkBase64Encoding(b *testing.B) {
 func BenchmarkUUIDGeneration(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		uuid.New().String()
+		_ = uuid.New().String()
 	}
 }

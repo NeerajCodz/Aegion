@@ -163,10 +163,8 @@ func TestManagerStopTimeout(t *testing.T) {
 		name: "stubborn",
 		startFn: func(ctx context.Context) error {
 			// Ignore context, just sleep forever (until test times out)
-			select {
-			case <-time.After(60 * time.Second):
-				return nil
-			}
+			<-time.After(60 * time.Second)
+			return nil
 		},
 	}
 

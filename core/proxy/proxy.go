@@ -121,7 +121,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Add request ID to context and response headers
-	ctx = context.WithValue(ctx, "request_id", requestID)
+	ctx = withRequestID(ctx, requestID)
 	r = r.WithContext(ctx)
 	w.Header().Set("X-Request-ID", requestID)
 
@@ -251,8 +251,8 @@ func (p *Proxy) Forward(target *url.URL, w http.ResponseWriter, r *http.Request,
 			p.addForwardedHeaders(req, r)
 
 			// Preserve request ID
-			if requestID := req.Context().Value("request_id"); requestID != nil {
-				req.Header.Set("X-Request-ID", requestID.(string))
+			if requestID := getRequestIDFromContext(req.Context()); requestID != "" {
+				req.Header.Set("X-Request-ID", requestID)
 			}
 
 			p.logger.Debug().
@@ -378,7 +378,9 @@ func (p *Proxy) getOrCreateRequestID(r *http.Request) string {
 
 	// Generate new request ID
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -470,5 +472,10 @@ func (p *Proxy) writeErrorResponse(w http.ResponseWriter, statusCode int, messag
 		`{"error":{"code":%d,"message":"%s","request_id":"%s"}}`,
 		statusCode, message, requestID,
 	)
-	w.Write([]byte(response))
+	if _, err := w.Write([]byte(response)); err != nil {
+		p.logger.Error().
+			Str("request_id", requestID).
+			Err(err).
+			Msg("failed to write error response")
+	}
 }

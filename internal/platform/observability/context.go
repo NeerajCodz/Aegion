@@ -15,10 +15,12 @@ type TraceInfoForLogger struct {
 	SpanID  string `json:"span_id"`
 }
 
+type loggerContextKey string
+
 // Context key constants that the logger package can reference
 const (
-	TraceInfoContextKey = "trace_info"
-	RequestIDContextKey = "request_id"
+	TraceInfoContextKey loggerContextKey = "trace_info"
+	RequestIDContextKey loggerContextKey = "request_id"
 )
 
 // AddTraceToContext adds trace information to context for logger consumption

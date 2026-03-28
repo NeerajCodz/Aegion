@@ -2,7 +2,7 @@
 # Aegion Base Build Image
 # Contains Go + Rust toolchains for building all components
 # =============================================================================
-FROM golang:1.23-bookworm AS base
+FROM golang:1.25-bookworm AS base
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -19,9 +19,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go tools (with specific versions for reproducibility)
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.31.0 && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0 && \
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10 && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1 && \
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.5.0
 
 # Install Rust tools
 RUN cargo install cbindgen

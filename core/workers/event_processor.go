@@ -169,49 +169,6 @@ func (w *EventProcessorWorker) markDelivered(ctx context.Context, deliveryID uui
 	}
 }
 
-// markFailed marks a delivery as failed and schedules retry.
-func (w *EventProcessorWorker) markFailed(ctx context.Context, deliveryID uuid.UUID, attemptCount int, err error) {
-	attemptCount++
-
-	if attemptCount >= w.maxRetries {
-		// Dead letter
-		_, dbErr := w.DB().Exec(ctx, `
-			UPDATE core_event_bus_deliveries
-			SET status = 'dead_lettered',
-			    attempt_count = $2,
-			    last_error = $3,
-			    updated_at = NOW()
-			WHERE id = $1
-		`, deliveryID, attemptCount, err.Error())
-		if dbErr != nil {
-			w.Log().Error().Err(dbErr).Str("delivery_id", deliveryID.String()).Msg("failed to dead-letter delivery")
-		}
-	} else {
-		// Schedule retry with exponential backoff
-		retryDelay := w.retryDelay * time.Duration(1<<uint(attemptCount))
-		nextRetry := time.Now().Add(retryDelay)
-
-		_, dbErr := w.DB().Exec(ctx, `
-			UPDATE core_event_bus_deliveries
-			SET status = 'failed',
-			    attempt_count = $2,
-			    last_error = $3,
-			    next_retry_at = $4,
-			    updated_at = NOW()
-			WHERE id = $1
-		`, deliveryID, attemptCount, err.Error(), nextRetry)
-		if dbErr != nil {
-			w.Log().Error().Err(dbErr).Str("delivery_id", deliveryID.String()).Msg("failed to mark delivery as failed")
-		}
-
-		w.Log().Debug().
-			Str("delivery_id", deliveryID.String()).
-			Int("attempt", attemptCount).
-			Time("next_retry", nextRetry).
-			Msg("delivery scheduled for retry")
-	}
-}
-
 // CleanupOldEvents removes old delivered events.
 func (w *EventProcessorWorker) CleanupOldEvents(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan)

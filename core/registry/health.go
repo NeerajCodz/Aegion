@@ -122,7 +122,9 @@ func (h *HealthChecker) checkAll() {
 	healthyCount := 0
 	unhealthyCount := 0
 	for result := range results {
-		h.registry.UpdateStatus(result.ModuleID, result.Status)
+		if err := h.registry.UpdateStatus(result.ModuleID, result.Status); err != nil {
+			log.Warn().Err(err).Str("module_id", result.ModuleID).Msg("failed to update module status")
+		}
 		if result.Status == StatusHealthy {
 			healthyCount++
 		} else {
@@ -213,7 +215,9 @@ func (h *HealthChecker) CheckNow(moduleID string) (*HealthCheckResult, error) {
 	}
 
 	result := h.checkModule(module)
-	h.registry.UpdateStatus(moduleID, result.Status)
+	if err := h.registry.UpdateStatus(moduleID, result.Status); err != nil {
+		return nil, err
+	}
 
 	return &result, nil
 }

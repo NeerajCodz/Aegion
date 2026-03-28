@@ -100,6 +100,8 @@ type Manager struct {
 	idleTimeout  time.Duration
 }
 
+var errTokenEntropyFailure = errors.New("failed to generate token entropy")
+
 // ManagerConfig configures the session manager.
 type ManagerConfig struct {
 	DB           *pgxpool.Pool
@@ -268,7 +270,9 @@ func (m *Manager) AddAuthMethod(ctx context.Context, sessionID uuid.UUID, method
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
 
 	// Insert auth method
 	_, err = tx.Exec(ctx, `
@@ -375,7 +379,9 @@ func (m *Manager) Cleanup(ctx context.Context) (int64, error) {
 
 func (m *Manager) generateToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(errTokenEntropyFailure)
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 

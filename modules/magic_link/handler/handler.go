@@ -113,7 +113,7 @@ func (h *Handler) HandleVerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleVerifyMagicLink handles verification of a magic link token.
@@ -141,7 +141,7 @@ func (h *Handler) HandleVerifyMagicLink(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleSendVerificationCode handles requests to send a verification code.
@@ -193,7 +193,7 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, message st
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // writeSuccess writes a success response with a message.
@@ -202,5 +202,5 @@ func (h *Handler) writeSuccess(w http.ResponseWriter, status int, message string
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }

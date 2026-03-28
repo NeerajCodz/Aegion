@@ -34,7 +34,7 @@ func TestDiscoveryGetEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	// Update status to healthy
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	url, err := discovery.GetEndpoint("api-service", EndpointHTTP)
 
@@ -89,7 +89,7 @@ func TestDiscoveryGetEndpointUnhealthy(t *testing.T) {
 	require.NoError(t, err)
 
 	// Module is unhealthy
-	registry.UpdateStatus("api-service", StatusUnhealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusUnhealthy))
 
 	url, err := discovery.GetEndpoint("api-service", EndpointHTTP)
 
@@ -135,7 +135,7 @@ func TestDiscoveryGetEndpointRoundRobin(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	// Get multiple endpoints and verify round-robin distribution
 	urls := make(map[string]int)
@@ -201,7 +201,7 @@ func TestDiscoveryGetEndpointByNameNoHealthy(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusUnhealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusUnhealthy))
 
 	endpoints, err := discovery.GetEndpointByName("API Service", EndpointHTTP)
 
@@ -225,7 +225,7 @@ func TestDiscoveryGetHealthyEndpoint(t *testing.T) {
 		}
 		_, err := registry.Register(req)
 		require.NoError(t, err)
-		registry.UpdateStatus(fmt.Sprintf("api-%d", i), StatusHealthy)
+		require.NoError(t, registry.UpdateStatus(fmt.Sprintf("api-%d", i), StatusHealthy))
 	}
 
 	endpoint, err := discovery.GetHealthyEndpoint("API Service", EndpointHTTP)
@@ -254,7 +254,7 @@ func TestDiscoveryGetHealthyEndpointRoundRobin(t *testing.T) {
 		}
 		_, err := registry.Register(req)
 		require.NoError(t, err)
-		registry.UpdateStatus(fmt.Sprintf("api-%d", i), StatusHealthy)
+		require.NoError(t, registry.UpdateStatus(fmt.Sprintf("api-%d", i), StatusHealthy))
 	}
 
 	// Get endpoints multiple times
@@ -297,7 +297,7 @@ func TestDiscoveryGetAllEndpoints(t *testing.T) {
 		}
 		_, err := registry.Register(req)
 		require.NoError(t, err)
-		registry.UpdateStatus(fmt.Sprintf("service-%d", i), StatusHealthy)
+		require.NoError(t, registry.UpdateStatus(fmt.Sprintf("service-%d", i), StatusHealthy))
 	}
 
 	httpEndpoints := discovery.GetAllEndpoints(EndpointHTTP)
@@ -336,7 +336,7 @@ func TestDiscoveryGetAllEndpointsUnhealthy(t *testing.T) {
 	require.NoError(t, err)
 
 	// Don't update to healthy - stays in starting state
-	registry.UpdateStatus("service-0", StatusUnhealthy)
+	require.NoError(t, registry.UpdateStatus("service-0", StatusUnhealthy))
 
 	endpoints := discovery.GetAllEndpoints(EndpointHTTP)
 
@@ -356,7 +356,7 @@ func TestDiscoveryResolveModule(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	module, err := discovery.ResolveModule("API Service")
 
@@ -379,7 +379,7 @@ func TestDiscoveryResolveModulePrefersHealthy(t *testing.T) {
 	}
 	_, err := registry.Register(req1)
 	require.NoError(t, err)
-	registry.UpdateStatus("api-1", StatusUnhealthy)
+	require.NoError(t, registry.UpdateStatus("api-1", StatusUnhealthy))
 
 	// Register healthy instance
 	req2 := RegistrationRequest{
@@ -389,7 +389,7 @@ func TestDiscoveryResolveModulePrefersHealthy(t *testing.T) {
 	}
 	_, err = registry.Register(req2)
 	require.NoError(t, err)
-	registry.UpdateStatus("api-2", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-2", StatusHealthy))
 
 	module, err := discovery.ResolveModule("API Service")
 
@@ -431,7 +431,7 @@ func TestDiscoveryResolveModuleNoInstances(t *testing.T) {
 	}
 	_, err := registry.Register(req)
 	require.NoError(t, err)
-	registry.UpdateStatus("api-1", StatusUnhealthy)
+	require.NoError(t, registry.UpdateStatus("api-1", StatusUnhealthy))
 
 	module, err := discovery.ResolveModule("API Service")
 
@@ -467,11 +467,12 @@ func TestDiscoveryResetRoundRobin(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	// Get some endpoints to populate round-robin
 	for i := 0; i < 3; i++ {
-		discovery.GetEndpoint("api-service", EndpointHTTP)
+		_, err = discovery.GetEndpoint("api-service", EndpointHTTP)
+		require.NoError(t, err)
 	}
 
 	key := "api-service:" + string(EndpointHTTP)
@@ -501,13 +502,16 @@ func TestDiscoveryResetAllRoundRobin(t *testing.T) {
 		}
 		_, err := registry.Register(req)
 		require.NoError(t, err)
-		registry.UpdateStatus(fmt.Sprintf("service-%d", i), StatusHealthy)
+		require.NoError(t, registry.UpdateStatus(fmt.Sprintf("service-%d", i), StatusHealthy))
 	}
 
 	// Populate round-robin - only GetEndpoint uses round-robin for multiple endpoints in same module
+	var err error
 	for i := 0; i < 2; i++ {
-		discovery.GetEndpoint(fmt.Sprintf("service-%d", i), EndpointHTTP)
-		discovery.GetEndpoint(fmt.Sprintf("service-%d", i), EndpointGRPC)
+		_, err = discovery.GetEndpoint(fmt.Sprintf("service-%d", i), EndpointHTTP)
+		require.NoError(t, err)
+		_, err = discovery.GetEndpoint(fmt.Sprintf("service-%d", i), EndpointGRPC)
+		require.NoError(t, err)
 	}
 
 	assert.Greater(t, len(discovery.rrIndex), 0)
@@ -535,7 +539,7 @@ func TestDiscoveryLeastConnectionsPattern(t *testing.T) {
 		}
 		_, err := registry.Register(req)
 		require.NoError(t, err)
-		registry.UpdateStatus(fmt.Sprintf("api-%d", i), StatusHealthy)
+		require.NoError(t, registry.UpdateStatus(fmt.Sprintf("api-%d", i), StatusHealthy))
 	}
 
 	// Track which instances get selected
@@ -568,7 +572,7 @@ func TestDiscoveryConcurrentEndpointSelection(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	// Concurrent access
 	done := make(chan bool)
@@ -603,7 +607,7 @@ func TestDiscoveryMultipleEndpointTypes(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	httpURL, err := discovery.GetEndpoint("api-service", EndpointHTTP)
 	assert.NoError(t, err)
@@ -653,7 +657,7 @@ func TestDiscoveryRoundRobinDoesNotLoseProgress(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	// Get endpoints and track sequence (round-robin starts at 0)
 	// First call: index=1 -> selects 8081
@@ -691,7 +695,7 @@ func TestDiscoveryEndpointWithMetadata(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	module, _ := registry.GetModule("api-service")
 
@@ -715,7 +719,7 @@ func TestDiscoveryRoundRobinWithReset(t *testing.T) {
 	_, err := registry.Register(req)
 	require.NoError(t, err)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	require.NoError(t, registry.UpdateStatus("api-service", StatusHealthy))
 
 	// Get first endpoint
 	ep1, _ := discovery.GetEndpoint("api-service", EndpointHTTP)

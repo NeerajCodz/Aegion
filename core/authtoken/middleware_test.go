@@ -30,7 +30,7 @@ func TestMiddleware(t *testing.T) {
 		moduleID := ModuleIDFromContext(r.Context())
 		w.Header().Set("X-Module-ID", moduleID)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	})
 
 	tests := []struct {
@@ -270,7 +270,7 @@ func TestModuleIDFromContext(t *testing.T) {
 func TestRequireModuleID(t *testing.T) {
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success"))
 	})
 
 	middleware := RequireModuleID("password", "magic_link")
@@ -374,7 +374,7 @@ func TestMiddleware_Integration(t *testing.T) {
 		moduleID := ModuleIDFromContext(r.Context())
 		w.Header().Set("X-Module", moduleID)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("authenticated and authorized"))
+		_, _ = w.Write([]byte("authenticated and authorized"))
 	})
 
 	authMiddleware := Middleware(MiddlewareConfig{

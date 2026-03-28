@@ -569,7 +569,7 @@ func BenchmarkService_CreateLoginFlow(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		service.CreateLoginFlow(ctx, "/auth/login")
+		_, _ = service.CreateLoginFlow(ctx, "/auth/login")
 	}
 }
 
@@ -583,7 +583,7 @@ func BenchmarkService_ValidateFlow(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		service.ValidateFlow(ctx, flow.ID, flow.CSRFToken)
+		_, _ = service.ValidateFlow(ctx, flow.ID, flow.CSRFToken)
 	}
 }
 

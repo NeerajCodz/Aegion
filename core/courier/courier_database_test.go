@@ -20,9 +20,6 @@ type MockDBExecutor struct {
 	insertedMessages map[uuid.UUID]*Message
 	updatedMessages  map[uuid.UUID]*Message
 	executeCalls     []string
-	execErr          error
-	queryErr         error
-	shouldFail       bool
 }
 
 // NewMockDBExecutor creates a new mock database executor

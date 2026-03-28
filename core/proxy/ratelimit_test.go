@@ -478,7 +478,7 @@ func BenchmarkRateLimiter_Allow(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			limiter.Allow(req)
+			_, _, _ = limiter.Allow(req)
 		}
 	})
 }
@@ -492,7 +492,7 @@ func BenchmarkMemoryStore_Allow(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			store.Allow(key, limit, window)
+			_, _, _ = store.Allow(key, limit, window)
 		}
 	})
 }
@@ -511,7 +511,8 @@ func TestRateLimiter_GetMetrics(t *testing.T) {
 	req.RemoteAddr = "192.168.1.100:12345"
 
 	for i := 0; i < 5; i++ {
-		limiter.Allow(req)
+		_, _, err := limiter.Allow(req)
+		require.NoError(t, err)
 	}
 
 	// Get metrics
@@ -540,8 +541,10 @@ func TestRateLimiter_GetMetrics_MultipleKeys(t *testing.T) {
 	req2.RemoteAddr = "192.168.1.101:12346"
 
 	for i := 0; i < 3; i++ {
-		limiter.Allow(req1)
-		limiter.Allow(req2)
+		_, _, err := limiter.Allow(req1)
+		require.NoError(t, err)
+		_, _, err = limiter.Allow(req2)
+		require.NoError(t, err)
 	}
 
 	keys := []string{"ip:192.168.1.100", "ip:192.168.1.101"}

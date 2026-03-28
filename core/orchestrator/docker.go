@@ -402,7 +402,7 @@ func (d *DockerClient) findContainer(ctx context.Context, name string) (*Contain
 
 // pullImageIfNeeded pulls an image if it doesn't exist locally.
 func (d *DockerClient) pullImageIfNeeded(ctx context.Context, imageRef string) error {
-	_, _, err := d.cli.ImageInspectWithRaw(ctx, imageRef)
+	_, err := d.cli.ImageInspect(ctx, imageRef)
 	if err == nil {
 		return nil // Image exists
 	}

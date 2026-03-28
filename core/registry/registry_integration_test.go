@@ -61,7 +61,7 @@ func TestRegistryDeregisterAfterClose(t *testing.T) {
 		Name:      "API Service",
 		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	registry.Stop()
 
@@ -126,7 +126,7 @@ func TestRegistryConcurrentGetModule(t *testing.T) {
 				{Type: EndpointHTTP, URL: "http://localhost:8080"},
 			},
 		}
-		registry.Register(req)
+		_, _ = registry.Register(req)
 	}
 
 	// Concurrent reads
@@ -159,7 +159,7 @@ func TestRegistryConcurrentListModules(t *testing.T) {
 		_, _ = registry.Register(req)
 
 		if i%3 == 0 {
-			registry.UpdateStatus("module-"+string(rune(i/10))+"-"+string(rune(i%10)), StatusHealthy)
+			_ = registry.UpdateStatus("module-"+string(rune(i/10))+"-"+string(rune(i%10)), StatusHealthy)
 		}
 	}
 
@@ -189,7 +189,7 @@ func TestRegistryConcurrentUpdateStatus(t *testing.T) {
 				{Type: EndpointHTTP, URL: "http://localhost:8080"},
 			},
 		}
-		registry.Register(req)
+		_, _ = registry.Register(req)
 	}
 
 	// Concurrent status updates
@@ -203,7 +203,7 @@ func TestRegistryConcurrentUpdateStatus(t *testing.T) {
 			if id%2 == 0 {
 				status = StatusUnhealthy
 			}
-			registry.UpdateStatus(moduleID, status)
+			_ = registry.UpdateStatus(moduleID, status)
 		}(i)
 	}
 
@@ -225,10 +225,10 @@ func TestRegistryGetHealthyModulesConcurrent(t *testing.T) {
 				{Type: EndpointHTTP, URL: "http://localhost:8080"},
 			},
 		}
-		registry.Register(req)
+		_, _ = registry.Register(req)
 
 		if i%2 == 0 {
-			registry.UpdateStatus("module-"+string(rune(i/5))+"-"+string(rune(i%5)), StatusHealthy)
+			_ = registry.UpdateStatus("module-"+string(rune(i/5))+"-"+string(rune(i%5)), StatusHealthy)
 		}
 	}
 
@@ -267,7 +267,7 @@ func TestRegistryModulesCopy(t *testing.T) {
 			"region": "us-east",
 		},
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	module1, _ := registry.GetModule("api-service")
 
@@ -292,7 +292,7 @@ func TestRegistryEndpointsCopy(t *testing.T) {
 			{Type: EndpointGRPC, URL: "grpc://localhost:9000"},
 		},
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	module1, _ := registry.GetModule("api-service")
 	module1.Endpoints[0].URL = "http://modified:8080"
@@ -326,9 +326,9 @@ func TestRegistryListModulesFilter(t *testing.T) {
 				{Type: cfg.endpoint, URL: "http://localhost:8080"},
 			},
 		}
-		registry.Register(req)
+		_, _ = registry.Register(req)
 		if cfg.status != StatusStarting {
-			registry.UpdateStatus(cfg.id, cfg.status)
+			_ = registry.UpdateStatus(cfg.id, cfg.status)
 		}
 	}
 
@@ -407,7 +407,7 @@ func TestRegistryDeregistrationResponse(t *testing.T) {
 		Name:      "API Service",
 		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	resp, err := registry.Deregister("api-service")
 
@@ -434,7 +434,7 @@ func TestRegistryMetadataPreservation(t *testing.T) {
 		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 		Metadata:  metadata,
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	module, _ := registry.GetModule("api-service")
 
@@ -455,7 +455,7 @@ func TestRegistryVersionTracking(t *testing.T) {
 			Version:   version,
 			Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 		}
-		registry.Register(req)
+		_, _ = registry.Register(req)
 	}
 
 	for i, expectedVersion := range versions {
@@ -493,16 +493,16 @@ func TestRegistryHealthStatusUpdate(t *testing.T) {
 		Name:      "API Service",
 		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	module, _ := registry.GetModule("api-service")
 	assert.Equal(t, StatusStarting, module.Status)
 
-	registry.UpdateStatus("api-service", StatusHealthy)
+	_ = registry.UpdateStatus("api-service", StatusHealthy)
 	module, _ = registry.GetModule("api-service")
 	assert.Equal(t, StatusHealthy, module.Status)
 
-	registry.UpdateStatus("api-service", StatusUnhealthy)
+	_ = registry.UpdateStatus("api-service", StatusUnhealthy)
 	module, _ = registry.GetModule("api-service")
 	assert.Equal(t, StatusUnhealthy, module.Status)
 }
@@ -515,13 +515,13 @@ func TestRegistryLastHealthAtUpdate(t *testing.T) {
 		Name:      "API Service",
 		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	module1, _ := registry.GetModule("api-service")
 	firstTime := module1.LastHealthAt
 
 	time.Sleep(100 * time.Millisecond)
-	registry.UpdateStatus("api-service", StatusHealthy)
+	_ = registry.UpdateStatus("api-service", StatusHealthy)
 
 	module2, _ := registry.GetModule("api-service")
 	secondTime := module2.LastHealthAt
@@ -582,11 +582,11 @@ func TestRegistryDeregistrationRemovesModule(t *testing.T) {
 		Name:      "API Service",
 		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 	}
-	registry.Register(req)
+	_, _ = registry.Register(req)
 
 	assert.Equal(t, 1, registry.ModuleCount())
 
-	registry.Deregister("api-service")
+	_, _ = registry.Deregister("api-service")
 
 	assert.Equal(t, 0, registry.ModuleCount())
 
@@ -625,10 +625,10 @@ func TestRegistryCountWithMultipleModules(t *testing.T) {
 				{Type: EndpointHTTP, URL: "http://localhost:8080"},
 			},
 		}
-		registry.Register(req)
+		_, _ = registry.Register(req)
 
 		if i%3 == 0 {
-			registry.UpdateStatus("module-"+string(rune('0'+(i/10)))+string(rune('0'+(i%10))), StatusHealthy)
+			_ = registry.UpdateStatus("module-"+string(rune('0'+(i/10)))+string(rune('0'+(i%10))), StatusHealthy)
 		}
 	}
 
@@ -665,7 +665,7 @@ func TestRegistryGetAllModulesInternal(t *testing.T) {
 				{Type: EndpointHTTP, URL: "http://localhost:8080"},
 			},
 		}
-		registry.Register(req)
+		_, _ = registry.Register(req)
 	}
 
 	modules := registry.getAllModules()

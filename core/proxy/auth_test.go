@@ -186,7 +186,7 @@ func TestAuthMiddleware_HandleAuthError_SessionNotFound(t *testing.T) {
 	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	am.handleAuthError(w, req, session.ErrSessionNotFound)
@@ -203,7 +203,7 @@ func TestAuthMiddleware_HandleAuthError_SessionExpired(t *testing.T) {
 	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	am.handleAuthError(w, req, session.ErrSessionExpired)
@@ -217,7 +217,7 @@ func TestAuthMiddleware_HandleAuthError_SessionInvalid(t *testing.T) {
 	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "request_id", "test-123"))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
 	w := httptest.NewRecorder()
 
 	am.handleAuthError(w, req, session.ErrSessionInvalid)
@@ -308,7 +308,7 @@ func TestRequireCapabilities_NoSession(t *testing.T) {
 
 // TestGetRequestIDFromContext_Success tests successful request ID extraction
 func TestGetRequestIDFromContext_Success(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "request_id", "test-123")
+	ctx := withRequestID(context.Background(), "test-123")
 	id := getRequestIDFromContext(ctx)
 	assert.Equal(t, "test-123", id)
 }
@@ -322,7 +322,7 @@ func TestGetRequestIDFromContext_Empty(t *testing.T) {
 
 // TestGetRequestIDFromContext_TypeAssertion tests type assertion failure
 func TestGetRequestIDFromContext_TypeAssertion(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "request_id", 123) // Wrong type
+	ctx := context.WithValue(context.Background(), requestIDKey, 123) // Wrong type
 	id := getRequestIDFromContext(ctx)
 	assert.Equal(t, "", id)
 }

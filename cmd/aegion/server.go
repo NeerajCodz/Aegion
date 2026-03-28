@@ -235,7 +235,7 @@ func joinStrings(ss []string) string {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +243,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.Pool.Ping(r.Context()); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"status":"not ready","reason":"database unavailable"}`))
+		_, _ = w.Write([]byte(`{"status":"not ready","reason":"database unavailable"}`))
 		return
 	}
 
@@ -260,17 +260,17 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"alive"}`))
+	_, _ = w.Write([]byte(`{"status":"alive"}`))
 }
 
 func (s *Server) handleNotImplemented(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte(`{"error":"not implemented"}`))
+	_, _ = w.Write([]byte(`{"error":"not implemented"}`))
 }

@@ -305,8 +305,12 @@ func TestListModules(t *testing.T) {
 	}
 
 	// Update status for filtering tests
-	registry.UpdateStatus("module1", StatusHealthy)
-	registry.UpdateStatus("module2", StatusUnhealthy)
+	if err := registry.UpdateStatus("module1", StatusHealthy); err != nil {
+		t.Fatalf("UpdateStatus() failed: %v", err)
+	}
+	if err := registry.UpdateStatus("module2", StatusUnhealthy); err != nil {
+		t.Fatalf("UpdateStatus() failed: %v", err)
+	}
 
 	tests := []struct {
 		name        string
@@ -474,9 +478,15 @@ func TestHealthyCount(t *testing.T) {
 	}
 
 	// Update statuses
-	registry.UpdateStatus("module1", StatusHealthy)
-	registry.UpdateStatus("module2", StatusHealthy)
-	registry.UpdateStatus("module3", StatusUnhealthy)
+	if err := registry.UpdateStatus("module1", StatusHealthy); err != nil {
+		t.Fatalf("UpdateStatus() failed: %v", err)
+	}
+	if err := registry.UpdateStatus("module2", StatusHealthy); err != nil {
+		t.Fatalf("UpdateStatus() failed: %v", err)
+	}
+	if err := registry.UpdateStatus("module3", StatusUnhealthy); err != nil {
+		t.Fatalf("UpdateStatus() failed: %v", err)
+	}
 
 	if count := registry.HealthyCount(); count != 2 {
 		t.Errorf("HealthyCount() = %d, want 2", count)

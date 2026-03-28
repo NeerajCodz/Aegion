@@ -569,7 +569,10 @@ func (s *Server) handleInternalFailFlow(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Error string `json:"error"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
 
 	if err := s.flowService.FailFlow(r.Context(), id, req.Error); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fail flow", err)
@@ -672,7 +675,7 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func writeError(w http.ResponseWriter, status int, message string, err error) {
@@ -685,5 +688,5 @@ func writeError(w http.ResponseWriter, status int, message string, err error) {
 	if err != nil {
 		resp["details"] = err.Error()
 	}
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }

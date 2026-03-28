@@ -21,14 +21,6 @@ type mockDB struct {
 	queryError  error
 }
 
-// Interface for database operations
-type dbPool interface {
-	Exec(ctx context.Context, sql string, args ...interface{}) (commandTag, error)
-	QueryRow(ctx context.Context, sql string, args ...interface{}) row
-	Query(ctx context.Context, sql string, args ...interface{}) (rows, error)
-	Begin(ctx context.Context) (tx, error)
-}
-
 func (m *mockDB) Exec(ctx context.Context, sql string, args ...interface{}) (commandTag, error) {
 	if m.execError != nil {
 		return commandTag{}, m.execError

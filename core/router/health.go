@@ -36,7 +36,7 @@ func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // handleReady handles the /ready endpoint for readiness checks.
@@ -103,7 +103,7 @@ func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(httpStatus)
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // handleMetrics handles the /metrics endpoint.
@@ -115,21 +115,21 @@ func (r *Router) handleMetrics(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	// Basic metrics placeholder
-	w.Write([]byte("# HELP aegion_up Aegion server is up\n"))
-	w.Write([]byte("# TYPE aegion_up gauge\n"))
-	w.Write([]byte("aegion_up 1\n"))
+	_, _ = w.Write([]byte("# HELP aegion_up Aegion server is up\n"))
+	_, _ = w.Write([]byte("# TYPE aegion_up gauge\n"))
+	_, _ = w.Write([]byte("aegion_up 1\n"))
 
 	if r.registry != nil {
 		moduleCount := r.registry.ModuleCount()
 		healthyCount := r.registry.HealthyCount()
 
-		w.Write([]byte("\n# HELP aegion_modules_total Total number of registered modules\n"))
-		w.Write([]byte("# TYPE aegion_modules_total gauge\n"))
-		w.Write([]byte("aegion_modules_total " + itoa(moduleCount) + "\n"))
+		_, _ = w.Write([]byte("\n# HELP aegion_modules_total Total number of registered modules\n"))
+		_, _ = w.Write([]byte("# TYPE aegion_modules_total gauge\n"))
+		_, _ = w.Write([]byte("aegion_modules_total " + itoa(moduleCount) + "\n"))
 
-		w.Write([]byte("\n# HELP aegion_modules_healthy Number of healthy modules\n"))
-		w.Write([]byte("# TYPE aegion_modules_healthy gauge\n"))
-		w.Write([]byte("aegion_modules_healthy " + itoa(healthyCount) + "\n"))
+		_, _ = w.Write([]byte("\n# HELP aegion_modules_healthy Number of healthy modules\n"))
+		_, _ = w.Write([]byte("# TYPE aegion_modules_healthy gauge\n"))
+		_, _ = w.Write([]byte("aegion_modules_healthy " + itoa(healthyCount) + "\n"))
 	}
 }
 

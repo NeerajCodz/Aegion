@@ -12,7 +12,7 @@ on:
     branches: [main, beta]
 
 env:
-  GO_VERSION: '1.22'
+  GO_VERSION: '1.25.0'
   RUST_VERSION: 'stable'
   CARGO_TERM_COLOR: always
 

@@ -79,9 +79,9 @@ func TestGetRequestIDForLogger_Empty(t *testing.T) {
 }
 
 func TestContextKeys(t *testing.T) {
-	// Ensure context keys are string constants
-	assert.Equal(t, "trace_info", TraceInfoContextKey)
-	assert.Equal(t, "request_id", RequestIDContextKey)
+	// Ensure context keys keep expected string values
+	assert.Equal(t, "trace_info", string(TraceInfoContextKey))
+	assert.Equal(t, "request_id", string(RequestIDContextKey))
 }
 
 func TestContextKeysAreConsistent(t *testing.T) {

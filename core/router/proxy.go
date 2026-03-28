@@ -219,7 +219,7 @@ func (p *ModuleProxy) handleError(w http.ResponseWriter, r *http.Request, err er
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":       status,
 			"message":    message,
@@ -254,7 +254,7 @@ func (p *ModuleProxy) handleProxyError(w http.ResponseWriter, r *http.Request, e
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":       status,
 			"message":    message,

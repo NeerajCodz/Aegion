@@ -422,7 +422,7 @@ func BenchmarkFlow_JSONOperations(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		data, _ := json.Marshal(flow)
 		var recovered Flow
-		json.Unmarshal(data, &recovered)
+		_ = json.Unmarshal(data, &recovered)
 	}
 }
 
@@ -434,6 +434,6 @@ func BenchmarkContinuityContainer_JSONOperations(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		data, _ := json.Marshal(container)
 		var recovered ContinuityContainer
-		json.Unmarshal(data, &recovered)
+		_ = json.Unmarshal(data, &recovered)
 	}
 }

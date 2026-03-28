@@ -298,7 +298,6 @@ type MockDBExecutor struct {
 	queryRowCalls []string
 	shouldFail    bool
 	failMessage   string
-	returnCount   int
 }
 
 func (m *MockDBExecutor) recordExec(query string) {
@@ -403,8 +402,9 @@ func TestInMemoryStoreRetrieval(t *testing.T) {
 		store := NewInMemoryStore()
 		ctx := context.Background()
 
-		store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
-		_, err := store.GetByCode(ctx, "user@example.com", "999999", CodeTypeLogin)
+		_, err := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
+		require.NoError(t, err)
+		_, err = store.GetByCode(ctx, "user@example.com", "999999", CodeTypeLogin)
 		assert.Error(t, err)
 		assert.Equal(t, ErrCodeNotFound, err)
 	})
@@ -873,7 +873,8 @@ func TestCRUDReadOperation(t *testing.T) {
 		ctx := context.Background()
 
 		// Create first code
-		store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
+		_, err := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
+		require.NoError(t, err)
 		time.Sleep(10 * time.Millisecond)
 
 		// Create second code with same recipient

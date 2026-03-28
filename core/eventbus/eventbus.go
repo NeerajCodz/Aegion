@@ -4,6 +4,7 @@ package eventbus
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -104,7 +105,11 @@ func (b *Bus) Publish(ctx context.Context, event Event) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil {
+			_ = rollbackErr
+		}
+	}()
 
 	// Insert event
 	_, err = tx.Exec(ctx, `
@@ -236,8 +241,14 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 		}
 
 		event.ID = eventID
-		json.Unmarshal(payloadJSON, &event.Payload)
-		json.Unmarshal(metadataJSON, &event.Metadata)
+		if err := json.Unmarshal(payloadJSON, &event.Payload); err != nil {
+			b.markFailed(ctx, deliveryID, attemptCount, fmt.Errorf("invalid payload JSON: %w", err))
+			continue
+		}
+		if err := json.Unmarshal(metadataJSON, &event.Metadata); err != nil {
+			b.markFailed(ctx, deliveryID, attemptCount, fmt.Errorf("invalid metadata JSON: %w", err))
+			continue
+		}
 
 		// Process event
 		err = handler(ctx, event)
@@ -253,7 +264,7 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 
 // markDelivered marks a delivery as successful.
 func (b *Bus) markDelivered(ctx context.Context, deliveryID uuid.UUID) {
-	b.db.Exec(ctx, `
+	_, _ = b.db.Exec(ctx, `
 		UPDATE core_event_bus_deliveries
 		SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
 		WHERE id = $1
@@ -266,7 +277,7 @@ func (b *Bus) markFailed(ctx context.Context, deliveryID uuid.UUID, attemptCount
 
 	if attemptCount >= b.maxRetries {
 		// Dead letter
-		b.db.Exec(ctx, `
+		_, _ = b.db.Exec(ctx, `
 			UPDATE core_event_bus_deliveries
 			SET status = 'dead_lettered',
 				attempt_count = $2,
@@ -277,7 +288,7 @@ func (b *Bus) markFailed(ctx context.Context, deliveryID uuid.UUID, attemptCount
 	} else {
 		// Schedule retry with exponential backoff
 		retryDelay := b.retryDelay * time.Duration(1<<uint(attemptCount))
-		b.db.Exec(ctx, `
+		_, _ = b.db.Exec(ctx, `
 			UPDATE core_event_bus_deliveries
 			SET status = 'failed',
 				attempt_count = $2,

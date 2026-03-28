@@ -43,7 +43,7 @@ func TestHTTPMiddleware_Handler(t *testing.T) {
 		assert.NotNil(t, r.Context())
 		
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Hello, World!"))
+		_, _ = w.Write([]byte("Hello, World!"))
 	})
 	
 	// Wrap handler with middleware
@@ -127,7 +127,7 @@ func TestHTTPMiddleware_ErrorStatusCodes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tc.statusCode)
-				w.Write([]byte("response"))
+				_, _ = w.Write([]byte("response"))
 			})
 			
 			handler := middleware.Handler(testHandler)
@@ -288,7 +288,7 @@ func TestHTTPMiddleware_PerformanceOverhead(t *testing.T) {
 	// Simple test handler
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	})
 	
 	handler := middleware.Handler(testHandler)

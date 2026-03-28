@@ -477,7 +477,7 @@ func BenchmarkLogAction(b *testing.B) {
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.LogAction(entry)
+		_ = logger.LogAction(entry)
 	}
 }
 
@@ -494,6 +494,6 @@ func BenchmarkLogUserAction(b *testing.B) {
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		logger.LogUserAction(actorID, "admin@example.com", ActionUserUpdated, "user123", "test", before, after, metadata)
+		_ = logger.LogUserAction(actorID, "admin@example.com", ActionUserUpdated, "user123", "test", before, after, metadata)
 	}
 }

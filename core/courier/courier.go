@@ -218,7 +218,12 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 		// Render template if needed
 		if templateID != nil && *templateID != "" {
 			var templateData map[string]interface{}
-			json.Unmarshal(templateDataJSON, &templateData)
+			if err := json.Unmarshal(templateDataJSON, &templateData); err != nil {
+				sendErr := fmt.Errorf("invalid template data: %w", err)
+				_ = c.markFailed(ctx, id, sendCount, sendErr)
+				processed++
+				continue
+			}
 			rendered, err := c.renderTemplate(*templateID, templateData)
 			if err == nil {
 				body = rendered
@@ -235,9 +240,13 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 		}
 
 		if sendErr != nil {
-			c.markFailed(ctx, id, sendCount, sendErr)
+			if err := c.markFailed(ctx, id, sendCount, sendErr); err != nil {
+				return processed, err
+			}
 		} else {
-			c.markSent(ctx, id)
+			if err := c.markSent(ctx, id); err != nil {
+				return processed, err
+			}
 		}
 
 		processed++
@@ -293,30 +302,33 @@ func (c *Courier) renderTemplate(templateID string, data map[string]interface{})
 }
 
 // markSent marks a message as sent.
-func (c *Courier) markSent(ctx context.Context, id uuid.UUID) {
-	c.db.Exec(ctx, `
+func (c *Courier) markSent(ctx context.Context, id uuid.UUID) error {
+	_, err := c.db.Exec(ctx, `
 		UPDATE core_courier_messages
 		SET status = 'sent', sent_at = NOW(), updated_at = NOW()
 		WHERE id = $1
 	`, id)
+	return err
 }
 
 // markFailed marks a message as failed.
-func (c *Courier) markFailed(ctx context.Context, id uuid.UUID, sendCount int, err error) {
+func (c *Courier) markFailed(ctx context.Context, id uuid.UUID, sendCount int, err error) error {
 	sendCount++
 
 	if sendCount >= c.maxRetries {
-		c.db.Exec(ctx, `
+		_, dbErr := c.db.Exec(ctx, `
 			UPDATE core_courier_messages
 			SET status = 'abandoned', send_count = $2, last_error = $3, updated_at = NOW()
 			WHERE id = $1
 		`, id, sendCount, err.Error())
+		return dbErr
 	} else {
-		c.db.Exec(ctx, `
+		_, dbErr := c.db.Exec(ctx, `
 			UPDATE core_courier_messages
 			SET status = 'queued', send_count = $2, last_error = $3, updated_at = NOW()
 			WHERE id = $1
 		`, id, sendCount, err.Error())
+		return dbErr
 	}
 }
 

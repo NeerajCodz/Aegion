@@ -101,7 +101,7 @@ func (s *Service) Verify(ctx context.Context, identifier, password string) (uuid
 	if err != nil {
 		if errors.Is(err, store.ErrCredentialNotFound) {
 			// Constant-time delay to prevent timing attacks
-			s.hasher.Hash(password) // Dummy hash
+			_, _ = s.hasher.Hash(password) // Dummy hash
 			return uuid.Nil, ErrInvalidCredentials
 		}
 		return uuid.Nil, err

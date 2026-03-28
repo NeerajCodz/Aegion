@@ -47,7 +47,6 @@ type Code struct {
 // Store handles magic link/OTP persistence.
 type Store struct {
 	db          *pgxpool.Pool
-	mockDB      interface{} // Used only for testing with mock database
 	codeLength  int
 	codeCharset string
 }
@@ -69,19 +68,29 @@ func (s *Store) SetCodeConfig(length int, charset string) {
 
 // Create creates a new magic link/OTP code.
 func (s *Store) Create(ctx context.Context, recipient string, codeType CodeType, identityID *uuid.UUID, ttl time.Duration) (*Code, error) {
+	codeValue, err := s.generateCode()
+	if err != nil {
+		return nil, err
+	}
+
+	tokenValue, err := s.generateToken()
+	if err != nil {
+		return nil, err
+	}
+
 	code := &Code{
 		ID:         uuid.New(),
 		IdentityID: identityID,
 		Recipient:  recipient,
 		Type:       codeType,
-		Code:       s.generateCode(),
-		Token:      s.generateToken(),
+		Code:       codeValue,
+		Token:      tokenValue,
 		Used:       false,
 		ExpiresAt:  time.Now().UTC().Add(ttl),
 		CreatedAt:  time.Now().UTC(),
 	}
 
-	_, err := s.db.Exec(ctx, `
+	_, err = s.db.Exec(ctx, `
 		INSERT INTO ml_codes (id, identity_id, recipient, type, code, token, used, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`, code.ID, code.IdentityID, code.Recipient, code.Type, code.Code, code.Token, code.Used, code.ExpiresAt, code.CreatedAt)
@@ -241,21 +250,26 @@ func (s *Store) Cleanup(ctx context.Context) (int64, error) {
 }
 
 // generateCode generates a random OTP code.
-func (s *Store) generateCode() string {
+func (s *Store) generateCode() (string, error) {
 	code := make([]byte, s.codeLength)
 	charsetLen := big.NewInt(int64(len(s.codeCharset)))
 
 	for i := 0; i < s.codeLength; i++ {
-		n, _ := rand.Int(rand.Reader, charsetLen)
+		n, err := rand.Int(rand.Reader, charsetLen)
+		if err != nil {
+			return "", err
+		}
 		code[i] = s.codeCharset[n.Int64()]
 	}
 
-	return string(code)
+	return string(code), nil
 }
 
 // generateToken generates a random magic link token.
-func (s *Store) generateToken() string {
+func (s *Store) generateToken() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
