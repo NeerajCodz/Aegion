@@ -38,12 +38,12 @@ type Config struct {
 
 // Service handles admin operations.
 type Service struct {
-	store  *store.Store
+	store  Store
 	config Config
 }
 
 // New creates a new admin service.
-func New(s *store.Store, config Config) *Service {
+func New(s Store, config Config) *Service {
 	return &Service{
 		store:  s,
 		config: config,
@@ -51,7 +51,7 @@ func New(s *store.Store, config Config) *Service {
 }
 
 // Store returns the underlying store for direct access if needed.
-func (s *Service) Store() *store.Store {
+func (s *Service) Store() Store {
 	return s.store
 }
 

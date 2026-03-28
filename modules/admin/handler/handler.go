@@ -2,22 +2,40 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/modules/admin/service"
+	"github.com/aegion/aegion/modules/admin/store"
 )
+
+// Service defines the admin service behavior needed by handlers.
+type Service interface {
+	Store() service.Store
+	EvaluateCapability(ctx context.Context, operatorID uuid.UUID, permission string) error
+	GetOperatorByIdentityID(ctx context.Context, identityID uuid.UUID) (*store.Operator, error)
+	ListOperators(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Operator, int64, error)
+	GetOperator(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID) (*store.Operator, error)
+	CreateOperator(ctx context.Context, actorID uuid.UUID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error)
+	UpdateOperator(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error)
+	DeleteOperator(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID, ipAddress string) error
+	ListRoles(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Role, int64, error)
+	GetRole(ctx context.Context, actorID uuid.UUID, name string) (*store.Role, error)
+	ListAuditLogs(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error)
+}
 
 // Handler handles admin HTTP requests.
 type Handler struct {
-	service *service.Service
+	service Service
 }
 
 // New creates a new admin handler.
-func New(svc *service.Service) *Handler {
+func New(svc Service) *Handler {
 	return &Handler{service: svc}
 }
 

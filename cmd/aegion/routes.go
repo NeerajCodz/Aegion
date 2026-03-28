@@ -127,9 +127,7 @@ func setupModuleRoutes(r chi.Router, s *Server) {
 	})
 
 	// Module proxy (for inter-module communication)
-	r.Route("/proxy/{moduleId}/*", func(r chi.Router) {
-		r.HandleFunc("/", s.handleModuleProxy)
-	})
+	r.HandleFunc("/proxy/{moduleId}/*", s.handleModuleProxy)
 
 	// Flow management (for modules)
 	r.Route("/flows", func(r chi.Router) {
