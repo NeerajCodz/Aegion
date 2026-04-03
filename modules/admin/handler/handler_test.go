@@ -1613,6 +1613,181 @@ func TestOperatorHandlersErrorMappings(t *testing.T) {
 		h.DeleteOperator(rec, req)
 		assert.Equal(t, http.StatusForbidden, rec.Code)
 	})
+
+	t.Run("get operator success", func(t *testing.T) {
+		operatorID := uuid.New()
+		targetOp := &store.Operator{
+			ID:         operatorID,
+			IdentityID: uuid.New(),
+			Role:       "admin",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		}
+		h := New(&fakeService{
+			getOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID) (*store.Operator, error) {
+				return targetOp, nil
+			},
+			store: &fakeStore{
+				getIdentityProfileFn: func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error) {
+					return &store.IdentityProfile{Email: "op@example.com", Name: "Op User", State: "active"}, nil
+				},
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/operators/"+operatorID.String(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", operatorID.String())
+		h.GetOperator(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), operatorID.String())
+	})
+
+	t.Run("get operator permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			getOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID) (*store.Operator, error) {
+				return nil, service.ErrPermissionDenied
+			},
+			store: &fakeStore{},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/operators/"+uuid.NewString(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.GetOperator(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("get operator not found", func(t *testing.T) {
+		h := New(&fakeService{
+			getOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID) (*store.Operator, error) {
+				return nil, store.ErrOperatorNotFound
+			},
+			store: &fakeStore{},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/operators/"+uuid.NewString(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.GetOperator(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("update operator success with name", func(t *testing.T) {
+		operatorID := uuid.New()
+		updatedOp := &store.Operator{
+			ID:         operatorID,
+			IdentityID: uuid.New(),
+			Role:       "operator",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		}
+		h := New(&fakeService{
+			updateOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return updatedOp, nil
+			},
+			store: &fakeStore{
+				getIdentityProfileFn: func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error) {
+					return &store.IdentityProfile{Email: "op@example.com", Name: "Updated User", State: "active"}, nil
+				},
+			},
+		})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("UPDATE 1"), nil
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+operatorID.String(), bytes.NewBufferString(`{"role":"operator","name":"Updated User"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", operatorID.String())
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("update operator self demotion", func(t *testing.T) {
+		h := New(&fakeService{
+			updateOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, service.ErrSelfDemotion
+			},
+			store: &fakeStore{},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+uuid.NewString(), bytes.NewBufferString(`{"role":"viewer"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("update operator not found", func(t *testing.T) {
+		h := New(&fakeService{
+			updateOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, store.ErrOperatorNotFound
+			},
+			store: &fakeStore{},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+uuid.NewString(), bytes.NewBufferString(`{"role":"admin"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("create operator success", func(t *testing.T) {
+		newOp := &store.Operator{
+			ID:         uuid.New(),
+			IdentityID: uuid.New(),
+			Role:       "admin",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		}
+		h := New(&fakeService{
+			createOperatorFn: func(ctx context.Context, actorID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return newOp, nil
+			},
+			store: &fakeStore{
+				getIdentityProfileFn: func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error) {
+					return &store.IdentityProfile{Email: "new@example.com", Name: "New Op", State: "active"}, nil
+				},
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", bytes.NewBufferString(`{"identity_id":"`+uuid.NewString()+`","role":"admin"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusCreated, rec.Code)
+	})
+
+	t.Run("delete operator success", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID, ipAddress string) error {
+				return nil
+			},
+			store: &fakeStore{},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/operators/"+uuid.NewString(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.DeleteOperator(rec, req)
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+	})
+
+	t.Run("delete operator not found", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteOperatorFn: func(ctx context.Context, actorID, opID uuid.UUID, ipAddress string) error {
+				return store.ErrOperatorNotFound
+			},
+			store: &fakeStore{},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/operators/"+uuid.NewString(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.DeleteOperator(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
 }
 
 func TestIdentityHandlersExtendedPaths(t *testing.T) {
