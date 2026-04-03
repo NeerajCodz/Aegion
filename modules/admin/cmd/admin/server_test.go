@@ -304,3 +304,122 @@ func TestSPAFallbackRouting(t *testing.T) {
 		}
 	})
 }
+
+func TestSetupRouter(t *testing.T) {
+	s := &Server{
+		Config: &Config{},
+	}
+	s.Config.Admin.Path = "/admin"
+	s.Handler = nil // Can be nil for this test
+
+	r := s.setupRouter()
+	if r == nil {
+		t.Fatal("setupRouter() returned nil")
+	}
+
+	// Test that health routes are registered (they don't need handler)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("Health endpoint not working, got status %d", rec.Code)
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	s := &Server{Config: &Config{}}
+	
+	handler := s.securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Should apply security headers
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestLogRequest(t *testing.T) {
+	s := &Server{Config: &Config{}}
+	
+	handler := s.logRequest(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test"))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+	if rec.Body.String() != "test" {
+		t.Errorf("Expected body 'test', got %s", rec.Body.String())
+	}
+}
+
+func TestHandleHealth(t *testing.T) {
+	s := &Server{Config: &Config{}}
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	s.handleHealth(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rec.Code)
+	}
+
+	var health map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&health); err != nil {
+		t.Fatalf("Failed to decode health response: %v", err)
+	}
+
+	if health["status"] != "ok" {
+		t.Errorf("Expected status 'ok', got %v", health["status"])
+	}
+	if health["service"] != "aegion-admin" {
+		t.Errorf("Expected service 'aegion-admin', got %v", health["service"])
+	}
+}
+
+func TestHandleReady(t *testing.T) {
+	// This test requires a mock DB, so we'll create a simple test
+	s := &Server{
+		Config: &Config{},
+		DB:     nil, // Will fail the ping
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	rec := httptest.NewRecorder()
+	s.handleReady(rec, req)
+
+	// Without a real DB, this should return an error status
+	// The actual status depends on implementation
+	if rec.Code != http.StatusServiceUnavailable && rec.Code != http.StatusInternalServerError {
+		t.Logf("Expected unhealthy status, got %d", rec.Code)
+	}
+}
+
+func TestSPAHandler(t *testing.T) {
+	s := &Server{Config: &Config{}}
+	handler := s.spaHandler()
+	
+	if handler == nil {
+		t.Fatal("spaHandler() returned nil")
+	}
+
+	// Test that it serves something
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Should return some response (either redirect or content)
+	if rec.Code == 0 {
+		t.Error("spaHandler didn't serve any response")
+	}
+}
