@@ -2,10 +2,15 @@ package flows
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -446,6 +451,312 @@ func BenchmarkContinuityContainer_Get(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		container.Get("key")
 	}
+}
+
+// ============================================================================
+// PostgresContinuityStore Tests with Fake DB (Seam Injection)
+// ============================================================================
+
+// fakeContinuityDB implements the DB interface for testing
+type fakeContinuityDB struct {
+	containers    map[uuid.UUID]*ContinuityContainer
+	execErr       error
+	queryRowErr   error
+	rowsAffected  int64
+	returnExpired bool
+}
+
+func newFakeContinuityDB() *fakeContinuityDB {
+	return &fakeContinuityDB{
+		containers:   make(map[uuid.UUID]*ContinuityContainer),
+		rowsAffected: 1,
+	}
+}
+
+func (f *fakeContinuityDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if f.execErr != nil {
+		return pgconn.NewCommandTag(""), f.execErr
+	}
+
+	// Handle INSERT for Store
+	if len(args) >= 7 && args[0] != nil {
+		if id, ok := args[0].(uuid.UUID); ok {
+			container := &ContinuityContainer{
+				ID:        id,
+				Name:      args[1].(string),
+				Payload:   make(Payload),
+				ExpiresAt: args[5].(time.Time),
+				CreatedAt: args[6].(time.Time),
+			}
+			if args[2] != nil {
+				identityID := args[2].(*uuid.UUID)
+				container.IdentityID = identityID
+			}
+			if args[3] != nil {
+				sessionID := args[3].(*uuid.UUID)
+				container.SessionID = sessionID
+			}
+			f.containers[id] = container
+			return pgconn.NewCommandTag("INSERT 0 1"), nil
+		}
+	}
+
+	// Handle DELETE
+	if f.rowsAffected == 0 {
+		return pgconn.NewCommandTag(""), nil
+	}
+	return pgconn.NewCommandTag(fmt.Sprintf("DELETE %d", f.rowsAffected)), nil
+}
+
+func (f *fakeContinuityDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if f.queryRowErr != nil {
+		return &fakeContinuityRow{err: f.queryRowErr}
+	}
+
+	// Handle retrieval by ID
+	if len(args) == 1 {
+		if id, ok := args[0].(uuid.UUID); ok {
+			if container, exists := f.containers[id]; exists {
+				return &fakeContinuityRow{container: container, returnExpired: f.returnExpired}
+			}
+		}
+	}
+
+	// Handle retrieval by name and identity
+	if len(args) == 2 {
+		name, _ := args[0].(string)
+		identityID, _ := args[1].(uuid.UUID)
+		for _, container := range f.containers {
+			if container.Name == name && container.IdentityID != nil && *container.IdentityID == identityID {
+				return &fakeContinuityRow{container: container}
+			}
+		}
+	}
+
+	return &fakeContinuityRow{err: pgx.ErrNoRows}
+}
+
+type fakeContinuityRow struct {
+	container     *ContinuityContainer
+	err           error
+	returnExpired bool
+}
+
+func (r *fakeContinuityRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if r.container == nil {
+		return pgx.ErrNoRows
+	}
+
+	// Scan container fields into destinations
+	if len(dest) >= 7 {
+		*dest[0].(*uuid.UUID) = r.container.ID
+		*dest[1].(*string) = r.container.Name
+		*dest[2].(**uuid.UUID) = r.container.IdentityID
+		*dest[3].(**uuid.UUID) = r.container.SessionID
+
+		payload, _ := json.Marshal(r.container.Payload)
+		*dest[4].(*[]byte) = payload
+
+		if r.returnExpired {
+			*dest[5].(*time.Time) = time.Now().Add(-1 * time.Hour)
+		} else {
+			*dest[5].(*time.Time) = r.container.ExpiresAt
+		}
+		*dest[6].(*time.Time) = r.container.CreatedAt
+	}
+	return nil
+}
+
+func TestPostgresContinuityStoreWithDB_Store(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	container := NewContinuityContainer("test", 15*time.Minute)
+	container.Set("key", "value")
+
+	err := store.Store(ctx, container)
+
+	require.NoError(t, err)
+	assert.Contains(t, fakeDB.containers, container.ID)
+}
+
+func TestPostgresContinuityStoreWithDB_Store_Error(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.execErr = errors.New("database error")
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	container := NewContinuityContainer("test", 15*time.Minute)
+
+	err := store.Store(ctx, container)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "database error")
+}
+
+func TestPostgresContinuityStoreWithDB_Retrieve(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	// First store a container
+	original := NewContinuityContainer("test", 15*time.Minute)
+	original.Set("data", "test-value")
+	identityID := uuid.New()
+	original.SetIdentity(identityID)
+	fakeDB.containers[original.ID] = original
+
+	// Retrieve it
+	retrieved, err := store.Retrieve(ctx, original.ID)
+
+	require.NoError(t, err)
+	assert.NotNil(t, retrieved)
+	assert.Equal(t, original.ID, retrieved.ID)
+	assert.Equal(t, "test", retrieved.Name)
+}
+
+func TestPostgresContinuityStoreWithDB_Retrieve_NotFound(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	retrieved, err := store.Retrieve(ctx, uuid.New())
+
+	assert.ErrorIs(t, err, ErrContainerNotFound)
+	assert.Nil(t, retrieved)
+}
+
+func TestPostgresContinuityStoreWithDB_Retrieve_Expired(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.returnExpired = true
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	// Store a container
+	container := NewContinuityContainer("test", 15*time.Minute)
+	fakeDB.containers[container.ID] = container
+
+	// Retrieve should fail because it's expired
+	retrieved, err := store.Retrieve(ctx, container.ID)
+
+	assert.ErrorIs(t, err, ErrContainerExpired)
+	assert.Nil(t, retrieved)
+}
+
+func TestPostgresContinuityStoreWithDB_Retrieve_DBError(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.queryRowErr = errors.New("connection error")
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	retrieved, err := store.Retrieve(ctx, uuid.New())
+
+	assert.Error(t, err)
+	assert.Nil(t, retrieved)
+}
+
+func TestPostgresContinuityStoreWithDB_RetrieveByName(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	// Store a container with identity
+	container := NewContinuityContainer("verification", 15*time.Minute)
+	identityID := uuid.New()
+	container.SetIdentity(identityID)
+	container.Set("code", "123456")
+	fakeDB.containers[container.ID] = container
+
+	// Retrieve by name
+	retrieved, err := store.RetrieveByName(ctx, "verification", identityID)
+
+	require.NoError(t, err)
+	assert.NotNil(t, retrieved)
+	assert.Equal(t, "verification", retrieved.Name)
+}
+
+func TestPostgresContinuityStoreWithDB_RetrieveByName_NotFound(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	retrieved, err := store.RetrieveByName(ctx, "nonexistent", uuid.New())
+
+	assert.ErrorIs(t, err, ErrContainerNotFound)
+	assert.Nil(t, retrieved)
+}
+
+func TestPostgresContinuityStoreWithDB_RetrieveByName_DBError(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.queryRowErr = errors.New("connection error")
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	retrieved, err := store.RetrieveByName(ctx, "test", uuid.New())
+
+	assert.Error(t, err)
+	assert.Nil(t, retrieved)
+}
+
+func TestPostgresContinuityStoreWithDB_Delete(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.rowsAffected = 1
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	err := store.Delete(ctx, uuid.New())
+
+	require.NoError(t, err)
+}
+
+func TestPostgresContinuityStoreWithDB_Delete_NotFound(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.rowsAffected = 0
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	err := store.Delete(ctx, uuid.New())
+
+	assert.ErrorIs(t, err, ErrContainerNotFound)
+}
+
+func TestPostgresContinuityStoreWithDB_Delete_Error(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.execErr = errors.New("database error")
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	err := store.Delete(ctx, uuid.New())
+
+	assert.Error(t, err)
+}
+
+func TestPostgresContinuityStoreWithDB_DeleteExpired(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.rowsAffected = 5
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	deleted, err := store.DeleteExpired(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), deleted)
+}
+
+func TestPostgresContinuityStoreWithDB_DeleteExpired_Error(t *testing.T) {
+	fakeDB := newFakeContinuityDB()
+	fakeDB.execErr = errors.New("database error")
+	store := NewPostgresContinuityStoreWithDB(fakeDB)
+	ctx := context.Background()
+
+	deleted, err := store.DeleteExpired(ctx)
+
+	assert.Error(t, err)
+	assert.Equal(t, int64(0), deleted)
 }
 
 func BenchmarkContinuityContainer_GetString(b *testing.B) {
