@@ -11,8 +11,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// DB interface defines methods needed for database operations
+type DB interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, optionsAndArgs ...interface{}) pgx.Row
+}
 
 var (
 	ErrCodeNotFound = errors.New("code not found")
@@ -46,13 +53,22 @@ type Code struct {
 
 // Store handles magic link/OTP persistence.
 type Store struct {
-	db          *pgxpool.Pool
+	db          DB
 	codeLength  int
 	codeCharset string
 }
 
 // New creates a new magic link store.
 func New(db *pgxpool.Pool) *Store {
+	return &Store{
+		db:          db,
+		codeLength:  6,
+		codeCharset: "0123456789",
+	}
+}
+
+// NewWithDB creates a new magic link store with a custom DB interface (primarily for testing).
+func NewWithDB(db DB) *Store {
 	return &Store{
 		db:          db,
 		codeLength:  6,
