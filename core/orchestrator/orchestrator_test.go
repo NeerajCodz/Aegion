@@ -836,3 +836,236 @@ func TestOrchestratorCoreFlowsWithStubs(t *testing.T) {
 		}
 	})
 }
+
+func TestOrchestratorGetters(t *testing.T) {
+	t.Run("GetNetwork returns network manager", func(t *testing.T) {
+		network := NewNetworkManager(nil, "test-net", "")
+		o := &Orchestrator{
+			network: network,
+			modules: make(map[string]*moduleInstance),
+		}
+
+		got := o.GetNetwork()
+		if got != network {
+			t.Errorf("GetNetwork() = %v, want %v", got, network)
+		}
+	})
+
+	t.Run("GetNetwork returns nil when no network", func(t *testing.T) {
+		o := &Orchestrator{
+			modules: make(map[string]*moduleInstance),
+		}
+
+		got := o.GetNetwork()
+		if got != nil {
+			t.Errorf("GetNetwork() = %v, want nil", got)
+		}
+	})
+
+	t.Run("GetDocker returns docker client", func(t *testing.T) {
+		docker := &DockerClient{}
+		o := &Orchestrator{
+			docker:  docker,
+			modules: make(map[string]*moduleInstance),
+		}
+
+		got := o.GetDocker()
+		if got != docker {
+			t.Errorf("GetDocker() = %v, want %v", got, docker)
+		}
+	})
+
+	t.Run("GetDocker returns nil when no docker", func(t *testing.T) {
+		o := &Orchestrator{
+			modules: make(map[string]*moduleInstance),
+		}
+
+		got := o.GetDocker()
+		if got != nil {
+			t.Errorf("GetDocker() = %v, want nil", got)
+		}
+	})
+}
+
+func TestDockerClientSetNetworkName(t *testing.T) {
+	t.Run("SetNetworkName sets network name", func(t *testing.T) {
+		d := &DockerClient{}
+		d.SetNetworkName("my-network")
+		if d.networkName != "my-network" {
+			t.Errorf("networkName = %q, want %q", d.networkName, "my-network")
+		}
+	})
+
+	t.Run("SetNetworkName overwrites existing", func(t *testing.T) {
+		d := &DockerClient{networkName: "old-network"}
+		d.SetNetworkName("new-network")
+		if d.networkName != "new-network" {
+			t.Errorf("networkName = %q, want %q", d.networkName, "new-network")
+		}
+	})
+}
+
+func TestLoadModuleConfig(t *testing.T) {
+	t.Run("LoadModuleConfig with missing config triggers Load", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+
+		// Write a minimal config
+		configContent := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: aegion_net
+    subnet: 172.28.0.0/16
+modules:
+  password:
+    enabled: true
+    image: aegion/password:latest
+  magic_link:
+    enabled: true
+    image: aegion/magic-link:latest
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+
+		// First call to LoadModuleConfig should trigger Load()
+		cfg, err := loader.LoadModuleConfig("password")
+		if err != nil {
+			t.Fatalf("LoadModuleConfig failed: %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("expected non-nil config")
+		}
+		if cfg.ID != "password" {
+			t.Errorf("expected ID=password, got %s", cfg.ID)
+		}
+	})
+
+	t.Run("LoadModuleConfig with already loaded config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+
+		configContent := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: aegion_net
+    subnet: 172.28.0.0/16
+modules:
+  admin:
+    enabled: true
+    image: aegion/admin:latest
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		// Pre-load config
+		if _, err := loader.Load(); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		cfg, err := loader.LoadModuleConfig("admin")
+		if err != nil {
+			t.Fatalf("LoadModuleConfig failed: %v", err)
+		}
+		if cfg.ID != "admin" {
+			t.Errorf("expected ID=admin, got %s", cfg.ID)
+		}
+	})
+
+	t.Run("LoadModuleConfig with module-specific file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+		modulesDir := filepath.Join(tmpDir, "modules")
+		if err := os.MkdirAll(modulesDir, 0755); err != nil {
+			t.Fatalf("failed to create modules dir: %v", err)
+		}
+
+		mainConfig := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: aegion_net
+    subnet: 172.28.0.0/16
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(mainConfig), 0644); err != nil {
+			t.Fatalf("failed to write main config: %v", err)
+		}
+
+		// Module config must have id, name, and image to pass validation
+		moduleConfig := `
+id: custom_module
+name: Custom Module
+image: aegion/custom:latest
+enabled: true
+`
+		moduleConfigPath := filepath.Join(modulesDir, "custom_module.yaml")
+		if err := os.WriteFile(moduleConfigPath, []byte(moduleConfig), 0644); err != nil {
+			t.Fatalf("failed to write module config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		if _, err := loader.Load(); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		cfg, err := loader.LoadModuleConfig("custom_module")
+		if err != nil {
+			t.Fatalf("LoadModuleConfig failed: %v", err)
+		}
+		if cfg.ID != "custom_module" {
+			t.Errorf("expected ID=custom_module, got %s", cfg.ID)
+		}
+	})
+
+	t.Run("LoadModuleConfig with invalid module file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+		modulesDir := filepath.Join(tmpDir, "modules")
+		if err := os.MkdirAll(modulesDir, 0755); err != nil {
+			t.Fatalf("failed to create modules dir: %v", err)
+		}
+
+		mainConfig := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: aegion_net
+    subnet: 172.28.0.0/16
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(mainConfig), 0644); err != nil {
+			t.Fatalf("failed to write main config: %v", err)
+		}
+
+		// Write invalid YAML
+		invalidConfig := `invalid: [yaml: broken`
+		moduleConfigPath := filepath.Join(modulesDir, "broken.yaml")
+		if err := os.WriteFile(moduleConfigPath, []byte(invalidConfig), 0644); err != nil {
+			t.Fatalf("failed to write broken config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		if _, err := loader.Load(); err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+
+		_, err := loader.LoadModuleConfig("broken")
+		if err == nil {
+			t.Fatal("expected error for invalid module config")
+		}
+		if !strings.Contains(err.Error(), "parsing module config") {
+			t.Errorf("expected parsing error, got: %v", err)
+		}
+	})
+}

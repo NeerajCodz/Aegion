@@ -1,9 +1,11 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestRequestIDMiddleware(t *testing.T) {
@@ -126,4 +128,67 @@ func TestCORSMiddlewarePreflight(t *testing.T) {
 	if resp.Header.Get("Access-Control-Allow-Headers") == "" {
 		t.Fatalf("expected allow headers header")
 	}
+}
+
+func TestGetRequestTime(t *testing.T) {
+	t.Run("no time in context", func(t *testing.T) {
+		ctx := context.Background()
+		tm := GetRequestTime(ctx)
+		if !tm.IsZero() {
+			t.Errorf("expected zero time, got %v", tm)
+		}
+	})
+
+	t.Run("time in context via RequestID middleware", func(t *testing.T) {
+		var capturedTime time.Time
+		handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedTime = GetRequestTime(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if capturedTime.IsZero() {
+			t.Error("expected non-zero time from context")
+		}
+	})
+}
+
+func TestTimeoutMiddleware(t *testing.T) {
+	t.Run("request completes before timeout", func(t *testing.T) {
+		handler := Timeout(5 * time.Second)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("context has timeout set", func(t *testing.T) {
+		var deadline time.Time
+		var hasDeadline bool
+		handler := Timeout(100 * time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			deadline, hasDeadline = r.Context().Deadline()
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if !hasDeadline {
+			t.Error("expected context to have deadline")
+		}
+		if deadline.IsZero() {
+			t.Error("expected non-zero deadline")
+		}
+	})
 }

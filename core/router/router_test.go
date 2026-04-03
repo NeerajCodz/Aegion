@@ -4,6 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
 )
 
 func TestSingleJoiningSlash(t *testing.T) {
@@ -178,4 +181,146 @@ func TestTimeToSeconds(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRouterWrapperMethods tests all the chi.Router wrapper methods
+func TestRouterWrapperMethods(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RateLimit.Enabled = false // Disable rate limiting for tests
+	logger := zerolog.Nop()
+	r := New(cfg, logger, nil)
+
+	// Test Get
+	t.Run("Get", func(t *testing.T) {
+		r.Get("/test-get", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+	})
+
+	// Test Post
+	t.Run("Post", func(t *testing.T) {
+		r.Post("/test-post", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+		})
+	})
+
+	// Test Put
+	t.Run("Put", func(t *testing.T) {
+		r.Put("/test-put", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+	})
+
+	// Test Patch
+	t.Run("Patch", func(t *testing.T) {
+		r.Patch("/test-patch", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+	})
+
+	// Test Delete
+	t.Run("Delete", func(t *testing.T) {
+		r.Delete("/test-delete", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
+
+	// Test Handle
+	t.Run("Handle", func(t *testing.T) {
+		r.Handle("/test-handle", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+	})
+
+	// Test HandleFunc
+	t.Run("HandleFunc", func(t *testing.T) {
+		r.HandleFunc("/test-handlefunc", func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+	})
+
+	// Test Mount
+	t.Run("Mount", func(t *testing.T) {
+		subHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		r.Mount("/mounted", subHandler)
+	})
+
+	// Test Route
+	t.Run("Route", func(t *testing.T) {
+		r.Route("/route-group", func(chi chi.Router) {
+			chi.Get("/nested", func(w http.ResponseWriter, req *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+		})
+	})
+
+	// Test Group
+	t.Run("Group", func(t *testing.T) {
+		r.Group(func(chi chi.Router) {
+			chi.Get("/grouped", func(w http.ResponseWriter, req *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+		})
+	})
+
+	// Test With
+	t.Run("With", func(t *testing.T) {
+		middleware := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				next.ServeHTTP(w, req)
+			})
+		}
+		subRouter := r.With(middleware)
+		if subRouter == nil {
+			t.Error("With() returned nil")
+		}
+	})
+
+	// Test NotFound
+	t.Run("NotFound", func(t *testing.T) {
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		})
+	})
+
+	// Test MethodNotAllowed
+	t.Run("MethodNotAllowed", func(t *testing.T) {
+		r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		})
+	})
+
+	// Test Chi
+	t.Run("Chi", func(t *testing.T) {
+		mux := r.Chi()
+		if mux == nil {
+			t.Error("Chi() returned nil")
+		}
+	})
+}
+
+// TestRouterModuleProxy tests ProxyToModule and MountModule
+func TestRouterModuleProxy(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.InternalToken = "test-token"
+	cfg.SessionSecret = []byte("test-secret")
+	cfg.RateLimit.Enabled = false
+	logger := zerolog.Nop()
+
+	// Use nil registry (acceptable for this test)
+	r := New(cfg, logger, nil)
+
+	t.Run("ProxyToModule", func(t *testing.T) {
+		handler := r.ProxyToModule("test-module")
+		if handler == nil {
+			t.Error("ProxyToModule() returned nil")
+		}
+	})
+
+	t.Run("MountModule", func(t *testing.T) {
+		// This should not panic
+		r.MountModule("/module", "another-module")
+	})
 }
