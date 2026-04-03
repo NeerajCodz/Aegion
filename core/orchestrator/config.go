@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -202,9 +203,16 @@ func (l *ConfigLoader) buildModuleConfig(moduleID string) (*ModuleConfig, error)
 		version = "latest"
 	}
 
+	image := moduleID
+	if l.config != nil && strings.TrimSpace(l.config.ModuleRegistry.BaseURL) != "" {
+		base := strings.TrimRight(strings.TrimSpace(l.config.ModuleRegistry.BaseURL), "/")
+		image = fmt.Sprintf("%s/%s", base, moduleID)
+	}
+
 	cfg := &ModuleConfig{
 		ID:      moduleID,
 		Name:    moduleID,
+		Image:   image,
 		Version: version,
 		Env:     make(map[string]string),
 		Labels:  make(map[string]string),
@@ -212,14 +220,19 @@ func (l *ConfigLoader) buildModuleConfig(moduleID string) (*ModuleConfig, error)
 
 	applyModuleDefaults(cfg, l.config)
 
+	if err := ValidateModuleConfig(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
 // applyModuleDefaults applies default values from main config.
 func applyModuleDefaults(cfg *ModuleConfig, mainCfg *AegionConfig) {
-	if cfg.Network == "" && mainCfg != nil {
-		cfg.Network = mainCfg.Server.InternalNetwork.Name
-		if cfg.Network == "" {
+	if cfg.Network == "" {
+		if mainCfg != nil && strings.TrimSpace(mainCfg.Server.InternalNetwork.Name) != "" {
+			cfg.Network = strings.TrimSpace(mainCfg.Server.InternalNetwork.Name)
+		} else {
 			cfg.Network = DefaultNetworkName
 		}
 	}

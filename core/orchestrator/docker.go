@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/rs/zerolog/log"
 )
 
@@ -27,10 +28,25 @@ const (
 	DefaultStopTimeout = 30 * time.Second
 )
 
+var newDockerEngineClient = func() (*client.Client, error) {
+	return client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+}
+
 // DockerClient wraps the Docker client for container operations.
 type DockerClient struct {
 	cli         *client.Client
 	networkName string
+
+	closeFn            func() error
+	containerCreateFn  func(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
+	containerStartFn   func(ctx context.Context, containerID string, options container.StartOptions) error
+	containerStopFn    func(ctx context.Context, containerID string, options container.StopOptions) error
+	containerRemoveFn  func(ctx context.Context, containerID string, options container.RemoveOptions) error
+	containerLogsFn    func(ctx context.Context, containerID string, options container.LogsOptions) (io.ReadCloser, error)
+	containerInspectFn func(ctx context.Context, containerID string) (container.InspectResponse, error)
+	containerListFn    func(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
+	imageInspectFn     func(ctx context.Context, imageID string, inspectOpts ...client.ImageInspectOption) (image.InspectResponse, error)
+	imagePullFn        func(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
 }
 
 // ContainerInfo holds container state information.
@@ -52,19 +68,39 @@ type ContainerInfo struct {
 
 // NewDockerClient creates a new Docker client wrapper.
 func NewDockerClient() (*DockerClient, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := newDockerEngineClient()
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
+	if cli == nil {
+		return nil, fmt.Errorf("creating docker client: nil docker client")
+	}
 
-	return &DockerClient{
+	d := &DockerClient{
 		cli:         cli,
 		networkName: DefaultNetworkName,
-	}, nil
+	}
+	d.closeFn = cli.Close
+	d.containerCreateFn = cli.ContainerCreate
+	d.containerStartFn = cli.ContainerStart
+	d.containerStopFn = cli.ContainerStop
+	d.containerRemoveFn = cli.ContainerRemove
+	d.containerLogsFn = cli.ContainerLogs
+	d.containerInspectFn = cli.ContainerInspect
+	d.containerListFn = cli.ContainerList
+	d.imageInspectFn = cli.ImageInspect
+	d.imagePullFn = cli.ImagePull
+	return d, nil
 }
 
 // Close closes the Docker client.
 func (d *DockerClient) Close() error {
+	if d.closeFn != nil {
+		return d.closeFn()
+	}
+	if d.cli == nil {
+		return fmt.Errorf("docker client is nil")
+	}
 	return d.cli.Close()
 }
 
@@ -82,7 +118,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 	if err == nil && existing != nil {
 		log.Info().
 			Str("module_id", cfg.ID).
-			Str("container_id", existing.ID).
+			Str("container_id", shortID(existing.ID)).
 			Msg("container already exists, removing")
 		if err := d.RemoveContainer(ctx, existing.ID, true); err != nil {
 			return "", fmt.Errorf("removing existing container: %w", err)
@@ -179,7 +215,14 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 		},
 	}
 
-	resp, err := d.cli.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, containerName)
+	var resp container.CreateResponse
+	if d.containerCreateFn != nil {
+		resp, err = d.containerCreateFn(ctx, containerCfg, hostCfg, networkCfg, nil, containerName)
+	} else if d.cli != nil {
+		resp, err = d.cli.ContainerCreate(ctx, containerCfg, hostCfg, networkCfg, nil, containerName)
+	} else {
+		return "", fmt.Errorf("docker client is nil")
+	}
 	if err != nil {
 		return "", fmt.Errorf("creating container: %w", err)
 	}
@@ -190,7 +233,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 
 	log.Info().
 		Str("module_id", cfg.ID).
-		Str("container_id", resp.ID[:12]).
+		Str("container_id", shortID(resp.ID)).
 		Str("container_name", containerName).
 		Msg("container created")
 
@@ -237,11 +280,19 @@ func (d *DockerClient) buildResources(cfg *ModuleConfig) container.Resources {
 
 // StartContainer starts an existing container.
 func (d *DockerClient) StartContainer(ctx context.Context, containerID string) error {
-	if err := d.cli.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+	var err error
+	if d.containerStartFn != nil {
+		err = d.containerStartFn(ctx, containerID, container.StartOptions{})
+	} else if d.cli != nil {
+		err = d.cli.ContainerStart(ctx, containerID, container.StartOptions{})
+	} else {
+		return fmt.Errorf("docker client is nil")
+	}
+	if err != nil {
 		return fmt.Errorf("starting container: %w", err)
 	}
 
-	log.Info().Str("container_id", containerID[:12]).Msg("container started")
+	log.Info().Str("container_id", shortID(containerID)).Msg("container started")
 	return nil
 }
 
@@ -254,11 +305,19 @@ func (d *DockerClient) StopContainer(ctx context.Context, containerID string, ti
 	timeoutSec := int(timeout.Seconds())
 	options := container.StopOptions{Timeout: &timeoutSec}
 
-	if err := d.cli.ContainerStop(ctx, containerID, options); err != nil {
+	var err error
+	if d.containerStopFn != nil {
+		err = d.containerStopFn(ctx, containerID, options)
+	} else if d.cli != nil {
+		err = d.cli.ContainerStop(ctx, containerID, options)
+	} else {
+		return fmt.Errorf("docker client is nil")
+	}
+	if err != nil {
 		return fmt.Errorf("stopping container: %w", err)
 	}
 
-	log.Info().Str("container_id", containerID[:12]).Msg("container stopped")
+	log.Info().Str("container_id", shortID(containerID)).Msg("container stopped")
 	return nil
 }
 
@@ -269,11 +328,19 @@ func (d *DockerClient) RemoveContainer(ctx context.Context, containerID string, 
 		Force:         force,
 	}
 
-	if err := d.cli.ContainerRemove(ctx, containerID, options); err != nil {
+	var err error
+	if d.containerRemoveFn != nil {
+		err = d.containerRemoveFn(ctx, containerID, options)
+	} else if d.cli != nil {
+		err = d.cli.ContainerRemove(ctx, containerID, options)
+	} else {
+		return fmt.Errorf("docker client is nil")
+	}
+	if err != nil {
 		return fmt.Errorf("removing container: %w", err)
 	}
 
-	log.Info().Str("container_id", containerID[:12]).Msg("container removed")
+	log.Info().Str("container_id", shortID(containerID)).Msg("container removed")
 	return nil
 }
 
@@ -292,7 +359,17 @@ func (d *DockerClient) ContainerLogs(ctx context.Context, containerID string, ta
 		options.Since = since.Format(time.RFC3339)
 	}
 
-	reader, err := d.cli.ContainerLogs(ctx, containerID, options)
+	var (
+		reader io.ReadCloser
+		err    error
+	)
+	if d.containerLogsFn != nil {
+		reader, err = d.containerLogsFn(ctx, containerID, options)
+	} else if d.cli != nil {
+		reader, err = d.cli.ContainerLogs(ctx, containerID, options)
+	} else {
+		return "", fmt.Errorf("docker client is nil")
+	}
 	if err != nil {
 		return "", fmt.Errorf("getting container logs: %w", err)
 	}
@@ -308,7 +385,17 @@ func (d *DockerClient) ContainerLogs(ctx context.Context, containerID string, ta
 
 // GetContainerInfo retrieves detailed container information.
 func (d *DockerClient) GetContainerInfo(ctx context.Context, containerID string) (*ContainerInfo, error) {
-	inspect, err := d.cli.ContainerInspect(ctx, containerID)
+	var (
+		inspect container.InspectResponse
+		err     error
+	)
+	if d.containerInspectFn != nil {
+		inspect, err = d.containerInspectFn(ctx, containerID)
+	} else if d.cli != nil {
+		inspect, err = d.cli.ContainerInspect(ctx, containerID)
+	} else {
+		return nil, fmt.Errorf("docker client is nil")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("inspecting container: %w", err)
 	}
@@ -356,7 +443,17 @@ func (d *DockerClient) GetContainerInfo(ctx context.Context, containerID string)
 
 // HealthCheck checks the health status of a container.
 func (d *DockerClient) HealthCheck(ctx context.Context, containerID string) (string, error) {
-	inspect, err := d.cli.ContainerInspect(ctx, containerID)
+	var (
+		inspect container.InspectResponse
+		err     error
+	)
+	if d.containerInspectFn != nil {
+		inspect, err = d.containerInspectFn(ctx, containerID)
+	} else if d.cli != nil {
+		inspect, err = d.cli.ContainerInspect(ctx, containerID)
+	} else {
+		return "", fmt.Errorf("docker client is nil")
+	}
 	if err != nil {
 		return "", fmt.Errorf("inspecting container: %w", err)
 	}
@@ -377,10 +474,23 @@ func (d *DockerClient) findContainer(ctx context.Context, name string) (*Contain
 	filterArgs := filters.NewArgs()
 	filterArgs.Add("name", name)
 
-	containers, err := d.cli.ContainerList(ctx, container.ListOptions{
-		All:     true,
-		Filters: filterArgs,
-	})
+	var (
+		containers []container.Summary
+		err        error
+	)
+	if d.containerListFn != nil {
+		containers, err = d.containerListFn(ctx, container.ListOptions{
+			All:     true,
+			Filters: filterArgs,
+		})
+	} else if d.cli != nil {
+		containers, err = d.cli.ContainerList(ctx, container.ListOptions{
+			All:     true,
+			Filters: filterArgs,
+		})
+	} else {
+		return nil, fmt.Errorf("docker client is nil")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -402,14 +512,28 @@ func (d *DockerClient) findContainer(ctx context.Context, name string) (*Contain
 
 // pullImageIfNeeded pulls an image if it doesn't exist locally.
 func (d *DockerClient) pullImageIfNeeded(ctx context.Context, imageRef string) error {
-	_, err := d.cli.ImageInspect(ctx, imageRef)
+	var err error
+	if d.imageInspectFn != nil {
+		_, err = d.imageInspectFn(ctx, imageRef)
+	} else if d.cli != nil {
+		_, err = d.cli.ImageInspect(ctx, imageRef)
+	} else {
+		return fmt.Errorf("docker client is nil")
+	}
 	if err == nil {
 		return nil // Image exists
 	}
 
 	log.Info().Str("image", imageRef).Msg("pulling image")
 
-	reader, err := d.cli.ImagePull(ctx, imageRef, image.PullOptions{})
+	var reader io.ReadCloser
+	if d.imagePullFn != nil {
+		reader, err = d.imagePullFn(ctx, imageRef, image.PullOptions{})
+	} else if d.cli != nil {
+		reader, err = d.cli.ImagePull(ctx, imageRef, image.PullOptions{})
+	} else {
+		return fmt.Errorf("docker client is nil")
+	}
 	if err != nil {
 		return err
 	}
@@ -425,10 +549,23 @@ func (d *DockerClient) ListContainers(ctx context.Context) ([]*ContainerInfo, er
 	filterArgs := filters.NewArgs()
 	filterArgs.Add("label", "aegion.module=true")
 
-	containers, err := d.cli.ContainerList(ctx, container.ListOptions{
-		All:     true,
-		Filters: filterArgs,
-	})
+	var (
+		containers []container.Summary
+		err        error
+	)
+	if d.containerListFn != nil {
+		containers, err = d.containerListFn(ctx, container.ListOptions{
+			All:     true,
+			Filters: filterArgs,
+		})
+	} else if d.cli != nil {
+		containers, err = d.cli.ContainerList(ctx, container.ListOptions{
+			All:     true,
+			Filters: filterArgs,
+		})
+	} else {
+		return nil, fmt.Errorf("docker client is nil")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("listing containers: %w", err)
 	}
@@ -482,4 +619,11 @@ func parseCPU(s string) (int64, error) {
 		return 0, err
 	}
 	return int64(value * 1e9), nil
+}
+
+func shortID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
 }

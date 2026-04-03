@@ -20,7 +20,7 @@ permissions:
   security-events: write
 
 env:
-  GO_VERSION: '1.25.0'
+  GO_VERSION: '1.25.5'
   RUST_VERSION: 'stable'
 
 jobs:
@@ -40,10 +40,16 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Resolve Go package list
+        id: go-packages
+        run: |
+          packages=$(go list ./... | grep -v '/node_modules/' | tr '\n' ' ')
+          echo "value=$packages" >> $GITHUB_OUTPUT
+
       - name: Run gosec
-        uses: securego/gosec@master
+        uses: securego/gosec@v2.25.0
         with:
-          args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+          args: -no-fail -fmt sarif -out gosec-results.sarif ${{ steps.go-packages.outputs.value }}
 
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v3
@@ -52,9 +58,9 @@ jobs:
           sarif_file: gosec-results.sarif
 
       - name: Run gosec with failure on high severity
-        uses: securego/gosec@master
+        uses: securego/gosec@v2.25.0
         with:
-          args: '-severity high -confidence high -exclude-generated ./...'
+          args: -severity high -confidence high -exclude-generated ${{ steps.go-packages.outputs.value }}
 
   # ---------------------------------------------------------------------------
   # Rust Dependency Audit
@@ -106,10 +112,14 @@ jobs:
           load: true
           tags: aegion/core:scan
           cache-from: type=gha
+          build-args: |
+            VERSION=security-scan
+            BASE_IMAGE=golang:1.25-bookworm
+            RUNTIME_IMAGE=debian:bookworm-slim
         continue-on-error: true
 
       - name: Run Trivy vulnerability scanner (filesystem)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -127,7 +137,7 @@ jobs:
           category: 'trivy-fs'
 
       - name: Run Trivy on container image
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.35.0
         if: success()
         with:
           image-ref: 'aegion/core:scan'

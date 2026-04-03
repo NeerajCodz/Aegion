@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+
+	admin "github.com/aegion/aegion/modules/admin"
 )
 
 func TestNormalizeAdminPath(t *testing.T) {
@@ -198,7 +201,8 @@ func TestSPAFileServerBehavior(t *testing.T) {
 	spa := NewSPAFileServer()
 
 	t.Run("javascript assets are immutable", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/assets/index-DfxWsJt4.js", nil)
+		jsAssetPath := findEmbeddedAssetPath(t, ".js")
+		req := httptest.NewRequest(http.MethodGet, "/"+jsAssetPath, nil)
 		rec := httptest.NewRecorder()
 		spa.ServeHTTP(rec, req)
 
@@ -235,6 +239,33 @@ func TestSPAFileServerBehavior(t *testing.T) {
 			t.Fatalf("expected redirect to ./, got %q", location)
 		}
 	})
+}
+
+func findEmbeddedAssetPath(t *testing.T, ext string) string {
+	t.Helper()
+
+	var found string
+	err := fs.WalkDir(admin.GetSPAFiles(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(path, ext) {
+			found = path
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if err != nil && err != fs.SkipAll {
+		t.Fatalf("failed to walk embedded SPA files: %v", err)
+	}
+	if found == "" {
+		t.Fatalf("no embedded asset found with extension %q", ext)
+	}
+
+	return found
 }
 
 func TestSPAFallbackRouting(t *testing.T) {

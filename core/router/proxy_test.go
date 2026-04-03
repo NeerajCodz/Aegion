@@ -1,0 +1,258 @@
+package router
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+
+	"github.com/aegion/aegion/core/registry"
+	"github.com/aegion/aegion/core/session"
+)
+
+func mustRegisterModule(t *testing.T, reg *registry.Registry, req registry.RegistrationRequest) {
+	t.Helper()
+	if _, err := reg.Register(req); err != nil {
+		t.Fatalf("failed to register module: %v", err)
+	}
+}
+
+func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig())
+	defer reg.Stop()
+
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry:      reg,
+		ModuleID:      "password",
+		InternalToken: "internal-token",
+		SessionSecret: []byte("test-session-secret"),
+		Timeout:       10 * time.Millisecond,
+		Logger:        zerolog.Nop(),
+	})
+
+	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrModuleUnavailable) {
+		t.Fatalf("expected ErrModuleUnavailable for missing module, got %v", err)
+	}
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "password",
+		Name:    "password",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: "http://127.0.0.1:18081"},
+		},
+		HealthURL: "http://127.0.0.1:18081/health",
+	})
+
+	endpoint, err := proxy.getModuleEndpoint(context.Background())
+	if err != nil {
+		t.Fatalf("getModuleEndpoint returned error: %v", err)
+	}
+	if endpoint.String() != "http://127.0.0.1:18081" {
+		t.Fatalf("unexpected endpoint: %s", endpoint.String())
+	}
+
+	if err := reg.UpdateStatus("password", registry.StatusUnhealthy); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrModuleUnavailable) {
+		t.Fatalf("expected ErrModuleUnavailable for unhealthy module, got %v", err)
+	}
+
+	if err := reg.UpdateStatus("password", registry.StatusHealthy); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+
+	_, _ = reg.Deregister("password")
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "password",
+		Name:    "password",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointGRPC, URL: "grpc://127.0.0.1:19090"},
+		},
+		HealthURL: "http://127.0.0.1:18081/health",
+	})
+	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrNoHealthyEndpoint) {
+		t.Fatalf("expected ErrNoHealthyEndpoint, got %v", err)
+	}
+}
+
+func TestModuleProxyDirectorAndHeaders(t *testing.T) {
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		InternalToken: "module-token",
+		SessionSecret: []byte("module-secret"),
+		ModuleID:      "admin",
+		Logger:        zerolog.Nop(),
+	})
+
+	target, _ := url.Parse("http://module.local/base")
+	original := httptest.NewRequest(http.MethodPost, "http://gateway.local/module/path?q=1", strings.NewReader("payload"))
+	original.RemoteAddr = "198.51.100.4:1234"
+	original.Header.Set("X-Forwarded-For", "203.0.113.10")
+	original.Header.Set("X-Forwarded-Proto", "https")
+	original.Header.Set("X-Forwarded-Host", "gateway.example.com")
+	original = original.WithContext(context.WithValue(original.Context(), contextKeyRequestID, "req-123"))
+
+	// Add a session to ensure session headers are injected.
+	sess := &session.Session{
+		ID:         uuid.New(),
+		IdentityID: uuid.New(),
+		ExpiresAt:  time.Now().Add(5 * time.Minute),
+	}
+	original = original.WithContext(session.WithSession(original.Context(), sess))
+
+	req := httptest.NewRequest(http.MethodPost, "http://placeholder/module/path?drop=true", strings.NewReader("payload"))
+	req = req.WithContext(original.Context())
+
+	proxy.director(target, original)(req)
+
+	if req.URL.Host != "module.local" || req.URL.Scheme != "http" {
+		t.Fatalf("expected rewritten URL host/scheme, got %s", req.URL.String())
+	}
+	if req.URL.Path != "/base/module/path" {
+		t.Fatalf("expected rewritten path /base/module/path, got %s", req.URL.Path)
+	}
+	if req.URL.RawQuery != "q=1" {
+		t.Fatalf("expected original query q=1, got %s", req.URL.RawQuery)
+	}
+	if req.Host != "module.local" {
+		t.Fatalf("expected host header module.local, got %s", req.Host)
+	}
+	if req.Header.Get("X-Aegion-Internal-Token") != "module-token" {
+		t.Fatalf("expected internal token header")
+	}
+	if req.Header.Get("X-Request-ID") != "req-123" {
+		t.Fatalf("expected forwarded request id")
+	}
+	if req.Header.Get("X-Forwarded-For") != "203.0.113.10, 203.0.113.10" {
+		t.Fatalf("unexpected x-forwarded-for: %q", req.Header.Get("X-Forwarded-For"))
+	}
+	if req.Header.Get("X-Forwarded-Proto") != "https" {
+		t.Fatalf("expected forwarded proto https")
+	}
+	if req.Header.Get("X-Forwarded-Host") != "gateway.example.com" {
+		t.Fatalf("expected forwarded host from original header")
+	}
+	if req.Header.Get(session.HeaderPrefix+"Session-ID") == "" || req.Header.Get(session.HeaderPrefix+"Signature") == "" {
+		t.Fatalf("expected session headers to be injected")
+	}
+}
+
+func TestModuleProxyErrorHandlers(t *testing.T) {
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		ModuleID: "password",
+		Logger:   zerolog.Nop(),
+	})
+
+	t.Run("setup error with timeout", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/module", nil)
+		proxy.handleError(rec, req, ErrModuleTimeout, "req-timeout")
+
+		if rec.Code != http.StatusGatewayTimeout {
+			t.Fatalf("expected %d, got %d", http.StatusGatewayTimeout, rec.Code)
+		}
+		var body map[string]map[string]interface{}
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode error body: %v", err)
+		}
+		if body["error"]["request_id"] != "req-timeout" {
+			t.Fatalf("expected request_id in error response")
+		}
+	})
+
+	t.Run("proxy transport connection refused", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/module", nil)
+		proxy.handleProxyError(rec, req, errors.New("dial tcp: connection refused"), "req-refused")
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	t.Run("proxy transport deadline exceeded", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		baseReq := httptest.NewRequest(http.MethodGet, "/module", nil)
+		ctx, cancel := context.WithCancel(baseReq.Context())
+		cancel()
+		req := baseReq.WithContext(ctx)
+
+		proxy.handleProxyError(rec, req, errors.New("upstream failed"), "req-timeout-2")
+		// No context deadline here, so default should be bad gateway.
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("expected %d, got %d", http.StatusBadGateway, rec.Code)
+		}
+	})
+}
+
+func TestModuleProxyServeHTTP(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig())
+	defer reg.Stop()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Aegion-Internal-Token") != "int-token" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("missing token"))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "password",
+		Name:    "password",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: upstream.URL},
+		},
+		HealthURL: upstream.URL + "/health",
+	})
+
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry:      reg,
+		ModuleID:      "password",
+		InternalToken: "int-token",
+		Timeout:       2 * time.Second,
+		Logger:        zerolog.Nop(),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/module/test", nil)
+	req = req.WithContext(context.WithValue(req.Context(), contextKeyRequestID, "req-proxy"))
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected %d, got %d", http.StatusAccepted, rec.Code)
+	}
+	if body := rec.Body.String(); body != "ok" {
+		t.Fatalf("unexpected body: %q", body)
+	}
+}
+
+func TestModuleProxyServeHTTP_ModuleUnavailable(t *testing.T) {
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry: nil,
+		ModuleID: "missing",
+		Logger:   zerolog.Nop(),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/module/test", nil)
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+}

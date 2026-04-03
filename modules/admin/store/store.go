@@ -3,23 +3,31 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Errors for the admin store.
 var (
 	ErrOperatorNotFound  = errors.New("operator not found")
+	ErrIdentityNotFound  = errors.New("identity not found")
 	ErrRoleNotFound      = errors.New("role not found")
 	ErrAPIKeyNotFound    = errors.New("api key not found")
 	ErrDuplicateOperator = errors.New("operator already exists for this identity")
 	ErrDuplicateRole     = errors.New("role with this name already exists")
 	ErrSystemRole        = errors.New("cannot modify system role")
+	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 
 // Operator represents an admin user with permissions.
@@ -69,6 +77,14 @@ type APIKey struct {
 	UpdatedAt   time.Time
 }
 
+// IdentityProfile contains identity details commonly needed by admin APIs.
+type IdentityProfile struct {
+	Email       string
+	Name        string
+	State       string
+	LastLoginAt *time.Time
+}
+
 // ListOptions contains pagination and filtering options.
 type ListOptions struct {
 	Limit  int
@@ -76,14 +92,30 @@ type ListOptions struct {
 	Sort   string
 }
 
+type dbQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 // Store handles admin data persistence.
 type Store struct {
-	db *pgxpool.Pool
+	pool *pgxpool.Pool
+	db   dbQuerier
 }
 
 // New creates a new admin store.
 func New(db *pgxpool.Pool) *Store {
-	return &Store{db: db}
+	s := &Store{pool: db}
+	if db != nil {
+		s.db = db
+	}
+	return s
+}
+
+// DB returns the underlying pgx pool for advanced queries in handlers.
+func (s *Store) DB() *pgxpool.Pool {
+	return s.pool
 }
 
 // ============================================================================
@@ -160,6 +192,112 @@ func (s *Store) GetOperatorByIdentityID(ctx context.Context, identityID uuid.UUI
 	}
 
 	return op, nil
+}
+
+// AuthenticateOperatorByEmail authenticates an operator using email and password.
+func (s *Store) AuthenticateOperatorByEmail(ctx context.Context, email, password string) (*Operator, error) {
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
+	if normalizedEmail == "" || password == "" {
+		return nil, ErrInvalidCredentials
+	}
+
+	op := &Operator{}
+	var (
+		permsJSON    []byte
+		passwordHash string
+	)
+
+	err := s.db.QueryRow(ctx, `
+		SELECT
+			ao.id,
+			ao.identity_id,
+			ao.role,
+			ao.permissions,
+			ao.created_at,
+			ao.updated_at,
+			pc.hash
+		FROM adm_operators ao
+		JOIN core_identities ci
+			ON ci.id = ao.identity_id
+		   AND ci.deleted_at IS NULL
+		JOIN pwd_credentials pc
+			ON pc.identity_id = ao.identity_id
+		LEFT JOIN LATERAL (
+			SELECT value
+			FROM core_identity_addresses
+			WHERE identity_id = ao.identity_id
+			  AND type = 'email'
+			ORDER BY is_primary DESC, created_at ASC
+			LIMIT 1
+		) addr ON TRUE
+		WHERE LOWER(COALESCE(addr.value, ci.traits->>'email', '')) = $1
+		LIMIT 1
+	`, normalizedEmail).Scan(
+		&op.ID,
+		&op.IdentityID,
+		&op.Role,
+		&permsJSON,
+		&op.CreatedAt,
+		&op.UpdatedAt,
+		&passwordHash,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvalidCredentials
+		}
+		return nil, err
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	if err := json.Unmarshal(permsJSON, &op.Permissions); err != nil {
+		op.Permissions = make(map[string]interface{})
+	}
+
+	return op, nil
+}
+
+// GetIdentityProfile fetches identity metadata used in operator and auth responses.
+func (s *Store) GetIdentityProfile(ctx context.Context, identityID uuid.UUID) (*IdentityProfile, error) {
+	profile := &IdentityProfile{}
+
+	err := s.db.QueryRow(ctx, `
+		SELECT
+			COALESCE(addr.value, ci.traits->>'email', '') AS email,
+			COALESCE(ci.traits->>'display_name', ci.traits->>'name', '') AS name,
+			ci.state,
+			(
+				SELECT MAX(authenticated_at)
+				FROM core_sessions cs
+				WHERE cs.identity_id = ci.id
+			) AS last_login_at
+		FROM core_identities ci
+		LEFT JOIN LATERAL (
+			SELECT value
+			FROM core_identity_addresses
+			WHERE identity_id = ci.id
+			  AND type = 'email'
+			ORDER BY is_primary DESC, created_at ASC
+			LIMIT 1
+		) addr ON TRUE
+		WHERE ci.id = $1
+		  AND ci.deleted_at IS NULL
+	`, identityID).Scan(
+		&profile.Email,
+		&profile.Name,
+		&profile.State,
+		&profile.LastLoginAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrIdentityNotFound
+		}
+		return nil, err
+	}
+
+	return profile, nil
 }
 
 // UpdateOperator updates an existing operator.
@@ -612,6 +750,26 @@ func (s *Store) UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error {
 		UPDATE adm_api_keys SET last_used_at = NOW(), updated_at = NOW() WHERE id = $1
 	`, id)
 	return err
+}
+
+// HashAPIKeyToken hashes a full API key/token for safe storage.
+func HashAPIKeyToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+// ValidateAPIKeyToken verifies a token against a stored hash in constant time.
+func ValidateAPIKeyToken(token, expectedHash string) bool {
+	if token == "" || expectedHash == "" {
+		return false
+	}
+
+	actual := HashAPIKeyToken(token)
+	if len(actual) != len(expectedHash) {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(expectedHash)) == 1
 }
 
 // DeleteAPIKey removes an API key.

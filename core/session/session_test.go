@@ -1407,15 +1407,10 @@ func TestManager_Operations_ContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 	defer cancel()
 
-	time.Sleep(2 * time.Millisecond)
-
-	// Verify context is cancelled
-	select {
-	case <-ctx.Done():
-		assert.Equal(t, context.DeadlineExceeded, ctx.Err())
-	default:
-		t.Fatal("context should be cancelled")
-	}
+	require.Eventually(t, func() bool {
+		return ctx.Err() != nil
+	}, 200*time.Millisecond, 1*time.Millisecond)
+	assert.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
 }
 
 // ============================================================================

@@ -4,13 +4,18 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aegion/aegion/modules/admin/store"
 )
 
 // Store defines the persistence behavior required by admin service.
 type Store interface {
+	DB() *pgxpool.Pool
+
 	CreateOperator(ctx context.Context, op *store.Operator) error
+	AuthenticateOperatorByEmail(ctx context.Context, email, password string) (*store.Operator, error)
+	GetIdentityProfile(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error)
 	GetOperator(ctx context.Context, id uuid.UUID) (*store.Operator, error)
 	GetOperatorByIdentityID(ctx context.Context, identityID uuid.UUID) (*store.Operator, error)
 	UpdateOperator(ctx context.Context, op *store.Operator) error
@@ -25,4 +30,5 @@ type Store interface {
 
 	GetAPIKeyByPrefix(ctx context.Context, prefix string) (*store.APIKey, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
+	CreateAPIKey(ctx context.Context, key *store.APIKey) error
 }

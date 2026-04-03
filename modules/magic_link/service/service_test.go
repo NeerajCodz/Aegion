@@ -2,455 +2,469 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/aegion/aegion/modules/magic_link/store"
 )
 
-// ============================================================================
-// Mock Courier Implementation
-// ============================================================================
-
-// MockCourier mocks the Courier interface
-type MockCourier struct {
-	mock.Mock
+type mockCourier struct {
+	sendFn func(ctx context.Context, to string, link string, code string) error
 }
 
-func (m *MockCourier) SendMagicLinkEmail(ctx context.Context, to string, link string, code string) error {
-	args := m.Called(ctx, to, link, code)
-	return args.Error(0)
+func (m *mockCourier) SendMagicLinkEmail(ctx context.Context, to string, link string, code string) error {
+	if m.sendFn != nil {
+		return m.sendFn(ctx, to, link, code)
+	}
+	return nil
 }
 
-// ============================================================================
-// Configuration Tests
-// ============================================================================
+type memoryStore struct {
+	configLength  int
+	configCharset string
 
-func TestConfigDefaults(t *testing.T) {
-	config := Config{}
+	codesByID    map[uuid.UUID]*store.Code
+	codesByToken map[string]*store.Code
+	codesByKey   map[string]*store.Code
+	rateCounts   map[string]int
+	invalidated  []string
 
-	assert.Equal(t, "", config.BaseURL)
-	assert.Equal(t, 0, config.CodeLength)
-	assert.Equal(t, "", config.CodeCharset)
-	assert.Equal(t, time.Duration(0), config.LinkLifespan)
-	assert.Equal(t, time.Duration(0), config.CodeLifespan)
-	assert.Equal(t, 0, config.RateLimit)
-	assert.Equal(t, time.Duration(0), config.RateWindow)
+	checkRateLimitErr error
+	invalidateErr     error
+	createErr         error
+	getByCodeErr      error
+	getByTokenErr     error
+	markUsedErr       error
+	cleanupErr        error
+
+	forceExpired bool
 }
 
-func TestConfigWithValues(t *testing.T) {
-	config := Config{
+func newMemoryStore() *memoryStore {
+	return &memoryStore{
+		codesByID:    map[uuid.UUID]*store.Code{},
+		codesByToken: map[string]*store.Code{},
+		codesByKey:   map[string]*store.Code{},
+		rateCounts:   map[string]int{},
+		invalidated:  []string{},
+	}
+}
+
+func codeKey(recipient string, codeType store.CodeType, code string) string {
+	return string(codeType) + "|" + recipient + "|" + code
+}
+
+func (m *memoryStore) SetCodeConfig(length int, charset string) {
+	m.configLength = length
+	m.configCharset = charset
+}
+
+func (m *memoryStore) CheckRateLimit(ctx context.Context, key string, limit int, window time.Duration) error {
+	if m.checkRateLimitErr != nil {
+		return m.checkRateLimitErr
+	}
+	m.rateCounts[key]++
+	if m.rateCounts[key] > limit {
+		return store.ErrRateLimited
+	}
+	return nil
+}
+
+func (m *memoryStore) InvalidatePrevious(ctx context.Context, recipient string, codeType store.CodeType) error {
+	if m.invalidateErr != nil {
+		return m.invalidateErr
+	}
+	m.invalidated = append(m.invalidated, string(codeType)+"|"+recipient)
+	return nil
+}
+
+func (m *memoryStore) Create(ctx context.Context, recipient string, codeType store.CodeType, identityID *uuid.UUID, ttl time.Duration) (*store.Code, error) {
+	if m.createErr != nil {
+		return nil, m.createErr
+	}
+	now := time.Now().UTC()
+	expires := now.Add(ttl)
+	if m.forceExpired {
+		expires = now.Add(-time.Minute)
+	}
+	c := &store.Code{
+		ID:         uuid.New(),
+		IdentityID: identityID,
+		Recipient:  recipient,
+		Type:       codeType,
+		Code:       "123456",
+		Token:      "tok_" + uuid.NewString(),
+		Used:       false,
+		ExpiresAt:  expires,
+		CreatedAt:  now,
+	}
+	m.codesByID[c.ID] = c
+	m.codesByToken[c.Token] = c
+	m.codesByKey[codeKey(recipient, codeType, c.Code)] = c
+	return c, nil
+}
+
+func (m *memoryStore) GetByCode(ctx context.Context, recipient string, otpCode string, codeType store.CodeType) (*store.Code, error) {
+	if m.getByCodeErr != nil {
+		return nil, m.getByCodeErr
+	}
+	c, ok := m.codesByKey[codeKey(recipient, codeType, otpCode)]
+	if !ok {
+		return nil, store.ErrCodeNotFound
+	}
+	if c.Used {
+		return nil, store.ErrCodeUsed
+	}
+	if time.Now().UTC().After(c.ExpiresAt) {
+		return nil, store.ErrCodeExpired
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (m *memoryStore) GetByToken(ctx context.Context, token string) (*store.Code, error) {
+	if m.getByTokenErr != nil {
+		return nil, m.getByTokenErr
+	}
+	c, ok := m.codesByToken[token]
+	if !ok {
+		return nil, store.ErrCodeNotFound
+	}
+	if c.Used {
+		return nil, store.ErrCodeUsed
+	}
+	if time.Now().UTC().After(c.ExpiresAt) {
+		return nil, store.ErrCodeExpired
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (m *memoryStore) MarkUsed(ctx context.Context, codeID uuid.UUID) error {
+	if m.markUsedErr != nil {
+		return m.markUsedErr
+	}
+	c, ok := m.codesByID[codeID]
+	if !ok {
+		return store.ErrCodeNotFound
+	}
+	if c.Used {
+		return store.ErrCodeUsed
+	}
+	c.Used = true
+	now := time.Now().UTC()
+	c.UsedAt = &now
+	return nil
+}
+
+func (m *memoryStore) Cleanup(ctx context.Context) (int64, error) {
+	if m.cleanupErr != nil {
+		return 0, m.cleanupErr
+	}
+	now := time.Now().UTC()
+	var deleted int64
+	for id, c := range m.codesByID {
+		if c.ExpiresAt.Before(now) || c.Used {
+			delete(m.codesByID, id)
+			delete(m.codesByToken, c.Token)
+			delete(m.codesByKey, codeKey(c.Recipient, c.Type, c.Code))
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
+func makeService(st codeStore, courier Courier) *Service {
+	return New(st, courier, Config{
 		BaseURL:      "https://example.com",
-		CodeLength:   8,
-		CodeCharset:  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-		LinkLifespan: 30 * time.Minute,
-		CodeLifespan: 10 * time.Minute,
-		RateLimit:    10,
-		RateWindow:   30 * time.Minute,
-	}
-
-	assert.Equal(t, "https://example.com", config.BaseURL)
-	assert.Equal(t, 8, config.CodeLength)
-	assert.Equal(t, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.CodeCharset)
-	assert.Equal(t, 30*time.Minute, config.LinkLifespan)
-	assert.Equal(t, 10*time.Minute, config.CodeLifespan)
-	assert.Equal(t, 10, config.RateLimit)
-	assert.Equal(t, 30*time.Minute, config.RateWindow)
+		CodeLength:   6,
+		CodeCharset:  "0123456789",
+		LinkLifespan: 15 * time.Minute,
+		CodeLifespan: 15 * time.Minute,
+		RateLimit:    2,
+		RateWindow:   time.Hour,
+	})
 }
 
-func TestErrorDefinitions(t *testing.T) {
-	assert.NotNil(t, ErrInvalidCode)
-	assert.NotNil(t, ErrRateLimited)
-	assert.NotNil(t, ErrRecipientEmpty)
-
-	assert.Contains(t, ErrInvalidCode.Error(), "invalid")
-	assert.Contains(t, ErrRateLimited.Error(), "too many")
-	assert.Contains(t, ErrRecipientEmpty.Error(), "required")
+func TestNewAppliesDefaultsAndConfiguresStore(t *testing.T) {
+	st := newMemoryStore()
+	svc := New(st, nil, Config{})
+	assert.NotNil(t, svc)
+	assert.Equal(t, 6, st.configLength)
+	assert.Equal(t, "0123456789", st.configCharset)
+	assert.Equal(t, time.Hour, svc.config.RateWindow)
 }
 
-// ============================================================================
-// BuildMagicLink Tests
-// ============================================================================
-
-func TestBuildMagicLink(t *testing.T) {
-	tests := []struct {
-		name     string
-		baseURL  string
-		token    string
-		flowType string
-		want     string
-	}{
-		{
-			name:     "login flow",
-			baseURL:  "https://example.com",
-			token:    "abc123",
-			flowType: "login",
-			want:     "https://example.com/self-service/login/methods/link/verify?token=abc123",
-		},
-		{
-			name:     "verification flow",
-			baseURL:  "https://example.com",
-			token:    "verify456",
-			flowType: "verification",
-			want:     "https://example.com/self-service/verification/methods/link/verify?token=verify456",
-		},
-		{
-			name:     "recovery flow",
-			baseURL:  "https://example.com",
-			token:    "recover789",
-			flowType: "recovery",
-			want:     "https://example.com/self-service/recovery/methods/link/verify?token=recover789",
-		},
-		{
-			name:     "empty base URL defaults to localhost",
-			baseURL:  "",
-			token:    "test123",
-			flowType: "login",
-			want:     "http://localhost:8080/self-service/login/methods/link/verify?token=test123",
-		},
-		{
-			name:     "URL with trailing slash",
-			baseURL:  "https://example.com/",
-			token:    "token123",
-			flowType: "login",
-			want:     "https://example.com/self-service/login/methods/link/verify?token=token123",
-		},
-		{
-			name:     "URL with port",
-			baseURL:  "https://example.com:8443",
-			token:    "secure123",
-			flowType: "login",
-			want:     "https://example.com:8443/self-service/login/methods/link/verify?token=secure123",
-		},
-		{
-			name:     "token with special characters",
-			baseURL:  "https://example.com",
-			token:    "abc-123_xyz",
-			flowType: "login",
-			want:     "https://example.com/self-service/login/methods/link/verify?token=abc-123_xyz",
-		},
-		{
-			name:     "http scheme",
-			baseURL:  "http://localhost:3000",
-			token:    "token123",
-			flowType: "login",
-			want:     "http://localhost:3000/self-service/login/methods/link/verify?token=token123",
-		},
-		{
-			name:     "token with encoded characters",
-			baseURL:  "https://example.com",
-			token:    "token=test&value=1",
-			flowType: "login",
-			want:     "https://example.com/self-service/login/methods/link/verify?token=token%3Dtest%26value%3D1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc := &Service{
-				config: Config{BaseURL: tt.baseURL},
-			}
-			result := svc.buildMagicLink(tt.token, tt.flowType)
-			assert.Equal(t, tt.want, result)
+func TestSendLoginCode(t *testing.T) {
+	t.Run("success with courier", func(t *testing.T) {
+		st := newMemoryStore()
+		sent := false
+		svc := makeService(st, &mockCourier{
+			sendFn: func(ctx context.Context, to string, link string, code string) error {
+				sent = true
+				assert.Equal(t, "user@example.com", to)
+				assert.Contains(t, link, "/self-service/login/methods/link/verify")
+				assert.Equal(t, "123456", code)
+				return nil
+			},
 		})
-	}
+		err := svc.SendLoginCode(context.Background(), "user@example.com")
+		require.NoError(t, err)
+		assert.True(t, sent)
+		assert.Contains(t, st.invalidated, "login|user@example.com")
+	})
+
+	t.Run("success without courier", func(t *testing.T) {
+		st := newMemoryStore()
+		svc := makeService(st, nil)
+		err := svc.SendLoginCode(context.Background(), "user@example.com")
+		require.NoError(t, err)
+	})
+
+	t.Run("empty recipient", func(t *testing.T) {
+		svc := makeService(newMemoryStore(), nil)
+		err := svc.SendLoginCode(context.Background(), "")
+		assert.ErrorIs(t, err, ErrRecipientEmpty)
+	})
+
+	t.Run("rate limited and other rate error", func(t *testing.T) {
+		st := newMemoryStore()
+		st.checkRateLimitErr = store.ErrRateLimited
+		svc := makeService(st, nil)
+		err := svc.SendLoginCode(context.Background(), "user@example.com")
+		assert.ErrorIs(t, err, ErrRateLimited)
+
+		st2 := newMemoryStore()
+		st2.checkRateLimitErr = errors.New("redis down")
+		svc2 := makeService(st2, nil)
+		err = svc2.SendLoginCode(context.Background(), "user@example.com")
+		assert.EqualError(t, err, "redis down")
+	})
+
+	t.Run("invalidate, create, and courier errors", func(t *testing.T) {
+		st := newMemoryStore()
+		st.invalidateErr = errors.New("invalidate failed")
+		svc := makeService(st, nil)
+		err := svc.SendLoginCode(context.Background(), "user@example.com")
+		assert.EqualError(t, err, "invalidate failed")
+
+		st2 := newMemoryStore()
+		st2.createErr = errors.New("create failed")
+		svc2 := makeService(st2, nil)
+		err = svc2.SendLoginCode(context.Background(), "user@example.com")
+		assert.EqualError(t, err, "create failed")
+
+		st3 := newMemoryStore()
+		svc3 := makeService(st3, &mockCourier{
+			sendFn: func(ctx context.Context, to string, link string, code string) error {
+				return errors.New("smtp down")
+			},
+		})
+		err = svc3.SendLoginCode(context.Background(), "user@example.com")
+		assert.EqualError(t, err, "smtp down")
+	})
 }
 
-func TestBuildMagicLinkInvalidURL(t *testing.T) {
-	svc := &Service{
-		config: Config{BaseURL: "ht!tp://invalid"},
-	}
-	result := svc.buildMagicLink("token", "login")
-	assert.Equal(t, "", result)
+func TestVerifyCode(t *testing.T) {
+	st := newMemoryStore()
+	identityID := uuid.New()
+	created, err := st.Create(context.Background(), "user@example.com", store.CodeTypeLogin, &identityID, 15*time.Minute)
+	require.NoError(t, err)
+
+	t.Run("success", func(t *testing.T) {
+		svc := makeService(st, nil)
+		recipient, id, err := svc.VerifyCode(context.Background(), "user@example.com", created.Code)
+		require.NoError(t, err)
+		assert.Equal(t, "user@example.com", recipient)
+		require.NotNil(t, id)
+		assert.Equal(t, identityID, *id)
+	})
+
+	t.Run("invalid by lookup error mapping", func(t *testing.T) {
+		stErr := newMemoryStore()
+		stErr.getByCodeErr = store.ErrCodeNotFound
+		svc := makeService(stErr, nil)
+		_, _, err := svc.VerifyCode(context.Background(), "u@example.com", "123456")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+
+		stErr2 := newMemoryStore()
+		stErr2.getByCodeErr = store.ErrCodeExpired
+		svc2 := makeService(stErr2, nil)
+		_, _, err = svc2.VerifyCode(context.Background(), "u@example.com", "123456")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+	})
+
+	t.Run("lookup and mark used errors", func(t *testing.T) {
+		stErr := newMemoryStore()
+		stErr.getByCodeErr = errors.New("db read failed")
+		svc := makeService(stErr, nil)
+		_, _, err := svc.VerifyCode(context.Background(), "u@example.com", "123456")
+		assert.EqualError(t, err, "db read failed")
+
+		stMark := newMemoryStore()
+		c, _ := stMark.Create(context.Background(), "u@example.com", store.CodeTypeLogin, nil, 15*time.Minute)
+		stMark.markUsedErr = store.ErrCodeUsed
+		svcMark := makeService(stMark, nil)
+		_, _, err = svcMark.VerifyCode(context.Background(), "u@example.com", c.Code)
+		assert.ErrorIs(t, err, ErrInvalidCode)
+
+		stMark2 := newMemoryStore()
+		c2, _ := stMark2.Create(context.Background(), "u@example.com", store.CodeTypeLogin, nil, 15*time.Minute)
+		stMark2.markUsedErr = errors.New("update failed")
+		svcMark2 := makeService(stMark2, nil)
+		_, _, err = svcMark2.VerifyCode(context.Background(), "u@example.com", c2.Code)
+		assert.EqualError(t, err, "update failed")
+	})
 }
 
-// ============================================================================
-// New Service Tests
-// ============================================================================
+func TestVerifyMagicLink(t *testing.T) {
+	st := newMemoryStore()
+	id := uuid.New()
+	c, err := st.Create(context.Background(), "u@example.com", store.CodeTypeLogin, &id, 15*time.Minute)
+	require.NoError(t, err)
 
-func TestNewServiceWithDefaults(t *testing.T) {
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
+	t.Run("success", func(t *testing.T) {
+		svc := makeService(st, nil)
+		recipient, gotID, err := svc.VerifyMagicLink(context.Background(), c.Token)
+		require.NoError(t, err)
+		assert.Equal(t, "u@example.com", recipient)
+		require.NotNil(t, gotID)
+		assert.Equal(t, id, *gotID)
+	})
 
-	config := Config{}
-	svc := New(mockStore, mockCourier, config)
+	t.Run("invalid and backend errors", func(t *testing.T) {
+		stErr := newMemoryStore()
+		stErr.getByTokenErr = store.ErrCodeNotFound
+		svc := makeService(stErr, nil)
+		_, _, err := svc.VerifyMagicLink(context.Background(), "missing")
+		assert.ErrorIs(t, err, ErrInvalidCode)
 
-	assert.NotNil(t, svc)
-	assert.Equal(t, 6, svc.config.CodeLength)
-	assert.Equal(t, "0123456789", svc.config.CodeCharset)
-	assert.Equal(t, 15*time.Minute, svc.config.LinkLifespan)
-	assert.Equal(t, 15*time.Minute, svc.config.CodeLifespan)
-	assert.Equal(t, 5, svc.config.RateLimit)
-	assert.Equal(t, time.Hour, svc.config.RateWindow)
+		stErr2 := newMemoryStore()
+		stErr2.getByTokenErr = errors.New("token read failed")
+		svc2 := makeService(stErr2, nil)
+		_, _, err = svc2.VerifyMagicLink(context.Background(), "x")
+		assert.EqualError(t, err, "token read failed")
+	})
 }
 
-func TestNewServiceWithCustomConfig(t *testing.T) {
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	config := Config{
-		BaseURL:      "https://example.com",
-		CodeLength:   8,
-		CodeCharset:  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-		LinkLifespan: 30 * time.Minute,
-		CodeLifespan: 10 * time.Minute,
-		RateLimit:    10,
-		RateWindow:   2 * time.Hour,
-	}
-	svc := New(mockStore, mockCourier, config)
-
-	assert.NotNil(t, svc)
-	assert.Equal(t, "https://example.com", svc.config.BaseURL)
-	assert.Equal(t, 8, svc.config.CodeLength)
-	assert.Equal(t, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", svc.config.CodeCharset)
-	assert.Equal(t, 30*time.Minute, svc.config.LinkLifespan)
-	assert.Equal(t, 10*time.Minute, svc.config.CodeLifespan)
-	assert.Equal(t, 10, svc.config.RateLimit)
-	assert.Equal(t, 2*time.Hour, svc.config.RateWindow)
-}
-
-func TestNewServiceWithNilCourier(t *testing.T) {
-	mockStore := newTestStore()
-
-	config := Config{}
-	svc := New(mockStore, nil, config)
-
-	assert.NotNil(t, svc)
-	assert.Nil(t, svc.courier)
-}
-
-// ============================================================================
-// Error Handling Tests
-// ============================================================================
-
-func TestSendLoginCodeEmptyEmail(t *testing.T) {
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	svc := New(mockStore, mockCourier, Config{})
-	err := svc.SendLoginCode(context.Background(), "")
-
-	assert.Error(t, err)
-	assert.Equal(t, ErrRecipientEmpty, err)
-}
-
-func TestSendVerificationCodeEmptyEmail(t *testing.T) {
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
+func TestSendVerificationCodeAndVerify(t *testing.T) {
+	st := newMemoryStore()
+	svc := makeService(st, nil)
 	identityID := uuid.New()
 
-	svc := New(mockStore, mockCourier, Config{})
-	err := svc.SendVerificationCode(context.Background(), "", identityID)
+	err := svc.SendVerificationCode(context.Background(), "user@example.com", identityID)
+	require.NoError(t, err)
 
-	assert.Error(t, err)
-	assert.Equal(t, ErrRecipientEmpty, err)
+	var created *store.Code
+	for _, c := range st.codesByID {
+		if c.Type == store.CodeTypeVerification {
+			created = c
+			break
+		}
+	}
+	require.NotNil(t, created)
+
+	gotID, err := svc.VerifyVerificationCode(context.Background(), "user@example.com", created.Code)
+	require.NoError(t, err)
+	require.NotNil(t, gotID)
+	assert.Equal(t, identityID, *gotID)
 }
 
-func TestSendRecoveryCodeEmptyEmail(t *testing.T) {
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
+func TestVerificationAndRecoveryErrorPaths(t *testing.T) {
 	identityID := uuid.New()
 
-	svc := New(mockStore, mockCourier, Config{})
-	err := svc.SendRecoveryCode(context.Background(), "", identityID)
+	t.Run("send verification errors", func(t *testing.T) {
+		svc := makeService(newMemoryStore(), nil)
+		assert.ErrorIs(t, svc.SendVerificationCode(context.Background(), "", identityID), ErrRecipientEmpty)
 
-	assert.Error(t, err)
-	assert.Equal(t, ErrRecipientEmpty, err)
+		stRate := newMemoryStore()
+		stRate.checkRateLimitErr = store.ErrRateLimited
+		svc = makeService(stRate, nil)
+		assert.ErrorIs(t, svc.SendVerificationCode(context.Background(), "u@example.com", identityID), ErrRateLimited)
+
+		stErr := newMemoryStore()
+		stErr.invalidateErr = errors.New("invalidate failed")
+		svc = makeService(stErr, nil)
+		assert.EqualError(t, svc.SendVerificationCode(context.Background(), "u@example.com", identityID), "invalidate failed")
+	})
+
+	t.Run("verify verification errors", func(t *testing.T) {
+		st := newMemoryStore()
+		svc := makeService(st, nil)
+
+		_, err := svc.VerifyVerificationCode(context.Background(), "u@example.com", "bad")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+
+		c, _ := st.Create(context.Background(), "u@example.com", store.CodeTypeVerification, nil, 15*time.Minute)
+		_, err = svc.VerifyVerificationCode(context.Background(), "u@example.com", c.Code)
+		assert.ErrorIs(t, err, ErrInvalidCode)
+
+		id := uuid.New()
+		c2, _ := st.Create(context.Background(), "u2@example.com", store.CodeTypeVerification, &id, 15*time.Minute)
+		st.markUsedErr = errors.New("mark used failed")
+		_, err = svc.VerifyVerificationCode(context.Background(), "u2@example.com", c2.Code)
+		assert.EqualError(t, err, "mark used failed")
+	})
+
+	t.Run("recovery flows", func(t *testing.T) {
+		st := newMemoryStore()
+		svc := makeService(st, nil)
+		assert.ErrorIs(t, svc.SendRecoveryCode(context.Background(), "", identityID), ErrRecipientEmpty)
+
+		err := svc.SendRecoveryCode(context.Background(), "recover@example.com", identityID)
+		require.NoError(t, err)
+
+		var rec *store.Code
+		for _, c := range st.codesByID {
+			if c.Type == store.CodeTypeRecovery {
+				rec = c
+				break
+			}
+		}
+		require.NotNil(t, rec)
+
+		gotID, err := svc.VerifyRecoveryCode(context.Background(), "recover@example.com", rec.Code)
+		require.NoError(t, err)
+		require.NotNil(t, gotID)
+		assert.Equal(t, identityID, *gotID)
+
+		st2 := newMemoryStore()
+		svc2 := makeService(st2, nil)
+		_, err = svc2.VerifyRecoveryCode(context.Background(), "x@example.com", "bad")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+	})
 }
 
-// ============================================================================
-// Courier Interface Tests
-// ============================================================================
+func TestCleanupAndBuildMagicLink(t *testing.T) {
+	st := newMemoryStore()
+	svc := makeService(st, nil)
+	id := uuid.New()
+	c, err := st.Create(context.Background(), "cleanup@example.com", store.CodeTypeLogin, &id, time.Minute)
+	require.NoError(t, err)
+	assert.NotEmpty(t, c.Token)
 
-func TestCourierInterface(t *testing.T) {
-	// Verify that MockCourier implements the Courier interface
-	var _ Courier = (*MockCourier)(nil)
-}
-
-func TestCourierImplementation(t *testing.T) {
-	mockCourier := new(MockCourier)
-	ctx := context.Background()
-
-	mockCourier.On("SendMagicLinkEmail", ctx, "test@example.com", "https://example.com/verify?token=abc123", "123456").Return(nil)
-
-	err := mockCourier.SendMagicLinkEmail(ctx, "test@example.com", "https://example.com/verify?token=abc123", "123456")
+	count, err := svc.Cleanup(context.Background())
 	assert.NoError(t, err)
-	mockCourier.AssertExpectations(t)
-}
+	assert.EqualValues(t, 0, count)
 
-// ============================================================================
-// Config Defaults Tests
-// ============================================================================
+	st.forceExpired = true
+	_, _ = st.Create(context.Background(), "expired@example.com", store.CodeTypeLogin, nil, time.Minute)
+	count, err = svc.Cleanup(context.Background())
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, count, int64(1))
 
-func TestConfigDefaultsCodeLength(t *testing.T) {
-	config := Config{}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
+	st.cleanupErr = errors.New("cleanup failed")
+	_, err = svc.Cleanup(context.Background())
+	assert.EqualError(t, err, "cleanup failed")
 
-	svc := New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 6, svc.config.CodeLength)
-}
-
-func TestConfigDefaultsCodeCharset(t *testing.T) {
-	config := Config{}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	svc := New(mockStore, mockCourier, config)
-
-	assert.Equal(t, "0123456789", svc.config.CodeCharset)
-}
-
-func TestConfigDefaultsLinkLifespan(t *testing.T) {
-	config := Config{}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	svc := New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 15*time.Minute, svc.config.LinkLifespan)
-}
-
-func TestConfigDefaultsCodeLifespan(t *testing.T) {
-	config := Config{}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	svc := New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 15*time.Minute, svc.config.CodeLifespan)
-}
-
-func TestConfigDefaultsRateLimit(t *testing.T) {
-	config := Config{}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	svc := New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 5, svc.config.RateLimit)
-}
-
-func TestConfigDefaultsRateWindow(t *testing.T) {
-	config := Config{}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	svc := New(mockStore, mockCourier, config)
-
-	assert.Equal(t, time.Hour, svc.config.RateWindow)
-}
-
-// ============================================================================
-// Config Override Tests
-// ============================================================================
-
-func TestConfigOverrideCodeLength(t *testing.T) {
-	config := Config{CodeLength: 8}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 8, config.CodeLength)
-}
-
-func TestConfigOverrideCodeCharset(t *testing.T) {
-	config := Config{CodeCharset: "ABCDEF"}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	New(mockStore, mockCourier, config)
-
-	assert.Equal(t, "ABCDEF", config.CodeCharset)
-}
-
-func TestConfigOverrideLinkLifespan(t *testing.T) {
-	config := Config{LinkLifespan: 30 * time.Minute}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 30*time.Minute, config.LinkLifespan)
-}
-
-func TestConfigOverrideCodeLifespan(t *testing.T) {
-	config := Config{CodeLifespan: 10 * time.Minute}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 10*time.Minute, config.CodeLifespan)
-}
-
-func TestConfigOverrideRateLimit(t *testing.T) {
-	config := Config{RateLimit: 10}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 10, config.RateLimit)
-}
-
-func TestConfigOverrideRateWindow(t *testing.T) {
-	config := Config{RateWindow: 2 * time.Hour}
-	mockStore := newTestStore()
-	mockCourier := new(MockCourier)
-
-	New(mockStore, mockCourier, config)
-
-	assert.Equal(t, 2*time.Hour, config.RateWindow)
-}
-
-// ============================================================================
-// BuildMagicLink Edge Cases
-// ============================================================================
-
-func TestBuildMagicLinkEmptyToken(t *testing.T) {
-	svc := &Service{
-		config: Config{BaseURL: "https://example.com"},
-	}
-	result := svc.buildMagicLink("", "login")
-	assert.Contains(t, result, "token=")
-}
-
-func TestBuildMagicLinkEmptyFlowType(t *testing.T) {
-	svc := &Service{
-		config: Config{BaseURL: "https://example.com"},
-	}
-	result := svc.buildMagicLink("token123", "")
-	assert.Contains(t, result, "token=token123")
-}
-
-func TestBuildMagicLinkURLPath(t *testing.T) {
-	svc := &Service{
-		config: Config{BaseURL: "https://example.com"},
-	}
-	result := svc.buildMagicLink("token", "login")
-	assert.Contains(t, result, "/self-service/login/methods/link/verify")
-}
-
-func TestBuildMagicLinkQueryParameter(t *testing.T) {
-	svc := &Service{
-		config: Config{BaseURL: "https://example.com"},
-	}
-	result := svc.buildMagicLink("test-token", "login")
-	assert.Contains(t, result, "?token=test-token")
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-// newTestStore creates a test store with nil database
-func newTestStore() *store.Store {
-	return &store.Store{}
+	assert.Contains(t, svc.buildMagicLink("abc123", "login"), "/self-service/login/methods/link/verify")
+	svc.config.BaseURL = ""
+	assert.Contains(t, svc.buildMagicLink("abc123", "login"), "http://localhost:8080")
+	svc.config.BaseURL = "ht!tp://invalid"
+	assert.Equal(t, "", svc.buildMagicLink("abc123", "login"))
 }

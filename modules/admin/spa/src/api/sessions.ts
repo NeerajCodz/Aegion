@@ -19,8 +19,12 @@ export const sessionsApi = {
   },
 
   get: async (id: string): Promise<IdentitySession> => {
-    const response = await apiClient.get<IdentitySession>(`/admin/sessions/${id}`);
-    return response.data;
+    const listResponse = await apiClient.get<PaginatedResponse<IdentitySession>>('/admin/sessions?page=1&per_page=100');
+    const found = listResponse.data.data.find((s) => s.id === id);
+    if (!found) {
+      throw new Error('Session not found');
+    }
+    return found;
   },
 
   revoke: async (id: string): Promise<void> => {

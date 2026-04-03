@@ -4,11 +4,13 @@ package eventbus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -53,7 +55,26 @@ type Bus struct {
 	mu            sync.RWMutex
 	maxRetries    int
 	retryDelay    time.Duration
+	beginTx       func(ctx context.Context) (eventTx, error)
+	queryRows     func(ctx context.Context, query string, args ...interface{}) (eventRows, error)
+	execStmt      func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error)
+	now           func() time.Time
 }
+
+type eventTx interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
+}
+
+type eventRows interface {
+	Close()
+	Err() error
+	Next() bool
+	Scan(dest ...interface{}) error
+}
+
+var errDatabaseUnavailable = errors.New("event bus database is not configured")
 
 // Config holds event bus configuration.
 type Config struct {
@@ -71,12 +92,32 @@ func New(cfg Config) *Bus {
 		cfg.RetryDelay = time.Second
 	}
 
-	return &Bus{
+	b := &Bus{
 		db:            cfg.DB,
 		subscriptions: make(map[string][]Subscription),
 		maxRetries:    cfg.MaxRetries,
 		retryDelay:    cfg.RetryDelay,
 	}
+	b.beginTx = func(ctx context.Context) (eventTx, error) {
+		if b.db == nil {
+			return nil, errDatabaseUnavailable
+		}
+		return b.db.Begin(ctx)
+	}
+	b.queryRows = func(ctx context.Context, query string, args ...interface{}) (eventRows, error) {
+		if b.db == nil {
+			return nil, errDatabaseUnavailable
+		}
+		return b.db.Query(ctx, query, args...)
+	}
+	b.execStmt = func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+		if b.db == nil {
+			return pgconn.CommandTag{}, errDatabaseUnavailable
+		}
+		return b.db.Exec(ctx, query, args...)
+	}
+	b.now = func() time.Time { return time.Now() }
+	return b
 }
 
 // Publish publishes an event to the bus.
@@ -85,7 +126,7 @@ func (b *Bus) Publish(ctx context.Context, event Event) error {
 		event.ID = uuid.New()
 	}
 	if event.OccurredAt.IsZero() {
-		event.OccurredAt = time.Now().UTC()
+		event.OccurredAt = b.now().UTC()
 	}
 	if event.Metadata == nil {
 		event.Metadata = make(map[string]interface{})
@@ -101,7 +142,7 @@ func (b *Bus) Publish(ctx context.Context, event Event) error {
 		return err
 	}
 
-	tx, err := b.db.Begin(ctx)
+	tx, err := b.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -203,7 +244,7 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 	}
 
 	// Get pending deliveries
-	rows, err := b.db.Query(ctx, `
+	rows, err := b.queryRows(ctx, `
 		SELECT d.id, d.event_id, d.attempt_count,
 			   e.event_type, e.source_module, e.entity_type, e.entity_id,
 			   e.identity_id, e.payload, e.metadata, e.occurred_at
@@ -264,7 +305,7 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 
 // markDelivered marks a delivery as successful.
 func (b *Bus) markDelivered(ctx context.Context, deliveryID uuid.UUID) {
-	_, _ = b.db.Exec(ctx, `
+	_, _ = b.execStmt(ctx, `
 		UPDATE core_event_bus_deliveries
 		SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
 		WHERE id = $1
@@ -277,7 +318,7 @@ func (b *Bus) markFailed(ctx context.Context, deliveryID uuid.UUID, attemptCount
 
 	if attemptCount >= b.maxRetries {
 		// Dead letter
-		_, _ = b.db.Exec(ctx, `
+		_, _ = b.execStmt(ctx, `
 			UPDATE core_event_bus_deliveries
 			SET status = 'dead_lettered',
 				attempt_count = $2,
@@ -288,7 +329,7 @@ func (b *Bus) markFailed(ctx context.Context, deliveryID uuid.UUID, attemptCount
 	} else {
 		// Schedule retry with exponential backoff
 		retryDelay := b.retryDelay * time.Duration(1<<uint(attemptCount))
-		_, _ = b.db.Exec(ctx, `
+		_, _ = b.execStmt(ctx, `
 			UPDATE core_event_bus_deliveries
 			SET status = 'failed',
 				attempt_count = $2,
@@ -296,7 +337,7 @@ func (b *Bus) markFailed(ctx context.Context, deliveryID uuid.UUID, attemptCount
 				next_retry_at = $4,
 				updated_at = NOW()
 			WHERE id = $1
-		`, deliveryID, attemptCount, err.Error(), time.Now().Add(retryDelay))
+		`, deliveryID, attemptCount, err.Error(), b.now().Add(retryDelay))
 	}
 }
 
@@ -305,7 +346,7 @@ func (b *Bus) Cleanup(ctx context.Context, olderThan time.Duration) (int64, erro
 	cutoff := time.Now().Add(-olderThan)
 
 	// Delete old delivered/dead-lettered events
-	result, err := b.db.Exec(ctx, `
+	result, err := b.execStmt(ctx, `
 		DELETE FROM core_event_bus_events e
 		WHERE e.occurred_at < $1
 		  AND NOT EXISTS (

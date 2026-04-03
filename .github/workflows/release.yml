@@ -170,6 +170,8 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
+            BASE_IMAGE=golang:1.25-bookworm
+            RUNTIME_IMAGE=debian:bookworm-slim
 
   # ---------------------------------------------------------------------------
   # Generate Changelog

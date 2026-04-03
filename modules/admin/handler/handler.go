@@ -6,13 +6,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
 )
+
+type dbQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
 
 // Service defines the admin service behavior needed by handlers.
 type Service interface {
@@ -29,9 +39,43 @@ type Service interface {
 	ListAuditLogs(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error)
 }
 
+const sessionTokenExpiry = 8 * time.Hour
+
+// OperatorView is the API representation used by auth and operator endpoints.
+type OperatorView struct {
+	ID          string                 `json:"id"`
+	Email       string                 `json:"email"`
+	Name        string                 `json:"name"`
+	Role        string                 `json:"role"`
+	Status      string                 `json:"status"`
+	Permissions map[string]interface{} `json:"permissions,omitempty"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
+	LastLoginAt *string                `json:"last_login_at,omitempty"`
+}
+
+// DashboardStatsResponse powers the admin dashboard widgets.
+type DashboardStatsResponse struct {
+	TotalIdentities    int64   `json:"total_identities"`
+	ActiveSessions     int64   `json:"active_sessions"`
+	IdentitiesLast24h  int64   `json:"identities_last_24h"`
+	MFAAdoptionRate    float64 `json:"mfa_adoption_rate"`
+}
+
+// SystemSettingsResponse is the persisted settings contract for admin UI.
+type SystemSettingsResponse struct {
+	SessionLifetimeHours   int      `json:"session_lifetime_hours"`
+	MFARequired            bool     `json:"mfa_required"`
+	PasswordMinLength      int      `json:"password_min_length"`
+	MaxLoginAttempts       int      `json:"max_login_attempts"`
+	LockoutDurationMinutes int      `json:"lockout_duration_minutes"`
+	AllowedDomains         []string `json:"allowed_domains,omitempty"`
+}
+
 // Handler handles admin HTTP requests.
 type Handler struct {
 	service Service
+	db      dbQuerier
 }
 
 // New creates a new admin handler.
@@ -39,49 +83,71 @@ func New(svc Service) *Handler {
 	return &Handler{service: svc}
 }
 
+func (h *Handler) dbConn() dbQuerier {
+	if h.db != nil {
+		return h.db
+	}
+	return h.service.Store().DB()
+}
+
 // RegisterRoutes registers all admin API routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	// Apply admin authentication middleware to all routes
-	r.Use(h.RequireAdmin)
+	// Public auth endpoints
+	r.Post("/auth/login", h.Login)
 
-	// Identity management
-	r.Route("/identities", func(r chi.Router) {
-		r.With(RequirePermission(h, service.PermIdentitiesRead)).Get("/", h.ListIdentities)
-		r.With(RequirePermission(h, service.PermIdentitiesRead)).Post("/search", h.SearchIdentities)
-		r.With(RequirePermission(h, service.PermIdentitiesRead)).Get("/{id}", h.GetIdentity)
-		r.With(RequirePermission(h, service.PermIdentitiesUpdate)).Patch("/{id}", h.UpdateIdentity)
-		r.With(RequirePermission(h, service.PermIdentitiesDelete)).Delete("/{id}", h.DeleteIdentity)
+	// Protected admin routes
+	r.Group(func(r chi.Router) {
+		r.Use(h.RequireAdmin)
 
-		// Session management for identity
-		r.Route("/{id}/sessions", func(r chi.Router) {
-			r.With(RequirePermission(h, service.PermSessionsRead)).Get("/", h.ListIdentitySessions)
-			r.With(RequirePermission(h, service.PermSessionsDelete)).Delete("/", h.RevokeAllIdentitySessions)
+		// Auth/session metadata
+		r.Post("/auth/logout", h.Logout)
+		r.Get("/auth/me", h.Me)
+
+		// Identity management
+		r.Route("/identities", func(r chi.Router) {
+			r.With(RequirePermission(h, service.PermIdentitiesRead)).Get("/", h.ListIdentities)
+			r.With(RequirePermission(h, service.PermIdentitiesRead)).Post("/search", h.SearchIdentities)
+			r.With(RequirePermission(h, service.PermIdentitiesRead)).Get("/{id}", h.GetIdentity)
+			r.With(RequirePermission(h, service.PermIdentitiesUpdate)).Patch("/{id}", h.UpdateIdentity)
+			r.With(RequirePermission(h, service.PermIdentitiesDelete)).Delete("/{id}", h.DeleteIdentity)
+
+			// Session management for identity
+			r.Route("/{id}/sessions", func(r chi.Router) {
+				r.With(RequirePermission(h, service.PermSessionsRead)).Get("/", h.ListIdentitySessions)
+				r.With(RequirePermission(h, service.PermSessionsDelete)).Delete("/", h.RevokeAllIdentitySessions)
+			})
 		})
-	})
 
-	// Session management
-	r.Route("/sessions", func(r chi.Router) {
-		r.With(RequirePermission(h, service.PermSessionsDelete)).Delete("/{session_id}", h.RevokeSession)
-	})
+		// Session management
+		r.Route("/sessions", func(r chi.Router) {
+			r.With(RequirePermission(h, service.PermSessionsRead)).Get("/", h.ListSessions)
+			r.With(RequirePermission(h, service.PermSessionsDelete)).Delete("/{session_id}", h.RevokeSession)
+		})
 
-	// Operator management
-	r.Route("/operators", func(r chi.Router) {
-		r.With(RequirePermission(h, service.PermOperatorsRead)).Get("/", h.ListOperators)
-		r.With(RequirePermission(h, service.PermOperatorsCreate)).Post("/", h.CreateOperator)
-		r.With(RequirePermission(h, service.PermOperatorsRead)).Get("/{id}", h.GetOperator)
-		r.With(RequirePermission(h, service.PermOperatorsUpdate)).Patch("/{id}", h.UpdateOperator)
-		r.With(RequirePermission(h, service.PermOperatorsDelete)).Delete("/{id}", h.DeleteOperator)
-	})
+		// Operator management
+		r.Route("/operators", func(r chi.Router) {
+			r.With(RequirePermission(h, service.PermOperatorsRead)).Get("/", h.ListOperators)
+			r.With(RequirePermission(h, service.PermOperatorsCreate)).Post("/", h.CreateOperator)
+			r.With(RequirePermission(h, service.PermOperatorsRead)).Get("/{id}", h.GetOperator)
+			r.With(RequirePermission(h, service.PermOperatorsUpdate)).Patch("/{id}", h.UpdateOperator)
+			r.With(RequirePermission(h, service.PermOperatorsDelete)).Delete("/{id}", h.DeleteOperator)
+		})
 
-	// Audit logs
-	r.Route("/audit", func(r chi.Router) {
-		r.With(RequirePermission(h, service.PermAuditRead)).Get("/", h.ListAuditLogs)
-	})
+		// Audit logs
+		r.Route("/audit", func(r chi.Router) {
+			r.With(RequirePermission(h, service.PermAuditRead)).Get("/", h.ListAuditLogs)
+		})
 
-	// Roles
-	r.Route("/roles", func(r chi.Router) {
-		r.With(RequirePermission(h, service.PermRolesRead)).Get("/", h.ListRoles)
-		r.With(RequirePermission(h, service.PermRolesRead)).Get("/{name}", h.GetRole)
+		// Roles
+		r.Route("/roles", func(r chi.Router) {
+			r.With(RequirePermission(h, service.PermRolesRead)).Get("/", h.ListRoles)
+			r.With(RequirePermission(h, service.PermRolesRead)).Get("/{name}", h.GetRole)
+		})
+
+		// Dashboard and system settings
+		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/stats", h.DashboardStats)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/settings", h.GetSettings)
+		r.With(RequirePermission(h, service.PermConfigUpdate)).Patch("/settings", h.UpdateSettings)
 	})
 }
 

@@ -11,6 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func stopProxyHealthCheckers(p *Proxy) {
+	p.healthMux.RLock()
+	checkers := make([]*HealthChecker, 0, len(p.healthCheckers))
+	for _, checker := range p.healthCheckers {
+		checkers = append(checkers, checker)
+	}
+	p.healthMux.RUnlock()
+
+	for _, checker := range checkers {
+		checker.Stop()
+	}
+}
+
 func TestHealthChecker_SuccessfulCheck(t *testing.T) {
 	// Create test server that returns healthy response
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +206,7 @@ func TestHealthChecker_Start_Stop(t *testing.T) {
 
 	// Should have performed multiple checks
 	assert.Greater(t, checkCount, 2, "should have performed multiple health checks")
-	
+
 	// Wait a bit more to ensure it stopped
 	currentCount := checkCount
 	time.Sleep(100 * time.Millisecond)
@@ -265,7 +278,7 @@ func TestHealthChecker_Timeout(t *testing.T) {
 
 	// Should fail due to timeout
 	assert.Equal(t, HealthStatusUnhealthy, hc.GetStatus())
-	
+
 	// Should have timed out quickly
 	assert.Less(t, duration, 100*time.Millisecond)
 
@@ -339,9 +352,20 @@ func TestProxy_GetUpstreamHealth(t *testing.T) {
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
 	proxy := NewProxy(config, nil, logger)
+	defer stopProxyHealthCheckers(proxy)
 
-	// Wait for initial health checks
-	time.Sleep(150 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		health := proxy.GetUpstreamHealth()
+		if len(health) != 2 {
+			return false
+		}
+		statuses := map[string]HealthStatus{}
+		for _, h := range health {
+			statuses[h.Name] = h.Health.Status
+		}
+		return statuses["healthy-service"] == HealthStatusHealthy &&
+			statuses["unhealthy-service"] == HealthStatusUnhealthy
+	}, time.Second, 25*time.Millisecond)
 
 	// Get upstream health
 	health := proxy.GetUpstreamHealth()
@@ -384,10 +408,12 @@ func TestProxy_IsUpstreamHealthy(t *testing.T) {
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
 	proxy := NewProxy(config, nil, logger)
+	defer stopProxyHealthCheckers(proxy)
 
-	// Test with health checking enabled
-	time.Sleep(150 * time.Millisecond) // Wait for health check
-	assert.True(t, proxy.IsUpstreamHealthy("test-service"))
+	// Test with health checking enabled (eventually healthy after async checker starts)
+	require.Eventually(t, func() bool {
+		return proxy.IsUpstreamHealthy("test-service")
+	}, time.Second, 25*time.Millisecond)
 
 	// Test with non-existent upstream
 	assert.True(t, proxy.IsUpstreamHealthy("non-existent")) // Should assume healthy
@@ -401,7 +427,7 @@ func TestProxy_IsUpstreamHealthy(t *testing.T) {
 
 func TestHealthCheckerConfig_Defaults(t *testing.T) {
 	config := HealthCheckerConfig{
-		URL: "http://example.com/health",
+		URL:    "http://example.com/health",
 		Logger: zerolog.New(zerolog.NewTestWriter(t)),
 	}
 

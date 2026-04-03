@@ -35,15 +35,26 @@ type Courier interface {
 	SendMagicLinkEmail(ctx context.Context, to string, link string, code string) error
 }
 
+type codeStore interface {
+	SetCodeConfig(length int, charset string)
+	CheckRateLimit(ctx context.Context, key string, limit int, window time.Duration) error
+	InvalidatePrevious(ctx context.Context, recipient string, codeType store.CodeType) error
+	Create(ctx context.Context, recipient string, codeType store.CodeType, identityID *uuid.UUID, ttl time.Duration) (*store.Code, error)
+	GetByCode(ctx context.Context, recipient string, otpCode string, codeType store.CodeType) (*store.Code, error)
+	GetByToken(ctx context.Context, token string) (*store.Code, error)
+	MarkUsed(ctx context.Context, codeID uuid.UUID) error
+	Cleanup(ctx context.Context) (int64, error)
+}
+
 // Service handles magic link authentication.
 type Service struct {
-	store   *store.Store
+	store   codeStore
 	courier Courier
 	config  Config
 }
 
 // New creates a new magic link service.
-func New(store *store.Store, courier Courier, config Config) *Service {
+func New(st codeStore, courier Courier, config Config) *Service {
 	if config.CodeLength == 0 {
 		config.CodeLength = 6
 	}
@@ -63,10 +74,10 @@ func New(store *store.Store, courier Courier, config Config) *Service {
 		config.RateWindow = time.Hour
 	}
 
-	store.SetCodeConfig(config.CodeLength, config.CodeCharset)
+	st.SetCodeConfig(config.CodeLength, config.CodeCharset)
 
 	return &Service{
-		store:   store,
+		store:   st,
 		courier: courier,
 		config:  config,
 	}

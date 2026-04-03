@@ -1,8 +1,16 @@
 package orchestrator
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/aegion/aegion/core/registry"
 )
 
 func TestModuleState(t *testing.T) {
@@ -96,7 +104,7 @@ func TestValidateModuleConfig(t *testing.T) {
 			name: "valid config",
 			config: &ModuleConfig{
 				ID:    "test-module",
-				Name:  "Test Module", 
+				Name:  "Test Module",
 				Image: "nginx:latest",
 			},
 			wantErr: nil,
@@ -181,13 +189,13 @@ func TestModuleConfigDefaults(t *testing.T) {
 			},
 			mainConfig: &AegionConfig{},
 			expectDefaults: map[string]interface{}{
-				"network":               "aegion_modules",
-				"health_endpoint":       "/health",
-				"health_interval":       5 * time.Second,
-				"health_timeout":        2 * time.Second, 
-				"health_retries":        3,
-				"health_start_period":   30 * time.Second,
-				"restart_policy":        "unless-stopped",
+				"network":             "aegion_modules",
+				"health_endpoint":     "/health",
+				"health_interval":     5 * time.Second,
+				"health_timeout":      2 * time.Second,
+				"health_retries":      3,
+				"health_start_period": 30 * time.Second,
+				"restart_policy":      "unless-stopped",
 			},
 		},
 	}
@@ -195,7 +203,7 @@ func TestModuleConfigDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := *tt.config // Copy the config
-			
+
 			// Simulate applyModuleDefaults logic
 			if cfg.Network == "" {
 				cfg.Network = "aegion_modules"
@@ -320,7 +328,7 @@ func TestHealthCheckConfig(t *testing.T) {
 func TestConfigLoaderStruct(t *testing.T) {
 	configPath := "/path/to/config.yaml"
 	loader := NewConfigLoader(configPath)
-	
+
 	if loader.configPath != configPath {
 		t.Errorf("configPath = %s, want %s", loader.configPath, configPath)
 	}
@@ -355,4 +363,476 @@ func TestModuleConfigStruct(t *testing.T) {
 	if config.Env["ENV"] != "test" {
 		t.Errorf("Env[ENV] = %s, want test", config.Env["ENV"])
 	}
+}
+
+func TestBuildModuleConfigUsesRegistryBaseURL(t *testing.T) {
+	loader := &ConfigLoader{
+		config: &AegionConfig{
+			ModuleVersions: map[string]string{
+				"admin": "v1.2.3",
+			},
+			ModuleRegistry: RegistryConfig{
+				BaseURL: "ghcr.io/aegion/base",
+			},
+			Server: ServerConfig{
+				InternalNetwork: NetworkConfig{
+					Name: "aegion_modules_test",
+				},
+			},
+		},
+	}
+
+	cfg, err := loader.buildModuleConfig("admin")
+	if err != nil {
+		t.Fatalf("buildModuleConfig returned error: %v", err)
+	}
+
+	if cfg.Image != "ghcr.io/aegion/base/admin" {
+		t.Fatalf("Image = %q, want %q", cfg.Image, "ghcr.io/aegion/base/admin")
+	}
+	if cfg.Version != "v1.2.3" {
+		t.Fatalf("Version = %q, want %q", cfg.Version, "v1.2.3")
+	}
+	if cfg.Network != "aegion_modules_test" {
+		t.Fatalf("Network = %q, want %q", cfg.Network, "aegion_modules_test")
+	}
+	if cfg.Labels["aegion.module"] != "true" {
+		t.Fatalf("expected aegion.module label to be set")
+	}
+}
+
+func TestBuildModuleConfigDefaultsToModuleImageAndLatest(t *testing.T) {
+	loader := &ConfigLoader{
+		config: &AegionConfig{
+			ModuleVersions: map[string]string{},
+			Server:         ServerConfig{},
+		},
+	}
+
+	cfg, err := loader.buildModuleConfig("password")
+	if err != nil {
+		t.Fatalf("buildModuleConfig returned error: %v", err)
+	}
+
+	if cfg.Image != "password" {
+		t.Fatalf("Image = %q, want %q", cfg.Image, "password")
+	}
+	if cfg.Version != "latest" {
+		t.Fatalf("Version = %q, want %q", cfg.Version, "latest")
+	}
+	if cfg.Network != DefaultNetworkName {
+		t.Fatalf("Network = %q, want %q", cfg.Network, DefaultNetworkName)
+	}
+}
+
+func TestApplyModuleDefaultsWithNilMainConfig(t *testing.T) {
+	cfg := &ModuleConfig{
+		ID:    "mod-a",
+		Name:  "mod-a",
+		Image: "mod-a",
+	}
+
+	applyModuleDefaults(cfg, nil)
+
+	if cfg.Network != DefaultNetworkName {
+		t.Fatalf("Network = %q, want %q", cfg.Network, DefaultNetworkName)
+	}
+	if cfg.HealthCheck.Endpoint != "/health" {
+		t.Fatalf("Health endpoint = %q, want /health", cfg.HealthCheck.Endpoint)
+	}
+	if cfg.RestartPolicy != "unless-stopped" {
+		t.Fatalf("RestartPolicy = %q, want unless-stopped", cfg.RestartPolicy)
+	}
+}
+
+func TestConfigLoaderLoadErrors(t *testing.T) {
+	t.Run("missing config returns ErrConfigNotFound", func(t *testing.T) {
+		loader := NewConfigLoader(filepath.Join(t.TempDir(), "aegion.yaml"))
+		_, err := loader.Load()
+		if !errors.Is(err, ErrConfigNotFound) {
+			t.Fatalf("expected ErrConfigNotFound, got %v", err)
+		}
+	})
+
+	t.Run("invalid yaml returns parsing error", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "aegion.yaml")
+		if err := os.WriteFile(path, []byte(":\n- invalid"), 0o600); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		loader := NewConfigLoader(path)
+		_, err := loader.Load()
+		if err == nil || !strings.Contains(err.Error(), "parsing config file") {
+			t.Fatalf("expected parsing config error, got %v", err)
+		}
+	})
+}
+
+func TestConfigLoaderSecretsAndNetwork(t *testing.T) {
+	loader := &ConfigLoader{
+		config: &AegionConfig{
+			Secrets: SecretsConfig{
+				Internal: []string{"internal-secret"},
+			},
+			Server: ServerConfig{
+				InternalNetwork: NetworkConfig{Name: "test-net"},
+			},
+		},
+	}
+
+	secret, err := loader.GetInternalSecret()
+	if err != nil {
+		t.Fatalf("GetInternalSecret returned error: %v", err)
+	}
+	if secret != "internal-secret" {
+		t.Fatalf("secret = %q, want %q", secret, "internal-secret")
+	}
+
+	network, err := loader.GetNetworkConfig()
+	if err != nil {
+		t.Fatalf("GetNetworkConfig returned error: %v", err)
+	}
+	if network.Name != "test-net" {
+		t.Fatalf("network name = %q, want %q", network.Name, "test-net")
+	}
+
+	loader.config.Secrets.Internal = nil
+	if _, err := loader.GetInternalSecret(); err == nil {
+		t.Fatalf("expected missing secret error")
+	}
+}
+
+func TestDockerResourceParsersAndBuilders(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int64
+	}{
+		{input: "1k", want: 1024},
+		{input: "2m", want: 2 * 1024 * 1024},
+		{input: "3g", want: 3 * 1024 * 1024 * 1024},
+		{input: "1024", want: 1024},
+	}
+
+	for _, tc := range tests {
+		got, err := parseMemory(tc.input)
+		if err != nil {
+			t.Fatalf("parseMemory(%q) unexpected error: %v", tc.input, err)
+		}
+		if got != tc.want {
+			t.Fatalf("parseMemory(%q) = %d, want %d", tc.input, got, tc.want)
+		}
+	}
+
+	if _, err := parseMemory("bad"); err == nil {
+		t.Fatalf("parseMemory should fail for invalid input")
+	}
+	if _, err := parseCPU("bad"); err == nil {
+		t.Fatalf("parseCPU should fail for invalid input")
+	}
+
+	cpu, err := parseCPU("0.5")
+	if err != nil {
+		t.Fatalf("parseCPU returned error: %v", err)
+	}
+	if cpu != 500000000 {
+		t.Fatalf("parseCPU = %d, want 500000000", cpu)
+	}
+
+	dc := &DockerClient{}
+	hc := dc.buildHealthCheck(&ModuleConfig{
+		HealthCheck: HealthCheckConfig{
+			Endpoint:    "/ready",
+			Interval:    10 * time.Second,
+			Timeout:     3 * time.Second,
+			Retries:     4,
+			StartPeriod: 20 * time.Second,
+		},
+	})
+	if hc == nil {
+		t.Fatalf("expected non-nil healthcheck")
+	}
+	if len(hc.Test) != 2 || !strings.Contains(hc.Test[1], "/ready") {
+		t.Fatalf("unexpected healthcheck command: %#v", hc.Test)
+	}
+
+	if dc.buildHealthCheck(&ModuleConfig{}) != nil {
+		t.Fatalf("expected nil healthcheck when endpoint is empty")
+	}
+
+	res := dc.buildResources(&ModuleConfig{
+		Resources: ResourceConfig{
+			MemoryLimit:       "128m",
+			MemoryReservation: "64m",
+			CPULimit:          "1.5",
+		},
+	})
+	if res.Memory == 0 || res.MemoryReservation == 0 || res.NanoCPUs == 0 {
+		t.Fatalf("expected resource limits to be parsed, got %+v", res)
+	}
+}
+
+func TestOrchestratorCoreFlowsWithStubs(t *testing.T) {
+	ctx := context.Background()
+	moduleID := "password"
+	reg := registry.New(registry.DefaultConfig())
+	defer reg.Stop()
+
+	moduleCfg := &ModuleConfig{ID: moduleID, Name: "Password", Image: "password"}
+
+	t.Run("start and stop module success path", func(t *testing.T) {
+		o := &Orchestrator{
+			registry: reg,
+			modules:  make(map[string]*moduleInstance),
+		}
+
+		o.ensureNetworkFn = func(context.Context) (string, error) { return "net-1", nil }
+		o.loadModuleCfgFn = func(id string) (*ModuleConfig, error) {
+			if id != moduleID {
+				return nil, fmt.Errorf("unexpected module id %s", id)
+			}
+			return moduleCfg, nil
+		}
+		o.generateTokenFn = func(id string) (string, error) {
+			if id != moduleID {
+				return "", fmt.Errorf("unexpected module id %s", id)
+			}
+			return "token", nil
+		}
+		o.createContainerFn = func(_ context.Context, cfg *ModuleConfig, token string) (string, error) {
+			if cfg.ID != moduleID || token != "token" {
+				return "", fmt.Errorf("unexpected create args")
+			}
+			return "container-1234567890", nil
+		}
+		o.startContainerFn = func(context.Context, string) error { return nil }
+		o.stopContainerFn = func(context.Context, string, time.Duration) error { return nil }
+		o.removeContainerFn = func(context.Context, string, bool) error { return nil }
+		o.containerLogsFn = func(context.Context, string, int, time.Time) (string, error) { return "logs", nil }
+		o.getContainerInfoFn = func(context.Context, string) (*ContainerInfo, error) {
+			return &ContainerInfo{
+				State:        "running",
+				Health:       "healthy",
+				IPAddress:    "10.0.0.2",
+				Ports:        []string{"8080/tcp"},
+				RestartCount: 1,
+			}, nil
+		}
+		o.dockerCloseFn = func() error { return nil }
+
+		if err := o.Start(ctx); err != nil {
+			t.Fatalf("Start returned error: %v", err)
+		}
+
+		if err := o.StartModule(ctx, moduleID); err != nil {
+			t.Fatalf("StartModule returned error: %v", err)
+		}
+		if !o.IsRunning(moduleID) {
+			t.Fatalf("expected module to be running")
+		}
+
+		status, err := o.GetModuleStatus(ctx, moduleID)
+		if err != nil {
+			t.Fatalf("GetModuleStatus returned error: %v", err)
+		}
+		if status.State != StateRunning {
+			t.Fatalf("expected running state, got %s", status.State)
+		}
+		if status.Health != "healthy" {
+			t.Fatalf("expected healthy status")
+		}
+
+		logs, err := o.GetModuleLogs(ctx, moduleID, 50)
+		if err != nil {
+			t.Fatalf("GetModuleLogs returned error: %v", err)
+		}
+		if logs != "logs" {
+			t.Fatalf("unexpected logs value: %q", logs)
+		}
+
+		if err := o.StopModule(ctx, moduleID); err != nil {
+			t.Fatalf("StopModule returned error: %v", err)
+		}
+
+		if err := o.Stop(ctx); err != nil {
+			t.Fatalf("Stop returned error: %v", err)
+		}
+	})
+
+	t.Run("error paths and state transitions", func(t *testing.T) {
+		o := &Orchestrator{
+			registry: reg,
+			modules:  make(map[string]*moduleInstance),
+		}
+		o.dockerCloseFn = func() error { return nil }
+		o.ensureNetworkFn = func(context.Context) (string, error) { return "", errors.New("network down") }
+		if err := o.Start(ctx); err == nil {
+			t.Fatalf("expected start error")
+		}
+
+		o.closed = true
+		if err := o.StartModule(ctx, moduleID); !errors.Is(err, ErrOrchestratorClosed) {
+			t.Fatalf("expected ErrOrchestratorClosed, got %v", err)
+		}
+		o.closed = false
+
+		o.modules[moduleID] = &moduleInstance{moduleID: moduleID, state: StateRunning}
+		if err := o.StartModule(ctx, moduleID); !errors.Is(err, ErrModuleAlreadyRunning) {
+			t.Fatalf("expected ErrModuleAlreadyRunning, got %v", err)
+		}
+
+		o.modules = make(map[string]*moduleInstance)
+		o.loadModuleCfgFn = func(string) (*ModuleConfig, error) { return nil, errors.New("missing cfg") }
+		if err := o.StartModule(ctx, moduleID); err == nil || !strings.Contains(err.Error(), "loading module config") {
+			t.Fatalf("expected module config load error, got %v", err)
+		}
+		if got := o.modules[moduleID].state; got != StateFailed {
+			t.Fatalf("expected failed state after config error, got %s", got)
+		}
+
+		o.modules = make(map[string]*moduleInstance)
+		o.loadModuleCfgFn = func(string) (*ModuleConfig, error) { return moduleCfg, nil }
+		o.generateTokenFn = func(string) (string, error) { return "", errors.New("token fail") }
+		if err := o.StartModule(ctx, moduleID); err == nil || !strings.Contains(err.Error(), "generating auth token") {
+			t.Fatalf("expected token generation error, got %v", err)
+		}
+
+		o.modules = make(map[string]*moduleInstance)
+		o.generateTokenFn = func(string) (string, error) { return "tok", nil }
+		o.createContainerFn = func(context.Context, *ModuleConfig, string) (string, error) { return "", errors.New("create fail") }
+		if err := o.StartModule(ctx, moduleID); err == nil || !strings.Contains(err.Error(), "creating container") {
+			t.Fatalf("expected container creation error, got %v", err)
+		}
+
+		removeCalled := false
+		o.modules = make(map[string]*moduleInstance)
+		o.createContainerFn = func(context.Context, *ModuleConfig, string) (string, error) { return "container-xyz", nil }
+		o.startContainerFn = func(context.Context, string) error { return errors.New("start fail") }
+		o.removeContainerFn = func(context.Context, string, bool) error { removeCalled = true; return nil }
+		if err := o.StartModule(ctx, moduleID); err == nil || !strings.Contains(err.Error(), "starting container") {
+			t.Fatalf("expected container start error, got %v", err)
+		}
+		if !removeCalled {
+			t.Fatalf("expected cleanup removeContainer to be called")
+		}
+
+		if err := o.StopModule(ctx, "missing"); !errors.Is(err, ErrModuleNotFound) {
+			t.Fatalf("expected ErrModuleNotFound, got %v", err)
+		}
+
+		o.modules[moduleID] = &moduleInstance{moduleID: moduleID, state: StateStopped}
+		if err := o.StopModule(ctx, moduleID); !errors.Is(err, ErrModuleNotRunning) {
+			t.Fatalf("expected ErrModuleNotRunning, got %v", err)
+		}
+
+		o.modules[moduleID] = &moduleInstance{moduleID: moduleID, containerID: "c1", state: StateRunning}
+		o.stopContainerFn = func(context.Context, string, time.Duration) error { return errors.New("stop fail") }
+		if err := o.StopModule(ctx, moduleID); err == nil || !strings.Contains(err.Error(), "stopping container") {
+			t.Fatalf("expected stop error, got %v", err)
+		}
+		if o.modules[moduleID].state != StateFailed {
+			t.Fatalf("expected failed state after stop error")
+		}
+
+		o.modules[moduleID] = &moduleInstance{moduleID: moduleID, containerID: "c1", state: StateRunning}
+		o.stopContainerFn = func(context.Context, string, time.Duration) error { return nil }
+		o.removeContainerFn = func(context.Context, string, bool) error { return errors.New("remove warn") }
+		if _, err := reg.Register(registry.RegistrationRequest{
+			ID:      moduleID,
+			Name:    moduleID,
+			Version: "v1",
+			Endpoints: []registry.Endpoint{
+				{Type: registry.EndpointHTTP, URL: "http://localhost"},
+			},
+			HealthURL: "http://localhost/health",
+		}); err != nil {
+			t.Fatalf("failed to register module: %v", err)
+		}
+		if err := o.StopModule(ctx, moduleID); err != nil {
+			t.Fatalf("expected stop success with remove warning, got %v", err)
+		}
+
+		o.modules[moduleID] = &moduleInstance{moduleID: moduleID, containerID: "c1", state: StateRunning}
+		if err := o.RestartModule(ctx, moduleID); err == nil {
+			t.Fatalf("expected restart failure due to missing start stubs")
+		}
+	})
+
+	t.Run("status mapping and list/log behavior", func(t *testing.T) {
+		o := &Orchestrator{
+			registry: reg,
+			modules:  make(map[string]*moduleInstance),
+		}
+		o.getContainerInfoFn = func(context.Context, string) (*ContainerInfo, error) {
+			return &ContainerInfo{
+				State:        "exited",
+				ExitCode:     2,
+				RestartCount: 3,
+			}, nil
+		}
+
+		st, err := o.GetModuleStatus(ctx, "missing")
+		if err != nil {
+			t.Fatalf("unexpected error for missing module: %v", err)
+		}
+		if st.State != StateStopped {
+			t.Fatalf("expected stopped state for missing module")
+		}
+
+		o.modules["a"] = &moduleInstance{moduleID: "a", containerID: "ca", state: StateRunning}
+		st, err = o.GetModuleStatus(ctx, "a")
+		if err != nil {
+			t.Fatalf("unexpected status error: %v", err)
+		}
+		if st.State != StateFailed {
+			t.Fatalf("expected failed state for exited container, got %s", st.State)
+		}
+		if !strings.Contains(st.Error, "exited with code 2") {
+			t.Fatalf("expected exit code error, got %q", st.Error)
+		}
+
+		o.getContainerInfoFn = func(context.Context, string) (*ContainerInfo, error) {
+			return &ContainerInfo{State: "restarting"}, nil
+		}
+		st, err = o.GetModuleStatus(ctx, "a")
+		if err != nil {
+			t.Fatalf("unexpected status error: %v", err)
+		}
+		if st.State != StateStarting {
+			t.Fatalf("expected starting state, got %s", st.State)
+		}
+
+		o.getContainerInfoFn = func(context.Context, string) (*ContainerInfo, error) {
+			return nil, errors.New("inspect fail")
+		}
+		_, err = o.GetModuleStatus(ctx, "a")
+		if err != nil {
+			t.Fatalf("GetModuleStatus should tolerate inspect failures, got %v", err)
+		}
+
+		o.containerLogsFn = func(context.Context, string, int, time.Time) (string, error) {
+			return "logline", nil
+		}
+		if _, err := o.GetModuleLogs(ctx, "missing", 10); !errors.Is(err, ErrModuleNotFound) {
+			t.Fatalf("expected ErrModuleNotFound, got %v", err)
+		}
+		if logs, err := o.GetModuleLogs(ctx, "a", 10); err != nil || logs != "logline" {
+			t.Fatalf("unexpected logs result: %q, err=%v", logs, err)
+		}
+
+		o.modules["b"] = &moduleInstance{moduleID: "b", containerID: "cb", state: StateStarting}
+		statuses, err := o.ListModules(ctx)
+		if err != nil {
+			t.Fatalf("ListModules returned error: %v", err)
+		}
+		if len(statuses) == 0 {
+			t.Fatalf("expected non-empty statuses")
+		}
+
+		o.modules["c"] = &moduleInstance{moduleID: "c", state: StateFailed}
+		o.setModuleError("c", errors.New("boom"))
+		if o.modules["c"].error != "boom" || o.modules["c"].state != StateFailed {
+			t.Fatalf("expected setModuleError to persist failure state")
+		}
+	})
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testContextKey string
@@ -440,14 +441,10 @@ func TestContextHandling(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 		defer cancel()
 
-		time.Sleep(time.Millisecond) // Wait for timeout
-
-		select {
-		case <-ctx.Done():
-			assert.Equal(t, context.DeadlineExceeded, ctx.Err())
-		default:
-			t.Error("Context should have timed out")
-		}
+		require.Eventually(t, func() bool {
+			return ctx.Err() != nil
+		}, 200*time.Millisecond, time.Millisecond)
+		assert.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
 	})
 
 	t.Run("context with values", func(t *testing.T) {

@@ -2,50 +2,39 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
 )
 
-// OperatorResponse represents an operator in API responses.
-type OperatorResponse struct {
-	ID          string                 `json:"id"`
-	IdentityID  string                 `json:"identity_id"`
-	Role        string                 `json:"role"`
-	Permissions map[string]interface{} `json:"permissions,omitempty"`
-	CreatedAt   string                 `json:"created_at"`
-	UpdatedAt   string                 `json:"updated_at"`
-}
-
 // CreateOperatorRequest is the request body for creating an operator.
 type CreateOperatorRequest struct {
 	IdentityID  string                 `json:"identity_id"`
+	Email       string                 `json:"email"`
+	Name        string                 `json:"name"`
+	Password    string                 `json:"password"`
+	Status      string                 `json:"status"`
 	Role        string                 `json:"role"`
 	Permissions map[string]interface{} `json:"permissions,omitempty"`
 }
 
 // UpdateOperatorRequest is the request body for updating an operator.
 type UpdateOperatorRequest struct {
+	Name        string                 `json:"name,omitempty"`
+	Status      string                 `json:"status,omitempty"`
 	Role        string                 `json:"role,omitempty"`
 	Permissions map[string]interface{} `json:"permissions,omitempty"`
-}
-
-// operatorToResponse converts a store operator to an API response.
-func operatorToResponse(op *store.Operator) OperatorResponse {
-	return OperatorResponse{
-		ID:          op.ID.String(),
-		IdentityID:  op.IdentityID.String(),
-		Role:        op.Role,
-		Permissions: op.Permissions,
-		CreatedAt:   op.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:   op.UpdatedAt.Format("2006-01-02T15:04:05Z"),
-	}
 }
 
 // ListOperators handles GET /admin/operators
@@ -69,17 +58,20 @@ func (h *Handler) ListOperators(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to response format
-	items := make([]OperatorResponse, len(operators))
-	for i, op := range operators {
-		items[i] = operatorToResponse(op)
+	// Convert to UI response format
+	data := make([]OperatorView, 0, len(operators))
+	for _, op := range operators {
+		profile, _ := h.service.Store().GetIdentityProfile(r.Context(), op.IdentityID)
+		data = append(data, operatorToView(op, profile))
 	}
 
-	resp := ListResponse{
-		Items:      items,
-		Pagination: buildPaginationMeta(page, perPage, total),
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"data":        data,
+		"total":       total,
+		"page":        page,
+		"per_page":    perPage,
+		"total_pages": paginationTotalPages(total, perPage),
+	})
 }
 
 // GetOperator handles GET /admin/operators/{id}
@@ -112,7 +104,13 @@ func (h *Handler) GetOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, operatorToResponse(op))
+	profile, err := h.service.Store().GetIdentityProfile(r.Context(), op.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get operator profile")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, operatorToView(op, profile))
 }
 
 // CreateOperator handles POST /admin/operators
@@ -129,28 +127,40 @@ func (h *Handler) CreateOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if req.IdentityID == "" {
-		writeError(w, http.StatusBadRequest, "missing_identity_id", "Identity ID is required")
-		return
-	}
-
 	if req.Role == "" {
 		writeError(w, http.StatusBadRequest, "missing_role", "Role is required")
 		return
 	}
 
-	// Parse identity ID
-	identityID, err := uuid.Parse(req.IdentityID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_identity_id", "Invalid identity ID format")
-		return
+	ipAddress := IPAddressFromContext(r.Context())
+	var identityID uuid.UUID
+
+	if strings.TrimSpace(req.IdentityID) != "" {
+		parsedIdentityID, err := uuid.Parse(req.IdentityID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_identity_id", "Invalid identity ID format")
+			return
+		}
+		identityID = parsedIdentityID
+	} else {
+		if strings.TrimSpace(req.Email) == "" || strings.TrimSpace(req.Password) == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "email and password are required when identity_id is not provided")
+			return
+		}
+
+		createdIdentityID, err := h.createOperatorIdentity(r.Context(), req)
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrDuplicateOperator):
+				writeError(w, http.StatusConflict, "duplicate_identity", "An identity with this email already exists")
+			default:
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create identity for operator")
+			}
+			return
+		}
+		identityID = createdIdentityID
 	}
 
-	// Get IP address for audit logging
-	ipAddress := IPAddressFromContext(r.Context())
-
-	// Create operator
 	newOperator, err := h.service.CreateOperator(r.Context(), operator.ID, identityID, req.Role, req.Permissions, ipAddress)
 	if err != nil {
 		switch {
@@ -166,7 +176,13 @@ func (h *Handler) CreateOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, operatorToResponse(newOperator))
+	profile, err := h.service.Store().GetIdentityProfile(r.Context(), newOperator.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load operator profile")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, operatorToView(newOperator, profile))
 }
 
 // UpdateOperator handles PATCH /admin/operators/{id}
@@ -211,7 +227,20 @@ func (h *Handler) UpdateOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, operatorToResponse(updatedOperator))
+	if req.Name != "" || req.Status != "" {
+		if err := h.updateIdentityForOperator(r.Context(), updatedOperator.IdentityID, req.Name, req.Status); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update operator identity profile")
+			return
+		}
+	}
+
+	profile, err := h.service.Store().GetIdentityProfile(r.Context(), updatedOperator.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load operator profile")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, operatorToView(updatedOperator, profile))
 }
 
 // DeleteOperator handles DELETE /admin/operators/{id}
@@ -248,6 +277,151 @@ func (h *Handler) DeleteOperator(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) createOperatorIdentity(ctx context.Context, req CreateOperatorRequest) (uuid.UUID, error) {
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = email
+	}
+
+	state := "active"
+	if strings.EqualFold(strings.TrimSpace(req.Status), "inactive") {
+		state = "inactive"
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	tx, err := h.dbConn().Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	schemaID, err := resolveDefaultSchemaID(ctx, tx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	identityID := uuid.New()
+	traits := map[string]interface{}{
+		"email":        email,
+		"display_name": name,
+		"name":         name,
+	}
+	traitsJSON, err := json.Marshal(traits)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO core_identities (id, schema_id, traits, state, created_at, updated_at)
+		VALUES ($1, $2, $3::jsonb, $4, NOW(), NOW())
+	`, identityID, schemaID, string(traitsJSON), state)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO core_identity_addresses (id, identity_id, type, value, is_primary, verified, created_at, updated_at)
+		VALUES ($1, $2, 'email', $3, TRUE, FALSE, NOW(), NOW())
+	`, uuid.New(), identityID, email)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO pwd_credentials (id, identity_id, identifier, hash, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())
+	`, uuid.New(), identityID, email, string(hashedPassword))
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+
+	return identityID, nil
+}
+
+func resolveDefaultSchemaID(ctx context.Context, tx pgx.Tx) (uuid.UUID, error) {
+	var schemaID uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM core_identity_schemas
+		ORDER BY is_default DESC, created_at ASC
+		LIMIT 1
+	`).Scan(&schemaID)
+	if err == nil {
+		return schemaID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, err
+	}
+
+	schemaID = uuid.New()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO core_identity_schemas (id, name, is_default, schema, created_at, updated_at)
+		VALUES ($1, $2, TRUE, '{}'::jsonb, NOW(), NOW())
+	`, schemaID, "default")
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return schemaID, nil
+}
+
+func (h *Handler) updateIdentityForOperator(ctx context.Context, identityID uuid.UUID, name, status string) error {
+	if strings.TrimSpace(name) == "" && strings.TrimSpace(status) == "" {
+		return nil
+	}
+
+	setClauses := []string{"updated_at = NOW()"}
+	args := []interface{}{}
+	argPos := 1
+
+	if strings.TrimSpace(name) != "" {
+		name = strings.TrimSpace(name)
+		patch := map[string]interface{}{
+			"display_name": name,
+			"name":         name,
+		}
+		patchJSON, err := json.Marshal(patch)
+		if err != nil {
+			return err
+		}
+		setClauses = append(setClauses, "traits = COALESCE(traits, '{}'::jsonb) || $"+strconv.Itoa(argPos)+"::jsonb")
+		args = append(args, string(patchJSON))
+		argPos++
+	}
+
+	if strings.TrimSpace(status) != "" {
+		dbState := "active"
+		if strings.EqualFold(strings.TrimSpace(status), "inactive") {
+			dbState = "inactive"
+		}
+		setClauses = append(setClauses, "state = $"+strconv.Itoa(argPos))
+		args = append(args, dbState)
+		argPos++
+	}
+
+	query := `
+		UPDATE core_identities
+		SET ` + strings.Join(setClauses, ", ") + `
+		WHERE id = $` + strconv.Itoa(argPos) + `
+		  AND deleted_at IS NULL
+	`
+	args = append(args, identityID)
+
+	_, err := h.dbConn().Exec(ctx, query, args...)
+	return err
 }
 
 // ListAuditLogs handles GET /admin/audit

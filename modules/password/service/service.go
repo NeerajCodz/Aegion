@@ -45,15 +45,26 @@ type Hasher interface {
 	Verify(password, hash string) (bool, error)
 }
 
+type credentialStore interface {
+	Create(ctx context.Context, cred *store.Credential) error
+	GetByIdentifier(ctx context.Context, identifier string) (*store.Credential, error)
+	GetByIdentityID(ctx context.Context, identityID uuid.UUID) (*store.Credential, error)
+	Update(ctx context.Context, credID uuid.UUID, newHash string) error
+	DeleteByIdentityID(ctx context.Context, identityID uuid.UUID) error
+	AddToHistory(ctx context.Context, credID uuid.UUID, hash string) error
+	GetHistory(ctx context.Context, credID uuid.UUID, limit int) ([]string, error)
+	CleanupHistory(ctx context.Context, credID uuid.UUID, keepCount int) error
+}
+
 // Service handles password authentication.
 type Service struct {
-	store  *store.Store
+	store  credentialStore
 	hasher Hasher
 	config Config
 }
 
 // New creates a new password service.
-func New(store *store.Store, hasher Hasher, config Config) *Service {
+func New(store credentialStore, hasher Hasher, config Config) *Service {
 	if config.MinLength == 0 {
 		config.MinLength = 8
 	}

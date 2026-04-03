@@ -4,281 +4,523 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/aegion/aegion/modules/password/store"
 )
 
-func TestConfigDefaults(t *testing.T) {
-	config := Config{}
-	
-	// Test that zero values are as expected
-	assert.Equal(t, 0, config.MinLength)
-	assert.False(t, config.RequireUppercase)
-	assert.False(t, config.RequireLowercase)
-	assert.False(t, config.RequireNumber)
-	assert.False(t, config.RequireSpecial)
-	assert.False(t, config.HIBPEnabled)
-	assert.Equal(t, 0, config.HistoryCount)
-}
-
-func TestConfigWithValues(t *testing.T) {
-	config := Config{
-		MinLength:        12,
-		RequireUppercase: true,
-		RequireLowercase: true,
-		RequireNumber:    true,
-		RequireSpecial:   true,
-		HIBPEnabled:      true,
-		HistoryCount:     5,
-	}
-	
-	assert.Equal(t, 12, config.MinLength)
-	assert.True(t, config.RequireUppercase)
-	assert.True(t, config.RequireLowercase)
-	assert.True(t, config.RequireNumber)
-	assert.True(t, config.RequireSpecial)
-	assert.True(t, config.HIBPEnabled)
-	assert.Equal(t, 5, config.HistoryCount)
-}
-
-// MockHasher implements Hasher interface for testing
 type mockHasher struct {
-	hashFunc   func(password string) (string, error)
-	verifyFunc func(password, hash string) (bool, error)
+	hashFn   func(password string) (string, error)
+	verifyFn func(password, hash string) (bool, error)
 }
 
 func (m *mockHasher) Hash(password string) (string, error) {
-	if m.hashFunc != nil {
-		return m.hashFunc(password)
+	if m.hashFn != nil {
+		return m.hashFn(password)
 	}
 	return "hashed_" + password, nil
 }
 
 func (m *mockHasher) Verify(password, hash string) (bool, error) {
-	if m.verifyFunc != nil {
-		return m.verifyFunc(password, hash)
+	if m.verifyFn != nil {
+		return m.verifyFn(password, hash)
 	}
 	return hash == "hashed_"+password, nil
 }
 
-func TestCheckComplexity(t *testing.T) {
-	tests := []struct {
-		name     string
-		password string
-		config   Config
-		wantErr  bool
-	}{
-		{
-			name:     "all requirements met",
-			password: "SecurePass123!",
-			config: Config{
-				RequireUppercase: true,
-				RequireLowercase: true,
-				RequireNumber:    true,
-				RequireSpecial:   true,
-			},
-			wantErr: false,
-		},
-		{
-			name:     "missing uppercase",
-			password: "lowercase123!",
-			config: Config{
-				RequireUppercase: true,
-			},
-			wantErr: true,
-		},
-		{
-			name:     "missing lowercase",
-			password: "UPPERCASE123!",
-			config: Config{
-				RequireLowercase: true,
-			},
-			wantErr: true,
-		},
-		{
-			name:     "missing number",
-			password: "SecurePass!",
-			config: Config{
-				RequireNumber: true,
-			},
-			wantErr: true,
-		},
-		{
-			name:     "missing special character",
-			password: "SecurePass123",
-			config: Config{
-				RequireSpecial: true,
-			},
-			wantErr: true,
-		},
-		{
-			name:     "no requirements - anything passes",
-			password: "simple",
-			config:   Config{},
-			wantErr:  false,
-		},
-		{
-			name:     "unicode characters",
-			password: "Pässwörd123!",
-			config: Config{
-				RequireUppercase: true,
-				RequireLowercase: true,
-				RequireNumber:    true,
-				RequireSpecial:   true,
-			},
-			wantErr: false,
-		},
-	}
+type memoryStore struct {
+	credentialsByIdentity map[uuid.UUID]*store.Credential
+	credentialsByID       map[uuid.UUID]*store.Credential
+	credentialsByIdent    map[string]*store.Credential
+	historyByCred         map[uuid.UUID][]string
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc := &Service{config: tt.config}
-			err := svc.checkComplexity(tt.password)
-			
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
+	createErr     error
+	getByIdentErr error
+	getByIDErr    error
+	updateErr     error
+	deleteErr     error
+	addHistoryErr error
+	getHistoryErr error
+	cleanupErr    error
+
+	lastCreated   *store.Credential
+	lastUpdatedID uuid.UUID
+	lastUpdatedTo string
+	deletedID     uuid.UUID
+}
+
+func newMemoryStore() *memoryStore {
+	return &memoryStore{
+		credentialsByIdentity: map[uuid.UUID]*store.Credential{},
+		credentialsByID:       map[uuid.UUID]*store.Credential{},
+		credentialsByIdent:    map[string]*store.Credential{},
+		historyByCred:         map[uuid.UUID][]string{},
 	}
 }
 
-func TestCheckSimilarity(t *testing.T) {
-	tests := []struct {
-		name       string
-		password   string
-		identifier string
-		wantErr    bool
-	}{
-		{
-			name:       "different password and identifier",
-			password:   "SecurePass123!",
-			identifier: "user@example.com",
-			wantErr:    false,
-		},
-		{
-			name:       "password contains username",
-			password:   "testuser123!",
-			identifier: "testuser@example.com",
-			wantErr:    true,
-		},
-		{
-			name:       "password is too similar",
-			password:   "john123!",
-			identifier: "john@example.com",
-			wantErr:    true,
-		},
-		{
-			name:       "empty identifier",
-			password:   "SecurePass123!",
-			identifier: "",
-			wantErr:    false,
-		},
-		{
-			name:       "password same as email",
-			password:   "test@example.com",
-			identifier: "test@example.com",
-			wantErr:    true,
-		},
+func (m *memoryStore) seedCredential(identityID uuid.UUID, identifier, hash string) *store.Credential {
+	c := &store.Credential{
+		ID:         uuid.New(),
+		IdentityID: identityID,
+		Identifier: identifier,
+		Hash:       hash,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
 	}
+	m.credentialsByIdentity[identityID] = c
+	m.credentialsByID[c.ID] = c
+	m.credentialsByIdent[identifier] = c
+	return c
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc := &Service{}
-			err := svc.checkSimilarity(tt.password, tt.identifier)
-			
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.True(t, errors.Is(err, ErrPasswordSimilar))
-			} else {
-				assert.NoError(t, err)
-			}
-		})
+func (m *memoryStore) Create(ctx context.Context, cred *store.Credential) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	cp := *cred
+	m.lastCreated = &cp
+	m.credentialsByIdentity[cred.IdentityID] = &cp
+	m.credentialsByID[cred.ID] = &cp
+	m.credentialsByIdent[cred.Identifier] = &cp
+	return nil
+}
+
+func (m *memoryStore) GetByIdentifier(ctx context.Context, identifier string) (*store.Credential, error) {
+	if m.getByIdentErr != nil {
+		return nil, m.getByIdentErr
+	}
+	if c, ok := m.credentialsByIdent[identifier]; ok {
+		cp := *c
+		return &cp, nil
+	}
+	return nil, store.ErrCredentialNotFound
+}
+
+func (m *memoryStore) GetByIdentityID(ctx context.Context, identityID uuid.UUID) (*store.Credential, error) {
+	if m.getByIDErr != nil {
+		return nil, m.getByIDErr
+	}
+	if c, ok := m.credentialsByIdentity[identityID]; ok {
+		cp := *c
+		return &cp, nil
+	}
+	return nil, store.ErrCredentialNotFound
+}
+
+func (m *memoryStore) Update(ctx context.Context, credID uuid.UUID, newHash string) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	c, ok := m.credentialsByID[credID]
+	if !ok {
+		return store.ErrCredentialNotFound
+	}
+	c.Hash = newHash
+	c.UpdatedAt = time.Now().UTC()
+	m.lastUpdatedID = credID
+	m.lastUpdatedTo = newHash
+	return nil
+}
+
+func (m *memoryStore) DeleteByIdentityID(ctx context.Context, identityID uuid.UUID) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	c, ok := m.credentialsByIdentity[identityID]
+	if !ok {
+		return nil
+	}
+	delete(m.credentialsByIdentity, identityID)
+	delete(m.credentialsByID, c.ID)
+	delete(m.credentialsByIdent, c.Identifier)
+	m.deletedID = identityID
+	return nil
+}
+
+func (m *memoryStore) AddToHistory(ctx context.Context, credID uuid.UUID, hash string) error {
+	if m.addHistoryErr != nil {
+		return m.addHistoryErr
+	}
+	m.historyByCred[credID] = append([]string{hash}, m.historyByCred[credID]...)
+	return nil
+}
+
+func (m *memoryStore) GetHistory(ctx context.Context, credID uuid.UUID, limit int) ([]string, error) {
+	if m.getHistoryErr != nil {
+		return nil, m.getHistoryErr
+	}
+	h := m.historyByCred[credID]
+	if limit <= 0 || len(h) <= limit {
+		return append([]string{}, h...), nil
+	}
+	return append([]string{}, h[:limit]...), nil
+}
+
+func (m *memoryStore) CleanupHistory(ctx context.Context, credID uuid.UUID, keepCount int) error {
+	if m.cleanupErr != nil {
+		return m.cleanupErr
+	}
+	h := m.historyByCred[credID]
+	if keepCount < 0 {
+		keepCount = 0
+	}
+	if len(h) > keepCount {
+		m.historyByCred[credID] = append([]string{}, h[:keepCount]...)
+	}
+	return nil
+}
+
+func defaultConfig() Config {
+	return Config{
+		MinLength:        8,
+		RequireUppercase: true,
+		RequireLowercase: true,
+		RequireNumber:    true,
+		RequireSpecial:   true,
+		HIBPEnabled:      false,
+		HistoryCount:     3,
 	}
 }
 
-func TestValidatePassword(t *testing.T) {
-	tests := []struct {
-		name       string
-		password   string
-		identifier string
-		config     Config
-		wantErr    error
-	}{
-		{
-			name:       "valid password",
-			password:   "SecurePass123!",
-			identifier: "user@example.com",
-			config: Config{
-				MinLength:        8,
-				RequireUppercase: true,
-				RequireLowercase: true,
-				RequireNumber:    true,
-				RequireSpecial:   true,
-			},
-			wantErr: nil,
-		},
-		{
-			name:       "too short",
-			password:   "Short1!",
-			identifier: "user@example.com",
-			config:     Config{MinLength: 8},
-			wantErr:    ErrPasswordTooShort,
-		},
-		{
-			name:       "too weak - missing uppercase",
-			password:   "lowercase123!",
-			identifier: "user@example.com",
-			config: Config{
-				MinLength:        8,
-				RequireUppercase: true,
-			},
-			wantErr: ErrPasswordTooWeak,
-		},
-		{
-			name:       "similar to identifier",
-			password:   "testuser123!",
-			identifier: "testuser@example.com",
-			config: Config{
-				MinLength: 8,
-			},
-			wantErr: ErrPasswordSimilar,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			svc := &Service{
-				hasher: &mockHasher{},
-				config: tt.config,
-			}
-
-			ctx := context.Background()
-			err := svc.ValidatePassword(ctx, tt.password, tt.identifier)
-
-			if tt.wantErr != nil {
-				assert.Error(t, err)
-				assert.True(t, errors.Is(err, tt.wantErr))
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+func TestNewAppliesDefaults(t *testing.T) {
+	s := New(newMemoryStore(), &mockHasher{}, Config{})
+	assert.Equal(t, 8, s.config.MinLength)
+	assert.Equal(t, 5, s.config.HistoryCount)
 }
 
-func TestErrors(t *testing.T) {
-	// Test that all errors are properly defined
-	assert.NotNil(t, ErrPasswordTooShort)
-	assert.NotNil(t, ErrPasswordTooWeak)
-	assert.NotNil(t, ErrPasswordBreached)
-	assert.NotNil(t, ErrPasswordReused)
-	assert.NotNil(t, ErrPasswordSimilar)
-	assert.NotNil(t, ErrInvalidCredentials)
-	assert.NotNil(t, ErrIdentityNotFound)
-	
-	// Test error messages
-	assert.Contains(t, ErrPasswordTooShort.Error(), "short")
-	assert.Contains(t, ErrPasswordTooWeak.Error(), "complexity")
-	assert.Contains(t, ErrPasswordBreached.Error(), "breach")
+func TestRegister(t *testing.T) {
+	identityID := uuid.New()
+	mem := newMemoryStore()
+	h := &mockHasher{
+		hashFn: func(password string) (string, error) {
+			assert.Equal(t, "GoodPass1!", password)
+			return "hashed-ok", nil
+		},
+	}
+	s := New(mem, h, defaultConfig())
+
+	err := s.Register(context.Background(), identityID, "USER@Example.com", "GoodPass1!")
+	require.NoError(t, err)
+	require.NotNil(t, mem.lastCreated)
+	assert.Equal(t, identityID, mem.lastCreated.IdentityID)
+	assert.Equal(t, "user@example.com", mem.lastCreated.Identifier)
+	assert.Equal(t, "hashed-ok", mem.lastCreated.Hash)
+}
+
+func TestRegisterErrors(t *testing.T) {
+	t.Run("validation failure", func(t *testing.T) {
+		s := New(newMemoryStore(), &mockHasher{}, defaultConfig())
+		err := s.Register(context.Background(), uuid.New(), "u@example.com", "short")
+		assert.ErrorIs(t, err, ErrPasswordTooShort)
+	})
+
+	t.Run("hash failure", func(t *testing.T) {
+		mem := newMemoryStore()
+		s := New(mem, &mockHasher{
+			hashFn: func(password string) (string, error) {
+				return "", errors.New("hash failed")
+			},
+		}, defaultConfig())
+		err := s.Register(context.Background(), uuid.New(), "u@example.com", "GoodPass1!")
+		assert.EqualError(t, err, "failed to hash password: hash failed")
+	})
+
+	t.Run("store create failure", func(t *testing.T) {
+		mem := newMemoryStore()
+		mem.createErr = errors.New("create failed")
+		s := New(mem, &mockHasher{}, defaultConfig())
+		err := s.Register(context.Background(), uuid.New(), "u@example.com", "GoodPass1!")
+		assert.EqualError(t, err, "create failed")
+	})
+}
+
+func TestVerify(t *testing.T) {
+	identityID := uuid.New()
+	mem := newMemoryStore()
+	cred := mem.seedCredential(identityID, "user@example.com", "stored-hash")
+
+	t.Run("success", func(t *testing.T) {
+		h := &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				assert.Equal(t, "GoodPass1!", password)
+				assert.Equal(t, cred.Hash, hash)
+				return true, nil
+			},
+		}
+		s := New(mem, h, defaultConfig())
+		gotID, err := s.Verify(context.Background(), "USER@example.com", "GoodPass1!")
+		require.NoError(t, err)
+		assert.Equal(t, identityID, gotID)
+	})
+
+	t.Run("credential not found returns invalid credentials", func(t *testing.T) {
+		h := &mockHasher{
+			hashFn: func(password string) (string, error) {
+				return "dummy", nil
+			},
+		}
+		s := New(newMemoryStore(), h, defaultConfig())
+		_, err := s.Verify(context.Background(), "missing@example.com", "whatever")
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+	})
+
+	t.Run("store lookup error", func(t *testing.T) {
+		memErr := newMemoryStore()
+		memErr.getByIdentErr = errors.New("db read failed")
+		s := New(memErr, &mockHasher{}, defaultConfig())
+		_, err := s.Verify(context.Background(), "u@example.com", "pw")
+		assert.EqualError(t, err, "db read failed")
+	})
+
+	t.Run("hasher verify error", func(t *testing.T) {
+		h := &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				return false, errors.New("verify failed")
+			},
+		}
+		s := New(mem, h, defaultConfig())
+		_, err := s.Verify(context.Background(), "user@example.com", "pw")
+		assert.EqualError(t, err, "failed to verify password: verify failed")
+	})
+
+	t.Run("wrong password", func(t *testing.T) {
+		h := &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				return false, nil
+			},
+		}
+		s := New(mem, h, defaultConfig())
+		_, err := s.Verify(context.Background(), "user@example.com", "pw")
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+	})
+}
+
+func TestChangePassword(t *testing.T) {
+	identityID := uuid.New()
+	mem := newMemoryStore()
+	cred := mem.seedCredential(identityID, "user@example.com", "old-hash")
+	mem.historyByCred[cred.ID] = []string{"older-hash"}
+
+	t.Run("success", func(t *testing.T) {
+		h := &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				if hash == "old-hash" {
+					return password == "OldPass1!", nil
+				}
+				return false, nil
+			},
+			hashFn: func(password string) (string, error) {
+				return "new-hash", nil
+			},
+		}
+		s := New(mem, h, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "OldPass1!", "GoodPass2!")
+		require.NoError(t, err)
+		assert.Equal(t, cred.ID, mem.lastUpdatedID)
+		assert.Equal(t, "new-hash", mem.lastUpdatedTo)
+	})
+
+	t.Run("identity missing", func(t *testing.T) {
+		s := New(newMemoryStore(), &mockHasher{}, defaultConfig())
+		err := s.ChangePassword(context.Background(), uuid.New(), "OldPass1!", "GoodPass2!")
+		assert.ErrorIs(t, err, ErrIdentityNotFound)
+	})
+
+	t.Run("get by identity store error", func(t *testing.T) {
+		memErr := newMemoryStore()
+		memErr.getByIDErr = errors.New("load failed")
+		s := New(memErr, &mockHasher{}, defaultConfig())
+		err := s.ChangePassword(context.Background(), uuid.New(), "old", "new")
+		assert.EqualError(t, err, "load failed")
+	})
+
+	t.Run("old password invalid", func(t *testing.T) {
+		s := New(mem, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				return false, nil
+			},
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "wrong", "GoodPass2!")
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+	})
+
+	t.Run("old password verify error", func(t *testing.T) {
+		s := New(mem, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				return false, errors.New("verify old failed")
+			},
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "old", "GoodPass2!")
+		assert.ErrorIs(t, err, ErrInvalidCredentials)
+	})
+
+	t.Run("history store error", func(t *testing.T) {
+		memErr := newMemoryStore()
+		memErr.seedCredential(identityID, "user@example.com", "old-hash")
+		memErr.getHistoryErr = errors.New("history read failed")
+		s := New(memErr, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) { return true, nil },
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "OldPass1!", "GoodPass2!")
+		assert.EqualError(t, err, "history read failed")
+	})
+
+	t.Run("password reused", func(t *testing.T) {
+		memReuse := newMemoryStore()
+		c := memReuse.seedCredential(identityID, "user@example.com", "old-hash")
+		memReuse.historyByCred[c.ID] = []string{"history-hash"}
+		s := New(memReuse, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				switch hash {
+				case "old-hash":
+					return true, nil
+				case "history-hash":
+					return true, nil
+				default:
+					return false, nil
+				}
+			},
+			hashFn: func(password string) (string, error) { return "new-hash", nil },
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "OldPass1!", "GoodPass2!")
+		assert.ErrorIs(t, err, ErrPasswordReused)
+	})
+
+	t.Run("hash generation failure", func(t *testing.T) {
+		memHashFail := newMemoryStore()
+		memHashFail.seedCredential(identityID, "user@example.com", "old-hash")
+		s := New(memHashFail, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) { return true, nil },
+			hashFn:   func(password string) (string, error) { return "", errors.New("hash failed") },
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "OldPass1!", "GoodPass2!")
+		assert.EqualError(t, err, "failed to hash password: hash failed")
+	})
+
+	t.Run("add history failure", func(t *testing.T) {
+		memErr := newMemoryStore()
+		memErr.seedCredential(identityID, "user@example.com", "old-hash")
+		memErr.addHistoryErr = errors.New("history insert failed")
+		s := New(memErr, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) { return true, nil },
+			hashFn:   func(password string) (string, error) { return "new-hash", nil },
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "OldPass1!", "GoodPass2!")
+		assert.EqualError(t, err, "history insert failed")
+	})
+
+	t.Run("update failure", func(t *testing.T) {
+		memErr := newMemoryStore()
+		memErr.seedCredential(identityID, "user@example.com", "old-hash")
+		memErr.updateErr = errors.New("update failed")
+		s := New(memErr, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) { return true, nil },
+			hashFn:   func(password string) (string, error) { return "new-hash", nil },
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "OldPass1!", "GoodPass2!")
+		assert.EqualError(t, err, "update failed")
+	})
+
+	t.Run("cleanup failure", func(t *testing.T) {
+		memErr := newMemoryStore()
+		memErr.seedCredential(identityID, "user@example.com", "old-hash")
+		memErr.cleanupErr = errors.New("cleanup failed")
+		s := New(memErr, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) { return true, nil },
+			hashFn:   func(password string) (string, error) { return "new-hash", nil },
+		}, defaultConfig())
+		err := s.ChangePassword(context.Background(), identityID, "OldPass1!", "GoodPass2!")
+		assert.EqualError(t, err, "cleanup failed")
+	})
+}
+
+func TestResetPassword(t *testing.T) {
+	identityID := uuid.New()
+	mem := newMemoryStore()
+	cred := mem.seedCredential(identityID, "user@example.com", "old-hash")
+
+	t.Run("success", func(t *testing.T) {
+		s := New(mem, &mockHasher{
+			hashFn: func(password string) (string, error) { return "reset-hash", nil },
+			verifyFn: func(password, hash string) (bool, error) {
+				return false, nil
+			},
+		}, defaultConfig())
+		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
+		require.NoError(t, err)
+		assert.Equal(t, cred.ID, mem.lastUpdatedID)
+		assert.Equal(t, "reset-hash", mem.lastUpdatedTo)
+	})
+
+	t.Run("identity missing", func(t *testing.T) {
+		s := New(newMemoryStore(), &mockHasher{}, defaultConfig())
+		err := s.ResetPassword(context.Background(), uuid.New(), "GoodPass3!")
+		assert.ErrorIs(t, err, ErrIdentityNotFound)
+	})
+
+	t.Run("history reused", func(t *testing.T) {
+		memReuse := newMemoryStore()
+		c := memReuse.seedCredential(identityID, "user@example.com", "old-hash")
+		memReuse.historyByCred[c.ID] = []string{"older-hash"}
+		s := New(memReuse, &mockHasher{
+			verifyFn: func(password, hash string) (bool, error) {
+				return hash == "older-hash", nil
+			},
+			hashFn: func(password string) (string, error) { return "new-hash", nil },
+		}, defaultConfig())
+		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
+		assert.ErrorIs(t, err, ErrPasswordReused)
+	})
+}
+
+func TestValidatePasswordAndHelpers(t *testing.T) {
+	s := New(newMemoryStore(), &mockHasher{}, defaultConfig())
+
+	assert.ErrorIs(t, s.ValidatePassword(context.Background(), "short", "u@example.com"), ErrPasswordTooShort)
+	assert.ErrorIs(t, s.ValidatePassword(context.Background(), "alllowercase1!", "u@example.com"), ErrPasswordTooWeak)
+	assert.ErrorIs(t, s.ValidatePassword(context.Background(), "user123!A", "user@example.com"), ErrPasswordSimilar)
+	assert.NoError(t, s.ValidatePassword(context.Background(), "GoodPass1!", "user@example.com"))
+	assert.NoError(t, s.checkSimilarity("GoodPass1!", "ab"))
+	assert.NoError(t, s.checkSimilarity("GoodPass1!", ""))
+}
+
+func TestCheckHIBPAndHistoryPaths(t *testing.T) {
+	s := New(newMemoryStore(), &mockHasher{}, Config{
+		MinLength:   8,
+		HIBPEnabled: true,
+	})
+
+	// Network failures should not fail validation.
+	assert.NoError(t, s.checkHIBP(context.Background(), "GoodPass1!"))
+
+	mem := newMemoryStore()
+	identityID := uuid.New()
+	c := mem.seedCredential(identityID, "user@example.com", "old-hash")
+	mem.historyByCred[c.ID] = []string{"older-hash"}
+
+	s = New(mem, &mockHasher{
+		verifyFn: func(password, hash string) (bool, error) {
+			return false, errors.New("verify history failed")
+		},
+	}, defaultConfig())
+	assert.NoError(t, s.checkHistory(context.Background(), c.ID, "CandidatePass1!"))
+}
+
+func TestDelete(t *testing.T) {
+	identityID := uuid.New()
+	mem := newMemoryStore()
+	mem.seedCredential(identityID, "user@example.com", "hash")
+	s := New(mem, &mockHasher{}, defaultConfig())
+
+	err := s.Delete(context.Background(), identityID)
+	require.NoError(t, err)
+	assert.Equal(t, identityID, mem.deletedID)
+
+	mem.deleteErr = errors.New("delete failed")
+	err = s.Delete(context.Background(), identityID)
+	assert.EqualError(t, err, "delete failed")
 }

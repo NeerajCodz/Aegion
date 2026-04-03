@@ -11,7 +11,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var (
+	parsePoolConfig   = pgxpool.ParseConfig
+	newPoolWithConfig = pgxpool.NewWithConfig
+	pingPool          = func(ctx context.Context, pool *pgxpool.Pool) error { return pool.Ping(ctx) }
+	closePool         = func(pool *pgxpool.Pool) { pool.Close() }
 )
 
 // DB wraps a pgxpool.Pool with additional utilities.
@@ -30,7 +38,7 @@ type Config struct {
 
 // Connect creates a new database connection pool.
 func Connect(ctx context.Context, cfg Config) (*DB, error) {
-	poolCfg, err := pgxpool.ParseConfig(cfg.URL)
+	poolCfg, err := parsePoolConfig(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
@@ -40,14 +48,14 @@ func Connect(ctx context.Context, cfg Config) (*DB, error) {
 	poolCfg.MaxConnLifetime = cfg.ConnMaxLifetime
 	poolCfg.MaxConnIdleTime = cfg.ConnMaxIdleTime
 
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	pool, err := newPoolWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
 	// Verify connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
+	if err := pingPool(ctx, pool); err != nil {
+		closePool(pool)
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -56,14 +64,40 @@ func Connect(ctx context.Context, cfg Config) (*DB, error) {
 
 // Close closes the database connection pool.
 func (db *DB) Close() {
-	db.Pool.Close()
+	if db == nil || db.Pool == nil {
+		return
+	}
+	closePool(db.Pool)
 }
 
 // Migrator handles database migrations.
 type Migrator struct {
-	db         *DB
-	migrations embed.FS
-	basePath   string
+	db          *DB
+	migrations  embed.FS
+	basePath    string
+	acquireConn func(ctx context.Context) (pooledMigrationConn, error)
+	beginTx     func(ctx context.Context, conn migrationBeginner) (migrationTx, error)
+}
+
+type migrationExecutor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+type migrationBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+type migrationTx interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
+}
+
+type pooledMigrationConn interface {
+	migrationExecutor
+	migrationBeginner
+	Release()
 }
 
 // Migration represents a single migration file.
@@ -76,11 +110,22 @@ type Migration struct {
 
 // NewMigrator creates a new migrator instance.
 func NewMigrator(db *DB, migrations embed.FS, basePath string) *Migrator {
-	return &Migrator{
+	migrator := &Migrator{
 		db:         db,
 		migrations: migrations,
 		basePath:   basePath,
 	}
+	migrator.acquireConn = func(ctx context.Context) (pooledMigrationConn, error) {
+		return migrator.db.Pool.Acquire(ctx)
+	}
+	migrator.beginTx = func(ctx context.Context, conn migrationBeginner) (migrationTx, error) {
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return tx, nil
+	}
+	return migrator
 }
 
 // Migrate runs all pending migrations.
@@ -88,7 +133,7 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 	// Acquire advisory lock to prevent concurrent migrations
 	lockID := int64(6832918273645123) // Unique lock ID for Aegion migrations
 
-	conn, err := m.db.Pool.Acquire(ctx)
+	conn, err := m.acquireConn(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to acquire connection: %w", err)
 	}
@@ -110,7 +155,7 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 	}()
 
 	// Ensure migrations table exists
-	if err := m.ensureMigrationsTable(ctx, conn.Conn()); err != nil {
+	if err := m.ensureMigrationsTable(ctx, conn); err != nil {
 		return err
 	}
 
@@ -121,7 +166,7 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 	}
 
 	// Get current version
-	currentVersion, err := m.getCurrentVersion(ctx, conn.Conn())
+	currentVersion, err := m.getCurrentVersion(ctx, conn)
 	if err != nil {
 		return fmt.Errorf("failed to get current version: %w", err)
 	}
@@ -132,7 +177,7 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 			continue
 		}
 
-		if err := m.applyMigration(ctx, conn.Conn(), mig); err != nil {
+		if err := m.applyMigration(ctx, conn, mig); err != nil {
 			return fmt.Errorf("failed to apply migration %d_%s: %w", mig.Version, mig.Name, err)
 		}
 	}
@@ -141,7 +186,7 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 }
 
 // ensureMigrationsTable creates the migrations tracking table.
-func (m *Migrator) ensureMigrationsTable(ctx context.Context, conn *pgx.Conn) error {
+func (m *Migrator) ensureMigrationsTable(ctx context.Context, conn migrationExecutor) error {
 	_, err := conn.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version     INT PRIMARY KEY,
@@ -153,7 +198,7 @@ func (m *Migrator) ensureMigrationsTable(ctx context.Context, conn *pgx.Conn) er
 }
 
 // getCurrentVersion returns the highest applied migration version.
-func (m *Migrator) getCurrentVersion(ctx context.Context, conn *pgx.Conn) (int, error) {
+func (m *Migrator) getCurrentVersion(ctx context.Context, conn migrationExecutor) (int, error) {
 	var version int
 	err := conn.QueryRow(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
 	return version, err
@@ -238,8 +283,8 @@ func (m *Migrator) loadMigrations() ([]Migration, error) {
 }
 
 // applyMigration applies a single migration within a transaction.
-func (m *Migrator) applyMigration(ctx context.Context, conn *pgx.Conn, mig Migration) error {
-	tx, err := conn.Begin(ctx)
+func (m *Migrator) applyMigration(ctx context.Context, conn migrationBeginner, mig Migration) error {
+	tx, err := m.beginTx(ctx, conn)
 	if err != nil {
 		return err
 	}
@@ -268,7 +313,7 @@ func (m *Migrator) applyMigration(ctx context.Context, conn *pgx.Conn, mig Migra
 
 // Rollback rolls back the last migration.
 func (m *Migrator) Rollback(ctx context.Context) error {
-	conn, err := m.db.Pool.Acquire(ctx)
+	conn, err := m.acquireConn(ctx)
 	if err != nil {
 		return err
 	}
@@ -306,7 +351,7 @@ func (m *Migrator) Rollback(ctx context.Context) error {
 	}
 
 	// Apply rollback
-	tx, err := conn.Begin(ctx)
+	tx, err := m.beginTx(ctx, conn)
 	if err != nil {
 		return err
 	}

@@ -12,7 +12,7 @@ on:
     branches: [main, beta]
 
 env:
-  GO_VERSION: '1.25.0'
+  GO_VERSION: '1.25.5'
   RUST_VERSION: 'stable'
   CARGO_TERM_COLOR: always
 
@@ -42,12 +42,18 @@ jobs:
           fi
 
       - name: Run go vet
-        run: go vet ./...
+        run: |
+          packages=$(go list ./... | grep -v '/node_modules/' || true)
+          if [ -z "$packages" ]; then
+            echo "No Go packages found for vet"
+            exit 1
+          fi
+          go vet $packages
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.5.0
           args: --timeout=5m
 
   # ---------------------------------------------------------------------------
@@ -113,11 +119,16 @@ jobs:
           CGO_ENABLED: 1
           CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          packages=$(go list ./... | grep -v '/node_modules/' || true)
+          if [ -z "$packages" ]; then
+            echo "No Go packages found for test"
+            exit 1
+          fi
+          go test -v -race -coverprofile=coverage.out -covermode=atomic $packages
 
       - name: Check coverage threshold
         run: |
-          total=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          total=$(go tool cover -func coverage.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Coverage: $total%"
           threshold=95
           # Use awk for floating point comparison instead of bc

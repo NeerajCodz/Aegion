@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -98,9 +99,31 @@ type Manager struct {
 	cookieConfig CookieConfig
 	lifespan     time.Duration
 	idleTimeout  time.Duration
+
+	execStmt   func(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
+	queryRowFn func(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	queryRows  func(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	beginTx    func(ctx context.Context) (sessionTx, error)
+	now        func() time.Time
 }
 
 var errTokenEntropyFailure = errors.New("failed to generate token entropy")
+var errSessionDBUnavailable = errors.New("session manager database unavailable")
+
+type sessionTx interface {
+	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context) error
+}
+
+type sessionErrorRow struct {
+	err error
+}
+
+func (r sessionErrorRow) Scan(dest ...interface{}) error {
+	return r.err
+}
 
 // ManagerConfig configures the session manager.
 type ManagerConfig struct {
@@ -113,18 +136,53 @@ type ManagerConfig struct {
 
 // NewManager creates a new session manager.
 func NewManager(cfg ManagerConfig) *Manager {
-	return &Manager{
+	m := &Manager{
 		db:           cfg.DB,
 		cookieSecret: cfg.CookieSecret,
 		cookieConfig: cfg.CookieConfig,
 		lifespan:     cfg.Lifespan,
 		idleTimeout:  cfg.IdleTimeout,
+		now: func() time.Time {
+			return time.Now().UTC()
+		},
 	}
+	if cfg.DB != nil {
+		m.execStmt = func(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+			return cfg.DB.Exec(ctx, sql, args...)
+		}
+		m.queryRowFn = func(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+			return cfg.DB.QueryRow(ctx, sql, args...)
+		}
+		m.queryRows = func(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+			return cfg.DB.Query(ctx, sql, args...)
+		}
+		m.beginTx = func(ctx context.Context) (sessionTx, error) {
+			tx, err := cfg.DB.Begin(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return tx, nil
+		}
+	} else {
+		m.execStmt = func(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, errSessionDBUnavailable
+		}
+		m.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+			return sessionErrorRow{err: errSessionDBUnavailable}
+		}
+		m.queryRows = func(context.Context, string, ...interface{}) (pgx.Rows, error) {
+			return nil, errSessionDBUnavailable
+		}
+		m.beginTx = func(context.Context) (sessionTx, error) {
+			return nil, errSessionDBUnavailable
+		}
+	}
+	return m
 }
 
 // Create creates a new session for an identity.
 func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthMethod, device DeviceInfo) (*Session, error) {
-	now := time.Now().UTC()
+	now := m.now()
 
 	session := &Session{
 		ID:              uuid.New(),
@@ -149,7 +207,7 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 	}
 
 	// Insert session
-	_, err := m.db.Exec(ctx, `
+	_, err := m.execStmt(ctx, `
 		INSERT INTO core_sessions (
 			id, token, identity_id, aal, issued_at, expires_at,
 			authenticated_at, logout_token, devices, active,
@@ -167,7 +225,7 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 	}
 
 	// Insert auth method
-	_, err = m.db.Exec(ctx, `
+	_, err = m.execStmt(ctx, `
 		INSERT INTO core_session_auth_methods (session_id, method, aal_contributed, completed_at)
 		VALUES ($1, $2, $3, $4)
 	`, session.ID, method, methodToAAL(method), now)
@@ -182,7 +240,7 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 	session := &Session{}
 
-	err := m.db.QueryRow(ctx, `
+	err := m.queryRowFn(ctx, `
 		SELECT id, token, identity_id, aal, issued_at, expires_at,
 			   authenticated_at, logout_token, devices, active,
 			   is_impersonation, impersonator_id, created_at, updated_at
@@ -203,12 +261,12 @@ func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 	}
 
 	// Check expiration
-	if time.Now().UTC().After(session.ExpiresAt) {
+	if m.now().After(session.ExpiresAt) {
 		return nil, ErrSessionExpired
 	}
 
 	// Load auth methods
-	rows, err := m.db.Query(ctx, `
+	rows, err := m.queryRows(ctx, `
 		SELECT method, aal_contributed, completed_at
 		FROM core_session_auth_methods
 		WHERE session_id = $1
@@ -227,12 +285,16 @@ func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 		session.AuthMethods = append(session.AuthMethods, am)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return session, nil
 }
 
 // Revoke invalidates a session.
 func (m *Manager) Revoke(ctx context.Context, sessionID uuid.UUID) error {
-	_, err := m.db.Exec(ctx, `
+	_, err := m.execStmt(ctx, `
 		UPDATE core_sessions
 		SET active = FALSE, updated_at = NOW()
 		WHERE id = $1
@@ -242,7 +304,7 @@ func (m *Manager) Revoke(ctx context.Context, sessionID uuid.UUID) error {
 
 // RevokeAllForIdentity revokes all sessions for an identity.
 func (m *Manager) RevokeAllForIdentity(ctx context.Context, identityID uuid.UUID) error {
-	_, err := m.db.Exec(ctx, `
+	_, err := m.execStmt(ctx, `
 		UPDATE core_sessions
 		SET active = FALSE, updated_at = NOW()
 		WHERE identity_id = $1 AND active = TRUE
@@ -252,8 +314,8 @@ func (m *Manager) RevokeAllForIdentity(ctx context.Context, identityID uuid.UUID
 
 // Extend extends a session's expiration time.
 func (m *Manager) Extend(ctx context.Context, sessionID uuid.UUID) error {
-	newExpiry := time.Now().UTC().Add(m.lifespan)
-	_, err := m.db.Exec(ctx, `
+	newExpiry := m.now().Add(m.lifespan)
+	_, err := m.execStmt(ctx, `
 		UPDATE core_sessions
 		SET expires_at = $1, updated_at = NOW()
 		WHERE id = $2 AND active = TRUE
@@ -263,10 +325,10 @@ func (m *Manager) Extend(ctx context.Context, sessionID uuid.UUID) error {
 
 // AddAuthMethod records an additional authentication method.
 func (m *Manager) AddAuthMethod(ctx context.Context, sessionID uuid.UUID, method AuthMethod) error {
-	now := time.Now().UTC()
+	now := m.now()
 	aalContrib := methodToAAL(method)
 
-	tx, err := m.db.Begin(ctx)
+	tx, err := m.beginTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -364,7 +426,7 @@ func (m *Manager) ClearCookie(w http.ResponseWriter) {
 
 // Cleanup removes expired sessions.
 func (m *Manager) Cleanup(ctx context.Context) (int64, error) {
-	result, err := m.db.Exec(ctx, `
+	result, err := m.execStmt(ctx, `
 		DELETE FROM core_sessions
 		WHERE expires_at < NOW() - INTERVAL '7 days'
 		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '1 day')

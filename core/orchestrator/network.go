@@ -15,6 +15,13 @@ type NetworkManager struct {
 	cli         *client.Client
 	networkName string
 	subnet      string
+
+	networkCreateFn     func(ctx context.Context, name string, options network.CreateOptions) (network.CreateResponse, error)
+	networkInspectFn    func(ctx context.Context, networkID string, options network.InspectOptions) (network.Inspect, error)
+	networkConnectFn    func(ctx context.Context, networkID, containerID string, config *network.EndpointSettings) error
+	networkDisconnectFn func(ctx context.Context, networkID, containerID string, force bool) error
+	networkRemoveFn     func(ctx context.Context, networkID string) error
+	networkListFn       func(ctx context.Context, options network.ListOptions) ([]network.Summary, error)
 }
 
 // NewNetworkManager creates a new network manager.
@@ -22,11 +29,20 @@ func NewNetworkManager(cli *client.Client, networkName, subnet string) *NetworkM
 	if networkName == "" {
 		networkName = DefaultNetworkName
 	}
-	return &NetworkManager{
+	n := &NetworkManager{
 		cli:         cli,
 		networkName: networkName,
 		subnet:      subnet,
 	}
+	if cli != nil {
+		n.networkCreateFn = cli.NetworkCreate
+		n.networkInspectFn = cli.NetworkInspect
+		n.networkConnectFn = cli.NetworkConnect
+		n.networkDisconnectFn = cli.NetworkDisconnect
+		n.networkRemoveFn = cli.NetworkRemove
+		n.networkListFn = cli.NetworkList
+	}
+	return n
 }
 
 // EnsureNetwork creates the aegion_modules network if it doesn't exist.
@@ -39,7 +55,7 @@ func (n *NetworkManager) EnsureNetwork(ctx context.Context) (string, error) {
 	if networkID != "" {
 		log.Debug().
 			Str("network", n.networkName).
-			Str("id", networkID[:12]).
+			Str("id", shortID(networkID)).
 			Msg("network already exists")
 		return networkID, nil
 	}
@@ -61,14 +77,21 @@ func (n *NetworkManager) EnsureNetwork(ctx context.Context) (string, error) {
 		}
 	}
 
-	resp, err := n.cli.NetworkCreate(ctx, n.networkName, options)
+	var resp network.CreateResponse
+	if n.networkCreateFn != nil {
+		resp, err = n.networkCreateFn(ctx, n.networkName, options)
+	} else if n.cli != nil {
+		resp, err = n.cli.NetworkCreate(ctx, n.networkName, options)
+	} else {
+		return "", fmt.Errorf("docker network client is nil")
+	}
 	if err != nil {
 		return "", fmt.Errorf("creating network: %w", err)
 	}
 
 	log.Info().
 		Str("network", n.networkName).
-		Str("id", resp.ID[:12]).
+		Str("id", shortID(resp.ID)).
 		Msg("network created")
 
 	return resp.ID, nil
@@ -77,7 +100,17 @@ func (n *NetworkManager) EnsureNetwork(ctx context.Context) (string, error) {
 // ConnectToNetwork adds a container to the network.
 func (n *NetworkManager) ConnectToNetwork(ctx context.Context, containerID string, aliases []string) error {
 	// Check if already connected
-	inspect, err := n.cli.NetworkInspect(ctx, n.networkName, network.InspectOptions{})
+	var (
+		inspect network.Inspect
+		err     error
+	)
+	if n.networkInspectFn != nil {
+		inspect, err = n.networkInspectFn(ctx, n.networkName, network.InspectOptions{})
+	} else if n.cli != nil {
+		inspect, err = n.cli.NetworkInspect(ctx, n.networkName, network.InspectOptions{})
+	} else {
+		return fmt.Errorf("docker network client is nil")
+	}
 	if err != nil {
 		return fmt.Errorf("inspecting network: %w", err)
 	}
@@ -85,7 +118,7 @@ func (n *NetworkManager) ConnectToNetwork(ctx context.Context, containerID strin
 	for id := range inspect.Containers {
 		if id == containerID {
 			log.Debug().
-				Str("container_id", containerID[:12]).
+				Str("container_id", shortID(containerID)).
 				Str("network", n.networkName).
 				Msg("container already connected to network")
 			return nil
@@ -97,12 +130,19 @@ func (n *NetworkManager) ConnectToNetwork(ctx context.Context, containerID strin
 		Aliases: aliases,
 	}
 
-	if err := n.cli.NetworkConnect(ctx, n.networkName, containerID, config); err != nil {
+	if n.networkConnectFn != nil {
+		err = n.networkConnectFn(ctx, n.networkName, containerID, config)
+	} else if n.cli != nil {
+		err = n.cli.NetworkConnect(ctx, n.networkName, containerID, config)
+	} else {
+		return fmt.Errorf("docker network client is nil")
+	}
+	if err != nil {
 		return fmt.Errorf("connecting to network: %w", err)
 	}
 
 	log.Info().
-		Str("container_id", containerID[:12]).
+		Str("container_id", shortID(containerID)).
 		Str("network", n.networkName).
 		Msg("container connected to network")
 
@@ -111,12 +151,20 @@ func (n *NetworkManager) ConnectToNetwork(ctx context.Context, containerID strin
 
 // DisconnectFromNetwork removes a container from the network.
 func (n *NetworkManager) DisconnectFromNetwork(ctx context.Context, containerID string) error {
-	if err := n.cli.NetworkDisconnect(ctx, n.networkName, containerID, false); err != nil {
+	var err error
+	if n.networkDisconnectFn != nil {
+		err = n.networkDisconnectFn(ctx, n.networkName, containerID, false)
+	} else if n.cli != nil {
+		err = n.cli.NetworkDisconnect(ctx, n.networkName, containerID, false)
+	} else {
+		return fmt.Errorf("docker network client is nil")
+	}
+	if err != nil {
 		return fmt.Errorf("disconnecting from network: %w", err)
 	}
 
 	log.Info().
-		Str("container_id", containerID[:12]).
+		Str("container_id", shortID(containerID)).
 		Str("network", n.networkName).
 		Msg("container disconnected from network")
 
@@ -125,7 +173,15 @@ func (n *NetworkManager) DisconnectFromNetwork(ctx context.Context, containerID 
 
 // RemoveNetwork removes the network (only if no containers are connected).
 func (n *NetworkManager) RemoveNetwork(ctx context.Context) error {
-	if err := n.cli.NetworkRemove(ctx, n.networkName); err != nil {
+	var err error
+	if n.networkRemoveFn != nil {
+		err = n.networkRemoveFn(ctx, n.networkName)
+	} else if n.cli != nil {
+		err = n.cli.NetworkRemove(ctx, n.networkName)
+	} else {
+		return fmt.Errorf("docker network client is nil")
+	}
+	if err != nil {
 		return fmt.Errorf("removing network: %w", err)
 	}
 
@@ -135,7 +191,17 @@ func (n *NetworkManager) RemoveNetwork(ctx context.Context) error {
 
 // GetNetworkInfo returns information about the network.
 func (n *NetworkManager) GetNetworkInfo(ctx context.Context) (*NetworkInfo, error) {
-	inspect, err := n.cli.NetworkInspect(ctx, n.networkName, network.InspectOptions{})
+	var (
+		inspect network.Inspect
+		err     error
+	)
+	if n.networkInspectFn != nil {
+		inspect, err = n.networkInspectFn(ctx, n.networkName, network.InspectOptions{})
+	} else if n.cli != nil {
+		inspect, err = n.cli.NetworkInspect(ctx, n.networkName, network.InspectOptions{})
+	} else {
+		return nil, fmt.Errorf("docker network client is nil")
+	}
 	if err != nil {
 		return nil, fmt.Errorf("inspecting network: %w", err)
 	}
@@ -193,9 +259,21 @@ func (n *NetworkManager) findNetwork(ctx context.Context) (string, error) {
 	filterArgs := filters.NewArgs()
 	filterArgs.Add("name", n.networkName)
 
-	networks, err := n.cli.NetworkList(ctx, network.ListOptions{
-		Filters: filterArgs,
-	})
+	var (
+		networks []network.Summary
+		err      error
+	)
+	if n.networkListFn != nil {
+		networks, err = n.networkListFn(ctx, network.ListOptions{
+			Filters: filterArgs,
+		})
+	} else if n.cli != nil {
+		networks, err = n.cli.NetworkList(ctx, network.ListOptions{
+			Filters: filterArgs,
+		})
+	} else {
+		return "", fmt.Errorf("docker network client is nil")
+	}
 	if err != nil {
 		return "", fmt.Errorf("listing networks: %w", err)
 	}
@@ -220,7 +298,17 @@ func (n *NetworkManager) NetworkExists(ctx context.Context) (bool, error) {
 
 // GetContainerIP returns the IP address of a container on the network.
 func (n *NetworkManager) GetContainerIP(ctx context.Context, containerID string) (string, error) {
-	inspect, err := n.cli.NetworkInspect(ctx, n.networkName, network.InspectOptions{})
+	var (
+		inspect network.Inspect
+		err     error
+	)
+	if n.networkInspectFn != nil {
+		inspect, err = n.networkInspectFn(ctx, n.networkName, network.InspectOptions{})
+	} else if n.cli != nil {
+		inspect, err = n.cli.NetworkInspect(ctx, n.networkName, network.InspectOptions{})
+	} else {
+		return "", fmt.Errorf("docker network client is nil")
+	}
 	if err != nil {
 		return "", fmt.Errorf("inspecting network: %w", err)
 	}

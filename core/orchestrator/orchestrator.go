@@ -57,6 +57,18 @@ type Orchestrator struct {
 	modules map[string]*moduleInstance
 	mu      sync.RWMutex
 	closed  bool
+
+	// Test seams for deterministic unit tests without Docker dependencies.
+	ensureNetworkFn    func(context.Context) (string, error)
+	dockerCloseFn      func() error
+	loadModuleCfgFn    func(string) (*ModuleConfig, error)
+	generateTokenFn    func(string) (string, error)
+	createContainerFn  func(context.Context, *ModuleConfig, string) (string, error)
+	startContainerFn   func(context.Context, string) error
+	stopContainerFn    func(context.Context, string, time.Duration) error
+	removeContainerFn  func(context.Context, string, bool) error
+	getContainerInfoFn func(context.Context, string) (*ContainerInfo, error)
+	containerLogsFn    func(context.Context, string, int, time.Time) (string, error)
 }
 
 // moduleInstance tracks a running module.
@@ -126,7 +138,7 @@ func New(cfg Config) (*Orchestrator, error) {
 // Start initializes the orchestrator and ensures network exists.
 func (o *Orchestrator) Start(ctx context.Context) error {
 	// Ensure network exists
-	_, err := o.network.EnsureNetwork(ctx)
+	_, err := o.ensureNetwork(ctx)
 	if err != nil {
 		return fmt.Errorf("ensuring network: %w", err)
 	}
@@ -150,7 +162,7 @@ func (o *Orchestrator) Stop(ctx context.Context) error {
 		}
 	}
 
-	if err := o.docker.Close(); err != nil {
+	if err := o.closeDocker(); err != nil {
 		log.Error().Err(err).Msg("failed to close docker client")
 		lastErr = err
 	}
@@ -185,33 +197,30 @@ func (o *Orchestrator) StartModule(ctx context.Context, moduleID string) error {
 	log.Info().Str("module_id", moduleID).Msg("starting module")
 
 	// Load module config
-	cfg, err := o.configLoader.LoadModuleConfig(moduleID)
+	cfg, err := o.loadModuleConfig(moduleID)
 	if err != nil {
 		o.setModuleError(moduleID, fmt.Errorf("loading config: %w", err))
 		return fmt.Errorf("loading module config: %w", err)
 	}
 
 	// Generate auth token
-	var authToken string
-	if o.tokenGenerator != nil {
-		authToken, err = o.tokenGenerator.Generate(moduleID)
-		if err != nil {
-			o.setModuleError(moduleID, fmt.Errorf("generating token: %w", err))
-			return fmt.Errorf("generating auth token: %w", err)
-		}
+	authToken, err := o.generateToken(moduleID)
+	if err != nil {
+		o.setModuleError(moduleID, fmt.Errorf("generating token: %w", err))
+		return fmt.Errorf("generating auth token: %w", err)
 	}
 
 	// Create container
-	containerID, err := o.docker.CreateContainer(ctx, cfg, authToken)
+	containerID, err := o.createContainer(ctx, cfg, authToken)
 	if err != nil {
 		o.setModuleError(moduleID, fmt.Errorf("creating container: %w", err))
 		return fmt.Errorf("creating container: %w", err)
 	}
 
 	// Start container
-	if err := o.docker.StartContainer(ctx, containerID); err != nil {
+	if err := o.startContainer(ctx, containerID); err != nil {
 		// Clean up container on failure
-		_ = o.docker.RemoveContainer(ctx, containerID, true)
+		_ = o.removeContainer(ctx, containerID, true)
 		o.setModuleError(moduleID, fmt.Errorf("starting container: %w", err))
 		return fmt.Errorf("starting container: %w", err)
 	}
@@ -254,13 +263,13 @@ func (o *Orchestrator) StopModule(ctx context.Context, moduleID string) error {
 	log.Info().Str("module_id", moduleID).Msg("stopping module")
 
 	// Stop container
-	if err := o.docker.StopContainer(ctx, inst.containerID, DefaultStopTimeout); err != nil {
+	if err := o.stopContainer(ctx, inst.containerID, DefaultStopTimeout); err != nil {
 		o.setModuleError(moduleID, fmt.Errorf("stopping container: %w", err))
 		return fmt.Errorf("stopping container: %w", err)
 	}
 
 	// Remove container
-	if err := o.docker.RemoveContainer(ctx, inst.containerID, false); err != nil {
+	if err := o.removeContainer(ctx, inst.containerID, false); err != nil {
 		log.Warn().Err(err).Str("module_id", moduleID).Msg("failed to remove container")
 	}
 
@@ -326,7 +335,7 @@ func (o *Orchestrator) GetModuleStatus(ctx context.Context, moduleID string) (*M
 
 	// Get container details if running
 	if inst.containerID != "" && (inst.state == StateRunning || inst.state == StateStarting) {
-		info, err := o.docker.GetContainerInfo(ctx, inst.containerID)
+		info, err := o.getContainerInfo(ctx, inst.containerID)
 		if err != nil {
 			log.Warn().Err(err).Str("module_id", moduleID).Msg("failed to get container info")
 		} else {
@@ -385,7 +394,7 @@ func (o *Orchestrator) GetModuleLogs(ctx context.Context, moduleID string, tail 
 		return "", ErrModuleNotFound
 	}
 
-	return o.docker.ContainerLogs(ctx, inst.containerID, tail, time.Time{})
+	return o.containerLogs(ctx, inst.containerID, tail, time.Time{})
 }
 
 // setModuleError updates the module state to failed with an error.
@@ -416,4 +425,104 @@ func (o *Orchestrator) GetNetwork() *NetworkManager {
 // GetDocker returns the Docker client.
 func (o *Orchestrator) GetDocker() *DockerClient {
 	return o.docker
+}
+
+func (o *Orchestrator) ensureNetwork(ctx context.Context) (string, error) {
+	if o.ensureNetworkFn != nil {
+		return o.ensureNetworkFn(ctx)
+	}
+	if o.network == nil {
+		return "", fmt.Errorf("network manager is nil")
+	}
+	return o.network.EnsureNetwork(ctx)
+}
+
+func (o *Orchestrator) closeDocker() error {
+	if o.dockerCloseFn != nil {
+		return o.dockerCloseFn()
+	}
+	if o.docker == nil {
+		return fmt.Errorf("docker client is nil")
+	}
+	return o.docker.Close()
+}
+
+func (o *Orchestrator) loadModuleConfig(moduleID string) (*ModuleConfig, error) {
+	if o.loadModuleCfgFn != nil {
+		return o.loadModuleCfgFn(moduleID)
+	}
+	if o.configLoader == nil {
+		return nil, fmt.Errorf("config loader is nil")
+	}
+	return o.configLoader.LoadModuleConfig(moduleID)
+}
+
+func (o *Orchestrator) generateToken(moduleID string) (string, error) {
+	if o.generateTokenFn != nil {
+		return o.generateTokenFn(moduleID)
+	}
+	if o.tokenGenerator == nil {
+		return "", nil
+	}
+	return o.tokenGenerator.Generate(moduleID)
+}
+
+func (o *Orchestrator) createContainer(ctx context.Context, cfg *ModuleConfig, authToken string) (string, error) {
+	if o.createContainerFn != nil {
+		return o.createContainerFn(ctx, cfg, authToken)
+	}
+	if o.docker == nil {
+		return "", fmt.Errorf("docker client is nil")
+	}
+	return o.docker.CreateContainer(ctx, cfg, authToken)
+}
+
+func (o *Orchestrator) startContainer(ctx context.Context, containerID string) error {
+	if o.startContainerFn != nil {
+		return o.startContainerFn(ctx, containerID)
+	}
+	if o.docker == nil {
+		return fmt.Errorf("docker client is nil")
+	}
+	return o.docker.StartContainer(ctx, containerID)
+}
+
+func (o *Orchestrator) stopContainer(ctx context.Context, containerID string, timeout time.Duration) error {
+	if o.stopContainerFn != nil {
+		return o.stopContainerFn(ctx, containerID, timeout)
+	}
+	if o.docker == nil {
+		return fmt.Errorf("docker client is nil")
+	}
+	return o.docker.StopContainer(ctx, containerID, timeout)
+}
+
+func (o *Orchestrator) removeContainer(ctx context.Context, containerID string, force bool) error {
+	if o.removeContainerFn != nil {
+		return o.removeContainerFn(ctx, containerID, force)
+	}
+	if o.docker == nil {
+		return fmt.Errorf("docker client is nil")
+	}
+	return o.docker.RemoveContainer(ctx, containerID, force)
+}
+
+func (o *Orchestrator) getContainerInfo(ctx context.Context, containerID string) (*ContainerInfo, error) {
+	if o.getContainerInfoFn != nil {
+		return o.getContainerInfoFn(ctx, containerID)
+	}
+	if o.docker == nil {
+		return nil, fmt.Errorf("docker client is nil")
+	}
+	return o.docker.GetContainerInfo(ctx, containerID)
+}
+
+func (o *Orchestrator) containerLogs(ctx context.Context, containerID string, tail int, since time.Time) (string, error) {
+	if o.containerLogsFn != nil {
+		return o.containerLogsFn(ctx, containerID, tail, since)
+	}
+	if o.docker == nil {
+		return "", fmt.Errorf("docker client is nil")
+	}
+	return o.docker.ContainerLogs(ctx, containerID, tail, since)
 }

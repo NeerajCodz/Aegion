@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -24,12 +25,27 @@ type FlowStore interface {
 
 // PostgresFlowStore implements FlowStore using PostgreSQL
 type PostgresFlowStore struct {
-	db *pgxpool.Pool
+	db         *pgxpool.Pool
+	execStmt   func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error)
+	queryRows  func(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error)
+	queryRowFn func(ctx context.Context, query string, args ...interface{}) pgx.Row
+	now        func() time.Time
 }
 
 // NewPostgresFlowStore creates a new PostgreSQL-backed flow store
 func NewPostgresFlowStore(db *pgxpool.Pool) *PostgresFlowStore {
-	return &PostgresFlowStore{db: db}
+	store := &PostgresFlowStore{db: db}
+	store.execStmt = func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+		return store.db.Exec(ctx, query, args...)
+	}
+	store.queryRows = func(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
+		return store.db.Query(ctx, query, args...)
+	}
+	store.queryRowFn = func(ctx context.Context, query string, args ...interface{}) pgx.Row {
+		return store.db.QueryRow(ctx, query, args...)
+	}
+	store.now = func() time.Time { return time.Now().UTC() }
+	return store
 }
 
 // Create inserts a new flow into the database
@@ -44,7 +60,7 @@ func (s *PostgresFlowStore) Create(ctx context.Context, flow *Flow) error {
 		return err
 	}
 
-	_, err = s.db.Exec(ctx, `
+	_, err = s.execStmt(ctx, `
 		INSERT INTO core_flows (
 			id, type, state, identity_id, session_id, request_url, return_to,
 			ui, context, issued_at, expires_at, csrf_token, created_at, updated_at
@@ -63,7 +79,7 @@ func (s *PostgresFlowStore) Get(ctx context.Context, id uuid.UUID) (*Flow, error
 	flow := &Flow{}
 	var ui, flowCtx []byte
 
-	err := s.db.QueryRow(ctx, `
+	err := s.queryRowFn(ctx, `
 		SELECT id, type, state, identity_id, session_id, request_url, return_to,
 			ui, context, issued_at, expires_at, csrf_token, created_at, updated_at
 		FROM core_flows
@@ -96,7 +112,7 @@ func (s *PostgresFlowStore) GetByCSRF(ctx context.Context, csrfToken string) (*F
 	flow := &Flow{}
 	var ui, flowCtx []byte
 
-	err := s.db.QueryRow(ctx, `
+	err := s.queryRowFn(ctx, `
 		SELECT id, type, state, identity_id, session_id, request_url, return_to,
 			ui, context, issued_at, expires_at, csrf_token, created_at, updated_at
 		FROM core_flows
@@ -136,9 +152,9 @@ func (s *PostgresFlowStore) Update(ctx context.Context, flow *Flow) error {
 		return err
 	}
 
-	flow.UpdatedAt = time.Now().UTC()
+	flow.UpdatedAt = s.now()
 
-	result, err := s.db.Exec(ctx, `
+	result, err := s.execStmt(ctx, `
 		UPDATE core_flows
 		SET type = $2, state = $3, identity_id = $4, session_id = $5,
 			request_url = $6, return_to = $7, ui = $8, context = $9,
@@ -162,7 +178,7 @@ func (s *PostgresFlowStore) Update(ctx context.Context, flow *Flow) error {
 
 // Delete removes a flow from the database
 func (s *PostgresFlowStore) Delete(ctx context.Context, id uuid.UUID) error {
-	result, err := s.db.Exec(ctx, `DELETE FROM core_flows WHERE id = $1`, id)
+	result, err := s.execStmt(ctx, `DELETE FROM core_flows WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
@@ -176,7 +192,7 @@ func (s *PostgresFlowStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 // DeleteExpired removes all expired flows from the database
 func (s *PostgresFlowStore) DeleteExpired(ctx context.Context) (int64, error) {
-	result, err := s.db.Exec(ctx, `
+	result, err := s.execStmt(ctx, `
 		DELETE FROM core_flows
 		WHERE expires_at < NOW() OR state IN ('completed', 'failed', 'expired')
 	`)
@@ -189,7 +205,7 @@ func (s *PostgresFlowStore) DeleteExpired(ctx context.Context) (int64, error) {
 
 // ListByIdentity retrieves all flows for a given identity and type
 func (s *PostgresFlowStore) ListByIdentity(ctx context.Context, identityID uuid.UUID, flowType FlowType) ([]*Flow, error) {
-	rows, err := s.db.Query(ctx, `
+	rows, err := s.queryRows(ctx, `
 		SELECT id, type, state, identity_id, session_id, request_url, return_to,
 			ui, context, issued_at, expires_at, csrf_token, created_at, updated_at
 		FROM core_flows

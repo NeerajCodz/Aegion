@@ -98,6 +98,11 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 		return
 	}
 
+	if !store.ValidateAPIKeyToken(apiKey, key.KeyHash) {
+		writeError(w, http.StatusUnauthorized, "invalid_api_key", "Invalid or expired API key")
+		return
+	}
+
 	// Check expiration
 	if key.ExpiresAt != nil && time.Now().UTC().After(*key.ExpiresAt) {
 		writeError(w, http.StatusUnauthorized, "api_key_expired", "API key has expired")

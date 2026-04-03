@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/smtp"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -68,11 +70,25 @@ type SMTPConfig struct {
 
 // Courier handles message delivery.
 type Courier struct {
-	db         *pgxpool.Pool
-	smtp       SMTPConfig
-	templates  map[string]*template.Template
-	maxRetries int
+	db          *pgxpool.Pool
+	smtp        SMTPConfig
+	templates   map[string]*template.Template
+	maxRetries  int
+	execStmt    func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error)
+	queryRows   func(ctx context.Context, query string, args ...interface{}) (courierRows, error)
+	sendEmailFn func(to, subject, body string) error
+	sendSMSFn   func(to, body string) error
+	now         func() time.Time
 }
+
+type courierRows interface {
+	Close()
+	Err() error
+	Next() bool
+	Scan(dest ...interface{}) error
+}
+
+var errCourierDBUnavailable = errors.New("courier database is not configured")
 
 // Config holds courier configuration.
 type Config struct {
@@ -87,12 +103,28 @@ func New(cfg Config) *Courier {
 		cfg.MaxRetries = 3
 	}
 
-	return &Courier{
+	c := &Courier{
 		db:         cfg.DB,
 		smtp:       cfg.SMTP,
 		templates:  make(map[string]*template.Template),
 		maxRetries: cfg.MaxRetries,
 	}
+	c.execStmt = func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+		if c.db == nil {
+			return pgconn.CommandTag{}, errCourierDBUnavailable
+		}
+		return c.db.Exec(ctx, query, args...)
+	}
+	c.queryRows = func(ctx context.Context, query string, args ...interface{}) (courierRows, error) {
+		if c.db == nil {
+			return nil, errCourierDBUnavailable
+		}
+		return c.db.Query(ctx, query, args...)
+	}
+	c.sendEmailFn = c.sendEmail
+	c.sendSMSFn = c.sendSMS
+	c.now = func() time.Time { return time.Now().UTC() }
+	return c
 }
 
 // QueueEmail queues an email for delivery.
@@ -104,8 +136,8 @@ func (c *Courier) QueueEmail(ctx context.Context, recipient, subject, body strin
 		Recipient: recipient,
 		Subject:   subject,
 		Body:      body,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		CreatedAt: c.now(),
+		UpdatedAt: c.now(),
 	}
 
 	for _, opt := range opts {
@@ -114,7 +146,7 @@ func (c *Courier) QueueEmail(ctx context.Context, recipient, subject, body strin
 
 	templateDataJSON, _ := json.Marshal(msg.TemplateData)
 
-	_, err := c.db.Exec(ctx, `
+	_, err := c.execStmt(ctx, `
 		INSERT INTO core_courier_messages (
 			id, type, status, recipient, subject, body,
 			template_id, template_data, idempotency_key,
@@ -179,7 +211,7 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 	}
 
 	// Get pending messages
-	rows, err := c.db.Query(ctx, `
+	rows, err := c.queryRows(ctx, `
 		UPDATE core_courier_messages
 		SET status = 'processing', updated_at = NOW()
 		WHERE id IN (
@@ -234,9 +266,9 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 		var sendErr error
 		switch msgType {
 		case MessageTypeEmail:
-			sendErr = c.sendEmail(recipient, subject, body)
+			sendErr = c.sendEmailFn(recipient, subject, body)
 		case MessageTypeSMS:
-			sendErr = c.sendSMS(recipient, body)
+			sendErr = c.sendSMSFn(recipient, body)
 		}
 
 		if sendErr != nil {
@@ -303,7 +335,7 @@ func (c *Courier) renderTemplate(templateID string, data map[string]interface{})
 
 // markSent marks a message as sent.
 func (c *Courier) markSent(ctx context.Context, id uuid.UUID) error {
-	_, err := c.db.Exec(ctx, `
+	_, err := c.execStmt(ctx, `
 		UPDATE core_courier_messages
 		SET status = 'sent', sent_at = NOW(), updated_at = NOW()
 		WHERE id = $1
@@ -316,14 +348,14 @@ func (c *Courier) markFailed(ctx context.Context, id uuid.UUID, sendCount int, e
 	sendCount++
 
 	if sendCount >= c.maxRetries {
-		_, dbErr := c.db.Exec(ctx, `
+		_, dbErr := c.execStmt(ctx, `
 			UPDATE core_courier_messages
 			SET status = 'abandoned', send_count = $2, last_error = $3, updated_at = NOW()
 			WHERE id = $1
 		`, id, sendCount, err.Error())
 		return dbErr
 	} else {
-		_, dbErr := c.db.Exec(ctx, `
+		_, dbErr := c.execStmt(ctx, `
 			UPDATE core_courier_messages
 			SET status = 'queued', send_count = $2, last_error = $3, updated_at = NOW()
 			WHERE id = $1
@@ -334,7 +366,7 @@ func (c *Courier) markFailed(ctx context.Context, id uuid.UUID, sendCount int, e
 
 // Cancel cancels a pending message.
 func (c *Courier) Cancel(ctx context.Context, id uuid.UUID) error {
-	result, err := c.db.Exec(ctx, `
+	result, err := c.execStmt(ctx, `
 		UPDATE core_courier_messages
 		SET status = 'cancelled', updated_at = NOW()
 		WHERE id = $1 AND status = 'queued'
@@ -352,9 +384,9 @@ func (c *Courier) Cancel(ctx context.Context, id uuid.UUID) error {
 
 // Cleanup removes old sent/abandoned messages.
 func (c *Courier) Cleanup(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().Add(-olderThan)
+	cutoff := c.now().Add(-olderThan)
 
-	result, err := c.db.Exec(ctx, `
+	result, err := c.execStmt(ctx, `
 		DELETE FROM core_courier_messages
 		WHERE status IN ('sent', 'abandoned', 'cancelled')
 		  AND updated_at < $1

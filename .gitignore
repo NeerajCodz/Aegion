@@ -78,3 +78,13 @@ logs/
 
 # Session/cache files
 *.pid
+
+# Local test/coverage artifacts
+coverage-focus
+coverage-store
+cover_router
+handler
+registry
+
+# Exclude accidental vendored Go package under SPA dependencies
+modules/admin/spa/node_modules/flatted/golang/
