@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,13 +44,24 @@ type ContinuityStore interface {
 	DeleteExpired(ctx context.Context) (int64, error)
 }
 
+// DB interface for testability (seam injection)
+type DB interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // PostgresContinuityStore implements ContinuityStore using PostgreSQL
 type PostgresContinuityStore struct {
-	db *pgxpool.Pool
+	db DB
 }
 
 // NewPostgresContinuityStore creates a new PostgreSQL-backed continuity store
 func NewPostgresContinuityStore(db *pgxpool.Pool) *PostgresContinuityStore {
+	return &PostgresContinuityStore{db: db}
+}
+
+// NewPostgresContinuityStoreWithDB creates a new store with a custom DB interface (for testing)
+func NewPostgresContinuityStoreWithDB(db DB) *PostgresContinuityStore {
 	return &PostgresContinuityStore{db: db}
 }
 
