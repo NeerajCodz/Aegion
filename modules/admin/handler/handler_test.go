@@ -1438,6 +1438,51 @@ func TestSessionRevocationHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
+	t.Run("list identity sessions success", func(t *testing.T) {
+		identityID := uuid.New()
+		sessionID := uuid.New()
+		now := time.Now().UTC()
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{{sessionID.String(), "aal1", true, now.Add(time.Hour), now, "127.0.0.1", "Mozilla"}}}, nil
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/identities/"+identityID.String()+"/sessions", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", identityID.String())
+		h.ListIdentitySessions(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), sessionID.String())
+	})
+
+	t.Run("list identity sessions unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/identities/"+uuid.NewString()+"/sessions", nil)
+		h.ListIdentitySessions(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("list identity sessions db error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{err: errors.New("db error")}
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/identities/"+uuid.NewString()+"/sessions", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.ListIdentitySessions(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+
 	t.Run("revoke all sessions success", func(t *testing.T) {
 		h := New(&fakeService{store: &fakeStore{}})
 		h.db = &fakeDB{
@@ -1452,6 +1497,39 @@ func TestSessionRevocationHandlers(t *testing.T) {
 		h.RevokeAllIdentitySessions(rec, req)
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "\"sessions_revoked\":3")
+	})
+
+	t.Run("revoke all sessions invalid id", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/identities/invalid/sessions", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", "invalid-uuid")
+		h.RevokeAllIdentitySessions(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("revoke all sessions unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/identities/"+uuid.NewString()+"/sessions", nil)
+		h.RevokeAllIdentitySessions(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("revoke all sessions db error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("db error")
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/identities/"+uuid.NewString()+"/sessions", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.RevokeAllIdentitySessions(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
 
 	t.Run("revoke session not found", func(t *testing.T) {
@@ -1485,6 +1563,39 @@ func TestSessionRevocationHandlers(t *testing.T) {
 		req = withRouteParam(req, "session_id", uuid.NewString())
 		h.RevokeSession(rec, req)
 		assert.Equal(t, http.StatusNoContent, rec.Code)
+	})
+
+	t.Run("revoke session invalid id", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/sessions/invalid", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "session_id", "invalid-uuid")
+		h.RevokeSession(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("revoke session unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/sessions/"+uuid.NewString(), nil)
+		h.RevokeSession(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("revoke session db error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("db error")
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/sessions/"+uuid.NewString(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "session_id", uuid.NewString())
+		h.RevokeSession(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
 }
 
