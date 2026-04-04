@@ -55,6 +55,10 @@ var (
 	ErrRngFailed        = errors.New("random number generation failed")
 )
 
+var generateKeyFn = func(key []byte) int {
+	return int(C.crypto_generate_key((*C.uint8_t)(unsafe.Pointer(&key[0]))))
+}
+
 // HashPassword hashes a password using Argon2id with secure defaults.
 // Returns the PHC-encoded hash string.
 func HashPassword(password string) (string, error) {
@@ -157,7 +161,7 @@ func DecryptField(key []byte, ciphertext string, aad []byte) ([]byte, error) {
 // GenerateKey generates a cryptographically secure random 32-byte key.
 func GenerateKey() ([]byte, error) {
 	key := make([]byte, KeySize)
-	result := C.crypto_generate_key((*C.uint8_t)(unsafe.Pointer(&key[0])))
+	result := generateKeyFn(key)
 	if result != 0 {
 		return nil, ErrRngFailed
 	}

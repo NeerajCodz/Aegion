@@ -26,6 +26,13 @@ const (
 	defaultRateLimitBurst = 20
 )
 
+var readRandom = rand.Read
+
+var newCleanupTicker = func() (<-chan time.Time, func()) {
+	ticker := time.NewTicker(5 * time.Minute)
+	return ticker.C, ticker.Stop
+}
+
 type contextKey string
 
 const contextKeyRequestID contextKey = "aegion.admin.request_id"
@@ -290,7 +297,7 @@ func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) (string, error) {
 
 func generateCSRFToken() (string, error) {
 	token := make([]byte, 32)
-	if _, err := rand.Read(token); err != nil {
+	if _, err := readRandom(token); err != nil {
 		return "", err
 	}
 
@@ -385,10 +392,10 @@ func (r *rateLimiter) allow(key string) bool {
 }
 
 func (r *rateLimiter) cleanupLoop() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
+	tickC, stop := newCleanupTicker()
+	defer stop()
 
-	for range ticker.C {
+	for range tickC {
 		now := time.Now()
 		r.mu.Lock()
 		for key, bucket := range r.buckets {
