@@ -1036,3 +1036,339 @@ func TestHelpers(t *testing.T) {
 	assert.Equal(t, "10", itoa(10))
 	assert.Equal(t, "12345", itoa(12345))
 }
+
+func TestGetOperatorByIdentityIDErrors(t *testing.T) {
+	t.Run("database error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{err: errors.New("connection lost")}
+				},
+			},
+		}
+		_, err := s.GetOperatorByIdentityID(context.Background(), uuid.New())
+		require.EqualError(t, err, "connection lost")
+	})
+
+	t.Run("invalid permissions json fallback", func(t *testing.T) {
+		id := uuid.New()
+		identityID := uuid.New()
+		now := time.Now()
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{
+						vals: []any{id, identityID, "admin", []byte("{invalid"), now, now},
+					}
+				},
+			},
+		}
+		op, err := s.GetOperatorByIdentityID(context.Background(), identityID)
+		require.NoError(t, err)
+		require.NotNil(t, op)
+		assert.Equal(t, id, op.ID)
+		assert.NotNil(t, op.Permissions)
+		assert.Empty(t, op.Permissions)
+	})
+}
+
+func TestCreateRoleErrors(t *testing.T) {
+	t.Run("database error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.CommandTag{}, errors.New("database offline")
+				},
+			},
+		}
+		role := &Role{
+			ID:          uuid.New(),
+			Name:        "test",
+			Description: "Test role",
+			Permissions: []string{"perm1"},
+			IsSystem:    false,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		err := s.CreateRole(context.Background(), role)
+		require.EqualError(t, err, "database offline")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
+			},
+		}
+		role := &Role{
+			ID:          uuid.New(),
+			Name:        "test",
+			Permissions: []string{"perm1"},
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		err := s.CreateRole(context.Background(), role)
+		require.NoError(t, err)
+	})
+}
+
+func TestGetRoleByNameErrors(t *testing.T) {
+	t.Run("database error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{err: errors.New("db timeout")}
+				},
+			},
+		}
+		_, err := s.GetRoleByName(context.Background(), "admin")
+		require.EqualError(t, err, "db timeout")
+	})
+
+	t.Run("invalid permissions json fallback", func(t *testing.T) {
+		id := uuid.New()
+		now := time.Now()
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{
+						vals: []any{id, "admin", "Admin role", []byte("corrupted"), false, now, now},
+					}
+				},
+			},
+		}
+		role, err := s.GetRoleByName(context.Background(), "admin")
+		require.NoError(t, err)
+		require.NotNil(t, role)
+		assert.Equal(t, "admin", role.Name)
+		assert.Empty(t, role.Permissions)
+	})
+}
+
+func TestDeleteRoleErrors(t *testing.T) {
+	t.Run("database error on initial query", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{err: errors.New("db connection failed")}
+				},
+			},
+		}
+		err := s.DeleteRole(context.Background(), uuid.New())
+		require.EqualError(t, err, "db connection failed")
+	})
+
+	t.Run("role not found on initial query", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{err: pgx.ErrNoRows}
+				},
+			},
+		}
+		err := s.DeleteRole(context.Background(), uuid.New())
+		require.ErrorIs(t, err, ErrRoleNotFound)
+	})
+
+	t.Run("system role cannot be deleted", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{vals: []any{true}} // is_system = true
+				},
+			},
+		}
+		err := s.DeleteRole(context.Background(), uuid.New())
+		require.ErrorIs(t, err, ErrSystemRole)
+	})
+
+	t.Run("exec error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{vals: []any{false}} // is_system = false
+				},
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.CommandTag{}, errors.New("exec failed")
+				},
+			},
+		}
+		err := s.DeleteRole(context.Background(), uuid.New())
+		require.EqualError(t, err, "exec failed")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{vals: []any{false}} // is_system = false
+				},
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("DELETE 1"), nil
+				},
+			},
+		}
+		err := s.DeleteRole(context.Background(), uuid.New())
+		require.NoError(t, err)
+	})
+}
+
+func TestGetAPIKeyErrors(t *testing.T) {
+	t.Run("database error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{err: errors.New("query failed")}
+				},
+			},
+		}
+		_, err := s.GetAPIKey(context.Background(), uuid.New())
+		require.EqualError(t, err, "query failed")
+	})
+
+	t.Run("invalid permissions json fallback", func(t *testing.T) {
+		id := uuid.New()
+		opID := uuid.New()
+		now := time.Now()
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					// GetAPIKey scans: id, operator_id, name, key_hash, key_prefix, permissions, last_used_at, expires_at, created_at, updated_at
+					return fakeRow{
+						vals: []any{id, opID, "test", "hash123", "prefix_", []byte("{malformed"), &now, &now, now, now},
+					}
+				},
+			},
+		}
+		key, err := s.GetAPIKey(context.Background(), id)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+		assert.Equal(t, "test", key.Name)
+		assert.Empty(t, key.Permissions)
+	})
+}
+
+func TestGetAPIKeyByPrefixErrors(t *testing.T) {
+	t.Run("database error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{err: errors.New("connection timeout")}
+				},
+			},
+		}
+		_, err := s.GetAPIKeyByPrefix(context.Background(), "prefix_")
+		require.EqualError(t, err, "connection timeout")
+	})
+
+	t.Run("invalid permissions json fallback", func(t *testing.T) {
+		id := uuid.New()
+		opID := uuid.New()
+		now := time.Now()
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					// Same 10 fields as GetAPIKey
+					return fakeRow{
+						vals: []any{id, opID, "test", "hash123", "prefix_", []byte("not-json"), &now, &now, now, now},
+					}
+				},
+			},
+		}
+		key, err := s.GetAPIKeyByPrefix(context.Background(), "prefix_")
+		require.NoError(t, err)
+		require.NotNil(t, key)
+		assert.Empty(t, key.Permissions)
+	})
+}
+
+func TestDeleteAPIKeyErrors(t *testing.T) {
+	t.Run("database error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.CommandTag{}, errors.New("delete failed")
+				},
+			},
+		}
+		err := s.DeleteAPIKey(context.Background(), uuid.New())
+		require.EqualError(t, err, "delete failed")
+	})
+
+	t.Run("api key not found", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("DELETE 0"), nil
+				},
+			},
+		}
+		err := s.DeleteAPIKey(context.Background(), uuid.New())
+		require.ErrorIs(t, err, ErrAPIKeyNotFound)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("DELETE 1"), nil
+				},
+			},
+		}
+		err := s.DeleteAPIKey(context.Background(), uuid.New())
+		require.NoError(t, err)
+	})
+}
+
+func TestListAPIKeysByOperatorErrors(t *testing.T) {
+	t.Run("query error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+					return nil, errors.New("query failed")
+				},
+			},
+		}
+		_, err := s.ListAPIKeysByOperator(context.Background(), uuid.New())
+		require.EqualError(t, err, "query failed")
+	})
+
+	t.Run("rows error during iteration", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+					return &fakeRows{
+						data: [][]any{},
+						err:  errors.New("iteration failed"),
+					}, nil
+				},
+			},
+		}
+		_, err := s.ListAPIKeysByOperator(context.Background(), uuid.New())
+		require.EqualError(t, err, "iteration failed")
+	})
+
+	t.Run("invalid permissions json fallback", func(t *testing.T) {
+		id := uuid.New()
+		opID := uuid.New()
+		now := time.Now()
+		s := &Store{
+			db: &fakeDB{
+				queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+					return &fakeRows{
+						data: [][]any{
+							// ListAPIKeysByOperator scans: id, operator_id, name, key_hash, key_prefix, permissions, last_used_at, expires_at, created_at, updated_at
+							{id, opID, "test", "hash123", "prefix_", []byte("bad-json"), &now, &now, now, now},
+						},
+					}, nil
+				},
+			},
+		}
+		keys, err := s.ListAPIKeysByOperator(context.Background(), opID)
+		require.NoError(t, err)
+		require.Len(t, keys, 1)
+		assert.Empty(t, keys[0].Permissions)
+	})
+}
