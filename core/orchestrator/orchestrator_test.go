@@ -1069,3 +1069,153 @@ modules: {}
 		}
 	})
 }
+
+func TestGetInternalSecret(t *testing.T) {
+	t.Run("with loaded config and secrets", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+
+		configContent := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: aegion_net
+    subnet: 172.28.0.0/16
+secrets:
+  internal:
+    - my-secret-token-123
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		secret, err := loader.GetInternalSecret()
+		if err != nil {
+			t.Fatalf("GetInternalSecret failed: %v", err)
+		}
+		if secret != "my-secret-token-123" {
+			t.Errorf("expected secret 'my-secret-token-123', got %s", secret)
+		}
+	})
+
+	t.Run("with no secrets configured", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+
+		configContent := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: aegion_net
+    subnet: 172.28.0.0/16
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		_, err := loader.GetInternalSecret()
+		if err == nil {
+			t.Fatal("expected error for missing secrets")
+		}
+		if !strings.Contains(err.Error(), "no internal secret configured") {
+			t.Errorf("expected 'no internal secret configured' error, got: %v", err)
+		}
+	})
+
+	t.Run("triggers Load when config is nil", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+
+		configContent := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: aegion_net
+    subnet: 172.28.0.0/16
+secrets:
+  internal:
+    - auto-loaded-secret
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		// Don't call Load() - let GetInternalSecret trigger it
+		secret, err := loader.GetInternalSecret()
+		if err != nil {
+			t.Fatalf("GetInternalSecret failed: %v", err)
+		}
+		if secret != "auto-loaded-secret" {
+			t.Errorf("expected secret 'auto-loaded-secret', got %s", secret)
+		}
+	})
+}
+
+func TestGetNetworkConfig(t *testing.T) {
+	t.Run("with loaded config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+
+		configContent := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: my-network
+    subnet: 10.0.0.0/24
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		netCfg, err := loader.GetNetworkConfig()
+		if err != nil {
+			t.Fatalf("GetNetworkConfig failed: %v", err)
+		}
+		if netCfg.Name != "my-network" {
+			t.Errorf("expected network name 'my-network', got %s", netCfg.Name)
+		}
+		if netCfg.Subnet != "10.0.0.0/24" {
+			t.Errorf("expected subnet '10.0.0.0/24', got %s", netCfg.Subnet)
+		}
+	})
+
+	t.Run("triggers Load when config is nil", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+
+		configContent := `
+server:
+  http:
+    port: 8080
+  internal_network:
+    name: auto-loaded-network
+    subnet: 192.168.1.0/24
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		// Don't call Load() - let GetNetworkConfig trigger it
+		netCfg, err := loader.GetNetworkConfig()
+		if err != nil {
+			t.Fatalf("GetNetworkConfig failed: %v", err)
+		}
+		if netCfg.Name != "auto-loaded-network" {
+			t.Errorf("expected network name 'auto-loaded-network', got %s", netCfg.Name)
+		}
+	})
+}
