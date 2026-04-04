@@ -165,3 +165,94 @@ func TestContextKey(t *testing.T) {
 		t.Error("ContextKey instances should be equal")
 	}
 }
+
+func TestLoggerFatal(t *testing.T) {
+	// Fatal() returns an event but actually calling .Msg() would exit
+	// So we just test that Fatal() returns a non-nil event
+	logger := New(Config{Level: "debug", Format: "json"})
+	if event := logger.Fatal(); event == nil {
+		t.Error("Fatal() returned nil event")
+	}
+}
+
+func TestFromContextWithLogger(t *testing.T) {
+	logger := New(Config{Level: "debug", Format: "json"})
+	ctx := context.WithValue(context.Background(), ContextKey{}, logger)
+	
+	retrieved := FromContext(ctx)
+	if retrieved == nil {
+		t.Error("FromContext() returned nil when logger was in context")
+	}
+}
+
+func TestFromContextWithoutLogger(t *testing.T) {
+	ctx := context.Background()
+	
+	retrieved := FromContext(ctx)
+	if retrieved == nil {
+		t.Error("FromContext() returned nil when no logger in context")
+	}
+}
+
+func TestWithContextExtended(t *testing.T) {
+	logger := New(Config{Level: "info", Format: "json"})
+	ctx := context.Background()
+	
+	newCtx := logger.WithContext(ctx)
+	if newCtx == ctx {
+		t.Error("WithContext() should return new context")
+	}
+	
+	// Verify the logger is stored in context
+	retrieved := FromContext(newCtx)
+	if retrieved == nil {
+		t.Error("Logger should be retrievable from context after WithContext()")
+	}
+}
+
+func TestWithTraceContext(t *testing.T) {
+	logger := New(Config{Level: "info", Format: "json"})
+	
+	// Test with empty context (no trace info)
+	ctx := context.Background()
+	newLogger := logger.withTraceContext(ctx)
+	if newLogger == nil {
+		t.Error("withTraceContext() returned nil")
+	}
+	
+	// Test with request ID in context via router middleware key
+	type requestIDKey struct{}
+	ctxWithRequestID := context.WithValue(ctx, requestIDKey{}, "test-request-123")
+	newLogger = logger.withTraceContext(ctxWithRequestID)
+	if newLogger == nil {
+		t.Error("withTraceContext() with request ID returned nil")
+	}
+}
+
+func TestGetTraceInfoFromContext(t *testing.T) {
+	// Test with empty context
+	ctx := context.Background()
+	traceInfo := getTraceInfoFromContext(ctx)
+	
+	// Should return zero values for empty context
+	if traceInfo.TraceID != "" || traceInfo.SpanID != "" {
+		t.Error("expected empty trace info for empty context")
+	}
+}
+
+func TestGetRequestIDFromContext(t *testing.T) {
+	// Test with empty context
+	ctx := context.Background()
+	requestID := getRequestIDFromContext(ctx)
+	
+	if requestID != "" {
+		t.Errorf("expected empty request ID for empty context, got %q", requestID)
+	}
+	
+	// Test with chi's request ID key
+	type chiRequestIDKey struct{}
+	ctxWithChiID := context.WithValue(ctx, chiRequestIDKey{}, "chi-request-id")
+	// This won't find the chi key since we're using different type, but tests the path
+	requestID = getRequestIDFromContext(ctxWithChiID)
+	// Won't match our custom key, but exercises the function
+}

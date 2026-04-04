@@ -222,3 +222,63 @@ func TestGetClientIP(t *testing.T) {
 		})
 	}
 }
+
+func TestTracerWrapper_AddEvent(t *testing.T) {
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	
+	tracer := NewTracerWrapper("test-service")
+	ctx := context.Background()
+	
+	ctx, span := tracer.StartSpan(ctx, "test-operation")
+	assert.NotNil(t, span)
+	
+	// AddEvent should not panic
+	tracer.AddEvent(span, "test-event")
+	
+	span.End()
+}
+
+func TestTracerWrapper_SetUserID(t *testing.T) {
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	
+	tracer := NewTracerWrapper("test-service")
+	ctx := context.Background()
+	
+	ctx, span := tracer.StartSpan(ctx, "test-operation")
+	assert.NotNil(t, span)
+	
+	// SetUserID should not panic
+	tracer.SetUserID(span, "user-123")
+	
+	span.End()
+}
+
+func TestTracerWrapper_SetSessionID(t *testing.T) {
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	
+	tracer := NewTracerWrapper("test-service")
+	ctx := context.Background()
+	
+	ctx, span := tracer.StartSpan(ctx, "test-operation")
+	assert.NotNil(t, span)
+	
+	// SetSessionID should not panic
+	tracer.SetSessionID(span, "session-456")
+	
+	span.End()
+}
+
+func TestTracerWrapper_SetRequestID(t *testing.T) {
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	
+	tracer := NewTracerWrapper("test-service")
+	ctx := context.Background()
+	
+	ctx, span := tracer.StartSpan(ctx, "test-operation")
+	assert.NotNil(t, span)
+	
+	// SetRequestID should not panic
+	tracer.SetRequestID(span, "request-789")
+	
+	span.End()
+}
