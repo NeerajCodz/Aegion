@@ -819,3 +819,76 @@ func TestNotImplementedHandlers(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleAdminListModules(t *testing.T) {
+	s := newTestServer(t)
+
+	// Register a test module
+	_, err := s.registry.Register(registry.RegistrationRequest{
+		ID:        "test-module",
+		Name:      "Test Module",
+		Version:   "v1.0.0",
+		Endpoints: []registry.Endpoint{{Type: registry.EndpointHTTP, URL: "http://localhost:8001"}},
+		HealthURL: "http://localhost:8001/health",
+	})
+	if err != nil {
+		t.Fatalf("failed to register module: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/admin/modules", nil)
+	s.handleAdminListModules(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	modules, ok := resp["modules"].([]interface{})
+	if !ok {
+		t.Fatalf("expected modules array in response")
+	}
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+}
+
+func TestHandleAdminGetModule(t *testing.T) {
+	s := newTestServer(t)
+
+	// Register a test module
+	_, err := s.registry.Register(registry.RegistrationRequest{
+		ID:        "test-module",
+		Name:      "Test Module",
+		Version:   "v1.0.0",
+		Endpoints: []registry.Endpoint{{Type: registry.EndpointHTTP, URL: "http://localhost:8001"}},
+		HealthURL: "http://localhost:8001/health",
+	})
+	if err != nil {
+		t.Fatalf("failed to register module: %v", err)
+	}
+
+	t.Run("existing module", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodGet, "/admin/modules/test-module", nil), "id", "test-module")
+		s.handleAdminGetModule(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("non-existent module", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodGet, "/admin/modules/non-existent", nil), "id", "non-existent")
+		s.handleAdminGetModule(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+	})
+}
