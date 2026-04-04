@@ -75,7 +75,7 @@ func (w *CourierDispatchWorker) dispatch(ctx context.Context) error {
 // processDirectly processes messages without a Courier instance.
 func (w *CourierDispatchWorker) processDirectly(ctx context.Context) error {
 	// Get pending messages using FOR UPDATE SKIP LOCKED
-	rows, err := w.DB().Query(ctx, `
+	rows, err := w.query(ctx, `
 		UPDATE core_courier_messages
 		SET status = 'processing', updated_at = NOW()
 		WHERE id IN (
@@ -113,14 +113,14 @@ func (w *CourierDispatchWorker) processDirectly(ctx context.Context) error {
 		// Mark as failed since we can't actually send without courier config
 		sendCount++
 		if sendCount >= w.maxRetries {
-			_, _ = w.DB().Exec(ctx, `
+			_, _ = w.exec(ctx, `
 				UPDATE core_courier_messages
 				SET status = 'abandoned', send_count = $2, 
 				    last_error = 'no courier configured', updated_at = NOW()
 				WHERE id = $1
 			`, id, sendCount)
 		} else {
-			_, _ = w.DB().Exec(ctx, `
+			_, _ = w.exec(ctx, `
 				UPDATE core_courier_messages
 				SET status = 'queued', send_count = $2,
 				    last_error = 'retrying', updated_at = NOW()
@@ -142,7 +142,7 @@ func (w *CourierDispatchWorker) processDirectly(ctx context.Context) error {
 func (w *CourierDispatchWorker) CleanupOldMessages(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan)
 
-	result, err := w.DB().Exec(ctx, `
+	result, err := w.exec(ctx, `
 		DELETE FROM core_courier_messages
 		WHERE status IN ('sent', 'abandoned', 'cancelled')
 		  AND updated_at < $1

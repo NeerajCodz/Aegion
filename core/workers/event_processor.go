@@ -86,7 +86,7 @@ func (w *EventProcessorWorker) process(ctx context.Context) error {
 // processDirectly processes events without an EventBus instance.
 func (w *EventProcessorWorker) processDirectly(ctx context.Context) error {
 	// Get pending deliveries using FOR UPDATE SKIP LOCKED
-	rows, err := w.DB().Query(ctx, `
+	rows, err := w.query(ctx, `
 		SELECT d.id, d.event_id, d.attempt_count,
 		       e.event_type, e.source_module, e.entity_type, e.entity_id,
 		       e.identity_id, e.payload, e.metadata, e.occurred_at
@@ -159,7 +159,7 @@ func (w *EventProcessorWorker) processDirectly(ctx context.Context) error {
 
 // markDelivered marks a delivery as successfully delivered.
 func (w *EventProcessorWorker) markDelivered(ctx context.Context, deliveryID uuid.UUID) {
-	_, err := w.DB().Exec(ctx, `
+	_, err := w.exec(ctx, `
 		UPDATE core_event_bus_deliveries
 		SET status = 'delivered', delivered_at = NOW(), updated_at = NOW()
 		WHERE id = $1
@@ -174,7 +174,7 @@ func (w *EventProcessorWorker) CleanupOldEvents(ctx context.Context, olderThan t
 	cutoff := time.Now().Add(-olderThan)
 
 	// Delete events where all deliveries are complete (delivered or dead-lettered)
-	result, err := w.DB().Exec(ctx, `
+	result, err := w.exec(ctx, `
 		DELETE FROM core_event_bus_events e
 		WHERE e.occurred_at < $1
 		  AND NOT EXISTS (
@@ -198,7 +198,7 @@ func (w *EventProcessorWorker) CleanupOldEvents(ctx context.Context, olderThan t
 // GetPendingCount returns the number of pending deliveries for this subscriber.
 func (w *EventProcessorWorker) GetPendingCount(ctx context.Context) (int64, error) {
 	var count int64
-	err := w.DB().QueryRow(ctx, `
+	err := w.queryRow(ctx, `
 		SELECT COUNT(*) FROM core_event_bus_deliveries
 		WHERE subscriber = $1 AND status IN ('pending', 'failed')
 	`, w.subscriber).Scan(&count)
@@ -208,7 +208,7 @@ func (w *EventProcessorWorker) GetPendingCount(ctx context.Context) (int64, erro
 // GetDeadLetteredCount returns the number of dead-lettered deliveries for this subscriber.
 func (w *EventProcessorWorker) GetDeadLetteredCount(ctx context.Context) (int64, error) {
 	var count int64
-	err := w.DB().QueryRow(ctx, `
+	err := w.queryRow(ctx, `
 		SELECT COUNT(*) FROM core_event_bus_deliveries
 		WHERE subscriber = $1 AND status = 'dead_lettered'
 	`, w.subscriber).Scan(&count)

@@ -70,7 +70,7 @@ func (w *FlowCleanupWorker) cleanupFlows(ctx context.Context) (int64, error) {
 	// 1. Expired (active flows past their expiry)
 	// 2. Completed or failed flows older than 24 hours
 	// 3. Active flows that expired more than 1 hour ago
-	result, err := w.DB().Exec(ctx, `
+	result, err := w.exec(ctx, `
 		DELETE FROM core_flows
 		WHERE (state = 'active' AND expires_at < NOW() - INTERVAL '1 hour')
 		   OR (state IN ('complete', 'failed') AND updated_at < NOW() - INTERVAL '24 hours')
@@ -85,7 +85,7 @@ func (w *FlowCleanupWorker) cleanupFlows(ctx context.Context) (int64, error) {
 // cleanupContinuityContainers removes expired continuity containers.
 func (w *FlowCleanupWorker) cleanupContinuityContainers(ctx context.Context) (int64, error) {
 	// Delete containers that have expired
-	result, err := w.DB().Exec(ctx, `
+	result, err := w.exec(ctx, `
 		DELETE FROM core_continuity_containers
 		WHERE expires_at < NOW()
 	`)
@@ -100,7 +100,7 @@ func (w *FlowCleanupWorker) cleanupContinuityContainers(ctx context.Context) (in
 func (w *FlowCleanupWorker) CleanupOldFlows(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan)
 
-	result, err := w.DB().Exec(ctx, `
+	result, err := w.exec(ctx, `
 		DELETE FROM core_flows
 		WHERE created_at < $1
 	`, cutoff)
@@ -115,7 +115,7 @@ func (w *FlowCleanupWorker) CleanupOldFlows(ctx context.Context, olderThan time.
 func (w *FlowCleanupWorker) CleanupOldContainers(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan)
 
-	result, err := w.DB().Exec(ctx, `
+	result, err := w.exec(ctx, `
 		DELETE FROM core_continuity_containers
 		WHERE created_at < $1
 	`, cutoff)

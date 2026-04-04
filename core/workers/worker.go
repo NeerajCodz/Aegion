@@ -3,12 +3,17 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var errWorkerDBUnavailable = errors.New("worker database unavailable")
 
 // Worker defines the interface for background workers.
 type Worker interface {
@@ -122,6 +127,18 @@ type BaseWorker struct {
 	done     chan struct{}
 	mu       sync.Mutex
 	running  bool
+
+	execFn     func(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
+	queryFn    func(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	queryRowFn func(ctx context.Context, sql string, args ...interface{}) pgx.Row
+}
+
+type workerErrorRow struct {
+	err error
+}
+
+func (r workerErrorRow) Scan(dest ...interface{}) error {
+	return r.err
 }
 
 // NewBaseWorker creates a new base worker.
@@ -130,13 +147,56 @@ func NewBaseWorker(name string, db *pgxpool.Pool, log *logger.Logger, interval t
 		log = logger.New(logger.Config{Level: "info", Format: "json"})
 	}
 
-	return &BaseWorker{
+	w := &BaseWorker{
 		name:     name,
 		db:       db,
 		log:      log.WithComponent(name),
 		interval: interval,
 		done:     make(chan struct{}),
 	}
+	if db != nil {
+		w.execFn = func(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+			return db.Exec(ctx, sql, args...)
+		}
+		w.queryFn = func(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+			return db.Query(ctx, sql, args...)
+		}
+		w.queryRowFn = func(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+			return db.QueryRow(ctx, sql, args...)
+		}
+	} else {
+		w.execFn = func(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, errWorkerDBUnavailable
+		}
+		w.queryFn = func(context.Context, string, ...interface{}) (pgx.Rows, error) {
+			return nil, errWorkerDBUnavailable
+		}
+		w.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+			return workerErrorRow{err: errWorkerDBUnavailable}
+		}
+	}
+	return w
+}
+
+func (w *BaseWorker) exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	if w.execFn == nil {
+		return pgconn.CommandTag{}, errWorkerDBUnavailable
+	}
+	return w.execFn(ctx, sql, args...)
+}
+
+func (w *BaseWorker) query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	if w.queryFn == nil {
+		return nil, errWorkerDBUnavailable
+	}
+	return w.queryFn(ctx, sql, args...)
+}
+
+func (w *BaseWorker) queryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	if w.queryRowFn == nil {
+		return workerErrorRow{err: errWorkerDBUnavailable}
+	}
+	return w.queryRowFn(ctx, sql, args...)
 }
 
 // Name returns the worker name.

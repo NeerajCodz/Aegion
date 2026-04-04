@@ -42,7 +42,7 @@ func (w *SessionCleanupWorker) cleanup(ctx context.Context) error {
 
 	// Delete expired sessions (expired more than 7 days ago)
 	// and inactive sessions (revoked more than 1 day ago)
-	result, err := w.DB().Exec(ctx, `
+	result, err := w.exec(ctx, `
 		DELETE FROM core_sessions
 		WHERE expires_at < NOW() - INTERVAL '7 days'
 		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '1 day')
@@ -59,7 +59,7 @@ func (w *SessionCleanupWorker) cleanup(ctx context.Context) error {
 	}
 
 	// Also clean up orphaned session auth methods
-	result, err = w.DB().Exec(ctx, `
+	result, err = w.exec(ctx, `
 		DELETE FROM core_session_auth_methods
 		WHERE session_id NOT IN (SELECT id FROM core_sessions)
 	`)
