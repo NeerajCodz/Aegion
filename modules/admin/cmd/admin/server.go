@@ -22,9 +22,15 @@ import (
 	"github.com/aegion/aegion/modules/admin/security"
 )
 
+// DBPinger is an interface for DB health checking
+type DBPinger interface {
+	Ping(ctx context.Context) error
+}
+
 type Server struct {
 	Config  *Config
 	DB      *pgxpool.Pool
+	dbPing  DBPinger // for testing
 	Handler *handler.Handler
 }
 
@@ -136,7 +142,25 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := s.DB.Ping(ctx); err != nil {
+	// Use dbPing if set (for testing), otherwise use DB
+	var pinger DBPinger
+	if s.dbPing != nil {
+		pinger = s.dbPing
+	} else if s.DB != nil {
+		pinger = s.DB
+	}
+
+	if pinger == nil {
+		log.Error().Msg("No database connection configured")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status": "not ready",
+			"error":  "database not configured",
+		})
+		return
+	}
+
+	if err := pinger.Ping(ctx); err != nil {
 		log.Error().Err(err).Msg("Database health check failed")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{

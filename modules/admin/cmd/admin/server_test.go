@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	admin "github.com/aegion/aegion/modules/admin"
 )
@@ -389,44 +388,76 @@ func TestHandleHealth(t *testing.T) {
 	}
 }
 
-// fakePool implements a minimal pingable interface for testing
-type fakePool struct {
+// fakeDBPinger implements DBPinger for testing
+type fakeDBPinger struct {
 	pingErr error
 }
 
-func (f *fakePool) Ping(ctx context.Context) error {
+func (f *fakeDBPinger) Ping(ctx context.Context) error {
 	return f.pingErr
 }
 
-func (f *fakePool) Acquire(ctx context.Context) (*pgxpool.Conn, error) {
-	return nil, f.pingErr
-}
-
-func (f *fakePool) Close() {}
-
 func TestHandleReady(t *testing.T) {
 	t.Run("healthy db", func(t *testing.T) {
-		// We can't easily mock pgxpool.Pool, so test the handler behavior indirectly
-		// by checking that it handles the nil case gracefully in a recovery scenario
-		// For now, we just verify the handler doesn't panic when we can't use it directly
-		s := &Server{Config: &Config{}}
-		_ = s // Server exists
-	})
+		s := &Server{
+			Config: &Config{},
+			dbPing: &fakeDBPinger{pingErr: nil},
+		}
 
-	t.Run("nil db causes panic recovery scenario", func(t *testing.T) {
-		// Document that nil DB will panic - this is expected behavior
-		// Real tests should use integration tests with actual DB
-		defer func() {
-			if r := recover(); r != nil {
-				// Expected - nil DB causes panic
-			}
-		}()
-		
-		s := &Server{Config: &Config{}, DB: nil}
 		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
 		rec := httptest.NewRecorder()
-		// This will panic because DB is nil - we recover above
 		s.handleReady(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse response: %v", err)
+		}
+		if resp["status"] != "ready" {
+			t.Errorf("expected status 'ready', got %v", resp["status"])
+		}
+	})
+
+	t.Run("unhealthy db", func(t *testing.T) {
+		s := &Server{
+			Config: &Config{},
+			dbPing: &fakeDBPinger{pingErr: errors.New("connection refused")},
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		rec := httptest.NewRecorder()
+		s.handleReady(rec, req)
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+
+		var resp map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse response: %v", err)
+		}
+		if resp["status"] != "not ready" {
+			t.Errorf("expected status 'not ready', got %v", resp["status"])
+		}
+	})
+
+	t.Run("no db configured", func(t *testing.T) {
+		s := &Server{
+			Config: &Config{},
+			DB:     nil,
+			dbPing: nil,
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		rec := httptest.NewRecorder()
+		s.handleReady(rec, req)
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
 	})
 }
 
