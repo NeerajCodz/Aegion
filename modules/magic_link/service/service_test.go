@@ -350,6 +350,33 @@ func TestVerifyMagicLink(t *testing.T) {
 		_, _, err = svc2.VerifyMagicLink(context.Background(), "x")
 		assert.EqualError(t, err, "token read failed")
 	})
+
+	t.Run("mark used errors", func(t *testing.T) {
+		// Test ErrCodeUsed returns ErrInvalidCode
+		stUsed := newMemoryStore()
+		id := uuid.New()
+		cUsed, _ := stUsed.Create(context.Background(), "used@example.com", store.CodeTypeLogin, &id, 15*time.Minute)
+		stUsed.markUsedErr = store.ErrCodeUsed
+		svcUsed := makeService(stUsed, nil)
+		_, _, err := svcUsed.VerifyMagicLink(context.Background(), cUsed.Token)
+		assert.ErrorIs(t, err, ErrInvalidCode)
+
+		// Test other MarkUsed errors
+		stOther := newMemoryStore()
+		cOther, _ := stOther.Create(context.Background(), "other@example.com", store.CodeTypeLogin, &id, 15*time.Minute)
+		stOther.markUsedErr = errors.New("db connection lost")
+		svcOther := makeService(stOther, nil)
+		_, _, err = svcOther.VerifyMagicLink(context.Background(), cOther.Token)
+		assert.EqualError(t, err, "db connection lost")
+	})
+
+	t.Run("expired code returns ErrInvalidCode", func(t *testing.T) {
+		stExp := newMemoryStore()
+		stExp.getByTokenErr = store.ErrCodeExpired
+		svc := makeService(stExp, nil)
+		_, _, err := svc.VerifyMagicLink(context.Background(), "expired")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+	})
 }
 
 func TestSendVerificationCodeAndVerify(t *testing.T) {
@@ -436,6 +463,72 @@ func TestVerificationAndRecoveryErrorPaths(t *testing.T) {
 		st2 := newMemoryStore()
 		svc2 := makeService(st2, nil)
 		_, err = svc2.VerifyRecoveryCode(context.Background(), "x@example.com", "bad")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+	})
+
+	t.Run("recovery rate limit errors", func(t *testing.T) {
+		// Test other rate limit errors (not ErrRateLimited)
+		stRate := newMemoryStore()
+		stRate.checkRateLimitErr = errors.New("redis connection failed")
+		svc := makeService(stRate, nil)
+		err := svc.SendRecoveryCode(context.Background(), "recover@example.com", identityID)
+		assert.EqualError(t, err, "redis connection failed")
+	})
+
+	t.Run("recovery invalidate and create errors", func(t *testing.T) {
+		stInv := newMemoryStore()
+		stInv.invalidateErr = errors.New("invalidate db error")
+		svc := makeService(stInv, nil)
+		err := svc.SendRecoveryCode(context.Background(), "recover@example.com", identityID)
+		assert.EqualError(t, err, "invalidate db error")
+
+		stCreate := newMemoryStore()
+		stCreate.createErr = errors.New("insert failed")
+		svc2 := makeService(stCreate, nil)
+		err = svc2.SendRecoveryCode(context.Background(), "recover@example.com", identityID)
+		assert.EqualError(t, err, "insert failed")
+	})
+
+	t.Run("verify recovery mark used errors", func(t *testing.T) {
+		// Test ErrCodeUsed returns ErrInvalidCode
+		stUsed := newMemoryStore()
+		c, _ := stUsed.Create(context.Background(), "recover@example.com", store.CodeTypeRecovery, &identityID, 15*time.Minute)
+		stUsed.markUsedErr = store.ErrCodeUsed
+		svc := makeService(stUsed, nil)
+		_, err := svc.VerifyRecoveryCode(context.Background(), "recover@example.com", c.Code)
+		assert.ErrorIs(t, err, ErrInvalidCode)
+
+		// Test other MarkUsed errors
+		stOther := newMemoryStore()
+		c2, _ := stOther.Create(context.Background(), "recover2@example.com", store.CodeTypeRecovery, &identityID, 15*time.Minute)
+		stOther.markUsedErr = errors.New("db write failed")
+		svc2 := makeService(stOther, nil)
+		_, err = svc2.VerifyRecoveryCode(context.Background(), "recover2@example.com", c2.Code)
+		assert.EqualError(t, err, "db write failed")
+	})
+
+	t.Run("verify recovery get by code errors", func(t *testing.T) {
+		// Test expired code returns ErrInvalidCode
+		stExp := newMemoryStore()
+		stExp.getByCodeErr = store.ErrCodeExpired
+		svc := makeService(stExp, nil)
+		_, err := svc.VerifyRecoveryCode(context.Background(), "x@example.com", "expired")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+
+		// Test other GetByCode errors
+		stOther := newMemoryStore()
+		stOther.getByCodeErr = errors.New("db read failed")
+		svc2 := makeService(stOther, nil)
+		_, err = svc2.VerifyRecoveryCode(context.Background(), "x@example.com", "code")
+		assert.EqualError(t, err, "db read failed")
+	})
+
+	t.Run("verify recovery nil identity", func(t *testing.T) {
+		// Test code without identity returns ErrInvalidCode
+		st := newMemoryStore()
+		c, _ := st.Create(context.Background(), "recover@example.com", store.CodeTypeRecovery, nil, 15*time.Minute)
+		svc := makeService(st, nil)
+		_, err := svc.VerifyRecoveryCode(context.Background(), "recover@example.com", c.Code)
 		assert.ErrorIs(t, err, ErrInvalidCode)
 	})
 }
