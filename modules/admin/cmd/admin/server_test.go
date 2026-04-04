@@ -464,7 +464,7 @@ func TestHandleReady(t *testing.T) {
 func TestSPAHandler(t *testing.T) {
 	s := &Server{Config: &Config{}}
 	handler := s.spaHandler()
-	
+
 	if handler == nil {
 		t.Fatal("spaHandler() returned nil")
 	}
@@ -477,5 +477,30 @@ func TestSPAHandler(t *testing.T) {
 	// Should return some response (either redirect or content)
 	if rec.Code == 0 {
 		t.Error("spaHandler didn't serve any response")
+	}
+}
+
+func TestSecurityHeaders_InDevMode(t *testing.T) {
+	// Set dev mode
+	os.Setenv("AEGION_ENV", "dev")
+	defer os.Unsetenv("AEGION_ENV")
+
+	s := &Server{Config: &Config{}}
+	
+	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	
+	handler := s.securityHeaders(nextHandler)
+	if handler == nil {
+		t.Fatal("securityHeaders returned nil in dev mode")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 }
