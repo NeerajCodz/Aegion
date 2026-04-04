@@ -4,13 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func TestModuleState(t *testing.T) {
@@ -1216,6 +1223,253 @@ modules: {}
 		}
 		if netCfg.Name != "auto-loaded-network" {
 			t.Errorf("expected network name 'auto-loaded-network', got %s", netCfg.Name)
+		}
+	})
+}
+
+func TestOrchestratorInternalDelegatesAndGuards(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("guard branches for nil dependencies", func(t *testing.T) {
+		o := &Orchestrator{}
+
+		if _, err := o.ensureNetwork(ctx); err == nil || !strings.Contains(err.Error(), "network manager is nil") {
+			t.Fatalf("expected network guard error, got %v", err)
+		}
+		if err := o.closeDocker(); err == nil || !strings.Contains(err.Error(), "docker client is nil") {
+			t.Fatalf("expected close docker guard error, got %v", err)
+		}
+		if _, err := o.loadModuleConfig("password"); err == nil || !strings.Contains(err.Error(), "config loader is nil") {
+			t.Fatalf("expected config loader guard error, got %v", err)
+		}
+		if token, err := o.generateToken("password"); err != nil || token != "" {
+			t.Fatalf("expected empty token with nil generator, got token=%q err=%v", token, err)
+		}
+		if _, err := o.createContainer(ctx, &ModuleConfig{ID: "password"}, "t"); err == nil || !strings.Contains(err.Error(), "docker client is nil") {
+			t.Fatalf("expected create container guard error, got %v", err)
+		}
+		if err := o.startContainer(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "docker client is nil") {
+			t.Fatalf("expected start container guard error, got %v", err)
+		}
+		if err := o.stopContainer(ctx, "cid", time.Second); err == nil || !strings.Contains(err.Error(), "docker client is nil") {
+			t.Fatalf("expected stop container guard error, got %v", err)
+		}
+		if err := o.removeContainer(ctx, "cid", false); err == nil || !strings.Contains(err.Error(), "docker client is nil") {
+			t.Fatalf("expected remove container guard error, got %v", err)
+		}
+		if _, err := o.getContainerInfo(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "docker client is nil") {
+			t.Fatalf("expected get container info guard error, got %v", err)
+		}
+		if _, err := o.containerLogs(ctx, "cid", 5, time.Now()); err == nil || !strings.Contains(err.Error(), "docker client is nil") {
+			t.Fatalf("expected container logs guard error, got %v", err)
+		}
+	})
+
+	t.Run("default delegates call underlying components", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+		configContent := `
+server:
+  internal_network:
+    name: test_net
+    subnet: 10.10.0.0/16
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		closeCalled := false
+		startCalled := false
+		stopCalled := false
+		removeCalled := false
+
+		dockerClient := &DockerClient{
+			networkName: "test_net",
+			closeFn: func() error {
+				closeCalled = true
+				return nil
+			},
+			containerListFn: func(context.Context, container.ListOptions) ([]container.Summary, error) {
+				return nil, nil
+			},
+			imageInspectFn: func(context.Context, string, ...client.ImageInspectOption) (image.InspectResponse, error) {
+				return image.InspectResponse{}, nil
+			},
+			containerCreateFn: func(_ context.Context, cfg *container.Config, _ *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+				if cfg.Image != "repo/password" {
+					t.Fatalf("unexpected image in create config: %q", cfg.Image)
+				}
+				if containerName != "aegion_password" {
+					t.Fatalf("unexpected container name: %q", containerName)
+				}
+				return container.CreateResponse{ID: "cid-created"}, nil
+			},
+			containerStartFn: func(context.Context, string, container.StartOptions) error {
+				startCalled = true
+				return nil
+			},
+			containerStopFn: func(context.Context, string, container.StopOptions) error {
+				stopCalled = true
+				return nil
+			},
+			containerRemoveFn: func(context.Context, string, container.RemoveOptions) error {
+				removeCalled = true
+				return nil
+			},
+			containerInspectFn: func(context.Context, string) (container.InspectResponse, error) {
+				return container.InspectResponse{
+					ContainerJSONBase: &container.ContainerJSONBase{
+						ID:      "cid-created",
+						Name:    "/aegion_password",
+						Created: "2026-01-01T00:00:00Z",
+						State: &container.State{
+							Status:    "running",
+							StartedAt: "2026-01-01T00:00:01Z",
+						},
+					},
+					NetworkSettings: &container.NetworkSettings{
+						Networks: map[string]*network.EndpointSettings{
+							"test_net": {IPAddress: "10.10.0.20"},
+						},
+					},
+				}, nil
+			},
+			containerLogsFn: func(context.Context, string, container.LogsOptions) (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("module logs")), nil
+			},
+		}
+
+		netMgr := NewNetworkManager(nil, "test_net", "")
+		netMgr.networkListFn = func(context.Context, network.ListOptions) ([]network.Summary, error) {
+			return []network.Summary{{ID: "net-1", Name: "test_net"}}, nil
+		}
+
+		tokenGen, err := authtoken.NewGenerator(authtoken.GeneratorConfig{Secret: []byte("super-secret")})
+		if err != nil {
+			t.Fatalf("failed to create token generator: %v", err)
+		}
+
+		o := &Orchestrator{
+			docker:         dockerClient,
+			network:        netMgr,
+			configLoader:   NewConfigLoader(configPath),
+			tokenGenerator: tokenGen,
+			modules:        make(map[string]*moduleInstance),
+		}
+
+		if netID, err := o.ensureNetwork(ctx); err != nil || netID != "net-1" {
+			t.Fatalf("ensureNetwork returned id=%q err=%v", netID, err)
+		}
+
+		cfg, err := o.loadModuleConfig("password")
+		if err != nil {
+			t.Fatalf("loadModuleConfig returned error: %v", err)
+		}
+		if cfg.ID != "password" {
+			t.Fatalf("unexpected loaded module config id: %s", cfg.ID)
+		}
+
+		token, err := o.generateToken("password")
+		if err != nil || token == "" {
+			t.Fatalf("generateToken returned token=%q err=%v", token, err)
+		}
+		if gotID, err := tokenGen.ValidateString(token); err != nil || gotID != "password" {
+			t.Fatalf("generated token not valid for module: id=%q err=%v", gotID, err)
+		}
+
+		cid, err := o.createContainer(ctx, &ModuleConfig{
+			ID:    "password",
+			Name:  "Password",
+			Image: "repo/password",
+			Env:   map[string]string{},
+			Labels: map[string]string{
+				"aegion.module": "true",
+			},
+		}, token)
+		if err != nil || cid != "cid-created" {
+			t.Fatalf("createContainer returned cid=%q err=%v", cid, err)
+		}
+
+		if err := o.startContainer(ctx, cid); err != nil {
+			t.Fatalf("startContainer returned error: %v", err)
+		}
+		if err := o.stopContainer(ctx, cid, time.Second); err != nil {
+			t.Fatalf("stopContainer returned error: %v", err)
+		}
+		if err := o.removeContainer(ctx, cid, true); err != nil {
+			t.Fatalf("removeContainer returned error: %v", err)
+		}
+
+		info, err := o.getContainerInfo(ctx, cid)
+		if err != nil {
+			t.Fatalf("getContainerInfo returned error: %v", err)
+		}
+		if info.Name != "aegion_password" || info.IPAddress != "10.10.0.20" {
+			t.Fatalf("unexpected container info: %+v", info)
+		}
+
+		logs, err := o.containerLogs(ctx, cid, 10, time.Time{})
+		if err != nil || logs != "module logs" {
+			t.Fatalf("containerLogs returned logs=%q err=%v", logs, err)
+		}
+
+		if err := o.closeDocker(); err != nil {
+			t.Fatalf("closeDocker returned error: %v", err)
+		}
+		if !closeCalled || !startCalled || !stopCalled || !removeCalled {
+			t.Fatalf("expected delegates to be called, got close=%v start=%v stop=%v remove=%v", closeCalled, startCalled, stopCalled, removeCalled)
+		}
+	})
+}
+
+func TestNewOrchestrator_WithDockerSeam(t *testing.T) {
+	orig := newDockerEngineClient
+	t.Cleanup(func() { newDockerEngineClient = orig })
+
+	t.Run("docker creation error", func(t *testing.T) {
+		newDockerEngineClient = func() (*client.Client, error) { return nil, errors.New("docker down") }
+		_, err := New(Config{ConfigPath: "ignored.yaml"})
+		if err == nil || !strings.Contains(err.Error(), "creating docker client") {
+			t.Fatalf("expected docker creation error, got %v", err)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		newDockerEngineClient = func() (*client.Client, error) { return &client.Client{}, nil }
+
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "aegion.yaml")
+		configContent := `
+server:
+  internal_network:
+    name: created_net
+    subnet: 172.18.0.0/16
+secrets:
+  internal:
+    - config-secret
+modules: {}
+`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		reg := registry.New(registry.DefaultConfig())
+		defer reg.Stop()
+
+		o, err := New(Config{
+			ConfigPath:  configPath,
+			Registry:    reg,
+			TokenSecret: []byte("explicit-secret"),
+		})
+		if err != nil {
+			t.Fatalf("New returned error: %v", err)
+		}
+		if o == nil || o.docker == nil || o.network == nil || o.configLoader == nil || o.tokenGenerator == nil {
+			t.Fatalf("expected orchestrator dependencies to be initialized")
+		}
+		if o.network.networkName != "created_net" {
+			t.Fatalf("expected network name from config, got %q", o.network.networkName)
 		}
 	})
 }

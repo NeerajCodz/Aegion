@@ -10,10 +10,12 @@ import (
 //go:embed spa/dist/*
 var spaFiles embed.FS
 
+var subSPAFiles = fs.Sub
+
 // GetSPAFiles returns the embedded filesystem containing the SPA files
 func GetSPAFiles() fs.FS {
 	// Strip the spa/dist prefix to serve files from root
-	distFS, err := fs.Sub(spaFiles, "spa/dist")
+	distFS, err := subSPAFiles(spaFiles, "spa/dist")
 	if err != nil {
 		// Fallback to empty filesystem if dist doesn't exist
 		return embed.FS{}

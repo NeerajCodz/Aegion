@@ -24,6 +24,7 @@ type AuthMiddleware struct {
 	sessionManager *session.Manager
 	logger         zerolog.Logger
 	optional       bool // If true, missing sessions are not treated as errors
+	getFromRequest func(context.Context, *http.Request) (*session.Session, error)
 }
 
 // NewAuthMiddleware creates a new authentication middleware.
@@ -40,9 +41,9 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		requestID := getRequestIDFromContext(ctx)
-		
+
 		// Attempt to get session from request
-		sess, err := am.sessionManager.GetFromRequest(ctx, r)
+		sess, err := am.resolveSession(ctx, r)
 		if err != nil {
 			// Log the authentication failure
 			am.logger.Debug().
@@ -69,7 +70,7 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 				Str("request_id", requestID).
 				Str("session_id", sess.ID.String()).
 				Msg("session is inactive")
-			
+
 			if !am.optional {
 				am.handleAuthError(w, r, session.ErrSessionInvalid)
 				return
@@ -83,7 +84,7 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 				Str("session_id", sess.ID.String()).
 				Time("expires_at", sess.ExpiresAt).
 				Msg("session has expired")
-			
+
 			if !am.optional {
 				am.handleAuthError(w, r, session.ErrSessionExpired)
 				return
@@ -92,7 +93,7 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 
 		// Add session to request context
 		ctx = session.WithSession(ctx, sess)
-		
+
 		// Log successful authentication
 		am.logger.Debug().
 			Str("request_id", requestID).
@@ -104,6 +105,16 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 		// Continue to next handler
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (am *AuthMiddleware) resolveSession(ctx context.Context, r *http.Request) (*session.Session, error) {
+	if am.getFromRequest != nil {
+		return am.getFromRequest(ctx, r)
+	}
+	if am.sessionManager == nil {
+		return nil, session.ErrSessionNotFound
+	}
+	return am.sessionManager.GetFromRequest(ctx, r)
 }
 
 // InjectHeaders adds Aegion-specific headers to the request for downstream services.
@@ -149,7 +160,7 @@ func (am *AuthMiddleware) InjectHeaders(r *http.Request, sess *session.Session) 
 // handleAuthError handles authentication errors by returning appropriate HTTP responses.
 func (am *AuthMiddleware) handleAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	requestID := getRequestIDFromContext(r.Context())
-	
+
 	var statusCode int
 	var message string
 
@@ -173,7 +184,7 @@ func (am *AuthMiddleware) handleAuthError(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
-	
+
 	// For session expired, suggest reauthentication
 	if err == session.ErrSessionExpired {
 		w.Header().Set("X-Aegion-Action", "reauthenticate")

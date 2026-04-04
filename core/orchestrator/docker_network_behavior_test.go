@@ -5,25 +5,54 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func TestNewDockerClient_WithSeam(t *testing.T) {
 	orig := newDockerEngineClient
 	t.Cleanup(func() { newDockerEngineClient = orig })
 
-	newDockerEngineClient = func() (*client.Client, error) { return nil, errors.New("dial failed") }
-	if _, err := NewDockerClient(); err == nil || !strings.Contains(err.Error(), "creating docker client") {
-		t.Fatalf("expected wrapped docker client creation error, got %v", err)
-	}
+	t.Run("creation error", func(t *testing.T) {
+		newDockerEngineClient = func() (*client.Client, error) { return nil, errors.New("dial failed") }
+		if _, err := NewDockerClient(); err == nil || !strings.Contains(err.Error(), "creating docker client") {
+			t.Fatalf("expected wrapped docker client creation error, got %v", err)
+		}
+	})
+
+	t.Run("nil client", func(t *testing.T) {
+		newDockerEngineClient = func() (*client.Client, error) { return nil, nil }
+		if _, err := NewDockerClient(); err == nil || !strings.Contains(err.Error(), "nil docker client") {
+			t.Fatalf("expected nil docker client error, got %v", err)
+		}
+	})
+
+	t.Run("success initializes defaults and delegates", func(t *testing.T) {
+		newDockerEngineClient = func() (*client.Client, error) { return &client.Client{}, nil }
+		d, err := NewDockerClient()
+		if err != nil {
+			t.Fatalf("NewDockerClient returned error: %v", err)
+		}
+		if d.cli == nil {
+			t.Fatalf("expected non-nil docker cli")
+		}
+		if d.networkName != DefaultNetworkName {
+			t.Fatalf("expected default network name %q, got %q", DefaultNetworkName, d.networkName)
+		}
+		if d.closeFn == nil || d.containerCreateFn == nil || d.containerStartFn == nil || d.containerStopFn == nil || d.containerRemoveFn == nil || d.containerLogsFn == nil || d.containerInspectFn == nil || d.containerListFn == nil || d.imageInspectFn == nil || d.imagePullFn == nil {
+			t.Fatalf("expected delegate function pointers to be initialized")
+		}
+	})
 }
 
 func TestDockerClient_GuardAndUtilityPaths(t *testing.T) {
@@ -256,6 +285,195 @@ func TestDockerClient_ContainerOps_WithSeams(t *testing.T) {
 			t.Fatalf("expected pull failure, got %v", err)
 		}
 	})
+
+	t.Run("create container decision paths", func(t *testing.T) {
+		mustContain := func(list []string, expected string) {
+			for _, item := range list {
+				if item == expected {
+					return
+				}
+			}
+			t.Fatalf("expected %q in %v", expected, list)
+		}
+
+		newCfg := func() *ModuleConfig {
+			return &ModuleConfig{
+				ID:      "password",
+				Name:    "Password",
+				Image:   "repo/password",
+				Version: "v1.2.3",
+				Env: map[string]string{
+					"AEGION_ENV": "test",
+				},
+				Ports: []PortMapping{
+					{HostPort: "18080", ContainerPort: "8080"}, // default tcp path
+				},
+				Volumes: []VolumeMapping{
+					{HostPath: "/host/data", ContainerPath: "/app/data", ReadOnly: true},
+				},
+				Resources: ResourceConfig{
+					CPULimit:          "1.5",
+					MemoryLimit:       "128m",
+					MemoryReservation: "64m",
+				},
+				HealthCheck: HealthCheckConfig{
+					Endpoint:    "/health",
+					Interval:    5 * time.Second,
+					Timeout:     2 * time.Second,
+					Retries:     3,
+					StartPeriod: 1 * time.Second,
+				},
+				Labels: map[string]string{
+					"aegion.module": "true",
+				},
+				RestartPolicy: "on-failure",
+			}
+		}
+
+		d.containerListFn = func(context.Context, container.ListOptions) ([]container.Summary, error) {
+			return []container.Summary{{ID: "old-id", Names: []string{"/aegion_password"}}}, nil
+		}
+		d.containerRemoveFn = func(context.Context, string, container.RemoveOptions) error {
+			return errors.New("remove existing failed")
+		}
+		if _, err := d.CreateContainer(ctx, newCfg(), "auth-token"); err == nil || !strings.Contains(err.Error(), "removing existing container") {
+			t.Fatalf("expected remove existing failure, got %v", err)
+		}
+
+		d.containerListFn = func(context.Context, container.ListOptions) ([]container.Summary, error) {
+			return nil, nil
+		}
+		d.imageInspectFn = func(context.Context, string, ...client.ImageInspectOption) (image.InspectResponse, error) {
+			return image.InspectResponse{}, errors.New("missing image")
+		}
+		d.imagePullFn = func(context.Context, string, image.PullOptions) (io.ReadCloser, error) {
+			return nil, errors.New("pull failed")
+		}
+		if _, err := d.CreateContainer(ctx, newCfg(), "auth-token"); err == nil || !strings.Contains(err.Error(), "pulling image: pull failed") {
+			t.Fatalf("expected pull failure, got %v", err)
+		}
+
+		d.imageInspectFn = func(context.Context, string, ...client.ImageInspectOption) (image.InspectResponse, error) {
+			return image.InspectResponse{}, nil
+		}
+		d.containerCreateFn = nil
+		if _, err := d.CreateContainer(ctx, newCfg(), "auth-token"); err == nil || err.Error() != "docker client is nil" {
+			t.Fatalf("expected docker nil error, got %v", err)
+		}
+
+		var (
+			gotImage          string
+			gotContainerName  string
+			gotEnv            []string
+			gotRestartPolicy  container.RestartPolicy
+			gotPortBindings   nat.PortMap
+			gotExposedPorts   nat.PortSet
+			gotMounts         []mount.Mount
+			gotNetworkAliases []string
+			gotResources      container.Resources
+		)
+		d.containerCreateFn = func(_ context.Context, cfg *container.Config, hostCfg *container.HostConfig, networkCfg *network.NetworkingConfig, _ *ocispec.Platform, containerName string) (container.CreateResponse, error) {
+			gotImage = cfg.Image
+			gotContainerName = containerName
+			gotEnv = append([]string(nil), cfg.Env...)
+			gotRestartPolicy = hostCfg.RestartPolicy
+			gotPortBindings = hostCfg.PortBindings
+			gotExposedPorts = cfg.ExposedPorts
+			gotMounts = append([]mount.Mount(nil), hostCfg.Mounts...)
+			gotResources = hostCfg.Resources
+			gotNetworkAliases = append([]string(nil), networkCfg.EndpointsConfig[d.networkName].Aliases...)
+			return container.CreateResponse{}, errors.New("create failed")
+		}
+		if _, err := d.CreateContainer(ctx, newCfg(), "auth-token"); err == nil || !strings.Contains(err.Error(), "creating container: create failed") {
+			t.Fatalf("expected wrapped create failure, got %v", err)
+		}
+		if gotImage != "repo/password:v1.2.3" {
+			t.Fatalf("unexpected image reference: %q", gotImage)
+		}
+		if gotContainerName != "aegion_password" {
+			t.Fatalf("unexpected container name: %q", gotContainerName)
+		}
+		sort.Strings(gotEnv)
+		mustContain(gotEnv, "AEGION_ENV=test")
+		mustContain(gotEnv, "AEGION_AUTH_TOKEN=auth-token")
+		mustContain(gotEnv, "AEGION_MODULE_ID=password")
+		if gotRestartPolicy.Name != container.RestartPolicyOnFailure || gotRestartPolicy.MaximumRetryCount != 5 {
+			t.Fatalf("unexpected restart policy: %+v", gotRestartPolicy)
+		}
+		if len(gotExposedPorts) != 1 {
+			t.Fatalf("expected one exposed port, got %d", len(gotExposedPorts))
+		}
+		if len(gotPortBindings[nat.Port("8080/tcp")]) != 1 || gotPortBindings[nat.Port("8080/tcp")][0].HostPort != "18080" {
+			t.Fatalf("unexpected port bindings: %+v", gotPortBindings)
+		}
+		if len(gotMounts) != 1 || !gotMounts[0].ReadOnly || gotMounts[0].Target != "/app/data" {
+			t.Fatalf("unexpected mounts: %+v", gotMounts)
+		}
+		if len(gotNetworkAliases) != 1 || gotNetworkAliases[0] != "password" {
+			t.Fatalf("unexpected network aliases: %+v", gotNetworkAliases)
+		}
+		if gotResources.Memory == 0 || gotResources.MemoryReservation == 0 || gotResources.NanoCPUs == 0 {
+			t.Fatalf("expected parsed resource limits, got %+v", gotResources)
+		}
+
+		cases := []struct {
+			name          string
+			image         string
+			version       string
+			restartPolicy string
+			wantImage     string
+			wantPolicy    container.RestartPolicyMode
+		}{
+			{
+				name:          "always policy",
+				image:         "repo/password",
+				version:       "latest",
+				restartPolicy: "always",
+				wantImage:     "repo/password",
+				wantPolicy:    container.RestartPolicyAlways,
+			},
+			{
+				name:          "disabled policy",
+				image:         "repo/password",
+				version:       "latest",
+				restartPolicy: "no",
+				wantImage:     "repo/password",
+				wantPolicy:    container.RestartPolicyDisabled,
+			},
+			{
+				name:          "keep explicit image tag",
+				image:         "repo/password:stable",
+				version:       "v9.9.9",
+				restartPolicy: "unless-stopped",
+				wantImage:     "repo/password:stable",
+				wantPolicy:    container.RestartPolicyUnlessStopped,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				cfg := newCfg()
+				cfg.Image = tc.image
+				cfg.Version = tc.version
+				cfg.RestartPolicy = tc.restartPolicy
+				d.containerCreateFn = func(_ context.Context, cfg *container.Config, hostCfg *container.HostConfig, _ *network.NetworkingConfig, _ *ocispec.Platform, _ string) (container.CreateResponse, error) {
+					if cfg.Image != tc.wantImage {
+						t.Fatalf("image mismatch: got %q want %q", cfg.Image, tc.wantImage)
+					}
+					if hostCfg.RestartPolicy.Name != tc.wantPolicy {
+						t.Fatalf("restart policy mismatch: got %q want %q", hostCfg.RestartPolicy.Name, tc.wantPolicy)
+					}
+					return container.CreateResponse{ID: "new-container-id"}, nil
+				}
+				id, err := d.CreateContainer(ctx, cfg, "auth-token")
+				if err != nil {
+					t.Fatalf("CreateContainer returned error: %v", err)
+				}
+				if id != "new-container-id" {
+					t.Fatalf("unexpected container id: %s", id)
+				}
+			})
+		}
+	})
 }
 
 func TestNetworkManager_WithSeams(t *testing.T) {
@@ -402,6 +620,31 @@ func TestNetworkManager_WithSeams(t *testing.T) {
 		}
 		if _, err := nm.NetworkExists(ctx); err == nil {
 			t.Fatalf("expected NetworkExists error")
+		}
+	})
+
+	t.Run("nil client guards", func(t *testing.T) {
+		nm := NewNetworkManager(nil, "aegion_modules", "")
+		if _, err := nm.EnsureNetwork(ctx); err == nil || !strings.Contains(err.Error(), "docker network client is nil") {
+			t.Fatalf("expected ensure network nil-client error, got %v", err)
+		}
+		if err := nm.ConnectToNetwork(ctx, "cid", nil); err == nil || !strings.Contains(err.Error(), "docker network client is nil") {
+			t.Fatalf("expected connect nil-client error, got %v", err)
+		}
+		if err := nm.DisconnectFromNetwork(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "docker network client is nil") {
+			t.Fatalf("expected disconnect nil-client error, got %v", err)
+		}
+		if err := nm.RemoveNetwork(ctx); err == nil || !strings.Contains(err.Error(), "docker network client is nil") {
+			t.Fatalf("expected remove nil-client error, got %v", err)
+		}
+		if _, err := nm.GetNetworkInfo(ctx); err == nil || !strings.Contains(err.Error(), "docker network client is nil") {
+			t.Fatalf("expected get network info nil-client error, got %v", err)
+		}
+		if _, err := nm.NetworkExists(ctx); err == nil || !strings.Contains(err.Error(), "docker network client is nil") {
+			t.Fatalf("expected network exists nil-client error, got %v", err)
+		}
+		if _, err := nm.GetContainerIP(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "docker network client is nil") {
+			t.Fatalf("expected get container IP nil-client error, got %v", err)
 		}
 	})
 }

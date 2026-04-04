@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -385,4 +386,152 @@ func TestNewAuthMiddleware(t *testing.T) {
 	am = NewAuthMiddleware(nil, logger, true)
 	assert.NotNil(t, am)
 	assert.True(t, am.optional)
+}
+
+func TestAuthMiddleware_Middleware(t *testing.T) {
+	identityID := uuid.New()
+	sessionID := uuid.New()
+	baseSession := &session.Session{
+		ID:         sessionID,
+		IdentityID: identityID,
+		AAL:        session.AAL1,
+		Active:     true,
+		ExpiresAt:  time.Now().UTC().Add(10 * time.Minute),
+	}
+
+	t.Run("optional allows missing session", func(t *testing.T) {
+		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), true)
+		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
+			return nil, session.ErrSessionNotFound
+		}
+
+		nextCalled := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nextCalled = true
+			w.WriteHeader(http.StatusOK)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil).WithContext(withRequestID(context.Background(), "req-1"))
+		rec := httptest.NewRecorder()
+		am.Middleware(next).ServeHTTP(rec, req)
+
+		if !nextCalled || rec.Code != http.StatusOK {
+			t.Fatalf("expected optional middleware to continue, got next=%v status=%d", nextCalled, rec.Code)
+		}
+	})
+
+	t.Run("required returns auth error on missing session", func(t *testing.T) {
+		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
+			return nil, session.ErrSessionNotFound
+		}
+
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatalf("next should not be called")
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil).WithContext(withRequestID(context.Background(), "req-2"))
+		rec := httptest.NewRecorder()
+		am.Middleware(next).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected unauthorized, got %d", rec.Code)
+		}
+	})
+
+	t.Run("optional with inactive session continues", func(t *testing.T) {
+		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), true)
+		inactive := *baseSession
+		inactive.Active = false
+		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
+			return &inactive, nil
+		}
+
+		nextCalled := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			nextCalled = true
+			w.WriteHeader(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil).WithContext(withRequestID(context.Background(), "req-3"))
+		rec := httptest.NewRecorder()
+		am.Middleware(next).ServeHTTP(rec, req)
+
+		if !nextCalled || rec.Code != http.StatusNoContent {
+			t.Fatalf("expected inactive optional flow to continue, got next=%v status=%d", nextCalled, rec.Code)
+		}
+	})
+
+	t.Run("required rejects inactive session", func(t *testing.T) {
+		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		inactive := *baseSession
+		inactive.Active = false
+		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
+			return &inactive, nil
+		}
+
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatalf("next should not be called")
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil).WithContext(withRequestID(context.Background(), "req-4"))
+		rec := httptest.NewRecorder()
+		am.Middleware(next).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected unauthorized for inactive session, got %d", rec.Code)
+		}
+	})
+
+	t.Run("required rejects expired session", func(t *testing.T) {
+		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		expired := *baseSession
+		expired.ExpiresAt = time.Now().UTC().Add(-time.Minute)
+		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
+			return &expired, nil
+		}
+
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Fatalf("next should not be called")
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil).WithContext(withRequestID(context.Background(), "req-5"))
+		rec := httptest.NewRecorder()
+		am.Middleware(next).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized || rec.Header().Get("X-Aegion-Action") != "reauthenticate" {
+			t.Fatalf("expected expired-session unauthorized with reauthenticate hint, got status=%d action=%q", rec.Code, rec.Header().Get("X-Aegion-Action"))
+		}
+	})
+
+	t.Run("successful auth attaches session to context", func(t *testing.T) {
+		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
+			return baseSession, nil
+		}
+
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got := session.FromContext(r.Context())
+			if got == nil || got.ID != baseSession.ID {
+				t.Fatalf("expected session in downstream context")
+			}
+			w.WriteHeader(http.StatusAccepted)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/protected", nil).WithContext(withRequestID(context.Background(), "req-6"))
+		rec := httptest.NewRecorder()
+		am.Middleware(next).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("expected accepted status, got %d", rec.Code)
+		}
+	})
+
+	t.Run("resolveSession nil manager", func(t *testing.T) {
+		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		_, err := am.resolveSession(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			t.Fatalf("expected ErrSessionNotFound for nil manager, got %v", err)
+		}
+	})
 }

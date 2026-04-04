@@ -313,6 +313,35 @@ func TestFunctionSignatures(t *testing.T) {
 	}
 }
 
+func TestGuardRailsForEmptyKeys(t *testing.T) {
+	t.Run("Sign with empty private key panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatalf("expected panic for empty private key")
+			}
+		}()
+		_, _ = Sign(Claims{Issuer: "aegion"}, []byte{}, "ES256", "kid")
+	})
+
+	t.Run("Verify with empty public key panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatalf("expected panic for empty public key")
+			}
+		}()
+		_, _ = Verify("x.y.z", []byte{}, "ES256", VerifyOptions{})
+	})
+
+	t.Run("ToJWK with empty public key panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatalf("expected panic for empty public key")
+			}
+		}()
+		_, _ = ToJWK("ES256", "kid", []byte{})
+	})
+}
+
 func TestErrorCodeMapping(t *testing.T) {
 	// Test that our error code mappings are correct
 	// This is testing the logic in the Verify function
