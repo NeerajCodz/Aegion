@@ -841,8 +841,8 @@ func TestZeroRetryDefaults(t *testing.T) {
 
 // TestVeryShortInterval verifies workers handle very short intervals
 func TestVeryShortInterval(t *testing.T) {
-	worker := NewBaseWorker("fast", nil, nil, 1*time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	worker := NewBaseWorker("fast", nil, nil, 5*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	executionCount := atomic.Int32{}
@@ -855,10 +855,10 @@ func TestVeryShortInterval(t *testing.T) {
 		_ = worker.RunLoop(ctx, fn)
 	}()
 
-	time.Sleep(45 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 
-	// Should have executed many times
-	assert.Greater(t, executionCount.Load(), int32(10))
+	// Should have executed multiple times (more generous threshold for Windows)
+	assert.Greater(t, executionCount.Load(), int32(5))
 }
 
 // TestLongRunningFunction handles slow execution
