@@ -597,3 +597,93 @@ func BenchmarkService_GetFlowMethods(b *testing.B) {
 		service.GetFlowMethods(TypeLogin)
 	}
 }
+
+// TestValidateFlow_CompletedFlow tests that completed flows are rejected
+func TestValidateFlow_CompletedFlow(t *testing.T) {
+	store := NewMockFlowStore()
+	config := DefaultConfig()
+	service := NewService(store, config)
+
+	ctx := context.Background()
+	flow, _ := service.CreateLoginFlow(ctx, "/auth/login")
+
+	// Complete the flow
+	err := service.CompleteFlow(ctx, flow.ID)
+	require.NoError(t, err)
+
+	// Now try to validate - should fail
+	_, err = service.ValidateFlow(ctx, flow.ID, flow.CSRFToken)
+	assert.Equal(t, ErrFlowCompleted, err)
+}
+
+// TestValidateFlow_FailedFlow tests that failed flows are rejected
+func TestValidateFlow_FailedFlow(t *testing.T) {
+	store := NewMockFlowStore()
+	config := DefaultConfig()
+	service := NewService(store, config)
+
+	ctx := context.Background()
+	flow, _ := service.CreateLoginFlow(ctx, "/auth/login")
+
+	// Fail the flow
+	err := service.FailFlow(ctx, flow.ID, "test failure")
+	require.NoError(t, err)
+
+	// Now try to validate - should fail
+	_, err = service.ValidateFlow(ctx, flow.ID, flow.CSRFToken)
+	assert.Equal(t, ErrFlowFailed, err)
+}
+
+// TestValidateFlow_ExpiredState tests that flows with expired state are rejected
+func TestValidateFlow_ExpiredState(t *testing.T) {
+	store := NewMockFlowStore()
+	config := DefaultConfig()
+	service := NewService(store, config)
+
+	ctx := context.Background()
+	flow, _ := service.CreateLoginFlow(ctx, "/auth/login")
+
+	// Manually set state to expired
+	flow.State = StateExpired
+	_ = store.Update(ctx, flow)
+
+	// Now try to validate - should fail
+	_, err := service.ValidateFlow(ctx, flow.ID, flow.CSRFToken)
+	assert.Equal(t, ErrFlowExpired, err)
+}
+
+// TestValidateFlowByCSRF_CompletedFlow tests that completed flows are rejected
+func TestValidateFlowByCSRF_CompletedFlow(t *testing.T) {
+	store := NewMockFlowStore()
+	config := DefaultConfig()
+	service := NewService(store, config)
+
+	ctx := context.Background()
+	flow, _ := service.CreateLoginFlow(ctx, "/auth/login")
+
+	// Complete the flow
+	err := service.CompleteFlow(ctx, flow.ID)
+	require.NoError(t, err)
+
+	// Now try to validate - should fail
+	_, err = service.ValidateFlowByCSRF(ctx, flow.CSRFToken)
+	assert.Equal(t, ErrFlowCompleted, err)
+}
+
+// TestValidateFlowByCSRF_FailedFlow tests that failed flows are rejected
+func TestValidateFlowByCSRF_FailedFlow(t *testing.T) {
+	store := NewMockFlowStore()
+	config := DefaultConfig()
+	service := NewService(store, config)
+
+	ctx := context.Background()
+	flow, _ := service.CreateLoginFlow(ctx, "/auth/login")
+
+	// Fail the flow
+	err := service.FailFlow(ctx, flow.ID, "test failure")
+	require.NoError(t, err)
+
+	// Now try to validate - should fail
+	_, err = service.ValidateFlowByCSRF(ctx, flow.CSRFToken)
+	assert.Equal(t, ErrFlowFailed, err)
+}
