@@ -475,6 +475,62 @@ func TestResetPassword(t *testing.T) {
 		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
 		assert.ErrorIs(t, err, ErrPasswordReused)
 	})
+
+	t.Run("validate password error", func(t *testing.T) {
+		mem2 := newMemoryStore()
+		mem2.seedCredential(identityID, "user@example.com", "old-hash")
+		s := New(mem2, &mockHasher{}, defaultConfig())
+		err := s.ResetPassword(context.Background(), identityID, "short")
+		assert.ErrorIs(t, err, ErrPasswordTooShort)
+	})
+
+	t.Run("hash error", func(t *testing.T) {
+		mem3 := newMemoryStore()
+		mem3.seedCredential(identityID, "user@example.com", "old-hash")
+		s := New(mem3, &mockHasher{
+			hashFn: func(password string) (string, error) {
+				return "", errors.New("hash failed")
+			},
+			verifyFn: func(password, hash string) (bool, error) {
+				return false, nil
+			},
+		}, defaultConfig())
+		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to hash password")
+	})
+
+	t.Run("add to history error", func(t *testing.T) {
+		mem4 := newMemoryStore()
+		mem4.seedCredential(identityID, "user@example.com", "old-hash")
+		mem4.addHistoryErr = errors.New("db write failed")
+		s := New(mem4, &mockHasher{
+			hashFn: func(password string) (string, error) { return "new-hash", nil },
+			verifyFn: func(password, hash string) (bool, error) { return false, nil },
+		}, defaultConfig())
+		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
+		assert.EqualError(t, err, "db write failed")
+	})
+
+	t.Run("update error", func(t *testing.T) {
+		mem5 := newMemoryStore()
+		mem5.seedCredential(identityID, "user@example.com", "old-hash")
+		mem5.updateErr = errors.New("update failed")
+		s := New(mem5, &mockHasher{
+			hashFn: func(password string) (string, error) { return "new-hash", nil },
+			verifyFn: func(password, hash string) (bool, error) { return false, nil },
+		}, defaultConfig())
+		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
+		assert.EqualError(t, err, "update failed")
+	})
+
+	t.Run("get by identity error", func(t *testing.T) {
+		mem6 := newMemoryStore()
+		mem6.getByIDErr = errors.New("db connection lost")
+		s := New(mem6, &mockHasher{}, defaultConfig())
+		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
+		assert.EqualError(t, err, "db connection lost")
+	})
 }
 
 func TestValidatePasswordAndHelpers(t *testing.T) {
