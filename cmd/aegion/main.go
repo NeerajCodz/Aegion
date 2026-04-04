@@ -6,6 +6,7 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -35,6 +36,36 @@ type flags struct {
 	enableWorkers  bool
 }
 
+type runtimeServer interface {
+	Handler() http.Handler
+}
+
+type lifecycleManager interface {
+	Shutdown(ctx context.Context) error
+}
+
+type mainDeps struct {
+	stdout          io.Writer
+	stderr          io.Writer
+	loadConfig      func(path string) (*config.Config, error)
+	validateConfig  func(cfg *config.Config) error
+	newLogger       func(cfg logger.Config) *logger.Logger
+	connectDB       func(ctx context.Context, cfg database.Config) (*database.DB, error)
+	newMigrator     func(db *database.DB) migrator
+	newWorkerMgr    func(log *logger.Logger, db *database.DB) *workers.Manager
+	newServer       func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error)
+	newHTTPServer   func(cfg *config.Config, handler http.Handler) *http.Server
+	newLifecycle    func(cfg *LifecycleConfig) lifecycleManager
+	newSignalChan   func() chan os.Signal
+	notifySignals   func(c chan<- os.Signal, sig ...os.Signal)
+	stopSignals     func(c chan<- os.Signal)
+	startHTTPServer func(cfg *config.Config, log *logger.Logger, httpServer *http.Server)
+}
+
+type migrator interface {
+	Migrate(ctx context.Context) error
+}
+
 func parseFlags() *flags {
 	f := &flags{}
 	flag.StringVar(&f.configPath, "config", "aegion.yaml", "Path to configuration file")
@@ -46,29 +77,142 @@ func parseFlags() *flags {
 	return f
 }
 
+func parseFlagsWithArgs(args []string) (*flags, error) {
+	fs := flag.NewFlagSet("aegion", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	f := &flags{}
+	fs.StringVar(&f.configPath, "config", "aegion.yaml", "Path to configuration file")
+	fs.BoolVar(&f.migrateOnly, "migrate", false, "Run migrations and exit")
+	fs.BoolVar(&f.showVersion, "version", false, "Show version and exit")
+	fs.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
+	fs.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+type liveMigrator struct {
+	migrator *database.Migrator
+}
+
+func (m *liveMigrator) Migrate(ctx context.Context) error {
+	return m.migrator.Migrate(ctx)
+}
+
+type liveServer struct {
+	server *Server
+}
+
+func (s *liveServer) Handler() http.Handler {
+	return s.server.Handler()
+}
+
+type liveLifecycle struct {
+	lifecycle *Lifecycle
+}
+
+func (l *liveLifecycle) Shutdown(ctx context.Context) error {
+	return l.lifecycle.Shutdown(ctx)
+}
+
+func defaultMainDeps() mainDeps {
+	return mainDeps{
+		stdout: os.Stdout,
+		stderr: os.Stderr,
+		loadConfig: func(path string) (*config.Config, error) {
+			return config.Load(path)
+		},
+		validateConfig: func(cfg *config.Config) error {
+			return cfg.Validate()
+		},
+		newLogger: logger.New,
+		connectDB: database.Connect,
+		newMigrator: func(db *database.DB) migrator {
+			return &liveMigrator{migrator: database.NewMigrator(db, migrations, "migrations")}
+		},
+		newWorkerMgr: func(log *logger.Logger, db *database.DB) *workers.Manager {
+			return workers.NewManager(workers.ManagerConfig{
+				DB:  db.Pool,
+				Log: log,
+			})
+		},
+		newServer: func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error) {
+			s, err := NewServer(ctx, cfg)
+			if err != nil {
+				return nil, err
+			}
+			return &liveServer{server: s}, nil
+		},
+		newHTTPServer: func(cfg *config.Config, handler http.Handler) *http.Server {
+			return &http.Server{
+				Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+				Handler:      handler,
+				ReadTimeout:  cfg.Server.ReadTimeout.Duration(),
+				WriteTimeout: cfg.Server.WriteTimeout.Duration(),
+				IdleTimeout:  cfg.Server.IdleTimeout.Duration(),
+			}
+		},
+		newLifecycle: func(cfg *LifecycleConfig) lifecycleManager {
+			return &liveLifecycle{lifecycle: NewLifecycle(cfg)}
+		},
+		newSignalChan: func() chan os.Signal {
+			return make(chan os.Signal, 1)
+		},
+		notifySignals: signal.Notify,
+		stopSignals:   signal.Stop,
+		startHTTPServer: func(cfg *config.Config, log *logger.Logger, httpServer *http.Server) {
+			go func() {
+				log.Info().
+					Str("addr", httpServer.Addr).
+					Msg("HTTP server listening")
+
+				var err error
+				if cfg.Server.TLS.Enabled {
+					err = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+				} else {
+					err = httpServer.ListenAndServe()
+				}
+				if err != nil && err != http.ErrServerClosed {
+					log.Fatal().Err(err).Msg("HTTP server failed")
+				}
+			}()
+		},
+	}
+}
+
 func main() {
-	f := parseFlags()
+	if code := run(os.Args[1:], defaultMainDeps()); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func run(args []string, deps mainDeps) int {
+	f, err := parseFlagsWithArgs(args)
+	if err != nil {
+		fmt.Fprintf(deps.stderr, "Failed to parse flags: %v\n", err)
+		return 1
+	}
 
 	if f.showVersion {
-		fmt.Printf("Aegion %s (built %s)\n", version, buildTime)
-		os.Exit(0)
+		fmt.Fprintf(deps.stdout, "Aegion %s (built %s)\n", version, buildTime)
+		return 0
 	}
 
-	// Load configuration
-	cfg, err := config.Load(f.configPath)
+	cfg, err := deps.loadConfig(f.configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(deps.stderr, "Failed to load configuration: %v\n", err)
+		return 1
 	}
 
-	// Validate configuration
-	if err := cfg.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
-		os.Exit(1)
+	if err := deps.validateConfig(cfg); err != nil {
+		fmt.Fprintf(deps.stderr, "Invalid configuration: %v\n", err)
+		return 1
 	}
 
-	// Initialize logger
-	log := logger.New(logger.Config{
+	log := deps.newLogger(logger.Config{
 		Level:  cfg.Log.Level,
 		Format: cfg.Log.Format,
 	})
@@ -80,12 +224,10 @@ func main() {
 		Bool("admin_bootstrap", f.adminBootstrap).
 		Msg("Starting Aegion")
 
-	// Create context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Connect to database
-	db, err := database.Connect(ctx, database.Config{
+	db, err := deps.connectDB(ctx, database.Config{
 		URL:             cfg.Database.URL,
 		MaxOpenConns:    int32(cfg.Database.MaxOpenConns),
 		MaxIdleConns:    int32(cfg.Database.MaxIdleConns),
@@ -93,35 +235,31 @@ func main() {
 		ConnMaxIdleTime: cfg.Database.ConnMaxIdleTime.Duration(),
 	})
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect to database")
+		fmt.Fprintf(deps.stderr, "Failed to connect to database: %v\n", err)
+		return 1
 	}
 	defer db.Close()
 	log.Info().Msg("Connected to database")
 
-	// Run migrations
-	migrator := database.NewMigrator(db, migrations, "migrations")
+	migrator := deps.newMigrator(db)
 	if err := migrator.Migrate(ctx); err != nil {
-		log.Fatal().Err(err).Msg("Failed to run migrations")
+		fmt.Fprintf(deps.stderr, "Failed to run migrations: %v\n", err)
+		return 1
 	}
 	log.Info().Msg("Migrations complete")
 
 	if f.migrateOnly || cfg.Database.MigrateOnly {
 		log.Info().Msg("Migrate-only mode, exiting")
-		return
+		return 0
 	}
 
-	// Initialize worker manager
 	var workerMgr *workers.Manager
 	if f.enableWorkers {
-		workerMgr = workers.NewManager(workers.ManagerConfig{
-			DB:  db.Pool,
-			Log: log,
-		})
+		workerMgr = deps.newWorkerMgr(log, db)
 		log.Info().Msg("Worker manager initialized")
 	}
 
-	// Initialize server with worker manager
-	server, err := NewServer(ctx, &ServerConfig{
+	server, err := deps.newServer(ctx, &ServerConfig{
 		Config:         cfg,
 		DB:             db,
 		Log:            log,
@@ -129,64 +267,49 @@ func main() {
 		AdminBootstrap: f.adminBootstrap,
 	})
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to initialize server")
+		fmt.Fprintf(deps.stderr, "Failed to initialize server: %v\n", err)
+		return 1
 	}
 
-	// Start workers if enabled
 	if workerMgr != nil {
 		workerMgr.Start(ctx)
 		log.Info().Msg("Background workers started")
 	}
 
-	// Start HTTP server
-	httpServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      server.Handler(),
-		ReadTimeout:  cfg.Server.ReadTimeout.Duration(),
-		WriteTimeout: cfg.Server.WriteTimeout.Duration(),
-		IdleTimeout:  cfg.Server.IdleTimeout.Duration(),
-	}
+	httpServer := deps.newHTTPServer(cfg, server.Handler())
+	deps.startHTTPServer(cfg, log, httpServer)
 
-	// Start server in goroutine
-	go func() {
-		log.Info().
-			Str("addr", httpServer.Addr).
-			Msg("HTTP server listening")
-
-		var err error
-		if cfg.Server.TLS.Enabled {
-			err = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
-		} else {
-			err = httpServer.ListenAndServe()
-		}
-		if err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("HTTP server failed")
-		}
-	}()
-
-	// Setup lifecycle manager
-	lifecycle := NewLifecycle(&LifecycleConfig{
+	lifecycle := deps.newLifecycle(&LifecycleConfig{
 		Log:           log,
-		Server:        server,
+		Server:        asConcreteServer(server),
 		HTTPServer:    httpServer,
 		WorkerManager: workerMgr,
 	})
 
-	// Wait for interrupt signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	sigCh := deps.newSignalChan()
+	deps.notifySignals(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer deps.stopSignals(sigCh)
 	sig := <-sigCh
 
 	log.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
 
-	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := lifecycle.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")
-		os.Exit(1)
+		fmt.Fprintf(deps.stderr, "Error during shutdown: %v\n", err)
+		return 1
 	}
 
 	log.Info().Msg("Shutdown complete")
+	return 0
+}
+
+func asConcreteServer(s runtimeServer) *Server {
+	if live, ok := s.(*liveServer); ok {
+		return live.server
+	}
+	// Test doubles can still drive lifecycle with a minimal shell server.
+	return &Server{}
 }

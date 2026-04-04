@@ -1,9 +1,12 @@
 package security
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 )
 
 func TestCSRFProtectionSetsCookie(t *testing.T) {
@@ -376,4 +379,126 @@ func containsLoop(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestHeadersProductionHSTS(t *testing.T) {
+	originalEnv := os.Getenv("AEGION_ENV")
+	t.Cleanup(func() {
+		_ = os.Setenv("AEGION_ENV", originalEnv)
+	})
+	_ = os.Setenv("AEGION_ENV", "production")
+
+	handler := Headers(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Strict-Transport-Security"); got == "" {
+		t.Fatalf("expected HSTS header in production mode")
+	}
+}
+
+func TestValidateCSRFTokenBranches(t *testing.T) {
+	reqNoCookie := httptest.NewRequest(http.MethodPost, "/", nil)
+	if validateCSRFToken(reqNoCookie, "token") {
+		t.Fatalf("expected false when csrf cookie missing")
+	}
+
+	reqMismatch := httptest.NewRequest(http.MethodPost, "/", nil)
+	reqMismatch.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "abc"})
+	if validateCSRFToken(reqMismatch, "abcd") {
+		t.Fatalf("expected false for length mismatch")
+	}
+
+	reqBad := httptest.NewRequest(http.MethodPost, "/", nil)
+	reqBad.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "abc"})
+	if validateCSRFToken(reqBad, "def") {
+		t.Fatalf("expected false for token mismatch")
+	}
+}
+
+func TestEnsureCSRFCookieAndGenerateToken(t *testing.T) {
+	reqWithCookie := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqWithCookie.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "preset"})
+	rec := httptest.NewRecorder()
+	token, err := ensureCSRFCookie(rec, reqWithCookie)
+	if err != nil {
+		t.Fatalf("expected nil err, got %v", err)
+	}
+	if token != "preset" {
+		t.Fatalf("expected existing cookie token to be reused")
+	}
+
+	rec2 := httptest.NewRecorder()
+	reqNoCookie := httptest.NewRequest(http.MethodGet, "/", nil)
+	token2, err := ensureCSRFCookie(rec2, reqNoCookie)
+	if err != nil {
+		t.Fatalf("expected nil err, got %v", err)
+	}
+	if token2 == "" {
+		t.Fatalf("expected generated token")
+	}
+	if len(token2) < 40 {
+		t.Fatalf("expected reasonably long CSRF token")
+	}
+
+	token3, err := generateCSRFToken()
+	if err != nil || token3 == "" {
+		t.Fatalf("generateCSRFToken should return non-empty token and nil error")
+	}
+}
+
+func TestTokenBucketRefillAndLimiterHelpers(t *testing.T) {
+	bucket := newTokenBucket(1, 100)
+	if !bucket.take() {
+		t.Fatalf("first token take should pass")
+	}
+	if bucket.take() {
+		t.Fatalf("second immediate token take should fail with empty bucket")
+	}
+	bucket.mu.Lock()
+	bucket.lastFill = time.Now().Add(-2 * time.Second)
+	bucket.mu.Unlock()
+	if !bucket.take() {
+		t.Fatalf("token bucket should refill over elapsed time")
+	}
+
+	limiter := newRateLimiter(1, 2)
+	if !limiter.allow("user-1") {
+		t.Fatalf("first allow should pass")
+	}
+	if !limiter.allow("user-1") {
+		t.Fatalf("second allow should pass up to burst")
+	}
+	if limiter.allow("user-1") {
+		t.Fatalf("third allow should fail when burst exhausted")
+	}
+}
+
+func TestRateLimitAndClientIPExtraBranches(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Real-IP", "10.10.0.1")
+	if key := rateLimitKey(req); key != "ip:10.10.0.1" {
+		t.Fatalf("unexpected rate limit key: %s", key)
+	}
+
+	reqIPFallback := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqIPFallback.RemoteAddr = "invalid-remote-addr"
+	if got := getClientIP(reqIPFallback); got != "invalid-remote-addr" {
+		t.Fatalf("expected fallback to raw remote addr, got %s", got)
+	}
+}
+
+func TestRequestIDContextAndSecurityAuditWarnBranch(t *testing.T) {
+	ctx := setRequestIDInContext(context.Background(), "req-ctx")
+	if v, ok := ctx.Value(contextKeyRequestID).(string); !ok || v != "req-ctx" {
+		t.Fatalf("expected request id in context")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin", nil)
+	req.Header.Set("X-Request-ID", "req-1")
+	logSecurityEvent(req, http.StatusForbidden)
 }

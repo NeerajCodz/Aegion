@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,11 @@ import (
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
 )
+
+type LogConfig struct {
+	Level  string `yaml:"level"`
+	Format string `yaml:"format"`
+}
 
 type Config struct {
 	Database struct {
@@ -44,45 +50,119 @@ type Config struct {
 		ServiceURL string `yaml:"service_url"`
 		APIKey     string `yaml:"api_key"`
 	} `yaml:"core"`
-	Log struct {
-		Level  string `yaml:"level"`
-		Format string `yaml:"format"`
-	} `yaml:"log"`
+	Log LogConfig `yaml:"log"`
+}
+
+type mainFlags struct {
+	configPath string
+	version    bool
+	migrate    bool
+}
+
+type runtimeServer interface {
+	registerWithCore(ctx context.Context) error
+	shutdown(ctx context.Context) error
+}
+
+type liveRuntimeServer struct {
+	server     *Server
+	httpServer *http.Server
+}
+
+func (s *liveRuntimeServer) registerWithCore(ctx context.Context) error {
+	return s.server.registerWithCore(ctx)
+}
+
+func (s *liveRuntimeServer) shutdown(ctx context.Context) error {
+	return s.httpServer.Shutdown(ctx)
+}
+
+type mainDeps struct {
+	stdout         io.Writer
+	loadConfig     func(path string) (*Config, error)
+	setupLogger    func(logConfig LogConfig)
+	parseDBConfig  func(connString string) (*pgxpool.Config, error)
+	newDBPool      func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error)
+	pingDB         func(ctx context.Context, db *pgxpool.Pool) error
+	closeDB        func(db *pgxpool.Pool)
+	runMigrations  func(ctx context.Context, db *pgxpool.Pool) error
+	startServer    func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error)
+	newSignalChan  func() chan os.Signal
+	notifySignals  func(c chan<- os.Signal, sig ...os.Signal)
+	stopSignalChan func(c chan<- os.Signal)
+}
+
+func defaultMainDeps() mainDeps {
+	return mainDeps{
+		stdout:        os.Stdout,
+		loadConfig:    loadConfig,
+		setupLogger:   setupLogger,
+		parseDBConfig: pgxpool.ParseConfig,
+		newDBPool:     pgxpool.NewWithConfig,
+		pingDB: func(ctx context.Context, db *pgxpool.Pool) error {
+			return db.Ping(ctx)
+		},
+		closeDB: func(db *pgxpool.Pool) {
+			if db != nil {
+				db.Close()
+			}
+		},
+		runMigrations: runMigrations,
+		startServer:   startServerRuntime,
+		newSignalChan: func() chan os.Signal {
+			return make(chan os.Signal, 1)
+		},
+		notifySignals:  signal.Notify,
+		stopSignalChan: signal.Stop,
+	}
 }
 
 func main() {
-	// Parse command line flags
-	var (
-		configPath = flag.String("config", getEnv("AEGION_CONFIG_PATH", "admin.yaml"), "Configuration file path")
-		version    = flag.Bool("version", false, "Show version")
-		migrate    = flag.Bool("migrate", false, "Run migrations only")
-	)
-	flag.Parse()
-
-	if *version {
-		fmt.Println("Aegion Admin Module v1.0.0")
-		return
+	if err := run(os.Args[1:], defaultMainDeps()); err != nil {
+		log.Fatal().Err(err).Msg("Admin module startup failed")
 	}
+}
 
-	// Load configuration
-	cfg, err := loadConfig(*configPath)
+func parseMainFlags(args []string, envLookup func(string, string) string) (*mainFlags, error) {
+	fs := flag.NewFlagSet("aegion-admin", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	f := &mainFlags{}
+	fs.StringVar(&f.configPath, "config", envLookup("AEGION_CONFIG_PATH", "admin.yaml"), "Configuration file path")
+	fs.BoolVar(&f.version, "version", false, "Show version")
+	fs.BoolVar(&f.migrate, "migrate", false, "Run migrations only")
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func run(args []string, deps mainDeps) error {
+	flags, err := parseMainFlags(args, getEnv)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load configuration")
+		return fmt.Errorf("failed to parse flags: %w", err)
 	}
 
-	// Setup logger
-	setupLogger(cfg.Log)
+	if flags.version {
+		fmt.Fprintln(deps.stdout, "Aegion Admin Module v1.0.0")
+		return nil
+	}
 
-	log.Info().Str("config", *configPath).Msg("Starting Aegion Admin Module")
+	cfg, err := deps.loadConfig(flags.configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
 
-	// Context with cancellation
+	deps.setupLogger(cfg.Log)
+	log.Info().Str("config", flags.configPath).Msg("Starting Aegion Admin Module")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Database connection
-	dbConfig, err := pgxpool.ParseConfig(cfg.Database.URL)
+	dbConfig, err := deps.parseDBConfig(cfg.Database.URL)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to parse database URL")
+		return fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
 	dbConfig.MaxConns = cfg.Database.MaxConns
@@ -90,47 +170,70 @@ func main() {
 	if cfg.Database.MaxIdleTime != "" {
 		duration, err := time.ParseDuration(cfg.Database.MaxIdleTime)
 		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to parse max_idle_time")
+			return fmt.Errorf("failed to parse max_idle_time: %w", err)
 		}
 		dbConfig.MaxConnIdleTime = duration
 	}
 
-	db, err := pgxpool.NewWithConfig(ctx, dbConfig)
+	db, err := deps.newDBPool(ctx, dbConfig)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect to database")
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer db.Close()
+	defer deps.closeDB(db)
 
-	// Test database connection
-	if err := db.Ping(ctx); err != nil {
-		log.Fatal().Err(err).Msg("Failed to ping database")
+	if err := deps.pingDB(ctx, db); err != nil {
+		return fmt.Errorf("failed to ping database: %w", err)
 	}
 	log.Info().Msg("Database connected successfully")
 
-	// Run migrations if requested
-	if *migrate {
-		if err := runMigrations(ctx, db); err != nil {
-			log.Fatal().Err(err).Msg("Failed to run migrations")
+	if flags.migrate {
+		if err := deps.runMigrations(ctx, db); err != nil {
+			return fmt.Errorf("failed to run migrations: %w", err)
 		}
 		log.Info().Msg("Migrations completed")
-		return
+		return nil
 	}
 
-	// Initialize service layer
+	serverRuntime, err := deps.startServer(cfg, db)
+	if err != nil {
+		return fmt.Errorf("failed to initialize server: %w", err)
+	}
+
+	if err := serverRuntime.registerWithCore(ctx); err != nil {
+		log.Error().Err(err).Msg("Failed to register with core service")
+	}
+
+	sigCh := deps.newSignalChan()
+	deps.notifySignals(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer deps.stopSignalChan(sigCh)
+
+	sig := <-sigCh
+	log.Info().Str("signal", sig.String()).Msg("Shutting down gracefully...")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := serverRuntime.shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("server shutdown error: %w", err)
+	}
+
+	log.Info().Msg("Server stopped")
+	return nil
+}
+
+func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 	adminStore := store.New(db)
 	adminService := service.New(adminStore, service.Config{
 		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
 	adminHandler := handler.New(adminService)
 
-	// Setup server
 	server := &Server{
 		Config:  cfg,
 		DB:      db,
 		Handler: adminHandler,
 	}
 
-	// Setup HTTP server
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Address, cfg.Server.Port),
 		Handler:      server.setupRouter(),
@@ -139,7 +242,6 @@ func main() {
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 
-	// Start server in goroutine
 	go func() {
 		log.Info().
 			Str("address", httpServer.Addr).
@@ -150,27 +252,10 @@ func main() {
 		}
 	}()
 
-	// Register with core service
-	if err := server.registerWithCore(ctx); err != nil {
-		log.Error().Err(err).Msg("Failed to register with core service")
-	}
-
-	// Wait for interrupt signal
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-
-	<-c
-	log.Info().Msg("Shutting down gracefully...")
-
-	// Shutdown with timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("Server shutdown error")
-	}
-
-	log.Info().Msg("Server stopped")
+	return &liveRuntimeServer{
+		server:     server,
+		httpServer: httpServer,
+	}, nil
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -224,10 +309,7 @@ func loadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func setupLogger(logConfig struct {
-	Level  string `yaml:"level"`
-	Format string `yaml:"format"`
-}) {
+func setupLogger(logConfig LogConfig) {
 	// Set log level
 	level := zerolog.InfoLevel
 	if logConfig.Level != "" {

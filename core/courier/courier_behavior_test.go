@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"net/smtp"
+	"strings"
 	"testing"
 	"time"
 
@@ -360,4 +364,191 @@ func TestCourierDefaults_DBUnavailableSentinel(t *testing.T) {
 	if _, err := c.queryRows(context.Background(), "select 1"); !errors.Is(err, errCourierDBUnavailable) {
 		t.Fatalf("expected errCourierDBUnavailable from queryRows, got %v", err)
 	}
+}
+
+type stubSMTPServer struct {
+	listener net.Listener
+	messages chan string
+}
+
+func startStubSMTPServer(t *testing.T) *stubSMTPServer {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen for smtp stub: %v", err)
+	}
+	s := &stubSMTPServer{
+		listener: ln,
+		messages: make(chan string, 4),
+	}
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go handleSMTPConn(conn, s.messages)
+		}
+	}()
+	return s
+}
+
+func handleSMTPConn(conn net.Conn, out chan<- string) {
+	defer conn.Close()
+	_, _ = conn.Write([]byte("220 localhost Simple SMTP\r\n"))
+	buf := make([]byte, 4096)
+	inData := false
+	var payload string
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return
+		}
+		chunk := string(buf[:n])
+		lines := splitCRLF(chunk)
+		for _, line := range lines {
+			if line == "" {
+				continue
+			}
+			if inData {
+				if line == "." {
+					inData = false
+					select {
+					case out <- payload:
+					default:
+					}
+					payload = ""
+					_, _ = conn.Write([]byte("250 Ok\r\n"))
+					continue
+				}
+				payload += line + "\n"
+				continue
+			}
+			switch {
+			case line == "QUIT":
+				_, _ = conn.Write([]byte("221 Bye\r\n"))
+				return
+			case line == "DATA":
+				inData = true
+				_, _ = conn.Write([]byte("354 End data with <CR><LF>.<CR><LF>\r\n"))
+			case line == "RSET" || line == "NOOP" || len(line) >= 4 && (line[:4] == "EHLO" || line[:4] == "HELO" || line[:4] == "MAIL" || line[:4] == "RCPT"):
+				_, _ = conn.Write([]byte("250 Ok\r\n"))
+			default:
+				_, _ = conn.Write([]byte("250 Ok\r\n"))
+			}
+		}
+	}
+}
+
+func splitCRLF(s string) []string {
+	out := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			line := s[start:i]
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
+			out = append(out, line)
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		line := s[start:]
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func TestSendEmailLiveSMTP(t *testing.T) {
+	smtpStub := startStubSMTPServer(t)
+	defer smtpStub.listener.Close()
+
+	addr := smtpStub.listener.Addr().(*net.TCPAddr)
+	c := New(Config{
+		SMTP: SMTPConfig{
+			Host:        "127.0.0.1",
+			Port:        addr.Port,
+			FromAddress: "noreply@example.com",
+			FromName:    "Aegion",
+			AuthEnabled: false,
+		},
+		MaxRetries: 3,
+	})
+
+	err := c.sendEmail("user@example.com", "Hello", "<p>Body</p>")
+	if err != nil {
+		t.Fatalf("expected smtp send to succeed, got %v", err)
+	}
+
+	select {
+	case msg := <-smtpStub.messages:
+		if msg == "" {
+			t.Fatalf("expected smtp payload")
+		}
+		if !strings.Contains(msg, "Subject: Hello") {
+			t.Fatalf("expected subject in smtp payload: %s", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for smtp payload")
+	}
+}
+
+func TestSendEmailFailureBranch(t *testing.T) {
+	c := New(Config{
+		SMTP: SMTPConfig{
+			Host:        "127.0.0.1",
+			Port:        1,
+			FromAddress: "noreply@example.com",
+			FromName:    "Aegion",
+			AuthEnabled: false,
+		},
+		MaxRetries: 3,
+	})
+	if err := c.sendEmail("user@example.com", "Subj", "Body"); err == nil {
+		t.Fatalf("expected sendEmail failure on invalid smtp endpoint")
+	}
+}
+
+func TestQueueEmail_DBUnavailableViaMethods(t *testing.T) {
+	c := New(Config{})
+	if _, err := c.QueueEmail(context.Background(), "user@example.com", "s", "b"); !errors.Is(err, errCourierDBUnavailable) {
+		t.Fatalf("expected db unavailable error from QueueEmail, got %v", err)
+	}
+}
+
+func TestCancelAndCleanupDBErrorBranches(t *testing.T) {
+	c := newTestCourier(3)
+	c.execStmt = func(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
+		return pgconn.CommandTag{}, errors.New("db down")
+	}
+	if err := c.Cancel(context.Background(), uuid.New()); err == nil || err.Error() != "db down" {
+		t.Fatalf("expected db error from Cancel, got %v", err)
+	}
+	if _, err := c.Cleanup(context.Background(), time.Hour); err == nil || err.Error() != "db down" {
+		t.Fatalf("expected db error from Cleanup, got %v", err)
+	}
+}
+
+func TestCourierNewDefaultsAndSMTPAuthConfig(t *testing.T) {
+	c := New(Config{
+		SMTP: SMTPConfig{
+			Host:        "smtp.example.com",
+			Port:        587,
+			FromAddress: "noreply@example.com",
+			FromName:    "Aegion",
+		},
+		MaxRetries: 0,
+	})
+	if c.maxRetries != 3 {
+		t.Fatalf("expected default maxRetries to be 3, got %d", c.maxRetries)
+	}
+	addr := fmt.Sprintf("%s:%d", c.smtp.Host, c.smtp.Port)
+	if addr != "smtp.example.com:587" {
+		t.Fatalf("unexpected smtp addr: %s", addr)
+	}
+	_ = smtp.PlainAuth("", "u", "p", "smtp.example.com")
 }

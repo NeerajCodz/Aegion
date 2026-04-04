@@ -2,11 +2,14 @@ package observability
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/sdk/resource"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -200,4 +203,114 @@ func TestProvider_ShutdownTimeout(t *testing.T) {
 	err = provider.Shutdown(ctx)
 	// Should complete even with short timeout since no components are enabled
 	assert.NoError(t, err)
+}
+
+func TestProviderInitLoggingAndShutdownError(t *testing.T) {
+	t.Run("init logging invalid endpoint fails", func(t *testing.T) {
+		p := &Provider{
+			config: &Config{
+				ServiceName: "aegion",
+				LogsEndpoint: "://bad-endpoint",
+				Insecure: true,
+			},
+			resource: resource.Empty(),
+		}
+		err := p.initLogging(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create log exporter")
+	})
+
+	t.Run("new provider with logs enabled propagates init failure", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.EnableTraces = false
+		cfg.EnableMetrics = false
+		cfg.EnableLogs = true
+		cfg.LogsEndpoint = "://bad-endpoint"
+		_, err := NewProvider(context.Background(), cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to initialize logging")
+	})
+
+	t.Run("shutdown returns last error", func(t *testing.T) {
+		p := &Provider{
+			shutdownFuncs: []func(context.Context) error{
+				func(context.Context) error { return errors.New("first") },
+				func(context.Context) error { return nil },
+				func(context.Context) error { return errors.New("last") },
+			},
+		}
+		err := p.Shutdown(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, "last", err.Error())
+	})
+}
+
+func TestProviderNewProviderErrorPaths(t *testing.T) {
+	t.Run("metrics init error triggers cleanup", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.EnableTraces = false
+		cfg.EnableMetrics = true
+		cfg.EnableLogs = false
+		cfg.MetricsEndpoint = "://bad-endpoint"
+		_, err := NewProvider(context.Background(), cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to initialize metrics")
+	})
+
+	t.Run("trace init error returned", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.EnableTraces = true
+		cfg.EnableMetrics = false
+		cfg.EnableLogs = false
+		cfg.TracesEndpoint = "://bad-endpoint"
+		provider, err := NewProvider(context.Background(), cfg)
+		if err != nil {
+			assert.Contains(t, err.Error(), "failed to initialize tracing")
+			return
+		}
+		require.NotNil(t, provider)
+		assert.True(t, provider.IsTracingEnabled())
+		assert.NoError(t, provider.Shutdown(context.Background()))
+	})
+}
+
+func TestProviderInitMetricsWithHeadersBranch(t *testing.T) {
+	p := &Provider{
+		config: &Config{
+			ServiceName:         "aegion",
+			ServiceVersion:      "v1.0.0",
+			MetricsEndpoint:     "://bad-endpoint",
+			Headers:             map[string]string{"x-test": "1"},
+			MetricExportInterval: time.Second,
+			Insecure:            true,
+		},
+		resource: resource.Empty(),
+	}
+	err := p.initMetrics(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create metric exporter")
+}
+
+func TestProviderCreateResourceNeverFails(t *testing.T) {
+	p := &Provider{
+		config: &Config{
+			ServiceName:    "svc",
+			ServiceVersion: "v1",
+			Environment:    "dev",
+			InstanceID:     "inst-1",
+		},
+	}
+	res, err := p.createResource()
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	attrs := res.Attributes()
+	require.NotEmpty(t, attrs)
+	var found bool
+	for _, a := range attrs {
+		if fmt.Sprint(a.Key) == "service.name" && a.Value.AsString() == "svc" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
 }

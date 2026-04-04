@@ -3,6 +3,8 @@ package scim
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1415,4 +1417,267 @@ func TestHandlerDeleteUserServerError(t *testing.T) {
 	handler.DeleteUser(rr, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+}
+
+func TestAuthMiddlewareValidTokenSuccess(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	handler := NewHandler(service)
+
+	tokenString := "aegion_scim_test1234abcdef9876543210"
+	prefix := tokenString[12:24]
+	hash := sha256.Sum256([]byte(tokenString))
+	tokenHash := base64.StdEncoding.EncodeToString(hash[:])
+
+	token := &SCIMToken{
+		ID:          uuid.New(),
+		Name:        "test-token",
+		TokenHash:   tokenHash,
+		Prefix:      prefix,
+		Permissions: []string{"users:read"},
+		Active:      true,
+	}
+
+	mockStore.On("GetSCIMTokenByPrefix", mock.Anything, prefix).Return(token, nil)
+	mockStore.On("UpdateSCIMTokenLastUsed", mock.Anything, token.ID).Return(nil).Maybe()
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	rr := httptest.NewRecorder()
+
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		assert.NotNil(t, scimTokenFromContext(r.Context()))
+		w.WriteHeader(http.StatusOK)
+	})
+
+	middleware := handler.authMiddleware(next)
+	middleware.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.True(t, nextCalled)
+	mockStore.AssertExpectations(t)
+}
+
+func TestRegisterRoutesMiddlewareAndHandlers(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	handler := NewHandler(service)
+
+	tokenString := "aegion_scim_test1234abcdef9876543210"
+	prefix := tokenString[12:24]
+	hash := sha256.Sum256([]byte(tokenString))
+	tokenHash := base64.StdEncoding.EncodeToString(hash[:])
+	scimToken := &SCIMToken{
+		ID:          uuid.New(),
+		Name:        "route-token",
+		TokenHash:   tokenHash,
+		Prefix:      prefix,
+		Permissions: []string{"*"},
+		Active:      true,
+	}
+
+	mockStore.On("GetSCIMTokenByPrefix", mock.Anything, prefix).Return(scimToken, nil)
+	mockStore.On("UpdateSCIMTokenLastUsed", mock.Anything, scimToken.ID).Return(nil).Maybe()
+
+	users := []*SCIMUser{{ID: uuid.NewString(), UserName: "alice", Active: true}}
+	mockStore.On("ListUsers", mock.Anything, mock.Anything, "", SortAscending, 1, 20).Return(users, 1, nil)
+	groups := []*SCIMGroup{{ID: uuid.NewString(), DisplayName: "DevOps"}}
+	mockStore.On("ListGroups", mock.Anything, mock.Anything, "", SortAscending, 1, 20).Return(groups, 1, nil)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/Users/", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "alice")
+
+	req2 := httptest.NewRequest(http.MethodGet, "/Groups/", nil)
+	req2.Header.Set("Authorization", "Bearer "+tokenString)
+	rec2 := httptest.NewRecorder()
+	r.ServeHTTP(rec2, req2)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+	assert.Contains(t, rec2.Body.String(), "DevOps")
+
+	req3 := httptest.NewRequest(http.MethodGet, "/Users/", nil)
+	rec3 := httptest.NewRecorder()
+	r.ServeHTTP(rec3, req3)
+	assert.Equal(t, http.StatusUnauthorized, rec3.Code)
+}
+
+func TestHandlerListGroupsAdditionalPaths(t *testing.T) {
+	t.Run("descending sort and pagination", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		groups := []*SCIMGroup{{ID: uuid.NewString(), DisplayName: "Team Z"}}
+		mockStore.On("ListGroups", mock.Anything, mock.Anything, "", SortDescending, 2, 5).Return(groups, 1, nil)
+
+		req := httptest.NewRequest("GET", "/scim/v2/Groups?sortOrder=descending&startIndex=2&count=5", nil)
+		rr := httptest.NewRecorder()
+		handler.ListGroups(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("invalid start and count fallback", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		mockStore.On("ListGroups", mock.Anything, mock.Anything, "", SortAscending, 1, 20).Return([]*SCIMGroup{}, 0, nil)
+
+		req := httptest.NewRequest("GET", "/scim/v2/Groups?startIndex=invalid&count=invalid", nil)
+		rr := httptest.NewRecorder()
+		handler.ListGroups(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("list groups internal error", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		mockStore.On("ListGroups", mock.Anything, mock.Anything, "", SortAscending, 1, 20).Return(nil, 0, fmt.Errorf("db exploded"))
+
+		req := httptest.NewRequest("GET", "/scim/v2/Groups", nil)
+		rr := httptest.NewRecorder()
+		handler.ListGroups(rr, req)
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	})
+}
+
+func TestHandlerGroupMutationAdditionalErrors(t *testing.T) {
+	t.Run("create group internal error", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		mockStore.On("CreateGroup", mock.Anything, mock.Anything).Return(fmt.Errorf("db error"))
+		req := httptest.NewRequest("POST", "/scim/v2/Groups", bytes.NewBufferString(`{"displayName":"eng"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		handler.CreateGroup(rr, req)
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	})
+
+	t.Run("update group invalid json", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		req := httptest.NewRequest("PUT", "/scim/v2/Groups/"+uuid.NewString(), bytes.NewBufferString("{"))
+		req.Header.Set("Content-Type", "application/json")
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", uuid.NewString())
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.UpdateGroup(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("update group internal error", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		groupID := uuid.NewString()
+		now := time.Now().UTC()
+		mockStore.On("GetGroupByID", mock.Anything, groupID).Return(&SCIMGroup{
+			ID:          groupID,
+			DisplayName: "old",
+			Meta: Meta{
+				Created:      &now,
+				LastModified: &now,
+			},
+		}, nil)
+		mockStore.On("UpdateGroup", mock.Anything, mock.Anything).Return(fmt.Errorf("write failed"))
+
+		req := httptest.NewRequest("PUT", "/scim/v2/Groups/"+groupID, bytes.NewBufferString(`{"displayName":"new"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", groupID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.UpdateGroup(rr, req)
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	})
+
+	t.Run("patch group invalid json", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		req := httptest.NewRequest("PATCH", "/scim/v2/Groups/"+uuid.NewString(), bytes.NewBufferString("{"))
+		req.Header.Set("Content-Type", "application/json")
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", uuid.NewString())
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.PatchGroup(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("patch group no operations", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		groupID := uuid.NewString()
+		req := httptest.NewRequest("PATCH", "/scim/v2/Groups/"+groupID, bytes.NewBufferString(`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[]}`))
+		req.Header.Set("Content-Type", "application/json")
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", groupID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.PatchGroup(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("patch group internal error", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		groupID := uuid.NewString()
+		patchReq := PatchRequest{
+			Schemas: []string{SchemaPatchOp},
+			Operations: []PatchOperation{
+				{Op: "replace", Path: "displayName", Value: "x"},
+			},
+		}
+		mockStore.On("PatchGroup", mock.Anything, groupID, patchReq.Operations).Return(nil, fmt.Errorf("db panic"))
+		body, err := json.Marshal(patchReq)
+		require.NoError(t, err)
+		req := httptest.NewRequest("PATCH", "/scim/v2/Groups/"+groupID, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", groupID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.PatchGroup(rr, req)
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	})
+
+	t.Run("delete group internal error", func(t *testing.T) {
+		mockStore := &MockStore{}
+		service := NewService(mockStore, nil)
+		handler := NewHandler(service)
+
+		groupID := uuid.NewString()
+		mockStore.On("DeleteGroup", mock.Anything, groupID).Return(fmt.Errorf("db panic"))
+		req := httptest.NewRequest("DELETE", "/scim/v2/Groups/"+groupID, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", groupID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rr := httptest.NewRecorder()
+		handler.DeleteGroup(rr, req)
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	})
 }
