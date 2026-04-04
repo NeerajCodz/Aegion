@@ -238,6 +238,34 @@ func TestGetTraceInfoFromContext(t *testing.T) {
 	if traceInfo.TraceID != "" || traceInfo.SpanID != "" {
 		t.Error("expected empty trace info for empty context")
 	}
+
+	// Test with TraceInfo type in context
+	ctxWithTraceInfo := context.WithValue(ctx, "trace_info", TraceInfo{
+		TraceID: "test-trace-id",
+		SpanID:  "test-span-id",
+	})
+	traceInfo = getTraceInfoFromContext(ctxWithTraceInfo)
+	if traceInfo.TraceID != "test-trace-id" {
+		t.Errorf("expected TraceID 'test-trace-id', got %q", traceInfo.TraceID)
+	}
+	if traceInfo.SpanID != "test-span-id" {
+		t.Errorf("expected SpanID 'test-span-id', got %q", traceInfo.SpanID)
+	}
+
+	// Test with different type that has same fields (fallback case)
+	type otherTraceInfo struct {
+		TraceID string
+		SpanID  string
+	}
+	ctxWithOtherType := context.WithValue(ctx, "trace_info", otherTraceInfo{
+		TraceID: "other-trace-id",
+		SpanID:  "other-span-id",
+	})
+	// This should return empty TraceInfo since it's a different type
+	traceInfo = getTraceInfoFromContext(ctxWithOtherType)
+	if traceInfo.TraceID != "" {
+		t.Errorf("expected empty TraceID for different type, got %q", traceInfo.TraceID)
+	}
 }
 
 func TestGetRequestIDFromContext(t *testing.T) {
@@ -249,10 +277,17 @@ func TestGetRequestIDFromContext(t *testing.T) {
 		t.Errorf("expected empty request ID for empty context, got %q", requestID)
 	}
 	
-	// Test with chi's request ID key
-	type chiRequestIDKey struct{}
-	ctxWithChiID := context.WithValue(ctx, chiRequestIDKey{}, "chi-request-id")
-	// This won't find the chi key since we're using different type, but tests the path
-	requestID = getRequestIDFromContext(ctxWithChiID)
-	// Won't match our custom key, but exercises the function
+	// Test with request_id key and string value
+	ctxWithRequestID := context.WithValue(ctx, "request_id", "my-request-123")
+	requestID = getRequestIDFromContext(ctxWithRequestID)
+	if requestID != "my-request-123" {
+		t.Errorf("expected request ID 'my-request-123', got %q", requestID)
+	}
+
+	// Test with wrong type (should return empty)
+	ctxWithWrongType := context.WithValue(ctx, "request_id", 12345)
+	requestID = getRequestIDFromContext(ctxWithWrongType)
+	if requestID != "" {
+		t.Errorf("expected empty request ID for wrong type, got %q", requestID)
+	}
 }
