@@ -1284,6 +1284,210 @@ func TestGetAPIKeyByPrefixErrors(t *testing.T) {
 	})
 }
 
+func TestStore_AdditionalErrorBranches(t *testing.T) {
+	now := time.Now().UTC()
+	ctx := context.Background()
+
+	t.Run("create/get/auth/profile/delete operator generic errors", func(t *testing.T) {
+		op := &Operator{
+			ID:          uuid.New(),
+			IdentityID:  uuid.New(),
+			Role:        "admin",
+			Permissions: map[string]interface{}{"manage": true},
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+
+		s := &Store{
+			db: &fakeDB{
+				execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+					return pgconn.CommandTag{}, errors.New("write failed")
+				},
+				queryRowFn: func(context.Context, string, ...any) pgx.Row {
+					return fakeRow{err: errors.New("query failed")}
+				},
+			},
+		}
+
+		require.EqualError(t, s.CreateOperator(ctx, op), "write failed")
+		_, err := s.GetOperator(ctx, op.ID)
+		require.EqualError(t, err, "query failed")
+		_, err = s.AuthenticateOperatorByEmail(ctx, "admin@example.com", "password")
+		require.EqualError(t, err, "query failed")
+		_, err = s.GetIdentityProfile(ctx, op.IdentityID)
+		require.EqualError(t, err, "query failed")
+		require.EqualError(t, s.DeleteOperator(ctx, op.ID), "write failed")
+	})
+
+	t.Run("list operators scan error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(context.Context, string, ...any) pgx.Row {
+					return fakeRow{vals: []any{int64(1)}}
+				},
+				queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+					return &fakeRows{data: [][]any{{"bad-row"}}}, nil
+				},
+			},
+		}
+
+		_, _, err := s.ListOperators(ctx, ListOptions{Limit: 1})
+		require.Error(t, err)
+	})
+
+	t.Run("get role no rows and generic query error", func(t *testing.T) {
+		notFound := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: pgx.ErrNoRows}
+			},
+		}}
+		_, err := notFound.GetRole(ctx, uuid.New())
+		require.ErrorIs(t, err, ErrRoleNotFound)
+
+		dbErr := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: errors.New("role lookup failed")}
+			},
+		}}
+		_, err = dbErr.GetRole(ctx, uuid.New())
+		require.EqualError(t, err, "role lookup failed")
+	})
+
+	t.Run("update role extra errors", func(t *testing.T) {
+		role := &Role{
+			ID:          uuid.New(),
+			Name:        "custom",
+			Description: "Custom role",
+			Permissions: []string{"read"},
+		}
+
+		notFound := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: pgx.ErrNoRows}
+			},
+		}}
+		require.ErrorIs(t, notFound.UpdateRole(ctx, role), ErrRoleNotFound)
+
+		readErr := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: errors.New("query failed")}
+			},
+		}}
+		require.EqualError(t, readErr.UpdateRole(ctx, role), "query failed")
+
+		execErr := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{false}}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("update failed")
+			},
+		}}
+		require.EqualError(t, execErr.UpdateRole(ctx, role), "update failed")
+
+		zeroRows := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{false}}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("UPDATE 0"), nil
+			},
+		}}
+		require.ErrorIs(t, zeroRows.UpdateRole(ctx, role), ErrRoleNotFound)
+	})
+
+	t.Run("list roles count/query/scan/error fallback branches", func(t *testing.T) {
+		countErrStore := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: errors.New("count failed")}
+			},
+		}}
+		_, _, err := countErrStore.ListRoles(ctx, ListOptions{})
+		require.EqualError(t, err, "count failed")
+
+		queryErrStore := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return nil, errors.New("query failed")
+			},
+		}}
+		_, _, err = queryErrStore.ListRoles(ctx, ListOptions{})
+		require.EqualError(t, err, "query failed")
+
+		scanErrStore := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{{"bad-row"}}}, nil
+			},
+		}}
+		_, _, err = scanErrStore.ListRoles(ctx, ListOptions{})
+		require.Error(t, err)
+
+		id := uuid.New()
+		unmarshalFallbackStore := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{
+					{id, "admin", "Admin", []byte("{bad-json"), true, now, now},
+				}}, nil
+			},
+		}}
+		roles, total, err := unmarshalFallbackStore.ListRoles(ctx, ListOptions{})
+		require.NoError(t, err)
+		require.Equal(t, int64(1), total)
+		require.Len(t, roles, 1)
+		assert.Empty(t, roles[0].Permissions)
+	})
+
+	t.Run("list audit logs query and scan errors", func(t *testing.T) {
+		queryErrStore := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(0)}}
+			},
+			queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return nil, errors.New("query failed")
+			},
+		}}
+		_, _, err := queryErrStore.ListAuditLogs(ctx, AuditFilter{}, ListOptions{})
+		require.EqualError(t, err, "query failed")
+
+		scanErrStore := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{{"bad-row"}}}, nil
+			},
+		}}
+		_, _, err = scanErrStore.ListAuditLogs(ctx, AuditFilter{}, ListOptions{})
+		require.Error(t, err)
+	})
+
+	t.Run("api key not found and scan error branches", func(t *testing.T) {
+		notFoundStore := &Store{db: &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: pgx.ErrNoRows}
+			},
+		}}
+		_, err := notFoundStore.GetAPIKey(ctx, uuid.New())
+		require.ErrorIs(t, err, ErrAPIKeyNotFound)
+
+		scanErrStore := &Store{db: &fakeDB{
+			queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{{"bad-row"}}}, nil
+			},
+		}}
+		_, err = scanErrStore.ListAPIKeysByOperator(ctx, uuid.New())
+		require.Error(t, err)
+	})
+}
+
 func TestDeleteAPIKeyErrors(t *testing.T) {
 	t.Run("database error", func(t *testing.T) {
 		s := &Store{

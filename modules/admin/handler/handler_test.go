@@ -3571,3 +3571,250 @@ func TestOperatorHandlersAdditionalPaths(t *testing.T) {
 		assert.Contains(t, auditRec.Body.String(), actorID.String())
 	})
 }
+
+func TestOperatorHandler_AdditionalCoveragePaths(t *testing.T) {
+	operator := &store.Operator{
+		ID:         uuid.New(),
+		IdentityID: uuid.New(),
+		Role:       "admin",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	t.Run("create operator without identity id success", func(t *testing.T) {
+		newOp := &store.Operator{
+			ID:         uuid.New(),
+			IdentityID: uuid.New(),
+			Role:       "admin",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		}
+		h := New(&fakeService{
+			store: &fakeStore{
+				getIdentityProfileFn: func(context.Context, uuid.UUID) (*store.IdentityProfile, error) {
+					return &store.IdentityProfile{Email: "new@example.com", Name: "New User", State: "active"}, nil
+				},
+			},
+			createOperatorFn: func(ctx context.Context, actorID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				if identityID == uuid.Nil {
+					t.Fatalf("expected createOperatorIdentity path to provide a non-nil identity ID")
+				}
+				return newOp, nil
+			},
+		})
+		tx := &fakeTx{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				if strings.Contains(sql, "FROM core_identity_schemas") {
+					return fakeRow{vals: []any{uuid.New()}}
+				}
+				return fakeRow{err: errors.New("unexpected schema query")}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("INSERT 1"), nil
+			},
+		}
+		h.db = &fakeDB{
+			beginFn: func(context.Context) (pgx.Tx, error) { return tx, nil },
+		}
+
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"email":"new@example.com","password":"StrongPass123!","role":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+
+		assert.Equal(t, http.StatusCreated, rec.Code)
+	})
+
+	t.Run("createOperatorIdentity inactive and failure branches", func(t *testing.T) {
+		t.Run("inactive status is persisted", func(t *testing.T) {
+			var capturedState string
+			h := New(&fakeService{store: &fakeStore{}})
+			tx := &fakeTx{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					if strings.Contains(sql, "FROM core_identity_schemas") {
+						return fakeRow{vals: []any{uuid.New()}}
+					}
+					return fakeRow{err: errors.New("unexpected query")}
+				},
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					if strings.Contains(sql, "INSERT INTO core_identities") {
+						capturedState, _ = args[3].(string)
+					}
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
+			}
+			h.db = &fakeDB{beginFn: func(context.Context) (pgx.Tx, error) { return tx, nil }}
+
+			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
+				Email:    "inactive@example.com",
+				Password: "StrongPass123!",
+				Status:   "inactive",
+			})
+			require.NoError(t, err)
+			assert.Equal(t, "inactive", capturedState)
+		})
+
+		t.Run("bcrypt rejects too long password", func(t *testing.T) {
+			h := New(&fakeService{store: &fakeStore{}})
+			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
+				Email:    "toolong@example.com",
+				Password: strings.Repeat("x", 73),
+			})
+			require.Error(t, err)
+		})
+
+		t.Run("schema lookup error propagates", func(t *testing.T) {
+			h := New(&fakeService{store: &fakeStore{}})
+			tx := &fakeTx{
+				queryRowFn: func(context.Context, string, ...any) pgx.Row {
+					return fakeRow{err: errors.New("schema lookup failed")}
+				},
+			}
+			h.db = &fakeDB{beginFn: func(context.Context) (pgx.Tx, error) { return tx, nil }}
+
+			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
+				Email:    "schema@example.com",
+				Password: "StrongPass123!",
+			})
+			require.EqualError(t, err, "schema lookup failed")
+		})
+
+		t.Run("identity insert error propagates", func(t *testing.T) {
+			h := New(&fakeService{store: &fakeStore{}})
+			tx := &fakeTx{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					if strings.Contains(sql, "FROM core_identity_schemas") {
+						return fakeRow{vals: []any{uuid.New()}}
+					}
+					return fakeRow{err: errors.New("unexpected query")}
+				},
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					if strings.Contains(sql, "INSERT INTO core_identities") {
+						return pgconn.CommandTag{}, errors.New("identity insert failed")
+					}
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
+			}
+			h.db = &fakeDB{beginFn: func(context.Context) (pgx.Tx, error) { return tx, nil }}
+
+			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
+				Email:    "insert@example.com",
+				Password: "StrongPass123!",
+			})
+			require.EqualError(t, err, "identity insert failed")
+		})
+
+		t.Run("password credential insert error propagates", func(t *testing.T) {
+			h := New(&fakeService{store: &fakeStore{}})
+			tx := &fakeTx{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					if strings.Contains(sql, "FROM core_identity_schemas") {
+						return fakeRow{vals: []any{uuid.New()}}
+					}
+					return fakeRow{err: errors.New("unexpected query")}
+				},
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					if strings.Contains(sql, "INSERT INTO pwd_credentials") {
+						return pgconn.CommandTag{}, errors.New("credentials insert failed")
+					}
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
+			}
+			h.db = &fakeDB{beginFn: func(context.Context) (pgx.Tx, error) { return tx, nil }}
+
+			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
+				Email:    "creds@example.com",
+				Password: "StrongPass123!",
+			})
+			require.EqualError(t, err, "credentials insert failed")
+		})
+
+		t.Run("commit error propagates", func(t *testing.T) {
+			h := New(&fakeService{store: &fakeStore{}})
+			tx := &fakeTx{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					if strings.Contains(sql, "FROM core_identity_schemas") {
+						return fakeRow{vals: []any{uuid.New()}}
+					}
+					return fakeRow{err: errors.New("unexpected query")}
+				},
+				execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
+				commitFn: func(context.Context) error { return errors.New("commit failed") },
+			}
+			h.db = &fakeDB{beginFn: func(context.Context) (pgx.Tx, error) { return tx, nil }}
+
+			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
+				Email:    "commit@example.com",
+				Password: "StrongPass123!",
+			})
+			require.EqualError(t, err, "commit failed")
+		})
+	})
+
+	t.Run("resolveDefaultSchemaID fallback insert error", func(t *testing.T) {
+		tx := &fakeTx{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: pgx.ErrNoRows}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("insert default schema failed")
+			},
+		}
+		_, err := resolveDefaultSchemaID(context.Background(), tx)
+		require.EqualError(t, err, "insert default schema failed")
+	})
+
+	t.Run("get role permission denied and internal error", func(t *testing.T) {
+		t.Run("permission denied", func(t *testing.T) {
+			h := New(&fakeService{
+				store: &fakeStore{},
+				getRoleFn: func(context.Context, uuid.UUID, string) (*store.Role, error) {
+					return nil, service.ErrPermissionDenied
+				},
+			})
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/admin/roles/admin", nil)
+			req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+			req = withRouteParam(req, "name", "admin")
+			h.GetRole(rec, req)
+			assert.Equal(t, http.StatusForbidden, rec.Code)
+		})
+
+		t.Run("internal error", func(t *testing.T) {
+			h := New(&fakeService{
+				store: &fakeStore{},
+				getRoleFn: func(context.Context, uuid.UUID, string) (*store.Role, error) {
+					return nil, errors.New("role service down")
+				},
+			})
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/admin/roles/admin", nil)
+			req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+			req = withRouteParam(req, "name", "admin")
+			h.GetRole(rec, req)
+			assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		})
+	})
+
+	t.Run("list audit logs respects pagination parsing cap", func(t *testing.T) {
+		var gotLimit int
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listAuditLogsFn: func(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error) {
+				gotLimit = limit
+				return []*store.AuditLogEntry{}, 0, nil
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/audit?per_page=999&page=1", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListAuditLogs(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, 20, gotLimit)
+	})
+}

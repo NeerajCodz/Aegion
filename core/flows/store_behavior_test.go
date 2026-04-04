@@ -351,3 +351,132 @@ func TestPostgresFlowStore_MarshalErrors_WithSeams(t *testing.T) {
 		t.Fatalf("expected marshal error in Update")
 	}
 }
+
+func TestPostgresFlowStore_AdditionalErrorPaths_WithSeams(t *testing.T) {
+	store := newSeamedFlowStore()
+	now := store.now()
+	flow := &Flow{
+		ID:         uuid.New(),
+		Type:       TypeLogin,
+		State:      StateActive,
+		RequestURL: "/login",
+		UI:         &UIState{Action: "/login", Method: "POST"},
+		Context:    FlowCtx{"k": "v"},
+		IssuedAt:   now,
+		ExpiresAt:  now.Add(10 * time.Minute),
+		CSRFToken:  "csrf-token",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	t.Run("create and update return UI marshal errors", func(t *testing.T) {
+		bad := *flow
+		bad.UI = &UIState{
+			Nodes: []Node{
+				{
+					Type: NodeTypeInput,
+					Attributes: NodeAttributes{
+						Name:  "broken",
+						Value: func() {},
+					},
+				},
+			},
+		}
+
+		if err := store.Create(context.Background(), &bad); err == nil {
+			t.Fatalf("expected UI marshal error in Create")
+		}
+		if err := store.Update(context.Background(), &bad); err == nil {
+			t.Fatalf("expected UI marshal error in Update")
+		}
+	})
+
+	t.Run("get and get by csrf return json and query errors", func(t *testing.T) {
+		store.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+			return stubRow{err: errors.New("query failed")}
+		}
+		if _, err := store.GetByCSRF(context.Background(), "csrf"); err == nil || err.Error() != "query failed" {
+			t.Fatalf("expected query error from GetByCSRF, got %v", err)
+		}
+
+		baseUI, baseCtx := baseFlowJSONPayload()
+		store.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+			return stubRow{values: []interface{}{
+				flow.ID, flow.Type, flow.State, (*uuid.UUID)(nil), (*uuid.UUID)(nil), flow.RequestURL, flow.ReturnTo,
+				[]byte("{invalid"), baseCtx, flow.IssuedAt, flow.ExpiresAt, flow.CSRFToken, flow.CreatedAt, flow.UpdatedAt,
+			}}
+		}
+		if _, err := store.Get(context.Background(), flow.ID); err == nil {
+			t.Fatalf("expected UI unmarshal error in Get")
+		}
+
+		store.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+			return stubRow{values: []interface{}{
+				flow.ID, flow.Type, flow.State, (*uuid.UUID)(nil), (*uuid.UUID)(nil), flow.RequestURL, flow.ReturnTo,
+				baseUI, []byte("{invalid"), flow.IssuedAt, flow.ExpiresAt, flow.CSRFToken, flow.CreatedAt, flow.UpdatedAt,
+			}}
+		}
+		if _, err := store.Get(context.Background(), flow.ID); err == nil {
+			t.Fatalf("expected context unmarshal error in Get")
+		}
+
+		store.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+			return stubRow{values: []interface{}{
+				flow.ID, flow.Type, flow.State, (*uuid.UUID)(nil), (*uuid.UUID)(nil), flow.RequestURL, flow.ReturnTo,
+				[]byte("{invalid"), baseCtx, flow.IssuedAt, flow.ExpiresAt, flow.CSRFToken, flow.CreatedAt, flow.UpdatedAt,
+			}}
+		}
+		if _, err := store.GetByCSRF(context.Background(), flow.CSRFToken); err == nil {
+			t.Fatalf("expected UI unmarshal error in GetByCSRF")
+		}
+
+		store.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+			return stubRow{values: []interface{}{
+				flow.ID, flow.Type, flow.State, (*uuid.UUID)(nil), (*uuid.UUID)(nil), flow.RequestURL, flow.ReturnTo,
+				baseUI, []byte("{invalid"), flow.IssuedAt, flow.ExpiresAt, flow.CSRFToken, flow.CreatedAt, flow.UpdatedAt,
+			}}
+		}
+		if _, err := store.GetByCSRF(context.Background(), flow.CSRFToken); err == nil {
+			t.Fatalf("expected context unmarshal error in GetByCSRF")
+		}
+	})
+
+	t.Run("update/delete/delete expired return exec errors", func(t *testing.T) {
+		store.execStmt = func(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, errors.New("exec failed")
+		}
+		if err := store.Update(context.Background(), flow); err == nil || err.Error() != "exec failed" {
+			t.Fatalf("expected update exec error, got %v", err)
+		}
+		if err := store.Delete(context.Background(), flow.ID); err == nil || err.Error() != "exec failed" {
+			t.Fatalf("expected delete exec error, got %v", err)
+		}
+		if _, err := store.DeleteExpired(context.Background()); err == nil || err.Error() != "exec failed" {
+			t.Fatalf("expected delete expired exec error, got %v", err)
+		}
+	})
+
+	t.Run("list by identity returns json unmarshal errors", func(t *testing.T) {
+		identityID := uuid.New()
+		baseUI, baseCtx := baseFlowJSONPayload()
+		rows := &stubRows{
+			rows: [][]interface{}{
+				{flow.ID, TypeLogin, StateActive, identityID, nil, "/login", "", []byte("{invalid"), baseCtx, now, now.Add(5 * time.Minute), "csrf-1", now, now},
+			},
+		}
+		store.queryRows = func(context.Context, string, ...interface{}) (pgx.Rows, error) { return rows, nil }
+		if _, err := store.ListByIdentity(context.Background(), identityID, TypeLogin); err == nil {
+			t.Fatalf("expected UI unmarshal error in ListByIdentity")
+		}
+
+		rows = &stubRows{
+			rows: [][]interface{}{
+				{flow.ID, TypeLogin, StateActive, identityID, nil, "/login", "", baseUI, []byte("{invalid"), now, now.Add(5 * time.Minute), "csrf-1", now, now},
+			},
+		}
+		store.queryRows = func(context.Context, string, ...interface{}) (pgx.Rows, error) { return rows, nil }
+		if _, err := store.ListByIdentity(context.Background(), identityID, TypeLogin); err == nil {
+			t.Fatalf("expected context unmarshal error in ListByIdentity")
+		}
+	})
+}

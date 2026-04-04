@@ -19,6 +19,17 @@ import (
 	"github.com/aegion/aegion/internal/platform/database"
 )
 
+type blockingWorker struct {
+	stopDelay time.Duration
+}
+
+func (w *blockingWorker) Name() string { return "blocking-worker" }
+func (w *blockingWorker) Start(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+func (w *blockingWorker) Stop() { time.Sleep(w.stopDelay) }
+
 func TestServerHealthAndLivenessHandlers(t *testing.T) {
 	s := newTestServer(t)
 
@@ -221,5 +232,169 @@ func TestLifecycleCleanupRegistry_NoRegistry(t *testing.T) {
 
 	if err := lc.cleanupRegistry(context.Background()); err != nil {
 		t.Fatalf("cleanupRegistry should not fail when registry is nil: %v", err)
+	}
+}
+
+func TestLifecycleShutdown_CanceledContextAndWorkerBranch(t *testing.T) {
+	s := newTestServer(t)
+	wm := workers.NewManager(workers.ManagerConfig{Log: testLogger()})
+	wm.Register(&blockingWorker{stopDelay: 50 * time.Millisecond})
+
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer httpSrv.Close()
+
+	lc := NewLifecycle(&LifecycleConfig{
+		Log:           testLogger(),
+		Server:        s,
+		HTTPServer:    httpSrv.Config,
+		WorkerManager: wm,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := lc.Shutdown(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("unexpected shutdown error for canceled context: %v", err)
+	}
+	if !lc.IsDraining() {
+		t.Fatalf("expected lifecycle to be marked as draining")
+	}
+}
+
+func TestLifecycleDrainHTTP_DeadlineExceededForcesClose(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	serveDone := make(chan struct{})
+
+	httpSrv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		_ = httpSrv.Serve(ln)
+		close(serveDone)
+	}()
+
+	go func() {
+		_, _ = http.Get("http://" + ln.Addr().String())
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for inflight request")
+	}
+
+	lc := NewLifecycle(&LifecycleConfig{
+		Log:        testLogger(),
+		Server:     newTestServer(t),
+		HTTPServer: httpSrv,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	if err := lc.drainHTTP(ctx); err != nil {
+		t.Fatalf("expected drainHTTP to force close on deadline exceeded, got %v", err)
+	}
+
+	close(release)
+	select {
+	case <-serveDone:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("expected server to stop after force close")
+	}
+}
+
+func TestLifecycleDrainHTTP_ReturnsContextErrorWhenCanceled(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	serveDone := make(chan struct{})
+
+	httpSrv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() {
+		_ = httpSrv.Serve(ln)
+		close(serveDone)
+	}()
+
+	go func() {
+		_, _ = http.Get("http://" + ln.Addr().String())
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for inflight request")
+	}
+
+	lc := NewLifecycle(&LifecycleConfig{
+		Log:        testLogger(),
+		Server:     newTestServer(t),
+		HTTPServer: httpSrv,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = lc.drainHTTP(ctx)
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("expected context cancellation style error, got %v", err)
+	}
+
+	close(release)
+	select {
+	case <-serveDone:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("expected server to stop after cancellation")
+	}
+}
+
+func TestLifecycleCleanupRegistry_ClosedRegistryWarnPath(t *testing.T) {
+	s := newTestServer(t)
+	registerTestModule(t, s, "closed-registry-module", registry.EndpointHTTP, "http://localhost:9099")
+
+	// Force Deregister to return ErrRegistryClosed inside cleanup loop.
+	s.registry.Stop()
+
+	lc := NewLifecycle(&LifecycleConfig{
+		Log:        testLogger(),
+		Server:     s,
+		HTTPServer: &http.Server{},
+	})
+
+	if err := lc.cleanupRegistry(context.Background()); err != nil {
+		t.Fatalf("cleanupRegistry should tolerate closed registry warnings: %v", err)
 	}
 }

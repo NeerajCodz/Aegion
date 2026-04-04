@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"sort"
 	"strings"
 	"testing"
@@ -18,6 +19,154 @@ import (
 	"github.com/docker/go-connections/nat"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
+
+func newUnreachableDockerAPIClient(t *testing.T) *client.Client {
+	t.Helper()
+
+	cli, err := client.NewClientWithOpts(
+		client.WithHost("tcp://127.0.0.1:1"),
+		client.WithVersion("1.44"),
+		client.WithHTTPClient(&http.Client{Timeout: 25 * time.Millisecond}),
+	)
+	if err != nil {
+		t.Fatalf("failed to create docker client test double: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+	return cli
+}
+
+func TestDockerAndNetworkClient_UseCLIDelegatesWhenSeamsNil(t *testing.T) {
+	ctx := context.Background()
+	cli := newUnreachableDockerAPIClient(t)
+
+	t.Run("docker client delegates through cli", func(t *testing.T) {
+		d := &DockerClient{
+			cli:         cli,
+			networkName: DefaultNetworkName,
+		}
+
+		if err := d.Close(); err != nil {
+			t.Fatalf("Close should delegate to cli without error, got %v", err)
+		}
+
+		d.containerStartFn = nil
+		if err := d.StartContainer(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "starting container:") {
+			t.Fatalf("expected delegated start failure, got %v", err)
+		}
+
+		d.containerStopFn = nil
+		if err := d.StopContainer(ctx, "cid", time.Second); err == nil || !strings.Contains(err.Error(), "stopping container:") {
+			t.Fatalf("expected delegated stop failure, got %v", err)
+		}
+
+		d.containerRemoveFn = nil
+		if err := d.RemoveContainer(ctx, "cid", true); err == nil || !strings.Contains(err.Error(), "removing container:") {
+			t.Fatalf("expected delegated remove failure, got %v", err)
+		}
+
+		d.containerLogsFn = nil
+		if _, err := d.ContainerLogs(ctx, "cid", 1, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "getting container logs:") {
+			t.Fatalf("expected delegated logs failure, got %v", err)
+		}
+
+		d.containerInspectFn = nil
+		if _, err := d.GetContainerInfo(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "inspecting container:") {
+			t.Fatalf("expected delegated inspect failure for info, got %v", err)
+		}
+		if _, err := d.HealthCheck(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "inspecting container:") {
+			t.Fatalf("expected delegated inspect failure for health, got %v", err)
+		}
+
+		d.containerListFn = nil
+		if _, err := d.findContainer(ctx, "aegion_password"); err == nil {
+			t.Fatalf("expected delegated list failure for findContainer")
+		}
+		if _, err := d.ListContainers(ctx); err == nil || !strings.Contains(err.Error(), "listing containers:") {
+			t.Fatalf("expected delegated list failure for ListContainers, got %v", err)
+		}
+
+		d.imageInspectFn = nil
+		d.imagePullFn = func(context.Context, string, image.PullOptions) (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewBufferString("ok")), nil
+		}
+		if err := d.pullImageIfNeeded(ctx, "repo/image:tag"); err != nil {
+			t.Fatalf("expected inspect->pull seam success path, got %v", err)
+		}
+
+		d.imageInspectFn = func(context.Context, string, ...client.ImageInspectOption) (image.InspectResponse, error) {
+			return image.InspectResponse{}, errors.New("missing")
+		}
+		d.imagePullFn = nil
+		if err := d.pullImageIfNeeded(ctx, "repo/image:tag"); err == nil {
+			t.Fatalf("expected delegated image pull failure")
+		}
+
+		d.containerListFn = func(context.Context, container.ListOptions) ([]container.Summary, error) { return nil, nil }
+		d.imageInspectFn = func(context.Context, string, ...client.ImageInspectOption) (image.InspectResponse, error) {
+			return image.InspectResponse{}, nil
+		}
+		d.containerCreateFn = nil
+
+		cfg := &ModuleConfig{
+			ID:      "password",
+			Name:    "Password",
+			Image:   "repo/password",
+			Env:     map[string]string{},
+			Labels:  map[string]string{"aegion.module": "true"},
+			Ports:   []PortMapping{{HostPort: "18080", ContainerPort: "8080"}},
+			Volumes: []VolumeMapping{},
+		}
+		if _, err := d.CreateContainer(ctx, cfg, "auth-token"); err == nil || !strings.Contains(err.Error(), "creating container:") {
+			t.Fatalf("expected delegated create failure, got %v", err)
+		}
+	})
+
+	t.Run("network manager delegates through cli", func(t *testing.T) {
+		nm := NewNetworkManager(cli, "aegion_modules", "")
+
+		nm.networkListFn = nil
+		if _, err := nm.NetworkExists(ctx); err == nil {
+			t.Fatalf("expected delegated list failure for NetworkExists")
+		}
+
+		nm.networkListFn = func(context.Context, network.ListOptions) ([]network.Summary, error) { return nil, nil }
+		nm.networkCreateFn = nil
+		if _, err := nm.EnsureNetwork(ctx); err == nil || !strings.Contains(err.Error(), "creating network:") {
+			t.Fatalf("expected delegated create failure, got %v", err)
+		}
+
+		nm.networkInspectFn = nil
+		if err := nm.ConnectToNetwork(ctx, "cid", nil); err == nil || !strings.Contains(err.Error(), "inspecting network:") {
+			t.Fatalf("expected delegated inspect failure, got %v", err)
+		}
+
+		nm.networkInspectFn = func(context.Context, string, network.InspectOptions) (network.Inspect, error) {
+			return network.Inspect{Containers: map[string]network.EndpointResource{}}, nil
+		}
+		nm.networkConnectFn = nil
+		if err := nm.ConnectToNetwork(ctx, "cid", []string{"alias"}); err == nil || !strings.Contains(err.Error(), "connecting to network:") {
+			t.Fatalf("expected delegated connect failure, got %v", err)
+		}
+
+		nm.networkDisconnectFn = nil
+		if err := nm.DisconnectFromNetwork(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "disconnecting from network:") {
+			t.Fatalf("expected delegated disconnect failure, got %v", err)
+		}
+
+		nm.networkRemoveFn = nil
+		if err := nm.RemoveNetwork(ctx); err == nil || !strings.Contains(err.Error(), "removing network:") {
+			t.Fatalf("expected delegated remove failure, got %v", err)
+		}
+
+		nm.networkInspectFn = nil
+		if _, err := nm.GetNetworkInfo(ctx); err == nil || !strings.Contains(err.Error(), "inspecting network:") {
+			t.Fatalf("expected delegated network info inspect failure, got %v", err)
+		}
+		if _, err := nm.GetContainerIP(ctx, "cid"); err == nil || !strings.Contains(err.Error(), "inspecting network:") {
+			t.Fatalf("expected delegated container IP inspect failure, got %v", err)
+		}
+	})
+}
 
 func TestNewDockerClient_WithSeam(t *testing.T) {
 	orig := newDockerEngineClient
