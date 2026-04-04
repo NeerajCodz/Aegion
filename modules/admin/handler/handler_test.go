@@ -2453,3 +2453,123 @@ func TestResetIdentityMFAErrors(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
 }
+
+func TestSuspendIdentityErrors(t *testing.T) {
+	operator := &store.Operator{ID: uuid.New()}
+
+	t.Run("no auth context", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/"+uuid.NewString()+"/suspend", nil)
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.SuspendIdentity(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("invalid uuid", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/invalid/suspend", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", "invalid")
+		h.SuspendIdentity(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("identity not found", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("UPDATE 0"), nil
+			},
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{err: pgx.ErrNoRows}
+			},
+		}
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/"+id+"/suspend", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.SuspendIdentity(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("db error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag(""), errors.New("db offline")
+			},
+		}
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/"+id+"/suspend", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.SuspendIdentity(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+}
+
+func TestActivateIdentityErrors(t *testing.T) {
+	operator := &store.Operator{ID: uuid.New()}
+
+	t.Run("no auth context", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/"+uuid.NewString()+"/activate", nil)
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.ActivateIdentity(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("invalid uuid", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/invalid/activate", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", "invalid")
+		h.ActivateIdentity(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("identity not found", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("UPDATE 0"), nil
+			},
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{err: pgx.ErrNoRows}
+			},
+		}
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/"+id+"/activate", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.ActivateIdentity(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("db error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag(""), errors.New("connection failed")
+			},
+		}
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/"+id+"/activate", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.ActivateIdentity(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+}
