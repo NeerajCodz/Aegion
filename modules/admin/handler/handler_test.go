@@ -2573,3 +2573,514 @@ func TestActivateIdentityErrors(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
 }
+
+func TestCreateOperatorErrors(t *testing.T) {
+	operator := &store.Operator{ID: uuid.New()}
+
+	t.Run("no auth context", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"role":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{invalid}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_request")
+	})
+
+	t.Run("missing role", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"email":"test@example.com"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "missing_role")
+	})
+
+	t.Run("invalid identity id format", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"identity_id":"not-a-uuid","role":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_identity_id")
+	})
+
+	t.Run("missing email and password without identity_id", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"role":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "email and password are required")
+	})
+
+	t.Run("missing password without identity_id", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"email":"test@example.com","role":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "email and password are required")
+	})
+
+	t.Run("createOperatorIdentity duplicate error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		tx := &fakeTx{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				if strings.Contains(sql, "FROM core_identity_schemas") {
+					return fakeRow{vals: []any{uuid.New()}}
+				}
+				return fakeRow{err: errors.New("unexpected tx query")}
+			},
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				if strings.Contains(sql, "INSERT INTO core_identity_addresses") {
+					return pgconn.CommandTag{}, store.ErrDuplicateOperator
+				}
+				return pgconn.NewCommandTag("INSERT 1"), nil
+			},
+		}
+		h.db = &fakeDB{
+			beginFn: func(ctx context.Context) (pgx.Tx, error) {
+				return tx, nil
+			},
+		}
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"email":"test@example.com","password":"Test123!","role":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusConflict, rec.Code)
+		assert.Contains(t, rec.Body.String(), "duplicate_identity")
+	})
+
+	t.Run("createOperatorIdentity internal error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{err: errors.New("db error")}
+			},
+		}
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"email":"test@example.com","password":"Test123!","role":"admin"}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to create identity")
+	})
+
+	t.Run("service permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			createOperatorFn: func(ctx context.Context, actorID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, service.ErrPermissionDenied
+			},
+		})
+		rec := httptest.NewRecorder()
+		identityID := uuid.New()
+		body := bytes.NewBufferString(fmt.Sprintf(`{"identity_id":"%s","role":"admin"}`, identityID))
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		assert.Contains(t, rec.Body.String(), "insufficient_permissions")
+	})
+
+	t.Run("service invalid role", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			createOperatorFn: func(ctx context.Context, actorID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, service.ErrInvalidRole
+			},
+		})
+		rec := httptest.NewRecorder()
+		identityID := uuid.New()
+		body := bytes.NewBufferString(fmt.Sprintf(`{"identity_id":"%s","role":"invalid"}`, identityID))
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_role")
+	})
+
+	t.Run("service duplicate operator", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			createOperatorFn: func(ctx context.Context, actorID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, store.ErrDuplicateOperator
+			},
+		})
+		rec := httptest.NewRecorder()
+		identityID := uuid.New()
+		body := bytes.NewBufferString(fmt.Sprintf(`{"identity_id":"%s","role":"admin"}`, identityID))
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusConflict, rec.Code)
+		assert.Contains(t, rec.Body.String(), "duplicate_operator")
+	})
+
+	t.Run("service internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			createOperatorFn: func(ctx context.Context, actorID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, errors.New("service error")
+			},
+		})
+		rec := httptest.NewRecorder()
+		identityID := uuid.New()
+		body := bytes.NewBufferString(fmt.Sprintf(`{"identity_id":"%s","role":"admin"}`, identityID))
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to create operator")
+	})
+
+	t.Run("failed to load profile", func(t *testing.T) {
+		newOp := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin"}
+		h := New(&fakeService{
+			store: &fakeStore{
+				getIdentityProfileFn: func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error) {
+					return nil, errors.New("profile error")
+				},
+			},
+			createOperatorFn: func(ctx context.Context, actorID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return newOp, nil
+			},
+		})
+		rec := httptest.NewRecorder()
+		identityID := uuid.New()
+		body := bytes.NewBufferString(fmt.Sprintf(`{"identity_id":"%s","role":"admin"}`, identityID))
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to load operator profile")
+	})
+}
+
+func TestUpdateOperatorAdditionalErrors(t *testing.T) {
+	operator := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+uuid.NewString(), bytes.NewBufferString(`{}`))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("invalid json body", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+uuid.NewString(), bytes.NewBufferString(`{`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_request")
+	})
+
+	t.Run("permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			updateOperatorFn: func(ctx context.Context, actorID, operatorID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, service.ErrPermissionDenied
+			},
+		})
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+id, bytes.NewBufferString(`{"role":"admin"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		assert.Contains(t, rec.Body.String(), "insufficient_permissions")
+	})
+
+	t.Run("invalid role", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			updateOperatorFn: func(ctx context.Context, actorID, operatorID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, service.ErrInvalidRole
+			},
+		})
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+id, bytes.NewBufferString(`{"role":"bad_role"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_role")
+	})
+
+	t.Run("service internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			updateOperatorFn: func(ctx context.Context, actorID, operatorID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, errors.New("update failed")
+			},
+		})
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+id, bytes.NewBufferString(`{"role":"admin"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to update operator")
+	})
+
+	t.Run("identity profile update failure", func(t *testing.T) {
+		updatedOp := &store.Operator{
+			ID:         uuid.New(),
+			IdentityID: uuid.New(),
+			Role:       "operator",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		}
+		h := New(&fakeService{
+			store: &fakeStore{
+				getIdentityProfileFn: func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error) {
+					return &store.IdentityProfile{Email: "op@example.com", Name: "Op User", State: "active"}, nil
+				},
+			},
+			updateOperatorFn: func(ctx context.Context, actorID, operatorID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return updatedOp, nil
+			},
+		})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("identity update failed")
+			},
+		}
+		rec := httptest.NewRecorder()
+		id := updatedOp.ID.String()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+id, bytes.NewBufferString(`{"name":"Renamed User"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to update operator identity profile")
+	})
+
+	t.Run("profile lookup failure", func(t *testing.T) {
+		updatedOp := &store.Operator{
+			ID:         uuid.New(),
+			IdentityID: uuid.New(),
+			Role:       "operator",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		}
+		h := New(&fakeService{
+			store: &fakeStore{
+				getIdentityProfileFn: func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error) {
+					return nil, errors.New("profile lookup failed")
+				},
+			},
+			updateOperatorFn: func(ctx context.Context, actorID, operatorID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return updatedOp, nil
+			},
+		})
+		rec := httptest.NewRecorder()
+		id := updatedOp.ID.String()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+id, bytes.NewBufferString(`{"role":"operator"}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to load operator profile")
+	})
+}
+
+func TestDeleteOperatorAdditionalErrors(t *testing.T) {
+	operator := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/operators/"+uuid.NewString(), nil)
+		req = withRouteParam(req, "id", uuid.NewString())
+		h.DeleteOperator(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("invalid operator id", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/operators/not-uuid", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", "not-uuid")
+		h.DeleteOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			deleteOperatorFn: func(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID, ipAddress string) error {
+				return service.ErrPermissionDenied
+			},
+		})
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/operators/"+id, nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.DeleteOperator(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		assert.Contains(t, rec.Body.String(), "insufficient_permissions")
+	})
+
+	t.Run("service internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			deleteOperatorFn: func(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID, ipAddress string) error {
+				return errors.New("delete failed")
+			},
+		})
+		rec := httptest.NewRecorder()
+		id := uuid.NewString()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/operators/"+id, nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", id)
+		h.DeleteOperator(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to delete operator")
+	})
+}
+
+func TestListRolesAdditionalErrors(t *testing.T) {
+	operator := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/roles", nil)
+		h.ListRoles(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listRolesFn: func(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Role, int64, error) {
+				return nil, 0, service.ErrPermissionDenied
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/roles?page=2&per_page=3", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListRoles(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		assert.Contains(t, rec.Body.String(), "insufficient_permissions")
+	})
+
+	t.Run("internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listRolesFn: func(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Role, int64, error) {
+				return nil, 0, errors.New("list roles failed")
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/roles", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListRoles(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to list roles")
+	})
+}
+
+func TestListAuditLogsAdditionalErrors(t *testing.T) {
+	operator := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listAuditLogsFn: func(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error) {
+				return nil, 0, service.ErrPermissionDenied
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/audit?action=update", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListAuditLogs(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		assert.Contains(t, rec.Body.String(), "insufficient_permissions")
+	})
+
+	t.Run("internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listAuditLogsFn: func(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error) {
+				return nil, 0, errors.New("list audit logs failed")
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/audit", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListAuditLogs(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to list audit logs")
+	})
+
+	t.Run("invalid operator id filter ignored", func(t *testing.T) {
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listAuditLogsFn: func(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error) {
+				assert.Nil(t, filter.OperatorID)
+				assert.Equal(t, "delete_operator", filter.Action)
+				assert.Equal(t, "operator", filter.ResourceType)
+				assert.Equal(t, "res-1", filter.ResourceID)
+				return []*store.AuditLogEntry{}, 0, nil
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/audit?operator_id=invalid&action=delete_operator&resource_type=operator&resource_id=res-1", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListAuditLogs(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+}
+
+func TestIdentitySortExprAdditionalCases(t *testing.T) {
+	assert.Equal(t, "ci.updated_at ASC", identitySortExpr("updated_at"))
+	assert.Equal(t, "ci.updated_at DESC", identitySortExpr("-updated_at"))
+	assert.Equal(t, "ci.state DESC, ci.created_at DESC", identitySortExpr("-state"))
+}
