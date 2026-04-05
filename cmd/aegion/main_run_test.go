@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"syscall"
@@ -133,6 +136,140 @@ func TestParseFlagsWithArgs(t *testing.T) {
 
 	if _, err := parseFlagsWithArgs([]string{"-unknown"}); err == nil {
 		t.Fatalf("expected unknown flag error")
+	}
+}
+
+func TestRunLegacySubcommands(t *testing.T) {
+	t.Run("serve subcommand respects config flag", func(t *testing.T) {
+		deps, _, stderr, migrator, lifecycle, _ := buildRunDeps(validMainConfig())
+		loadedConfigPath := ""
+		deps.loadConfig = func(path string) (*config.Config, error) {
+			loadedConfigPath = path
+			return validMainConfig(), nil
+		}
+		deps.notifySignals = func(c chan<- os.Signal, sig ...os.Signal) {
+			c <- syscall.SIGTERM
+		}
+
+		if code := run([]string{"serve", "-config", "custom.yaml"}, deps); code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %q)", code, stderr.String())
+		}
+		if loadedConfigPath != "custom.yaml" {
+			t.Fatalf("expected config path custom.yaml, got %q", loadedConfigPath)
+		}
+		if migrator.calls != 1 {
+			t.Fatalf("expected migrator to run once, got %d", migrator.calls)
+		}
+		if lifecycle.calls != 1 {
+			t.Fatalf("expected lifecycle shutdown once, got %d", lifecycle.calls)
+		}
+	})
+
+	t.Run("migrate subcommand runs migrate-only path", func(t *testing.T) {
+		deps, _, stderr, migrator, _, _ := buildRunDeps(validMainConfig())
+		serverCalled := false
+		loadedConfigPath := ""
+		deps.loadConfig = func(path string) (*config.Config, error) {
+			loadedConfigPath = path
+			return validMainConfig(), nil
+		}
+		deps.newServer = func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error) {
+			serverCalled = true
+			return nil, errors.New("server should not be constructed in migrate mode")
+		}
+
+		if code := run([]string{"migrate", "-config", "custom.yaml"}, deps); code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %q)", code, stderr.String())
+		}
+		if loadedConfigPath != "custom.yaml" {
+			t.Fatalf("expected config path custom.yaml, got %q", loadedConfigPath)
+		}
+		if migrator.calls != 1 {
+			t.Fatalf("expected migrator to run once, got %d", migrator.calls)
+		}
+		if serverCalled {
+			t.Fatalf("newServer should not be called for migrate subcommand")
+		}
+	})
+}
+
+func TestRunHealthCommand(t *testing.T) {
+	t.Run("health command succeeds without loading config", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/health" {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		parsed, err := url.Parse(srv.URL)
+		if err != nil {
+			t.Fatalf("failed to parse test server URL: %v", err)
+		}
+		_, port, err := net.SplitHostPort(parsed.Host)
+		if err != nil {
+			t.Fatalf("failed to parse host/port: %v", err)
+		}
+		t.Setenv("AEGION_PORT", port)
+
+		deps, stdout, stderr, _, _, _ := buildRunDeps(validMainConfig())
+		loadCalled := false
+		deps.loadConfig = func(path string) (*config.Config, error) {
+			loadCalled = true
+			return nil, errors.New("loadConfig should not be called for health command")
+		}
+
+		if code := run([]string{"health"}, deps); code != 0 {
+			t.Fatalf("expected exit code 0, got %d (stderr: %q)", code, stderr.String())
+		}
+		if loadCalled {
+			t.Fatalf("loadConfig should not be called for health command")
+		}
+		if !strings.Contains(stdout.String(), "ok") {
+			t.Fatalf("expected health command to print ok, got %q", stdout.String())
+		}
+	})
+
+	t.Run("health command fails when endpoint unavailable", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("failed to reserve test port: %v", err)
+		}
+		_, port, err := net.SplitHostPort(ln.Addr().String())
+		if err != nil {
+			t.Fatalf("failed to parse reserved port: %v", err)
+		}
+		_ = ln.Close()
+		t.Setenv("AEGION_PORT", port)
+
+		deps, _, stderr, _, _, _ := buildRunDeps(validMainConfig())
+		loadCalled := false
+		deps.loadConfig = func(path string) (*config.Config, error) {
+			loadCalled = true
+			return nil, errors.New("loadConfig should not be called for health command")
+		}
+
+		if code := run([]string{"health"}, deps); code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if loadCalled {
+			t.Fatalf("loadConfig should not be called for health command")
+		}
+		if !strings.Contains(stderr.String(), "Health check failed") {
+			t.Fatalf("expected health failure output, got %q", stderr.String())
+		}
+	})
+}
+
+func TestRunUnknownSubcommand(t *testing.T) {
+	deps, _, stderr, _, _, _ := buildRunDeps(validMainConfig())
+	if code := run([]string{"unknown-command"}, deps); code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if got := stderr.String(); !strings.Contains(got, "unknown command") {
+		t.Fatalf("expected unknown command error, got %q", got)
 	}
 }
 

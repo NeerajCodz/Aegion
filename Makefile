@@ -107,7 +107,7 @@ generate: proto rust-bindings
 
 # Run migrations
 migrate:
-	go run ./cmd/aegion migrate up
+	go run ./cmd/aegion -migrate -config configs/aegion.yaml
 
 # Create a new migration
 migrate-create:
@@ -116,7 +116,8 @@ migrate-create:
 
 # Rollback last migration
 migrate-down:
-	go run ./cmd/aegion migrate down 1
+	@echo "Rollback is not exposed via cmd/aegion. Use migration tooling directly."
+	@exit 1
 
 # ============================================================================
 # RUST
@@ -182,6 +183,7 @@ help:
 	@echo "Database:"
 	@echo "  make migrate        - Run migrations"
 	@echo "  make migrate-create - Create new migration (NAME=name)"
+	@echo "  make migrate-down   - Not supported via cmd/aegion (fails intentionally)"
 	@echo ""
 	@echo "Linting:"
 	@echo "  make lint           - Run all linters"

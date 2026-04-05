@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -190,7 +191,16 @@ func main() {
 }
 
 func run(args []string, deps mainDeps) int {
-	f, err := parseFlagsWithArgs(args)
+	normalizedArgs, command, err := normalizeCLIArgs(args)
+	if err != nil {
+		fmt.Fprintf(deps.stderr, "Failed to parse flags: %v\n", err)
+		return 1
+	}
+	if command == "health" {
+		return runHealthCommand(deps.stdout, deps.stderr)
+	}
+
+	f, err := parseFlagsWithArgs(normalizedArgs)
 	if err != nil {
 		fmt.Fprintf(deps.stderr, "Failed to parse flags: %v\n", err)
 		return 1
@@ -303,6 +313,54 @@ func run(args []string, deps mainDeps) int {
 	}
 
 	log.Info().Msg("Shutdown complete")
+	return 0
+}
+
+func normalizeCLIArgs(args []string) ([]string, string, error) {
+	if len(args) == 0 {
+		return args, "", nil
+	}
+
+	command := strings.ToLower(strings.TrimSpace(args[0]))
+	if command == "" || strings.HasPrefix(command, "-") {
+		return args, "", nil
+	}
+
+	switch command {
+	case "serve":
+		return args[1:], command, nil
+	case "migrate":
+		return append([]string{"-migrate"}, args[1:]...), command, nil
+	case "version":
+		return append([]string{"-version"}, args[1:]...), command, nil
+	case "health":
+		return args[1:], command, nil
+	default:
+		return nil, "", fmt.Errorf("unknown command: %s", command)
+	}
+}
+
+func runHealthCommand(stdout, stderr io.Writer) int {
+	port := strings.TrimSpace(os.Getenv("AEGION_PORT"))
+	if port == "" {
+		port = "8080"
+	}
+
+	url := "http://127.0.0.1:" + port + "/health"
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Fprintf(stderr, "Health check failed: %v\n", err)
+		return 1
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		fmt.Fprintf(stderr, "Health check failed: status %d\n", resp.StatusCode)
+		return 1
+	}
+
+	fmt.Fprintln(stdout, "ok")
 	return 0
 }
 
