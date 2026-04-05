@@ -83,8 +83,8 @@ logs/
 coverage-focus
 coverage-store
 cover_router
-handler
-registry
+/handler
+/registry
 
 # Exclude accidental vendored Go package under SPA dependencies
 modules/admin/spa/node_modules/flatted/golang/
