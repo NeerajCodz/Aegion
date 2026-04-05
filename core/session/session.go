@@ -109,6 +109,7 @@ type Manager struct {
 
 var errTokenEntropyFailure = errors.New("failed to generate token entropy")
 var errSessionDBUnavailable = errors.New("session manager database unavailable")
+var readTokenRandom = rand.Read
 
 type sessionTx interface {
 	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
@@ -183,16 +184,24 @@ func NewManager(cfg ManagerConfig) *Manager {
 // Create creates a new session for an identity.
 func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthMethod, device DeviceInfo) (*Session, error) {
 	now := m.now()
+	token, err := m.generateToken()
+	if err != nil {
+		return nil, err
+	}
+	logoutToken, err := m.generateToken()
+	if err != nil {
+		return nil, err
+	}
 
 	session := &Session{
 		ID:              uuid.New(),
-		Token:           m.generateToken(),
+		Token:           token,
 		IdentityID:      identityID,
 		AAL:             methodToAAL(method),
 		IssuedAt:        now,
 		ExpiresAt:       now.Add(m.lifespan),
 		AuthenticatedAt: now,
-		LogoutToken:     m.generateToken(),
+		LogoutToken:     logoutToken,
 		Devices:         []DeviceInfo{device},
 		Active:          true,
 		AuthMethods: []SessionAuthMethod{
@@ -207,7 +216,7 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 	}
 
 	// Insert session
-	_, err := m.execStmt(ctx, `
+	_, err = m.execStmt(ctx, `
 		INSERT INTO core_sessions (
 			id, token, identity_id, aal, issued_at, expires_at,
 			authenticated_at, logout_token, devices, active,
@@ -439,12 +448,12 @@ func (m *Manager) Cleanup(ctx context.Context) (int64, error) {
 
 // Helper functions
 
-func (m *Manager) generateToken() string {
+func (m *Manager) generateToken() (string, error) {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic(errTokenEntropyFailure)
+	if _, err := readTokenRandom(b); err != nil {
+		return "", errTokenEntropyFailure
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func (m *Manager) signToken(token string) string {

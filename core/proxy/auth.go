@@ -55,6 +55,11 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 
 			// If authentication is optional, continue without session
 			if am.optional {
+				am.logger.Warn().
+					Str("request_id", requestID).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Msg("optional authentication bypassed due to auth resolution failure")
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -75,6 +80,12 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 				am.handleAuthError(w, r, session.ErrSessionInvalid)
 				return
 			}
+			am.logger.Warn().
+				Str("request_id", requestID).
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Str("session_id", sess.ID.String()).
+				Msg("optional authentication bypassed inactive session")
 		}
 
 		// Check if session has expired
@@ -89,6 +100,12 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 				am.handleAuthError(w, r, session.ErrSessionExpired)
 				return
 			}
+			am.logger.Warn().
+				Str("request_id", requestID).
+				Str("method", r.Method).
+				Str("path", r.URL.Path).
+				Str("session_id", sess.ID.String()).
+				Msg("optional authentication bypassed expired session")
 		}
 
 		// Add session to request context

@@ -143,10 +143,13 @@ func setupModuleRoutes(r chi.Router, s *Server) {
 
 // setupAdminRoutes configures admin API endpoints.
 func setupAdminRoutes(r chi.Router, s *Server) {
+	// Protect core admin endpoints from public access by requiring trusted internal auth.
+	r.Use(authtoken.Middleware(authtoken.MiddlewareConfig{
+		Generator: s.tokenGen,
+	}))
+
 	// Admin API
 	r.Route("/api/v1", func(r chi.Router) {
-		// TODO: Add admin authentication middleware
-
 		// Identity management
 		r.Route("/identities", func(r chi.Router) {
 			r.Get("/", s.handleAdminListIdentities)

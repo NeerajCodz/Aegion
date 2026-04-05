@@ -403,6 +403,25 @@ func TestSetupRoutes_InternalAuthAndAdminMount(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/aegion/api/v1/system/health", nil)
 		router2.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	t.Run("admin route accepts valid internal auth token", func(t *testing.T) {
+		s2 := newTestServer(t)
+		s2.cfg.Admin.Enabled = true
+		router2 := SetupRoutes(s2)
+
+		token, err := s2.tokenGen.Generate("module-admin")
+		if err != nil {
+			t.Fatalf("failed to generate token: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/aegion/api/v1/system/health", nil)
+		req.Header.Set(authtoken.HeaderInternalToken, token)
+		router2.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}

@@ -85,10 +85,10 @@ func TestRuleEngine_Match(t *testing.T) {
 			shouldMatch:    true,
 		},
 		{
-			name:           "api v1 method not allowed",
-			method:         "DELETE",
-			path:           "/api/v1/users",
-			shouldMatch:    false,
+			name:        "api v1 method not allowed",
+			method:      "DELETE",
+			path:        "/api/v1/users",
+			shouldMatch: false,
 		},
 		{
 			name:           "api v2 DELETE allowed",
@@ -134,11 +134,11 @@ func TestRuleEngine_Match(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, nil)
-			
+
 			rule, matched := engine.Match(req)
-			
+
 			assert.Equal(t, tt.shouldMatch, matched, "match result")
-			
+
 			if tt.shouldMatch {
 				require.NotNil(t, rule, "rule should not be nil")
 				assert.Equal(t, tt.expectedRuleID, rule.ID, "rule ID")
@@ -180,21 +180,21 @@ func TestRuleEngine_Priority(t *testing.T) {
 	// Should match the highest priority rule
 	req := httptest.NewRequest("GET", "/api/v1/users", nil)
 	rule, matched := engine.Match(req)
-	
+
 	assert.True(t, matched)
 	assert.Equal(t, "api-v1-specific", rule.ID)
 
 	// Should match api-specific for v2
 	req = httptest.NewRequest("GET", "/api/v2/users", nil)
 	rule, matched = engine.Match(req)
-	
+
 	assert.True(t, matched)
 	assert.Equal(t, "api-specific", rule.ID)
 
 	// Should match catch-all for other paths
 	req = httptest.NewRequest("GET", "/other/path", nil)
 	rule, matched = engine.Match(req)
-	
+
 	assert.True(t, matched)
 	assert.Equal(t, "catch-all", rule.ID)
 }
@@ -269,7 +269,7 @@ func TestRuleEngine_CheckAccess(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "capabilities required (placeholder test)",
+			name: "capabilities required fail closed without capability source",
 			rule: Rule{
 				RequireAuth:  true,
 				Capabilities: []string{"read:users", "write:users"},
@@ -280,16 +280,17 @@ func TestRuleEngine_CheckAccess(t *testing.T) {
 				AAL:        session.AAL1,
 				Active:     true,
 			},
-			expectError: false, // checkCapabilities is a placeholder that returns nil
+			expectError: true,
+			errorType:   ErrInsufficientPrivileges,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/test", nil)
-			
+
 			err := engine.CheckAccess(req, &tt.rule, tt.session)
-			
+
 			if tt.expectError {
 				assert.Error(t, err)
 				if tt.errorType != nil {
@@ -480,7 +481,7 @@ func TestRule_Validate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.rule.Validate()
-			
+
 			if tt.wantErr {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.errMsg)
@@ -578,14 +579,14 @@ func BenchmarkRuleEngine_Match(b *testing.B) {
 	rules := make([]Rule, 100)
 	for i := 0; i < 100; i++ {
 		rules[i] = Rule{
-			ID:       string(rune('A' + i%26)) + string(rune('0' + i/26)),
+			ID:       string(rune('A'+i%26)) + string(rune('0'+i/26)),
 			Path:     "/api/v" + string(rune('0'+i%10)) + "/*",
 			Target:   "service" + string(rune('0'+i%10)),
 			Priority: 100 - i,
 			Enabled:  true,
 		}
 	}
-	
+
 	engine := NewRuleEngine(rules)
 	req := httptest.NewRequest("GET", "/api/v5/users", nil)
 
@@ -715,21 +716,21 @@ func TestRule_ApplyRewrite_EdgeCases(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "empty path with strip",
-			rule: Rule{Rewrite: &RewriteConfig{StripPrefix: "/api"}},
-			path: "",
+			name:     "empty path with strip",
+			rule:     Rule{Rewrite: &RewriteConfig{StripPrefix: "/api"}},
+			path:     "",
 			expected: "",
 		},
 		{
-			name: "single slash with add prefix",
-			rule: Rule{Rewrite: &RewriteConfig{AddPrefix: "/api"}},
-			path: "/",
+			name:     "single slash with add prefix",
+			rule:     Rule{Rewrite: &RewriteConfig{AddPrefix: "/api"}},
+			path:     "/",
 			expected: "/api/",
 		},
 		{
-			name: "double strip and add",
-			rule: Rule{Rewrite: &RewriteConfig{StripPrefix: "/a/b", AddPrefix: "/x/y"}},
-			path: "/a/b/c/d",
+			name:     "double strip and add",
+			rule:     Rule{Rewrite: &RewriteConfig{StripPrefix: "/a/b", AddPrefix: "/x/y"}},
+			path:     "/a/b/c/d",
 			expected: "/x/y/c/d",
 		},
 	}

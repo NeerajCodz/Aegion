@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	ErrAccessDenied          = errors.New("access denied")
+	ErrAccessDenied           = errors.New("access denied")
 	ErrAuthenticationRequired = errors.New("authentication required")
 	ErrInsufficientPrivileges = errors.New("insufficient privileges")
 )
@@ -67,7 +67,7 @@ type RewriteConfig struct {
 
 	// Regex pattern for complex rewriting (future extension)
 	Regex string `json:"regex,omitempty" yaml:"regex,omitempty"`
-	
+
 	// Replacement for regex pattern (future extension)
 	Replacement string `json:"replacement,omitempty" yaml:"replacement,omitempty"`
 }
@@ -82,7 +82,7 @@ func NewRuleEngine(rules []Rule) *RuleEngine {
 	// Sort rules by priority (highest first)
 	sortedRules := make([]Rule, len(rules))
 	copy(sortedRules, rules)
-	
+
 	for i := 0; i < len(sortedRules)-1; i++ {
 		for j := i + 1; j < len(sortedRules); j++ {
 			if sortedRules[i].Priority < sortedRules[j].Priority {
@@ -104,7 +104,7 @@ func (e *RuleEngine) Match(r *http.Request) (*Rule, bool) {
 
 	for i := range e.rules {
 		rule := &e.rules[i]
-		
+
 		// Skip disabled rules
 		if !rule.Enabled {
 			continue
@@ -156,7 +156,7 @@ func (e *RuleEngine) CheckAccess(r *http.Request, rule *Rule, sess *session.Sess
 // AddRule adds a new rule to the engine.
 func (e *RuleEngine) AddRule(rule Rule) {
 	e.rules = append(e.rules, rule)
-	
+
 	// Re-sort rules by priority
 	for i := len(e.rules) - 1; i > 0; i-- {
 		if e.rules[i].Priority > e.rules[i-1].Priority {
@@ -200,7 +200,7 @@ func (e *RuleEngine) UpdateRule(rule Rule) bool {
 	for i := range e.rules {
 		if e.rules[i].ID == rule.ID {
 			e.rules[i] = rule
-			
+
 			// Re-sort if priority changed
 			e.sortRules()
 			return true
@@ -254,22 +254,16 @@ func matchesPattern(path, pattern string) bool {
 
 // checkCapabilities validates if the session has required capabilities.
 func checkCapabilities(sess *session.Session, requiredCaps []string) error {
-	// For now, we'll implement a simple capability check
-	// In a real implementation, you'd query the user's permissions from the database
-	
-	// This is a placeholder - you would implement actual capability checking
-	// based on your authorization system (roles, permissions, etc.)
-	
-	// Example implementation:
-	// 1. Query user roles/permissions from database using sess.IdentityID
-	// 2. Check if user has all required capabilities
-	// 3. Return appropriate error if not
-	
-	// For demonstration, we'll return nil (allow all)
-	// TODO: Implement actual capability checking
-	_ = requiredCaps // Silence unused variable warning
-	
-	return nil
+	if sess == nil {
+		return ErrAuthenticationRequired
+	}
+	if len(requiredCaps) == 0 {
+		return nil
+	}
+
+	// Capability evaluation is not wired to a trusted permission source in this package yet.
+	// Fail closed to prevent silent authorization bypass when capabilities are configured.
+	return ErrInsufficientPrivileges
 }
 
 // ApplyRewrite applies path rewriting based on the rule's rewrite configuration.
@@ -281,7 +275,7 @@ func (r *Rule) ApplyRewrite(path string) string {
 	// Strip prefix
 	if r.Rewrite.StripPrefix != "" && strings.HasPrefix(path, r.Rewrite.StripPrefix) {
 		path = strings.TrimPrefix(path, r.Rewrite.StripPrefix)
-		
+
 		// Ensure path starts with /
 		if !strings.HasPrefix(path, "/") {
 			path = "/" + path
@@ -291,17 +285,17 @@ func (r *Rule) ApplyRewrite(path string) string {
 	// Add prefix
 	if r.Rewrite.AddPrefix != "" {
 		prefix := r.Rewrite.AddPrefix
-		
+
 		// Ensure prefix starts with /
 		if !strings.HasPrefix(prefix, "/") {
 			prefix = "/" + prefix
 		}
-		
+
 		// Ensure prefix doesn't end with / unless path is empty
 		if strings.HasSuffix(prefix, "/") && path != "/" && path != "" {
 			prefix = strings.TrimSuffix(prefix, "/")
 		}
-		
+
 		path = prefix + path
 	}
 

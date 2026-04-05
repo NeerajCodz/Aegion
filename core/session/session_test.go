@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,7 +33,7 @@ func (m *mockDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 	if m.queryError != nil {
 		return &mockRow{err: m.queryError}
 	}
-	
+
 	// Handle session query
 	if len(args) > 0 {
 		if token, ok := args[0].(string); ok {
@@ -42,7 +43,7 @@ func (m *mockDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			return &mockRow{err: ErrSessionNotFound}
 		}
 	}
-	
+
 	return &mockRow{err: ErrSessionNotFound}
 }
 
@@ -50,7 +51,7 @@ func (m *mockDB) Query(ctx context.Context, sql string, args ...interface{}) (ro
 	if m.queryError != nil {
 		return nil, m.queryError
 	}
-	
+
 	// Handle auth methods query
 	if len(args) > 0 {
 		if sessionID, ok := args[0].(uuid.UUID); ok {
@@ -59,7 +60,7 @@ func (m *mockDB) Query(ctx context.Context, sql string, args ...interface{}) (ro
 			}
 		}
 	}
-	
+
 	return &mockRows{}, nil
 }
 
@@ -102,7 +103,7 @@ func (r *mockRow) Scan(dest ...interface{}) error {
 	if r.err != nil {
 		return r.err
 	}
-	
+
 	if r.session != nil {
 		// Simplified scan for session data
 		if len(dest) >= 14 {
@@ -121,7 +122,7 @@ func (r *mockRow) Scan(dest ...interface{}) error {
 			// Set other fields as needed...
 		}
 	}
-	
+
 	return nil
 }
 
@@ -203,7 +204,7 @@ func TestNewManager(t *testing.T) {
 	}
 
 	manager := NewManager(cfg)
-	
+
 	assert.NotNil(t, manager)
 	assert.Equal(t, cfg.CookieSecret, manager.cookieSecret)
 	assert.Equal(t, cfg.CookieConfig, manager.cookieConfig)
@@ -333,8 +334,10 @@ func TestComputeAAL(t *testing.T) {
 func TestManager_GenerateToken(t *testing.T) {
 	manager := createTestManager()
 
-	token1 := manager.generateToken()
-	token2 := manager.generateToken()
+	token1, err := manager.generateToken()
+	require.NoError(t, err)
+	token2, err := manager.generateToken()
+	require.NoError(t, err)
 
 	// Tokens should be non-empty and unique
 	assert.NotEmpty(t, token1)
@@ -344,6 +347,22 @@ func TestManager_GenerateToken(t *testing.T) {
 	// Tokens should be valid base64
 	assert.Regexp(t, "^[A-Za-z0-9_-]+$", token1)
 	assert.Regexp(t, "^[A-Za-z0-9_-]+$", token2)
+}
+
+func TestManager_GenerateToken_EntropyFailure(t *testing.T) {
+	manager := createTestManager()
+
+	originalReadTokenRandom := readTokenRandom
+	readTokenRandom = func([]byte) (int, error) {
+		return 0, errors.New("entropy unavailable")
+	}
+	t.Cleanup(func() {
+		readTokenRandom = originalReadTokenRandom
+	})
+
+	token, err := manager.generateToken()
+	assert.Empty(t, token)
+	assert.ErrorIs(t, err, errTokenEntropyFailure)
 }
 
 func TestManager_SignVerifyToken(t *testing.T) {
@@ -380,7 +399,7 @@ func TestManager_SignVerifyToken(t *testing.T) {
 
 			// Verify signed token
 			verified, err := manager.verifySignedToken(signed)
-			
+
 			if tt.wantError {
 				assert.Error(t, err)
 			} else {
@@ -571,7 +590,7 @@ func TestManager_GetFromRequest(t *testing.T) {
 			// This test would require dependency injection to work properly
 			// For now, we test the logic structure
 			req := tt.setupReq()
-			
+
 			// Test cookie extraction logic
 			if cookie, err := req.Cookie(manager.cookieConfig.Name); err == nil {
 				_, verifyErr := manager.verifySignedToken(cookie.Value)
@@ -706,8 +725,10 @@ func TestManager_Create_Success(t *testing.T) {
 	manager := createTestManager()
 
 	// Test token generation part
-	token := manager.generateToken()
-	logoutToken := manager.generateToken()
+	token, err := manager.generateToken()
+	require.NoError(t, err)
+	logoutToken, err := manager.generateToken()
+	require.NoError(t, err)
 
 	assert.NotEmpty(t, token)
 	assert.NotEmpty(t, logoutToken)
@@ -983,8 +1004,8 @@ func TestComputeAAL_EdgeCases(t *testing.T) {
 
 func TestSession_FieldVisibility(t *testing.T) {
 	session := &Session{
-		ID:         uuid.New(),
-		Token:      "secret-token",
+		ID:          uuid.New(),
+		Token:       "secret-token",
 		LogoutToken: "logout-secret",
 	}
 
@@ -1025,7 +1046,7 @@ func TestSessionAuthMethod_AllAuthTypes(t *testing.T) {
 	now := time.Now().UTC()
 
 	authMethods := []struct {
-		method    AuthMethod
+		method     AuthMethod
 		aalContrib AAL
 	}{
 		{AuthMethodPassword, AAL1},
@@ -1079,7 +1100,8 @@ func TestManager_Config_Preservation(t *testing.T) {
 func TestManager_TokenFormat(t *testing.T) {
 	manager := createTestManager()
 
-	token := manager.generateToken()
+	token, err := manager.generateToken()
+	require.NoError(t, err)
 
 	// Token should be valid base64 URL-encoded
 	assert.Regexp(t, "^[A-Za-z0-9_-]+$", token)
@@ -1210,10 +1232,10 @@ func TestManager_Extend_LogicPath(t *testing.T) {
 	manager := createTestManager()
 	sessionID := uuid.New()
 	_ = sessionID
-	
+
 	now := time.Now().UTC()
 	expiresAt := now.Add(manager.lifespan)
-	
+
 	// Extended expiration should be in the future
 	assert.True(t, expiresAt.After(now))
 }
@@ -1222,15 +1244,15 @@ func TestManager_Cleanup_LogicPath(t *testing.T) {
 	// Test cleanup logic
 	manager := createTestManager()
 	_ = manager
-	
+
 	now := time.Now().UTC()
-	
+
 	// Sessions older than 7 days should be cleaned
 	oldSession := now.Add(-8 * 24 * time.Hour)
 	recentSession := now.Add(-6 * 24 * time.Hour)
-	
+
 	assert.True(t, now.Add(-7*24*time.Hour).After(oldSession))
-	assert.True(t, recentSession.After(now.Add(-7 * 24 * time.Hour)))
+	assert.True(t, recentSession.After(now.Add(-7*24*time.Hour)))
 }
 
 // ============================================================================
@@ -1239,19 +1261,21 @@ func TestManager_Cleanup_LogicPath(t *testing.T) {
 
 func TestManager_Create_TokenStructure(t *testing.T) {
 	manager := createTestManager()
-	
+
 	// Test that tokens are properly generated
-	token1 := manager.generateToken()
-	token2 := manager.generateToken()
-	
+	token1, err := manager.generateToken()
+	require.NoError(t, err)
+	token2, err := manager.generateToken()
+	require.NoError(t, err)
+
 	assert.NotEmpty(t, token1)
 	assert.NotEmpty(t, token2)
 	assert.NotEqual(t, token1, token2)
-	
+
 	// Tokens should be base64 URL-safe
 	assert.Regexp(t, "^[A-Za-z0-9_-]+$", token1)
 	assert.Regexp(t, "^[A-Za-z0-9_-]+$", token2)
-	
+
 	// Tokens should be reasonable length (32 bytes base64)
 	assert.Greater(t, len(token1), 40)
 	assert.Less(t, len(token1), 50)
@@ -1319,7 +1343,7 @@ func TestManager_GetFromRequest_BearerHeader(t *testing.T) {
 	// Test bearer header extraction
 	auth := req.Header.Get("Authorization")
 	assert.True(t, strings.HasPrefix(auth, "Bearer "))
-	
+
 	extractedToken := strings.TrimPrefix(auth, "Bearer ")
 	assert.Equal(t, sessionToken, extractedToken)
 }
@@ -1566,11 +1590,11 @@ func TestSession_Lifecycle_Creation(t *testing.T) {
 
 func TestSession_Lifecycle_Expiration(t *testing.T) {
 	now := time.Now().UTC()
-	
+
 	tests := []struct {
-		name       string
-		expiresAt  time.Time
-		isExpired  bool
+		name      string
+		expiresAt time.Time
+		isExpired bool
 	}{
 		{"Future expiration", now.Add(time.Hour), false},
 		{"Past expiration", now.Add(-time.Hour), true},
@@ -1662,10 +1686,10 @@ func TestSession_Impersonation(t *testing.T) {
 	impersonatorID := uuid.New()
 
 	session := &Session{
-		ID:             uuid.New(),
-		IdentityID:     uuid.New(),
+		ID:              uuid.New(),
+		IdentityID:      uuid.New(),
 		IsImpersonation: true,
-		ImpersonatorID: &impersonatorID,
+		ImpersonatorID:  &impersonatorID,
 	}
 
 	assert.True(t, session.IsImpersonation)
@@ -1674,10 +1698,10 @@ func TestSession_Impersonation(t *testing.T) {
 
 func TestSession_NoImpersonation(t *testing.T) {
 	session := &Session{
-		ID:             uuid.New(),
-		IdentityID:     uuid.New(),
+		ID:              uuid.New(),
+		IdentityID:      uuid.New(),
 		IsImpersonation: false,
-		ImpersonatorID: nil,
+		ImpersonatorID:  nil,
 	}
 
 	assert.False(t, session.IsImpersonation)
@@ -1690,7 +1714,7 @@ func TestSession_NoImpersonation(t *testing.T) {
 
 func TestManager_CookieRoundTrip(t *testing.T) {
 	manager := createTestManager()
-	
+
 	sessionID := uuid.New()
 	identityID := uuid.New()
 	token := "roundtrip-token"
@@ -1701,10 +1725,10 @@ func TestManager_CookieRoundTrip(t *testing.T) {
 
 	// Set cookie
 	session := &Session{
-		ID:        sessionID,
-		Token:     token,
+		ID:         sessionID,
+		Token:      token,
 		IdentityID: identityID,
-		ExpiresAt: time.Now().Add(time.Hour),
+		ExpiresAt:  time.Now().Add(time.Hour),
 	}
 
 	recorder := httptest.NewRecorder()
