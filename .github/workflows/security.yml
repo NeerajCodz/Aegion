@@ -115,17 +115,20 @@ jobs:
         continue-on-error: true
 
       - name: Run Trivy vulnerability scanner (filesystem)
-        uses: aquasecurity/trivy-action@v0.35.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          scanners: 'vuln'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          ignore-unfixed: true
-          trivyignores: '.trivyignore'
-          format: 'sarif'
-          output: 'trivy-fs-results.sarif'
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            aquasec/trivy:0.69.3 fs \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile .trivyignore \
+            --pkg-types os,library \
+            --format sarif \
+            --output trivy-fs-results.sarif \
+            .
 
       - name: Upload Trivy filesystem results
         uses: github/codeql-action/upload-sarif@v4
@@ -136,17 +139,22 @@ jobs:
           category: 'trivy-fs'
 
       - name: Run Trivy on container image
-        uses: aquasecurity/trivy-action@v0.35.0
         if: success()
-        with:
-          image-ref: 'aegion/core:scan'
-          scanners: 'vuln'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          ignore-unfixed: true
-          trivyignores: '.trivyignore'
-          format: 'sarif'
-          output: 'trivy-image-results.sarif'
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" \
+            -w /work \
+            aquasec/trivy:0.69.3 image \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile .trivyignore \
+            --pkg-types os,library \
+            --format sarif \
+            --output trivy-image-results.sarif \
+            aegion/core:scan
 
       - name: Upload Trivy image results
         uses: github/codeql-action/upload-sarif@v4
