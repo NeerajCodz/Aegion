@@ -11,6 +11,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func runLoopAsync(worker *BaseWorker, ctx context.Context, fn func(context.Context) error) <-chan error {
+	result := make(chan error, 1)
+	go func() {
+		result <- worker.RunLoop(ctx, fn)
+	}()
+	return result
+}
+
 // ============================================================================
 // RUNLOOP COMPREHENSIVE COVERAGE TESTS
 // ============================================================================
@@ -28,9 +36,7 @@ func TestBaseWorkerRunLoopInitialExecution(t *testing.T) {
 		return nil
 	}
 
-	go func() {
-		_ = worker.RunLoop(ctx, fn)
-	}()
+	_ = runLoopAsync(worker, ctx, fn)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -50,9 +56,7 @@ func TestBaseWorkerRunLoopMultipleTicks(t *testing.T) {
 		return nil
 	}
 
-	go func() {
-		_ = worker.RunLoop(ctx, fn)
-	}()
+	_ = runLoopAsync(worker, ctx, fn)
 
 	time.Sleep(120 * time.Millisecond)
 
@@ -72,10 +76,7 @@ func TestBaseWorkerRunLoopDoneChannelSignal(t *testing.T) {
 		return nil
 	}
 
-	doneChan := make(chan error, 1)
-	go func() {
-		doneChan <- worker.RunLoop(ctx, fn)
-	}()
+	doneChan := runLoopAsync(worker, ctx, fn)
 
 	// Wait for at least one execution
 	time.Sleep(50 * time.Millisecond)
@@ -97,10 +98,7 @@ func TestBaseWorkerRunLoopContextCancellationReturnsError(t *testing.T) {
 		return nil
 	}
 
-	resultChan := make(chan error, 1)
-	go func() {
-		resultChan <- worker.RunLoop(ctx, fn)
-	}()
+	resultChan := runLoopAsync(worker, ctx, fn)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -123,10 +121,7 @@ func TestBaseWorkerRunLoopFunctionErrorDoesNotStopLoop(t *testing.T) {
 		return nil
 	}
 
-	resultChan := make(chan error, 1)
-	go func() {
-		resultChan <- worker.RunLoop(ctx, fn)
-	}()
+	_ = runLoopAsync(worker, ctx, fn)
 
 	time.Sleep(120 * time.Millisecond)
 
@@ -149,9 +144,7 @@ func TestBaseWorkerRunLoopPanicRecovery(t *testing.T) {
 		return nil
 	}
 
-	go func() {
-		_ = worker.RunLoop(ctx, fn)
-	}()
+	_ = runLoopAsync(worker, ctx, fn)
 
 	time.Sleep(120 * time.Millisecond)
 
@@ -166,12 +159,9 @@ func TestBaseWorkerRunLoopConcurrentContextAndDone(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		resultChan := make(chan error, 1)
-		go func() {
-			resultChan <- worker.RunLoop(ctx, func(ctx context.Context) error {
-				return nil
-			})
-		}()
+		resultChan := runLoopAsync(worker, ctx, func(ctx context.Context) error {
+			return nil
+		})
 
 		// Test different stopping scenarios
 		switch i {
@@ -220,10 +210,7 @@ func TestBaseWorkerRunLoopRunningStateTransitions(t *testing.T) {
 	// Before start: not running
 	assert.False(t, worker.IsRunning())
 
-	resultChan := make(chan error, 1)
-	go func() {
-		resultChan <- worker.RunLoop(ctx, fn)
-	}()
+	resultChan := runLoopAsync(worker, ctx, fn)
 
 	// During execution: running
 	time.Sleep(50 * time.Millisecond)
@@ -231,6 +218,7 @@ func TestBaseWorkerRunLoopRunningStateTransitions(t *testing.T) {
 
 	// Wait for context to expire
 	time.Sleep(60 * time.Millisecond)
+	_ = <-resultChan
 
 	// After completion: not running
 	assert.False(t, worker.IsRunning())
@@ -242,11 +230,9 @@ func TestBaseWorkerRunLoopChannelCleanup(t *testing.T) {
 		worker := NewBaseWorker(fmt.Sprintf("test-%d", i), nil, nil, 50*time.Millisecond)
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 
-		go func() {
-			_ = worker.RunLoop(ctx, func(ctx context.Context) error {
-				return nil
-			})
-		}()
+		_ = runLoopAsync(worker, ctx, func(ctx context.Context) error {
+			return nil
+		})
 
 		time.Sleep(120 * time.Millisecond)
 		cancel()
