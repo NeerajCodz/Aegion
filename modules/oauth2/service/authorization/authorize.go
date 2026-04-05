@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Qypher/aegion/modules/oauth2/store"
+	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
 var (

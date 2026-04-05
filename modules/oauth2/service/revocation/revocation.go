@@ -8,7 +8,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/Qypher/aegion/modules/oauth2/store"
+	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
 var (
@@ -61,7 +61,7 @@ func (s *RevocationService) RevokeToken(ctx context.Context, req *RevocationRequ
 			return ErrInvalidClient
 		}
 		// For basic/post auth methods, verify secret
-		if !authenticateClientSecret(client.SecretHash, req.ClientSecret) {
+		if client.SecretHash != nil && !authenticateClientSecret(*client.SecretHash, req.ClientSecret) {
 			return ErrInvalidClient
 		}
 	}

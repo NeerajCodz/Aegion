@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Qypher/aegion/modules/oauth2/store"
+	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
 var (
@@ -91,7 +91,7 @@ func (s *DeviceService) RequestDeviceAuthorization(ctx context.Context, req *Dev
 		ClientID:    client.ID,
 		Scopes:      scopes,
 		ExpiresAt:   time.Now().UTC().Add(s.deviceCodeTTL),
-		Interval:    &s.pollingInterval,
+		Interval:    s.pollingInterval,
 	}
 
 	if err := s.store.CreateDeviceCode(ctx, dc); err != nil {
@@ -142,19 +142,19 @@ func (s *DeviceService) PollDeviceToken(ctx context.Context, req *DeviceTokenReq
 	}
 
 	// Check if denied
-	if dc.DeniedAt != nil {
+	if dc.Status == "denied" {
 		return nil, ErrAccessDenied
 	}
 
 	// Check if approved
-	if dc.ApprovedAt == nil {
+	if dc.Status != "approved" {
 		// Check polling rate
-		if dc.LastPolledAt != nil {
+		if dc.LastPollAt != nil {
 			interval := s.pollingInterval
-			if dc.Interval != nil {
-				interval = *dc.Interval
+			if dc.Interval != 0 {
+				interval = dc.Interval
 			}
-			elapsed := time.Since(*dc.LastPolledAt)
+			elapsed := time.Since(*dc.LastPollAt)
 			if elapsed < time.Duration(interval)*time.Second {
 				return nil, ErrSlowDown
 			}
@@ -162,8 +162,8 @@ func (s *DeviceService) PollDeviceToken(ctx context.Context, req *DeviceTokenReq
 		return nil, ErrAuthorizationPending
 	}
 
-	// Check if already used
-	if dc.Used {
+	// Verify identity was set on approval
+	if dc.IdentityID == nil {
 		return nil, ErrInvalidGrant
 	}
 
@@ -184,7 +184,7 @@ func (s *DeviceService) ApproveDeviceAuthorization(ctx context.Context, userCode
 	}
 
 	// Check if already approved/denied
-	if dc.ApprovedAt != nil || dc.DeniedAt != nil {
+	if dc.Status != "pending" {
 		return ErrInvalidGrant
 	}
 

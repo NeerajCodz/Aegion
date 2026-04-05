@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/Qypher/aegion/modules/oauth2/store"
+	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
 var (
