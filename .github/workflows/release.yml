@@ -12,7 +12,7 @@ on:
 
 env:
   GO_VERSION: '1.25.8'
-  RUST_VERSION: '1.81.0'
+  RUST_VERSION: 'stable'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository }}
 
