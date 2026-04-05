@@ -34,8 +34,8 @@ func (m *mockGrantStore) CreateAccessToken(ctx context.Context, token *store.Acc
 }
 
 type mockSigner struct {
-	token string
-	err   error
+	token  string
+	err    error
 	claims map[string]interface{}
 }
 

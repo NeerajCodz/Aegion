@@ -20,13 +20,13 @@ import (
 
 // Errors for the admin store.
 var (
-	ErrOperatorNotFound  = errors.New("operator not found")
-	ErrIdentityNotFound  = errors.New("identity not found")
-	ErrRoleNotFound      = errors.New("role not found")
-	ErrAPIKeyNotFound    = errors.New("api key not found")
-	ErrDuplicateOperator = errors.New("operator already exists for this identity")
-	ErrDuplicateRole     = errors.New("role with this name already exists")
-	ErrSystemRole        = errors.New("cannot modify system role")
+	ErrOperatorNotFound   = errors.New("operator not found")
+	ErrIdentityNotFound   = errors.New("identity not found")
+	ErrRoleNotFound       = errors.New("role not found")
+	ErrAPIKeyNotFound     = errors.New("api key not found")
+	ErrDuplicateOperator  = errors.New("operator already exists for this identity")
+	ErrDuplicateRole      = errors.New("role with this name already exists")
+	ErrSystemRole         = errors.New("cannot modify system role")
 	ErrInvalidCredentials = errors.New("invalid credentials")
 )
 

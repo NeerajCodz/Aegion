@@ -326,7 +326,9 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 		// Don't fail registration if HIBP is unavailable
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil

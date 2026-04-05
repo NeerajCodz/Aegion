@@ -59,7 +59,7 @@ func TestFlow_CompleteMultipleCalls(t *testing.T) {
 	// First complete succeeds
 	err1 := flow.Complete()
 	firstUpdatedAt := flow.UpdatedAt
-	
+
 	assert.NoError(t, err1)
 	assert.Equal(t, StateCompleted, flow.State)
 	assert.True(t, firstUpdatedAt.After(oldUpdatedAt) || firstUpdatedAt.Equal(oldUpdatedAt))
@@ -202,7 +202,7 @@ func TestCSRFToken_Length(t *testing.T) {
 
 func TestCSRFToken_Uniqueness(t *testing.T) {
 	tokens := make(map[string]bool)
-	
+
 	for i := 0; i < 100; i++ {
 		token, err := GenerateCSRFToken()
 		require.NoError(t, err)

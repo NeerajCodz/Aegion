@@ -14,21 +14,21 @@ func TestTraceInfoForLogger(t *testing.T) {
 		TraceID: "trace123",
 		SpanID:  "span456",
 	}
-	
+
 	assert.Equal(t, "trace123", traceInfo.TraceID)
 	assert.Equal(t, "span456", traceInfo.SpanID)
 }
 
 func TestAddTraceToContext(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	ctx := context.Background()
-	
+
 	// With no-op tracer, span context won't be valid
 	// so AddTraceToContext should return the original context
 	newCtx := AddTraceToContext(ctx)
 	assert.NotNil(t, newCtx)
-	
+
 	// Extract trace info - should be empty with no-op tracer
 	traceInfo := GetTraceInfoForLogger(newCtx)
 	assert.Empty(t, traceInfo.TraceID)
@@ -37,15 +37,15 @@ func TestAddTraceToContext(t *testing.T) {
 
 func TestGetTraceInfoForLogger(t *testing.T) {
 	ctx := context.Background()
-	
+
 	// Test with explicit trace info in context
 	traceInfo := TraceInfoForLogger{
 		TraceID: "explicit-trace-123",
 		SpanID:  "explicit-span-456",
 	}
-	
+
 	ctx = context.WithValue(ctx, TraceInfoContextKey, traceInfo)
-	
+
 	extracted := GetTraceInfoForLogger(ctx)
 	assert.Equal(t, traceInfo.TraceID, extracted.TraceID)
 	assert.Equal(t, traceInfo.SpanID, extracted.SpanID)
@@ -53,7 +53,7 @@ func TestGetTraceInfoForLogger(t *testing.T) {
 
 func TestGetTraceInfoForLogger_Empty(t *testing.T) {
 	ctx := context.Background()
-	
+
 	// Test with empty context
 	traceInfo := GetTraceInfoForLogger(ctx)
 	assert.Empty(t, traceInfo.TraceID)
@@ -63,17 +63,17 @@ func TestGetTraceInfoForLogger_Empty(t *testing.T) {
 func TestWithRequestIDForLogger(t *testing.T) {
 	ctx := context.Background()
 	requestID := "test-request-123"
-	
+
 	newCtx := WithRequestIDForLogger(ctx, requestID)
 	assert.NotNil(t, newCtx)
-	
+
 	extracted := GetRequestIDForLogger(newCtx)
 	assert.Equal(t, requestID, extracted)
 }
 
 func TestGetRequestIDForLogger_Empty(t *testing.T) {
 	ctx := context.Background()
-	
+
 	requestID := GetRequestIDForLogger(ctx)
 	assert.Empty(t, requestID)
 }
@@ -86,29 +86,29 @@ func TestContextKeys(t *testing.T) {
 
 func TestContextKeysAreConsistent(t *testing.T) {
 	ctx := context.Background()
-	
+
 	// Test that the context keys work consistently
 	traceInfo := TraceInfoForLogger{
 		TraceID: "consistency-trace",
 		SpanID:  "consistency-span",
 	}
 	requestID := "consistency-request"
-	
+
 	// Add values using the utility functions
 	ctx = context.WithValue(ctx, TraceInfoContextKey, traceInfo)
 	ctx = WithRequestIDForLogger(ctx, requestID)
-	
+
 	// Extract values using utility functions
 	extractedTrace := GetTraceInfoForLogger(ctx)
 	extractedRequest := GetRequestIDForLogger(ctx)
-	
+
 	assert.Equal(t, traceInfo, extractedTrace)
 	assert.Equal(t, requestID, extractedRequest)
-	
+
 	// Verify the raw context values are accessible with the constants
 	rawTrace := ctx.Value(TraceInfoContextKey)
 	rawRequest := ctx.Value(RequestIDContextKey)
-	
+
 	assert.Equal(t, traceInfo, rawTrace)
 	assert.Equal(t, requestID, rawRequest)
 }

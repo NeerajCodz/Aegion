@@ -98,7 +98,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	configLoader := NewConfigLoader(cfg.ConfigPath)
 	mainCfg, err := configLoader.Load()
 	if err != nil {
-		docker.Close()
+		_ = docker.Close()
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
 
@@ -118,7 +118,7 @@ func New(cfg Config) (*Orchestrator, error) {
 			Secret: secret,
 		})
 		if err != nil {
-			docker.Close()
+			_ = docker.Close()
 			return nil, fmt.Errorf("creating token generator: %w", err)
 		}
 	}

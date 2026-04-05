@@ -98,7 +98,7 @@ func TestHandler_HandleSendLoginCode(t *testing.T) {
 			expectedStatus: http.StatusOK,
 		},
 		{
-			name: "missing email",
+			name:           "missing email",
 			body:           SendCodeRequest{},
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
@@ -300,7 +300,7 @@ func TestHandler_HandleVerifyCode(t *testing.T) {
 				var response SuccessResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				
+
 				if tt.expectSession {
 					assert.NotNil(t, response.Session)
 					assert.Equal(t, identityID.String(), response.Session.IdentityID)
@@ -390,7 +390,7 @@ func TestHandler_HandleVerifyMagicLink(t *testing.T) {
 				var response SuccessResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				
+
 				if tt.expectSession {
 					assert.NotNil(t, response.Session)
 					assert.Equal(t, identityID.String(), response.Session.IdentityID)
@@ -499,7 +499,7 @@ func TestHandler_ErrorMapping(t *testing.T) {
 
 			if tt.expectedCode == "rate_limited" || tt.expectedCode == "internal_error" {
 				assert.Equal(t, tt.expectedStatus, recorder.Code)
-				
+
 				if recorder.Code != http.StatusOK {
 					var response ErrorResponse
 					err := json.NewDecoder(recorder.Body).Decode(&response)
@@ -640,7 +640,7 @@ func TestHandler_ConcurrentRequests(t *testing.T) {
 
 	// Run 10 concurrent send code requests
 	done := make(chan bool, 10)
-	
+
 	for i := 0; i < 10; i++ {
 		go func(id int) {
 			body := SendCodeRequest{

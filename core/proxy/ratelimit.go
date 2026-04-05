@@ -36,11 +36,11 @@ type MemoryStore struct {
 
 // tokenBucket represents a token bucket for rate limiting.
 type tokenBucket struct {
-	tokens       int
-	capacity     int
-	refillRate   int // tokens per second
-	lastRefill   time.Time
-	mutex        sync.Mutex
+	tokens     int
+	capacity   int
+	refillRate int // tokens per second
+	lastRefill time.Time
+	mutex      sync.Mutex
 }
 
 // NewMemoryStore creates a new in-memory rate limit store.
@@ -110,7 +110,7 @@ func (m *MemoryStore) GetCount(key string) (int, error) {
 
 	bucket.mutex.Lock()
 	defer bucket.mutex.Unlock()
-	
+
 	bucket.refill()
 	return bucket.capacity - bucket.tokens, nil
 }
@@ -156,10 +156,10 @@ func (tb *tokenBucket) consume() (bool, time.Duration, error) {
 func (tb *tokenBucket) refill() {
 	now := time.Now()
 	elapsed := now.Sub(tb.lastRefill)
-	
+
 	// Calculate tokens to add
 	tokensToAdd := int(elapsed.Seconds()) * tb.refillRate
-	
+
 	if tokensToAdd > 0 {
 		tb.tokens = min(tb.capacity, tb.tokens+tokensToAdd)
 		tb.lastRefill = now
@@ -291,12 +291,12 @@ func (rl *RateLimiter) Reset(key string) error {
 // GetMetrics returns rate limiting metrics for monitoring.
 func (rl *RateLimiter) GetMetrics(keys []string) map[string]int {
 	metrics := make(map[string]int)
-	
+
 	for _, key := range keys {
 		if count, err := rl.store.GetCount(key); err == nil {
 			metrics[key] = count
 		}
 	}
-	
+
 	return metrics
 }

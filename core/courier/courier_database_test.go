@@ -136,12 +136,12 @@ func TestTemplateNotFound(t *testing.T) {
 
 func TestMessageMarkingLogic(t *testing.T) {
 	tests := []struct {
-		name              string
-		initialSendCount  int
-		newSendCount      int
-		maxRetries        int
-		expectedStatus    MessageStatus
-		shouldAbandon     bool
+		name             string
+		initialSendCount int
+		newSendCount     int
+		maxRetries       int
+		expectedStatus   MessageStatus
+		shouldAbandon    bool
 	}{
 		{
 			name:             "first failure, should retry",
@@ -271,10 +271,10 @@ func TestMessageCancellation(t *testing.T) {
 
 func TestMessageCleanupLogic(t *testing.T) {
 	tests := []struct {
-		name           string
-		messageStatus  MessageStatus
-		daysOld        int
-		olderThanDays  int
+		name            string
+		messageStatus   MessageStatus
+		daysOld         int
+		olderThanDays   int
 		shouldBeDeleted bool
 	}{
 		{"sent message older than cutoff", StatusSent, 10, 5, true},
@@ -308,9 +308,9 @@ func TestMessageCleanupLogic(t *testing.T) {
 func TestBatchQueryFiltering(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
-		name           string
-		msgStatus      MessageStatus
-		sendAfter      *time.Time
+		name             string
+		msgStatus        MessageStatus
+		sendAfter        *time.Time
 		shouldBeIncluded bool
 	}{
 		{
@@ -757,8 +757,8 @@ func TestRetryCountdown(t *testing.T) {
 
 func TestTimestampEdgeCases(t *testing.T) {
 	tests := []struct {
-		name      string
-		testFunc  func(t *testing.T)
+		name     string
+		testFunc func(t *testing.T)
 	}{
 		{
 			name: "zero timestamp",

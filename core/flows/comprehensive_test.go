@@ -380,7 +380,7 @@ func TestNewInputNode_AllParameters(t *testing.T) {
 
 func TestNodeChaining_MultipleModifiers(t *testing.T) {
 	node := NewInputNode("password", InputTypePassword, "Password", true)
-	
+
 	node = WithPlaceholder(node, "Min 8 characters")
 	node = WithMinLength(node, 8)
 	node = WithMaxLength(node, 128)

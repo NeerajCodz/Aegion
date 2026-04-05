@@ -95,15 +95,15 @@ func TestHandler_HandleRegistration(t *testing.T) {
 			expectedError:  "invalid_request",
 		},
 		{
-			name: "missing email",
-			body: registerRequest("", "SecurePass123!"),
+			name:           "missing email",
+			body:           registerRequest("", "SecurePass123!"),
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_email",
 		},
 		{
-			name: "missing password",
-			body: registerRequest("user@example.com", ""),
+			name:           "missing password",
+			body:           registerRequest("user@example.com", ""),
 			setupMocks:     func(service *MockService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_password",
@@ -613,7 +613,7 @@ func TestHandler_Concurrency(t *testing.T) {
 
 	// Run 10 concurrent registration requests
 	done := make(chan bool, 10)
-	
+
 	for i := 0; i < 10; i++ {
 		go func(id int) {
 			body := registerRequest("user"+string(rune(id))+"@example.com", "SecurePass123!")

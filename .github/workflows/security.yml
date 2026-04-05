@@ -20,7 +20,7 @@ permissions:
   security-events: write
 
 env:
-  GO_VERSION: '1.25.1'
+  GO_VERSION: '1.25.8'
   RUST_VERSION: '1.81.0'
 
 jobs:
@@ -115,7 +115,7 @@ jobs:
           cache-from: type=gha
           build-args: |
             VERSION=security-scan
-            BASE_IMAGE=golang:1.25.1-bookworm
+            BASE_IMAGE=golang:1.25.8-bookworm
             RUNTIME_IMAGE=debian:bookworm-slim
         continue-on-error: true
 
@@ -167,7 +167,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v4.9.0
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0, AGPL-3.0

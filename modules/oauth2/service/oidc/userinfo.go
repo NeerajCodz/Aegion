@@ -14,26 +14,26 @@ var (
 
 // UserInfoClaims represents standard OIDC UserInfo claims.
 type UserInfoClaims struct {
-	Sub               string  `json:"sub"`
-	Name              *string `json:"name,omitempty"`
-	GivenName         *string `json:"given_name,omitempty"`
-	FamilyName        *string `json:"family_name,omitempty"`
-	MiddleName        *string `json:"middle_name,omitempty"`
-	Nickname          *string `json:"nickname,omitempty"`
-	PreferredUsername *string `json:"preferred_username,omitempty"`
-	Profile           *string `json:"profile,omitempty"`
-	Picture           *string `json:"picture,omitempty"`
-	Website           *string `json:"website,omitempty"`
-	Email             *string `json:"email,omitempty"`
-	EmailVerified     *bool   `json:"email_verified,omitempty"`
-	Gender            *string `json:"gender,omitempty"`
-	Birthdate         *string `json:"birthdate,omitempty"`
-	Zoneinfo          *string `json:"zoneinfo,omitempty"`
-	Locale            *string `json:"locale,omitempty"`
-	PhoneNumber       *string `json:"phone_number,omitempty"`
-	PhoneNumberVerified *bool `json:"phone_number_verified,omitempty"`
-	Address           *Address `json:"address,omitempty"`
-	UpdatedAt         *int64  `json:"updated_at,omitempty"`
+	Sub                 string   `json:"sub"`
+	Name                *string  `json:"name,omitempty"`
+	GivenName           *string  `json:"given_name,omitempty"`
+	FamilyName          *string  `json:"family_name,omitempty"`
+	MiddleName          *string  `json:"middle_name,omitempty"`
+	Nickname            *string  `json:"nickname,omitempty"`
+	PreferredUsername   *string  `json:"preferred_username,omitempty"`
+	Profile             *string  `json:"profile,omitempty"`
+	Picture             *string  `json:"picture,omitempty"`
+	Website             *string  `json:"website,omitempty"`
+	Email               *string  `json:"email,omitempty"`
+	EmailVerified       *bool    `json:"email_verified,omitempty"`
+	Gender              *string  `json:"gender,omitempty"`
+	Birthdate           *string  `json:"birthdate,omitempty"`
+	Zoneinfo            *string  `json:"zoneinfo,omitempty"`
+	Locale              *string  `json:"locale,omitempty"`
+	PhoneNumber         *string  `json:"phone_number,omitempty"`
+	PhoneNumberVerified *bool    `json:"phone_number_verified,omitempty"`
+	Address             *Address `json:"address,omitempty"`
+	UpdatedAt           *int64   `json:"updated_at,omitempty"`
 }
 
 // Address represents the address claim.

@@ -381,7 +381,7 @@ func TestMiddleware_Integration(t *testing.T) {
 		Generator: gen,
 		SkipPaths: []string{"/health"},
 	})
-	
+
 	// Create a conditional module middleware that skips health endpoints
 	moduleMiddleware := func(next http.Handler) http.Handler {
 		requireModuleMiddleware := RequireModuleID("password", "admin")
@@ -394,7 +394,7 @@ func TestMiddleware_Integration(t *testing.T) {
 			requireModuleMiddleware(next).ServeHTTP(w, r)
 		})
 	}
-	
+
 	handler := authMiddleware(moduleMiddleware(finalHandler))
 
 	tests := []struct {

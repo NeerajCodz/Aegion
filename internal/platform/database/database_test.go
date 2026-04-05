@@ -68,6 +68,7 @@ func TestNewMigrator(t *testing.T) {
 
 	if migrator == nil {
 		t.Fatal("NewMigrator() returned nil")
+		return
 	}
 	if migrator.db != db {
 		t.Error("Migrator.db not set correctly")
@@ -80,51 +81,51 @@ func TestNewMigrator(t *testing.T) {
 // Test the migration filename parsing logic (extracted from loadMigrations)
 func TestMigrationFilenameParsingLogic(t *testing.T) {
 	tests := []struct {
-		name         string
-		filename     string
-		expectValid  bool
-		expectVersion int
-		expectName   string
+		name            string
+		filename        string
+		expectValid     bool
+		expectVersion   int
+		expectName      string
 		expectDirection string
 	}{
 		{
-			name:         "valid up migration",
-			filename:     "0001_create_users.up.sql",
-			expectValid:  true,
-			expectVersion: 1,
-			expectName:   "create_users",
+			name:            "valid up migration",
+			filename:        "0001_create_users.up.sql",
+			expectValid:     true,
+			expectVersion:   1,
+			expectName:      "create_users",
 			expectDirection: "up",
 		},
 		{
-			name:         "valid down migration",
-			filename:     "0001_create_users.down.sql",
-			expectValid:  true,
-			expectVersion: 1,
-			expectName:   "create_users",
+			name:            "valid down migration",
+			filename:        "0001_create_users.down.sql",
+			expectValid:     true,
+			expectVersion:   1,
+			expectName:      "create_users",
 			expectDirection: "down",
 		},
 		{
-			name:         "complex migration name",
-			filename:     "0042_add_user_email_index.up.sql",
-			expectValid:  true,
-			expectVersion: 42,
-			expectName:   "add_user_email_index",
+			name:            "complex migration name",
+			filename:        "0042_add_user_email_index.up.sql",
+			expectValid:     true,
+			expectVersion:   42,
+			expectName:      "add_user_email_index",
 			expectDirection: "up",
 		},
 		{
-			name:         "migration with underscores in name",
-			filename:     "0123_update_user_table_add_created_at.down.sql",
-			expectValid:  true,
-			expectVersion: 123,
-			expectName:   "update_user_table_add_created_at",
+			name:            "migration with underscores in name",
+			filename:        "0123_update_user_table_add_created_at.down.sql",
+			expectValid:     true,
+			expectVersion:   123,
+			expectName:      "update_user_table_add_created_at",
 			expectDirection: "down",
 		},
 		{
-			name:         "zero-padded version",
-			filename:     "0007_initial_schema.up.sql",
-			expectValid:  true,
-			expectVersion: 7,
-			expectName:   "initial_schema",
+			name:            "zero-padded version",
+			filename:        "0007_initial_schema.up.sql",
+			expectValid:     true,
+			expectVersion:   7,
+			expectName:      "initial_schema",
 			expectDirection: "up",
 		},
 		{
@@ -168,7 +169,7 @@ func TestMigrationFilenameParsingLogic(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Simulate the filename parsing logic from loadMigrations
 			name := tt.filename
-			
+
 			// Check if it's a SQL file
 			if !strings.HasSuffix(name, ".sql") {
 				if tt.expectValid {
@@ -262,7 +263,7 @@ func TestParseVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			value, err := parseVersion(tt.input)
-			
+
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
 			}
@@ -301,11 +302,11 @@ func TestMigrationSorting(t *testing.T) {
 
 func TestDBStruct(t *testing.T) {
 	db := &DB{Pool: nil} // Mock for testing
-	
+
 	if db.Pool != nil {
 		t.Error("Expected Pool to be nil")
 	}
-	
+
 	// Test Close method doesn't panic with nil pool (it would in real usage)
 	// In actual implementation, this might cause panic, but we're just testing structure
 }

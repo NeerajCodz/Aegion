@@ -10,11 +10,11 @@ import (
 
 // Errors
 var (
-	ErrInvalidRole             = errors.New("invalid role")
-	ErrInvalidCapability       = errors.New("invalid capability")
-	ErrCannotModifySystemRole  = errors.New("cannot modify system role")
-	ErrCannotDeleteSystemRole  = errors.New("cannot delete system role")
-	ErrAdminIdentityNotFound   = errors.New("admin identity not found")
+	ErrInvalidRole            = errors.New("invalid role")
+	ErrInvalidCapability      = errors.New("invalid capability")
+	ErrCannotModifySystemRole = errors.New("cannot modify system role")
+	ErrCannotDeleteSystemRole = errors.New("cannot delete system role")
+	ErrAdminIdentityNotFound  = errors.New("admin identity not found")
 	ErrRoleNotFound           = errors.New("role not found")
 	ErrPermissionDenied       = errors.New("permission denied")
 )

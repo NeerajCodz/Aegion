@@ -73,11 +73,11 @@ func TestVerifyHeaders(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		setupReq  func() *http.Request
-		secret    []byte
-		wantCtx   *Context
-		wantErr   error
+		name     string
+		setupReq func() *http.Request
+		secret   []byte
+		wantCtx  *Context
+		wantErr  error
 	}{
 		{
 			name: "valid headers return context",
@@ -199,13 +199,13 @@ func TestVerifyHeaders(t *testing.T) {
 
 func TestSignHeaders(t *testing.T) {
 	secret := []byte("test-signing-secret")
-	
+
 	headers1 := map[string]string{
 		"Session-ID":  "session-1",
 		"Identity-ID": "identity-1",
 		"AAL":         "aal1",
 	}
-	
+
 	headers2 := map[string]string{
 		"Session-ID":  "session-2",
 		"Identity-ID": "identity-1",
@@ -578,10 +578,10 @@ func TestVerifyHeaders_InvalidUUIDs(t *testing.T) {
 	secret := []byte("test-secret")
 
 	tests := []struct {
-		name         string
-		sessionID    string
-		identityID   string
-		shouldError  bool
+		name        string
+		sessionID   string
+		identityID  string
+		shouldError bool
 	}{
 		{
 			name:        "both invalid",
@@ -904,8 +904,8 @@ func TestHeaderTampering_EachHeader(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		tamperFn  func(*http.Request)
+		name     string
+		tamperFn func(*http.Request)
 	}{
 		{
 			name: "tamper Session-ID",

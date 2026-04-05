@@ -10,12 +10,12 @@ type Capability string
 
 // User domain capabilities
 const (
-	CapUsersRead     Capability = "users.read"
-	CapUsersCreate   Capability = "users.create"
-	CapUsersUpdate   Capability = "users.update"
-	CapUsersDelete   Capability = "users.delete"
-	CapUsersSuspend  Capability = "users.suspend"
-	CapUsersAll      Capability = "users.*"
+	CapUsersRead    Capability = "users.read"
+	CapUsersCreate  Capability = "users.create"
+	CapUsersUpdate  Capability = "users.update"
+	CapUsersDelete  Capability = "users.delete"
+	CapUsersSuspend Capability = "users.suspend"
+	CapUsersAll     Capability = "users.*"
 )
 
 // Session domain capabilities
@@ -65,12 +65,12 @@ const (
 
 // SCIM domain capabilities
 const (
-	CapSCIMUsersRead   Capability = "scim.users.read"
-	CapSCIMUsersWrite  Capability = "scim.users.write"
-	CapSCIMGroupsRead  Capability = "scim.groups.read"
-	CapSCIMGroupsWrite Capability = "scim.groups.write"
+	CapSCIMUsersRead    Capability = "scim.users.read"
+	CapSCIMUsersWrite   Capability = "scim.users.write"
+	CapSCIMGroupsRead   Capability = "scim.groups.read"
+	CapSCIMGroupsWrite  Capability = "scim.groups.write"
 	CapSCIMTokensManage Capability = "scim.tokens.manage"
-	CapSCIMAll         Capability = "scim.*"
+	CapSCIMAll          Capability = "scim.*"
 )
 
 // Global capabilities
@@ -91,12 +91,12 @@ type Role struct {
 
 // AdminIdentity represents an admin's permission assignments.
 type AdminIdentity struct {
-	IdentityID   uuid.UUID    `json:"identityId" db:"identity_id"`
-	Roles        []string     `json:"roles" db:"roles"`           // role IDs
-	Grants       []Capability `json:"grants" db:"grants"`         // direct grants
-	Denies       []Capability `json:"denies" db:"denies"`         // direct denies (override grants)
-	CreatedAt    string       `json:"createdAt" db:"created_at"`
-	UpdatedAt    string       `json:"updatedAt" db:"updated_at"`
+	IdentityID uuid.UUID    `json:"identityId" db:"identity_id"`
+	Roles      []string     `json:"roles" db:"roles"`   // role IDs
+	Grants     []Capability `json:"grants" db:"grants"` // direct grants
+	Denies     []Capability `json:"denies" db:"denies"` // direct denies (override grants)
+	CreatedAt  string       `json:"createdAt" db:"created_at"`
+	UpdatedAt  string       `json:"updatedAt" db:"updated_at"`
 }
 
 // DefaultRoles defines the built-in system roles.

@@ -16,10 +16,10 @@ import (
 )
 
 var (
-	ErrInvalidGrant        = errors.New("invalid_grant")
-	ErrInvalidClient       = errors.New("invalid_client")
+	ErrInvalidGrant         = errors.New("invalid_grant")
+	ErrInvalidClient        = errors.New("invalid_client")
 	ErrUnsupportedGrantType = errors.New("unsupported_grant_type")
-	ErrInvalidScope        = errors.New("invalid_scope")
+	ErrInvalidScope         = errors.New("invalid_scope")
 )
 
 // TokenStore interface for token operations.

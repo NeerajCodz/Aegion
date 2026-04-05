@@ -373,7 +373,9 @@ func (d *DockerClient) ContainerLogs(ctx context.Context, containerID string, ta
 	if err != nil {
 		return "", fmt.Errorf("getting container logs: %w", err)
 	}
-	defer reader.Close()
+	defer func() {
+		_ = reader.Close()
+	}()
 
 	logs, err := io.ReadAll(reader)
 	if err != nil {
@@ -537,7 +539,9 @@ func (d *DockerClient) pullImageIfNeeded(ctx context.Context, imageRef string) e
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer func() {
+		_ = reader.Close()
+	}()
 
 	// Consume output to ensure pull completes
 	_, err = io.Copy(io.Discard, reader)

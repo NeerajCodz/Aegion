@@ -36,10 +36,10 @@ func TestDeliveryStatus(t *testing.T) {
 
 func TestNewWithDefaults(t *testing.T) {
 	tests := []struct {
-		name           string
-		config         Config
+		name            string
+		config          Config
 		expectedRetries int
-		expectedDelay  time.Duration
+		expectedDelay   time.Duration
 	}{
 		{
 			name:            "empty config gets defaults",
@@ -259,11 +259,11 @@ func TestRetryDelayCalculation(t *testing.T) {
 		attempt       uint
 		expectedDelay time.Duration
 	}{
-		{"attempt 0", 0, baseDelay * 1},   // 1 << 0 = 1
-		{"attempt 1", 1, baseDelay * 2},   // 1 << 1 = 2
-		{"attempt 2", 2, baseDelay * 4},   // 1 << 2 = 4
-		{"attempt 3", 3, baseDelay * 8},   // 1 << 3 = 8
-		{"attempt 4", 4, baseDelay * 16},  // 1 << 4 = 16
+		{"attempt 0", 0, baseDelay * 1},  // 1 << 0 = 1
+		{"attempt 1", 1, baseDelay * 2},  // 1 << 1 = 2
+		{"attempt 2", 2, baseDelay * 4},  // 1 << 2 = 4
+		{"attempt 3", 3, baseDelay * 8},  // 1 << 3 = 8
+		{"attempt 4", 4, baseDelay * 16}, // 1 << 4 = 16
 	}
 
 	for _, tt := range tests {
@@ -684,9 +684,9 @@ func TestEventPayloadMarshal(t *testing.T) {
 		{
 			name: "numeric values",
 			payload: map[string]interface{}{
-				"count":     42,
-				"price":     99.99,
-				"active":    true,
+				"count":  42,
+				"price":  99.99,
+				"active": true,
 			},
 			valid: true,
 		},
@@ -881,11 +881,11 @@ func TestSubscription_MultipleEventTypes_Tracking(t *testing.T) {
 // Test event field defaults
 func TestEventDefaults_Creation(t *testing.T) {
 	tests := []struct {
-		name        string
-		eventType   string
+		name         string
+		eventType    string
 		sourceModule string
-		hasPayload  bool
-		hasMetadata bool
+		hasPayload   bool
+		hasMetadata  bool
 	}{
 		{"minimal event", "test.event", "test-service", false, false},
 		{"with payload", "test.event", "test-service", true, false},
@@ -928,11 +928,11 @@ func TestEventDefaults_Creation(t *testing.T) {
 // Test Bus configuration
 func TestBusConfig_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name              string
-		config            Config
-		expectedRetries   int
-		expectedDelay     time.Duration
-		expectedDBNotNil  bool
+		name             string
+		config           Config
+		expectedRetries  int
+		expectedDelay    time.Duration
+		expectedDBNotNil bool
 	}{
 		{
 			"default config",
@@ -1087,10 +1087,10 @@ func TestEventMetadata_Handling(t *testing.T) {
 // Test subscription handler signature
 func TestSubscriptionHandler_Signature(t *testing.T) {
 	tests := []struct {
-		name           string
-		handler        Handler
-		expectError    bool
-		errorOnEvent   Event
+		name         string
+		handler      Handler
+		expectError  bool
+		errorOnEvent Event
 	}{
 		{
 			"successful handler",

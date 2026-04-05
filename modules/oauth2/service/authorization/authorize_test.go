@@ -321,11 +321,11 @@ func TestAuthorizationService_ErrorPaths(t *testing.T) {
 	t.Run("StartAuthorization create login failure and bad PKCE method", func(t *testing.T) {
 		st := &mockAuthzStore{
 			client: &store.Client{
-				ID:             "client-1",
-				RedirectURIs:   []string{"https://app.example.com/callback"},
-				ResponseTypes:  []string{"code"},
-				Scopes:         []string{"openid"},
-				RequirePKCE:    true,
+				ID:            "client-1",
+				RedirectURIs:  []string{"https://app.example.com/callback"},
+				ResponseTypes: []string{"code"},
+				Scopes:        []string{"openid"},
+				RequirePKCE:   true,
 			},
 			createLoginErr: errors.New("db down"),
 		}

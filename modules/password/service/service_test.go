@@ -505,7 +505,7 @@ func TestResetPassword(t *testing.T) {
 		mem4.seedCredential(identityID, "user@example.com", "old-hash")
 		mem4.addHistoryErr = errors.New("db write failed")
 		s := New(mem4, &mockHasher{
-			hashFn: func(password string) (string, error) { return "new-hash", nil },
+			hashFn:   func(password string) (string, error) { return "new-hash", nil },
 			verifyFn: func(password, hash string) (bool, error) { return false, nil },
 		}, defaultConfig())
 		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")
@@ -517,7 +517,7 @@ func TestResetPassword(t *testing.T) {
 		mem5.seedCredential(identityID, "user@example.com", "old-hash")
 		mem5.updateErr = errors.New("update failed")
 		s := New(mem5, &mockHasher{
-			hashFn: func(password string) (string, error) { return "new-hash", nil },
+			hashFn:   func(password string) (string, error) { return "new-hash", nil },
 			verifyFn: func(password, hash string) (bool, error) { return false, nil },
 		}, defaultConfig())
 		err := s.ResetPassword(context.Background(), identityID, "GoodPass3!")

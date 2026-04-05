@@ -26,7 +26,9 @@ func TestGetEnv(t *testing.T) {
 	if err := os.Setenv(key, "configured"); err != nil {
 		t.Fatalf("setenv failed: %v", err)
 	}
-	defer os.Unsetenv(key)
+	defer func() {
+		_ = os.Unsetenv(key)
+	}()
 
 	if got := getEnv(key, "fallback"); got != "configured" {
 		t.Fatalf("expected configured value, got %q", got)
@@ -56,7 +58,9 @@ admin:
 	if err := os.Setenv("DATABASE_URL", "postgres://env-user:env-pass@db:5432/aegion"); err != nil {
 		t.Fatalf("setenv failed: %v", err)
 	}
-	defer os.Unsetenv("DATABASE_URL")
+	defer func() {
+		_ = os.Unsetenv("DATABASE_URL")
+	}()
 
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
@@ -87,7 +91,9 @@ func TestLoadConfig_ExpandEnvInFile(t *testing.T) {
 	if err := os.Setenv("ADMIN_DB_URL", "postgres://expanded:expanded@localhost:5432/aegion"); err != nil {
 		t.Fatalf("setenv failed: %v", err)
 	}
-	defer os.Unsetenv("ADMIN_DB_URL")
+	defer func() {
+		_ = os.Unsetenv("ADMIN_DB_URL")
+	}()
 
 	configYAML := strings.TrimSpace(`
 database:

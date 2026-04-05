@@ -145,7 +145,7 @@ func run(args []string, deps mainDeps) error {
 	}
 
 	if flags.version {
-		fmt.Fprintln(deps.stdout, "Aegion Admin Module v1.0.0")
+		_, _ = fmt.Fprintln(deps.stdout, "Aegion Admin Module v1.0.0")
 		return nil
 	}
 

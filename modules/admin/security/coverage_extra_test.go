@@ -18,7 +18,9 @@ func TestCSRFProtection_InvalidTokenBranch(t *testing.T) {
 	handler.ServeHTTP(getRec, getReq)
 
 	resp := getRec.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var csrfCookie *http.Cookie
 	for _, c := range resp.Cookies() {

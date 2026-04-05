@@ -342,15 +342,15 @@ func TestOAuth2Integration_ReplayInvalidatesFamily(t *testing.T) {
 	tokenSvc := tokenservice.NewTokenService(memStore, &tokenservice.MockJWTSigner{}, "https://issuer")
 
 	memStore.refreshTokens["rt-replay"] = &store.RefreshToken{
-		ID:        "rt-replay",
-		FamilyID:  "family-1",
-		ClientID:  "client-1",
+		ID:         "rt-replay",
+		FamilyID:   "family-1",
+		ClientID:   "client-1",
 		IdentityID: "identity-1",
-		SessionID: "session-1",
-		Scopes:    []string{"openid", "offline_access"},
-		Active:    true,
-		Used:      true,
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		SessionID:  "session-1",
+		Scopes:     []string{"openid", "offline_access"},
+		Active:     true,
+		Used:       true,
+		ExpiresAt:  time.Now().UTC().Add(time.Hour),
 	}
 
 	_, err := tokenSvc.RefreshAccessToken(ctx, &tokenservice.TokenRequest{

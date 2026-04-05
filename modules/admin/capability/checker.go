@@ -161,7 +161,7 @@ func (c *Checker) GetEffectiveCapabilities(ctx context.Context, identityID uuid.
 				}
 				return result, nil
 			}
-			
+
 			// Expand wildcard capabilities
 			if strings.HasSuffix(string(cap), ".*") {
 				domain := strings.TrimSuffix(string(cap), ".*")
@@ -188,7 +188,7 @@ func (c *Checker) GetEffectiveCapabilities(ctx context.Context, identityID uuid.
 			}
 			return result, nil
 		}
-		
+
 		// Expand wildcard capabilities
 		if strings.HasSuffix(string(grant), ".*") {
 			domain := strings.TrimSuffix(string(grant), ".*")
@@ -210,7 +210,7 @@ func (c *Checker) GetEffectiveCapabilities(ctx context.Context, identityID uuid.
 			// If everything is denied, return empty
 			return []Capability{}, nil
 		}
-		
+
 		// Remove wildcard denials
 		if strings.HasSuffix(string(deny), ".*") {
 			domain := strings.TrimSuffix(string(deny), ".*")

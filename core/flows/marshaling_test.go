@@ -308,7 +308,7 @@ func TestConstants_Values(t *testing.T) {
 
 // Tests for TTL constants
 func TestTTLConstants(t *testing.T) {
-	assert.Equal(t, 15.0, DefaultTTL.Minutes()) // 15 minutes
+	assert.Equal(t, 15.0, DefaultTTL.Minutes())           // 15 minutes
 	assert.Equal(t, 15.0, DefaultContinuityTTL.Minutes()) // 15 minutes
 }
 

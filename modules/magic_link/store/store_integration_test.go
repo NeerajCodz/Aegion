@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
-	"sync"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +23,7 @@ type InMemoryStore struct {
 	codes      map[uuid.UUID]*CodeData
 	tokens     map[string]uuid.UUID
 	rateLimits map[string]*RateLimitData
-	
+
 	codeLength  int
 	codeCharset string
 }
@@ -74,9 +74,9 @@ func (s *InMemoryStore) Create(ctx context.Context, recipient string, codeType C
 	// Generate code and token
 	code := make([]byte, s.codeLength)
 	for i := 0; i < s.codeLength; i++ {
-		code[i] = s.codeCharset[i % len(s.codeCharset)]
+		code[i] = s.codeCharset[i%len(s.codeCharset)]
 	}
-	
+
 	tokenBytes := make([]byte, 32)
 	for i := 0; i < 32; i++ {
 		tokenBytes[i] = byte(i % 256)
@@ -312,11 +312,11 @@ func (m *MockDBExecutor) recordQueryRow(query string) {
 func TestMockDatabaseIntegration(t *testing.T) {
 	t.Run("mock executor tracks calls", func(t *testing.T) {
 		mock := &MockDBExecutor{}
-		
+
 		mock.recordExec("INSERT INTO ml_codes...")
 		mock.recordExec("UPDATE ml_codes...")
 		mock.recordQueryRow("SELECT FROM ml_codes...")
-		
+
 		assert.Len(t, mock.execCalls, 2)
 		assert.Len(t, mock.queryRowCalls, 1)
 		assert.Contains(t, mock.execCalls[0], "INSERT")
@@ -329,7 +329,7 @@ func TestMockDatabaseIntegration(t *testing.T) {
 			shouldFail:  true,
 			failMessage: "connection error",
 		}
-		
+
 		assert.True(t, mock.shouldFail)
 		assert.Equal(t, "connection error", mock.failMessage)
 	})
@@ -731,7 +731,7 @@ func TestCRUDCreateOperation(t *testing.T) {
 
 		code, err := store.Create(ctx, "user@example.com", CodeTypeVerification, &identityID, 15*time.Minute)
 		require.NoError(t, err)
-		
+
 		assert.NotNil(t, code)
 		assert.NotEqual(t, uuid.Nil, code.ID)
 		assert.NotNil(t, code.IdentityID)
@@ -820,7 +820,7 @@ func TestCRUDReadOperation(t *testing.T) {
 		created, _ := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
 		retrieved, err := store.GetByCode(ctx, "user@example.com", created.Code, CodeTypeLogin)
 		require.NoError(t, err)
-		
+
 		assert.Equal(t, created.ID, retrieved.ID)
 		assert.Equal(t, created.Recipient, retrieved.Recipient)
 		assert.Equal(t, created.Type, retrieved.Type)
@@ -834,7 +834,7 @@ func TestCRUDReadOperation(t *testing.T) {
 		created, _ := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
 		retrieved, err := store.GetByToken(ctx, created.Token)
 		require.NoError(t, err)
-		
+
 		assert.Equal(t, created.ID, retrieved.ID)
 		assert.Equal(t, created.Token, retrieved.Token)
 	})
@@ -879,7 +879,7 @@ func TestCRUDReadOperation(t *testing.T) {
 
 		// Create second code with same recipient
 		code2, _ := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
-		
+
 		// Should retrieve the latest
 		retrieved, err := store.GetByCode(ctx, "user@example.com", code2.Code, CodeTypeLogin)
 		require.NoError(t, err)
@@ -1014,7 +1014,7 @@ func TestExpiryHandling(t *testing.T) {
 		ctx := context.Background()
 
 		code, _ := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 100*time.Millisecond)
-		
+
 		// Should be valid before expiry
 		retrieved, err := store.GetByCode(ctx, "user@example.com", code.Code, CodeTypeLogin)
 		require.NoError(t, err)
@@ -1216,7 +1216,7 @@ func TestCodeVerificationStates(t *testing.T) {
 		ctx := context.Background()
 
 		code, _ := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
-		
+
 		// Before marking used
 		retrieved1, _ := store.GetByCode(ctx, "user@example.com", code.Code, CodeTypeLogin)
 		assert.False(t, retrieved1.Used)
@@ -1235,7 +1235,7 @@ func TestCodeVerificationStates(t *testing.T) {
 		ctx := context.Background()
 
 		code, _ := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
-		
+
 		err1 := store.MarkUsed(ctx, code.ID)
 		assert.NoError(t, err1)
 
@@ -1299,7 +1299,7 @@ func TestTokenManagement(t *testing.T) {
 		ctx := context.Background()
 
 		_, _ = store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
-		
+
 		// Try different case variations (tokens are base64 encoded)
 		_, err := store.GetByToken(ctx, "invalid-token")
 		assert.Error(t, err)
@@ -1312,7 +1312,7 @@ func TestTokenManagement(t *testing.T) {
 
 		// Recovery flow uses token
 		code, _ := store.Create(ctx, "user@example.com", CodeTypeRecovery, nil, time.Hour)
-		
+
 		// User clicks link with token
 		retrieved, err := store.GetByToken(ctx, code.Token)
 		require.NoError(t, err)
@@ -1506,7 +1506,7 @@ func TestBoundaryConditions(t *testing.T) {
 		ctx := context.Background()
 
 		code, _ := store.Create(ctx, "user@example.com", CodeTypeLogin, nil, 365*24*time.Hour)
-		
+
 		retrieved, err := store.GetByCode(ctx, "user@example.com", code.Code, CodeTypeLogin)
 		require.NoError(t, err)
 		assert.NotNil(t, retrieved)

@@ -558,6 +558,7 @@ func TestDockerResourceParsersAndBuilders(t *testing.T) {
 	})
 	if hc == nil {
 		t.Fatalf("expected non-nil healthcheck")
+		return
 	}
 	if len(hc.Test) != 2 || !strings.Contains(hc.Test[1], "/ready") {
 		t.Fatalf("unexpected healthcheck command: %#v", hc.Test)
@@ -946,6 +947,7 @@ modules:
 		}
 		if cfg == nil {
 			t.Fatal("expected non-nil config")
+			return
 		}
 		if cfg.ID != "password" {
 			t.Errorf("expected ID=password, got %s", cfg.ID)

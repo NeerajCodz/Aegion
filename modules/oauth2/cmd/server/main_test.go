@@ -135,6 +135,8 @@ func TestGetEnv(t *testing.T) {
 	assert.Equal(t, "fallback", getEnv(key, "fallback"))
 
 	require.NoError(t, os.Setenv(key, "value"))
-	defer os.Unsetenv(key)
+	defer func() {
+		_ = os.Unsetenv(key)
+	}()
 	assert.Equal(t, "value", getEnv(key, "fallback"))
 }

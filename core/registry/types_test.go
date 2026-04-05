@@ -70,15 +70,15 @@ func TestEndpointStruct(t *testing.T) {
 func TestModuleStruct(t *testing.T) {
 	now := time.Now()
 	module := Module{
-		ID:        "test-module",
-		Name:      "Test Module",
-		Version:   "1.0.0",
-		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
-		HealthURL: "http://localhost:8080/health",
-		Status:    StatusHealthy,
+		ID:           "test-module",
+		Name:         "Test Module",
+		Version:      "1.0.0",
+		Endpoints:    []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
+		HealthURL:    "http://localhost:8080/health",
+		Status:       StatusHealthy,
 		RegisteredAt: now,
 		LastHealthAt: now,
-		Metadata: map[string]string{"env": "test"},
+		Metadata:     map[string]string{"env": "test"},
 	}
 
 	if module.ID != "test-module" {
@@ -157,7 +157,7 @@ func TestRegistrationResponseStruct(t *testing.T) {
 func TestDeregistrationResponseStruct(t *testing.T) {
 	resp := DeregistrationResponse{
 		Success:  true,
-		ModuleID: "test-id", 
+		ModuleID: "test-id",
 		Message:  "deregistered",
 	}
 

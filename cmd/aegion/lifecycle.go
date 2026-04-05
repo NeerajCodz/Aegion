@@ -43,6 +43,17 @@ func NewLifecycle(cfg *LifecycleConfig) *Lifecycle {
 // Shutdown performs graceful shutdown of all components.
 func (l *Lifecycle) Shutdown(ctx context.Context) error {
 	var shutdownErr error
+	var shutdownErrMu sync.Mutex
+	recordShutdownErr := func(err error) {
+		if err == nil {
+			return
+		}
+		shutdownErrMu.Lock()
+		if shutdownErr == nil {
+			shutdownErr = err
+		}
+		shutdownErrMu.Unlock()
+	}
 
 	l.shutdownOnce.Do(func() {
 		l.log.Info().Msg("Starting graceful shutdown")
@@ -50,8 +61,6 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 		// Mark as draining
 		l.setDraining(true)
 
-		// Create error channel for concurrent shutdown
-		errCh := make(chan error, 4)
 		var wg sync.WaitGroup
 
 		// 1. Stop accepting new HTTP connections and drain existing
@@ -61,7 +70,7 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 			l.log.Info().Msg("Draining HTTP connections")
 			if err := l.drainHTTP(ctx); err != nil {
 				l.log.Error().Err(err).Msg("Error draining HTTP")
-				errCh <- err
+				recordShutdownErr(err)
 			}
 		}()
 
@@ -100,16 +109,7 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 		l.log.Info().Msg("Shutting down server components")
 		if err := l.server.Shutdown(ctx); err != nil {
 			l.log.Error().Err(err).Msg("Error shutting down server")
-			errCh <- err
-		}
-
-		close(errCh)
-
-		// Collect any errors
-		for err := range errCh {
-			if shutdownErr == nil {
-				shutdownErr = err
-			}
+			recordShutdownErr(err)
 		}
 	})
 

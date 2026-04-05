@@ -78,7 +78,7 @@ func TestRotator_Rotate(t *testing.T) {
 
 	rotator := NewRotator(RotatorConfig{
 		Generator:   gen,
-		EventBus:    nil, // Disable eventbus for testing
+		EventBus:    nil,                    // Disable eventbus for testing
 		GracePeriod: 100 * time.Millisecond, // Short for testing
 	})
 
@@ -169,7 +169,7 @@ func TestRotator_ForceComplete(t *testing.T) {
 
 	rotator := NewRotator(RotatorConfig{
 		Generator:   gen,
-		EventBus:    nil, // Disable eventbus for testing
+		EventBus:    nil,              // Disable eventbus for testing
 		GracePeriod: 10 * time.Minute, // Long grace period
 	})
 
@@ -324,7 +324,7 @@ func TestRotator_ConcurrentOperations(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			
+
 			secret := make([]byte, 32)
 			_, err := rand.Read(secret)
 			if err != nil {

@@ -56,10 +56,10 @@ type OperatorView struct {
 
 // DashboardStatsResponse powers the admin dashboard widgets.
 type DashboardStatsResponse struct {
-	TotalIdentities    int64   `json:"total_identities"`
-	ActiveSessions     int64   `json:"active_sessions"`
-	IdentitiesLast24h  int64   `json:"identities_last_24h"`
-	MFAAdoptionRate    float64 `json:"mfa_adoption_rate"`
+	TotalIdentities   int64   `json:"total_identities"`
+	ActiveSessions    int64   `json:"active_sessions"`
+	IdentitiesLast24h int64   `json:"identities_last_24h"`
+	MFAAdoptionRate   float64 `json:"mfa_adoption_rate"`
 }
 
 // SystemSettingsResponse is the persisted settings contract for admin UI.

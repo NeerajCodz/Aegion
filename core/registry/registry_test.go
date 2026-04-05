@@ -33,6 +33,7 @@ func TestNew(t *testing.T) {
 			registry := New(tt.config)
 			if registry == nil {
 				t.Fatal("New() returned nil registry")
+				return
 			}
 			if registry.modules == nil {
 				t.Error("modules map is nil")
@@ -95,7 +96,7 @@ func TestRegister(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, err := registry.Register(tt.req)
-			
+
 			if tt.wantErr != nil {
 				if err != tt.wantErr {
 					t.Errorf("Register() error = %v, want %v", err, tt.wantErr)

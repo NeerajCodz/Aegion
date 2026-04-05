@@ -114,7 +114,7 @@ func FromContext(ctx context.Context) *Logger {
 	} else {
 		logger = New(Config{Level: "info", Format: "json"})
 	}
-	
+
 	// Auto-inject trace information if available
 	return logger.withTraceContext(ctx)
 }
@@ -124,29 +124,29 @@ func (l *Logger) withTraceContext(ctx context.Context) *Logger {
 	// Try to extract trace info using well-known context keys
 	traceInfo := getTraceInfoFromContext(ctx)
 	requestID := getRequestIDFromContext(ctx)
-	
+
 	newLogger := l
-	
+
 	// Add trace ID and span ID if available
 	if traceInfo.TraceID != "" {
 		newLogger = &Logger{
 			zl: newLogger.zl.With().Str("trace_id", traceInfo.TraceID).Logger(),
 		}
 	}
-	
+
 	if traceInfo.SpanID != "" {
 		newLogger = &Logger{
 			zl: newLogger.zl.With().Str("span_id", traceInfo.SpanID).Logger(),
 		}
 	}
-	
+
 	// Add request ID if available and not already set
 	if requestID != "" {
 		newLogger = &Logger{
 			zl: newLogger.zl.With().Str("request_id", requestID).Logger(),
 		}
 	}
-	
+
 	return newLogger
 }
 
@@ -156,10 +156,23 @@ type TraceInfo struct {
 	SpanID  string `json:"span_id"`
 }
 
+type loggerContextKey string
+
+const (
+	legacyTraceInfoContextKey = "trace_info"
+	legacyRequestIDContextKey = "request_id"
+	traceInfoContextKey       = loggerContextKey(legacyTraceInfoContextKey)
+	requestIDContextKey       = loggerContextKey(legacyRequestIDContextKey)
+)
+
 // Helper functions to extract trace information from context
 // These use the same context keys as the observability package
 func getTraceInfoFromContext(ctx context.Context) TraceInfo {
-	info := ctx.Value("trace_info")
+	info := ctx.Value(traceInfoContextKey)
+	if info == nil {
+		// Keep compatibility with contexts using historical string keys.
+		info = ctx.Value(legacyTraceInfoContextKey)
+	}
 	if info != nil {
 		// Use reflection to handle different struct types with same field names
 		switch v := info.(type) {
@@ -176,7 +189,11 @@ func getTraceInfoFromContext(ctx context.Context) TraceInfo {
 }
 
 func getRequestIDFromContext(ctx context.Context) string {
-	if requestID, ok := ctx.Value("request_id").(string); ok {
+	if requestID, ok := ctx.Value(requestIDContextKey).(string); ok {
+		return requestID
+	}
+	// Keep compatibility with contexts using historical string keys.
+	if requestID, ok := ctx.Value(legacyRequestIDContextKey).(string); ok {
 		return requestID
 	}
 	return ""

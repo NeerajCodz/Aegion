@@ -218,7 +218,7 @@ func TestBaseWorkerRunLoopRunningStateTransitions(t *testing.T) {
 
 	// Wait for context to expire
 	time.Sleep(60 * time.Millisecond)
-	_ = <-resultChan
+	<-resultChan
 
 	// After completion: not running
 	assert.False(t, worker.IsRunning())

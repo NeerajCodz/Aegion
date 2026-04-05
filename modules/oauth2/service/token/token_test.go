@@ -14,26 +14,26 @@ import (
 
 // Mock store for testing
 type mockTokenStore struct {
-	client                    *store.Client
-	authCode                  *store.AuthCode
-	refreshToken              *store.RefreshToken
-	refreshTokenByID          map[string]*store.RefreshToken
-	accessTokens              []*store.AccessToken
-	refreshTokens             []*store.RefreshToken
-	idTokens                  []*store.IDToken
-	getClientErr              error
-	getAuthCodeErr            error
-	markAuthCodeUsedErr       error
-	createAccessErr           error
-	createRefreshErr          error
-	createIDErr               error
-	getRefreshErr             error
-	markRefreshUsedErr        error
+	client                     *store.Client
+	authCode                   *store.AuthCode
+	refreshToken               *store.RefreshToken
+	refreshTokenByID           map[string]*store.RefreshToken
+	accessTokens               []*store.AccessToken
+	refreshTokens              []*store.RefreshToken
+	idTokens                   []*store.IDToken
+	getClientErr               error
+	getAuthCodeErr             error
+	markAuthCodeUsedErr        error
+	createAccessErr            error
+	createRefreshErr           error
+	createIDErr                error
+	getRefreshErr              error
+	markRefreshUsedErr         error
 	invalidateRefreshFamilyErr error
-	revokeAccessErr           error
-	revokeRefreshBySessionErr error
-	revokeAccessBySessionErr  error
-	invalidatedFamilyID       string
+	revokeAccessErr            error
+	revokeRefreshBySessionErr  error
+	revokeAccessBySessionErr   error
+	invalidatedFamilyID        string
 }
 
 type failingJWTSigner struct {
@@ -167,10 +167,10 @@ func TestExchangeAuthorizationCode(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		mockStore := &mockTokenStore{
 			client: &store.Client{
-				ID:               "client-123",
-				AccessTokenTTL:   900,
-				RefreshTokenTTL:  2592000,
-				IDTokenTTL:       3600,
+				ID:                 "client-123",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
 				AllowOfflineAccess: true,
 			},
 			authCode: &store.AuthCode{
@@ -227,17 +227,17 @@ func TestExchangeAuthorizationCode(t *testing.T) {
 		mockStore := &mockTokenStore{
 			client: &store.Client{ID: "client-456"},
 			authCode: &store.AuthCode{
-				Code:       "ac_test123",
-				ClientID:   "client-123",
-				ExpiresAt:  time.Now().UTC().Add(10 * time.Minute),
+				Code:      "ac_test123",
+				ClientID:  "client-123",
+				ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 			},
 		}
 		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://auth.example.com")
 
 		req := &TokenRequest{
-			GrantType:   "authorization_code",
-			Code:        "ac_test123",
-			ClientID:    "client-456",
+			GrantType: "authorization_code",
+			Code:      "ac_test123",
+			ClientID:  "client-456",
 		}
 
 		_, err := svc.ExchangeAuthorizationCode(ctx, req)
@@ -251,10 +251,10 @@ func TestRefreshAccessToken(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		mockStore := &mockTokenStore{
 			client: &store.Client{
-				ID:               "client-123",
-				AccessTokenTTL:   900,
-				RefreshTokenTTL:  2592000,
-				IDTokenTTL:       3600,
+				ID:                 "client-123",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
 				AllowOfflineAccess: true,
 			},
 			refreshToken: &store.RefreshToken{
@@ -328,7 +328,7 @@ func TestExchangeAuthorizationCode_ErrorPaths(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidClient)
 
 		st = &mockTokenStore{
-			client:       baseClient,
+			client:         baseClient,
 			getAuthCodeErr: errors.New("missing code"),
 		}
 		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
@@ -449,8 +449,8 @@ func TestExchangeAuthorizationCode_ErrorPaths(t *testing.T) {
 		assert.ErrorContains(t, err, "sign access")
 
 		st = &mockTokenStore{
-			client:         baseClient,
-			authCode:       newAuthCode(),
+			client:          baseClient,
+			authCode:        newAuthCode(),
 			createAccessErr: errors.New("store access"),
 		}
 		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
@@ -462,8 +462,8 @@ func TestExchangeAuthorizationCode_ErrorPaths(t *testing.T) {
 		assert.ErrorIs(t, err, st.createAccessErr)
 
 		st = &mockTokenStore{
-			client:          baseClient,
-			authCode:        newAuthCode(),
+			client:           baseClient,
+			authCode:         newAuthCode(),
 			createRefreshErr: errors.New("store refresh"),
 		}
 		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
@@ -475,8 +475,8 @@ func TestExchangeAuthorizationCode_ErrorPaths(t *testing.T) {
 		assert.ErrorIs(t, err, st.createRefreshErr)
 
 		st = &mockTokenStore{
-			client:    baseClient,
-			authCode:  newAuthCode(),
+			client:      baseClient,
+			authCode:    newAuthCode(),
 			createIDErr: errors.New("store id"),
 		}
 		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")

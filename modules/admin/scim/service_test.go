@@ -115,6 +115,7 @@ func (n *NoOpStore) UpdateSCIMTokenLastUsed(ctx context.Context, id uuid.UUID) e
 func (n *NoOpStore) DeleteSCIMToken(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
+
 type MockStore struct {
 	mock.Mock
 }

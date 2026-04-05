@@ -7,68 +7,68 @@ import (
 
 // ConsentSession represents a remembered consent.
 type ConsentSession struct {
-	ID                string            `json:"id"`
-	ClientID          string            `json:"client_id"`
-	IdentityID        string            `json:"identity_id"`
-	Scopes            []string          `json:"scopes"`
-	Audience          []string          `json:"audience,omitempty"`
-	Remember          bool              `json:"remember"`
-	RememberFor       *int              `json:"remember_for,omitempty"`
-	AccessTokenClaims map[string]any    `json:"access_token_claims,omitempty"`
-	IDTokenClaims     map[string]any    `json:"id_token_claims,omitempty"`
-	Handled           bool              `json:"handled"`
-	GrantedAt         *time.Time        `json:"granted_at,omitempty"`
-	ExpiresAt         *time.Time        `json:"expires_at,omitempty"`
-	CreatedAt         time.Time         `json:"created_at"`
-	UpdatedAt         time.Time         `json:"updated_at"`
+	ID                string         `json:"id"`
+	ClientID          string         `json:"client_id"`
+	IdentityID        string         `json:"identity_id"`
+	Scopes            []string       `json:"scopes"`
+	Audience          []string       `json:"audience,omitempty"`
+	Remember          bool           `json:"remember"`
+	RememberFor       *int           `json:"remember_for,omitempty"`
+	AccessTokenClaims map[string]any `json:"access_token_claims,omitempty"`
+	IDTokenClaims     map[string]any `json:"id_token_claims,omitempty"`
+	Handled           bool           `json:"handled"`
+	GrantedAt         *time.Time     `json:"granted_at,omitempty"`
+	ExpiresAt         *time.Time     `json:"expires_at,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // LoginChallenge represents a pending login during OAuth flow.
 type LoginChallenge struct {
-	ID                    string     `json:"id"`
-	ClientID              string     `json:"client_id"`
-	RequestURL            string     `json:"request_url"`
-	RedirectURI           string     `json:"redirect_uri"`
-	Scopes                []string   `json:"scopes"`
-	Audience              []string   `json:"audience,omitempty"`
-	ACRValues             []string   `json:"acr_values,omitempty"`
-	State                 *string    `json:"state,omitempty"`
-	CodeChallenge         *string    `json:"code_challenge,omitempty"`
-	CodeChallengeMethod   *string    `json:"code_challenge_method,omitempty"`
-	Nonce                 *string    `json:"nonce,omitempty"`
-	Skip                  bool       `json:"skip"`
-	IdentityID            *string    `json:"identity_id,omitempty"`
-	SessionID             *string    `json:"session_id,omitempty"`
-	AuthenticatedAt       *time.Time `json:"authenticated_at,omitempty"`
-	ExpiresAt             time.Time  `json:"expires_at"`
-	CreatedAt             time.Time  `json:"created_at"`
+	ID                  string     `json:"id"`
+	ClientID            string     `json:"client_id"`
+	RequestURL          string     `json:"request_url"`
+	RedirectURI         string     `json:"redirect_uri"`
+	Scopes              []string   `json:"scopes"`
+	Audience            []string   `json:"audience,omitempty"`
+	ACRValues           []string   `json:"acr_values,omitempty"`
+	State               *string    `json:"state,omitempty"`
+	CodeChallenge       *string    `json:"code_challenge,omitempty"`
+	CodeChallengeMethod *string    `json:"code_challenge_method,omitempty"`
+	Nonce               *string    `json:"nonce,omitempty"`
+	Skip                bool       `json:"skip"`
+	IdentityID          *string    `json:"identity_id,omitempty"`
+	SessionID           *string    `json:"session_id,omitempty"`
+	AuthenticatedAt     *time.Time `json:"authenticated_at,omitempty"`
+	ExpiresAt           time.Time  `json:"expires_at"`
+	CreatedAt           time.Time  `json:"created_at"`
 }
 
 // ConsentChallenge represents a pending consent decision.
 type ConsentChallenge struct {
-	ID                  string            `json:"id"`
-	LoginChallengeID    string            `json:"login_challenge_id"`
-	ClientID            string            `json:"client_id"`
-	IdentityID          string            `json:"identity_id"`
-	SessionID           string            `json:"session_id"`
-	RequestURL          string            `json:"request_url"`
-	RedirectURI         string            `json:"redirect_uri"`
-	RequestedScopes     []string          `json:"requested_scopes"`
-	RequestedAudience   []string          `json:"requested_audience,omitempty"`
-	Skip                bool              `json:"skip"`
-	GrantedScopes       []string          `json:"granted_scopes,omitempty"`
-	GrantedAudience     []string          `json:"granted_audience,omitempty"`
-	Remember            *bool             `json:"remember,omitempty"`
-	RememberFor         *int              `json:"remember_for,omitempty"`
-	AccessTokenClaims   map[string]any    `json:"access_token_claims,omitempty"`
-	IDTokenClaims       map[string]any    `json:"id_token_claims,omitempty"`
-	Handled             bool              `json:"handled"`
-	HandledAt           *time.Time        `json:"handled_at,omitempty"`
-	Rejected            bool              `json:"rejected"`
-	Error               *string           `json:"error,omitempty"`
-	ErrorDescription    *string           `json:"error_description,omitempty"`
-	ExpiresAt           time.Time         `json:"expires_at"`
-	CreatedAt           time.Time         `json:"created_at"`
+	ID                string         `json:"id"`
+	LoginChallengeID  string         `json:"login_challenge_id"`
+	ClientID          string         `json:"client_id"`
+	IdentityID        string         `json:"identity_id"`
+	SessionID         string         `json:"session_id"`
+	RequestURL        string         `json:"request_url"`
+	RedirectURI       string         `json:"redirect_uri"`
+	RequestedScopes   []string       `json:"requested_scopes"`
+	RequestedAudience []string       `json:"requested_audience,omitempty"`
+	Skip              bool           `json:"skip"`
+	GrantedScopes     []string       `json:"granted_scopes,omitempty"`
+	GrantedAudience   []string       `json:"granted_audience,omitempty"`
+	Remember          *bool          `json:"remember,omitempty"`
+	RememberFor       *int           `json:"remember_for,omitempty"`
+	AccessTokenClaims map[string]any `json:"access_token_claims,omitempty"`
+	IDTokenClaims     map[string]any `json:"id_token_claims,omitempty"`
+	Handled           bool           `json:"handled"`
+	HandledAt         *time.Time     `json:"handled_at,omitempty"`
+	Rejected          bool           `json:"rejected"`
+	Error             *string        `json:"error,omitempty"`
+	ErrorDescription  *string        `json:"error_description,omitempty"`
+	ExpiresAt         time.Time      `json:"expires_at"`
+	CreatedAt         time.Time      `json:"created_at"`
 }
 
 // CreateConsentSession creates or updates a consent session.

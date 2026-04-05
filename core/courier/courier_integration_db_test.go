@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 package courier
@@ -33,7 +34,7 @@ func setupTestDB(ctx context.Context) (*pgxpool.Pool, testcontainers.Container, 
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
-				WithStartupTimeout(10 * time.Second),
+				WithStartupTimeout(10*time.Second),
 		),
 	)
 	if err != nil {
@@ -550,10 +551,10 @@ func TestTemplateDataPersistenceIntegration(t *testing.T) {
 	courier := New(cfg)
 
 	templateData := map[string]interface{}{
-		"name":       "John Doe",
-		"code":       "123456",
-		"expiresIn":  15,
-		"link":       "https://example.com/verify",
+		"name":      "John Doe",
+		"code":      "123456",
+		"expiresIn": 15,
+		"link":      "https://example.com/verify",
 	}
 
 	msg, err := courier.QueueEmail(ctx, "user@example.com", "Test", "Body",
@@ -729,8 +730,8 @@ func TestCourierInitializationIntegration(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name           string
-		maxRetries     int
+		name            string
+		maxRetries      int
 		expectedRetries int
 	}{
 		{"default retries", 0, 3},
