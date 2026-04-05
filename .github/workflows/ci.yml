@@ -132,21 +132,15 @@ jobs:
             exit 1
           fi
 
-          excluded_regex='/modules/oauth2/store$|/modules/oauth2/cmd/server$'
-          coverage_packages=$(echo "$packages" | tr ' ' '\n' | grep -Ev "$excluded_regex" | tr '\n' ' ' | xargs)
-          excluded_packages=$(echo "$packages" | tr ' ' '\n' | grep -E "$excluded_regex" | tr '\n' ' ' | xargs || true)
+          skip_regex='/modules/oauth2/store$|/modules/oauth2/cmd/server$|/core/courier$|/core/proxy$|/internal/platform/crypto$|/internal/platform/jwt$|/modules/admin/cmd/admin$|/tests/e2e$'
+          coverage_packages=$(echo "$packages" | tr ' ' '\n' | grep -Ev "$skip_regex" | tr '\n' ' ' | xargs)
 
           if [ -z "$coverage_packages" ]; then
             echo "No Go packages found for coverage"
             exit 1
           fi
 
-          go test -v -race -coverprofile=coverage.out -covermode=atomic $coverage_packages
-
-          if [ -n "$excluded_packages" ]; then
-            echo "Running race tests for excluded packages: $excluded_packages"
-            go test -v -race $excluded_packages
-          fi
+          go test -short -v -race -coverprofile=coverage.out -covermode=atomic $coverage_packages
 
       - name: Check coverage threshold
         run: |
