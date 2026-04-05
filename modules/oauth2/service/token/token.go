@@ -281,6 +281,7 @@ func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, id
 			SessionID:      sessionID,
 			Scopes:         scopes,
 			Audience:       audience,
+			Active:         true,
 			AccessTokenJTI: &accessJTI,
 			ExpiresAt:      refreshExpiresAt,
 		}
