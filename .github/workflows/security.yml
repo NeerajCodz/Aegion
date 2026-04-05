@@ -21,7 +21,7 @@ permissions:
 
 env:
   GO_VERSION: '1.25.5'
-  RUST_VERSION: 'stable'
+  RUST_VERSION: '1.81.0'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -77,6 +77,8 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-audit and cargo-deny
         run: |
@@ -88,7 +90,6 @@ jobs:
 
       - name: Run cargo deny
         run: cargo deny check advisories
-        continue-on-error: true
 
   # ---------------------------------------------------------------------------
   # Container Scanning with Trivy
@@ -114,7 +115,7 @@ jobs:
           cache-from: type=gha
           build-args: |
             VERSION=security-scan
-            BASE_IMAGE=golang:1.25-bookworm
+            BASE_IMAGE=golang:1.25.5-bookworm
             RUNTIME_IMAGE=debian:bookworm-slim
         continue-on-error: true
 
