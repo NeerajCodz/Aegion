@@ -32,6 +32,9 @@ type Server struct {
 	DB      *pgxpool.Pool
 	dbPing  DBPinger // for testing
 	Handler *handler.Handler
+
+	adminPath string
+	spaServer *SPAFileServer
 }
 
 type RegistrationRequest struct {
@@ -50,6 +53,7 @@ type Endpoint struct {
 }
 
 func (s *Server) setupRouter() chi.Router {
+	s.ensureRoutingAssets()
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -77,7 +81,7 @@ func (s *Server) setupRouter() chi.Router {
 	})
 
 	// Serve embedded SPA
-	r.Mount(s.Config.Admin.Path, s.spaHandler())
+	r.Mount(s.adminPath, s.spaHandler())
 
 	// Fallback route for SPA routing
 	r.NotFound(s.spaFallback)
@@ -181,10 +185,11 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
+	s.ensureRoutingAssets()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{
-		"base_path": normalizeAdminPath(s.Config.Admin.Path),
+		"base_path": s.adminPath,
 	})
 }
 
@@ -210,17 +215,19 @@ func normalizeAdminPath(adminPath string) string {
 }
 
 func (s *Server) spaHandler() http.Handler {
+	s.ensureRoutingAssets()
 	// Mount the embedded SPA files
-	return http.StripPrefix(s.Config.Admin.Path, NewSPAFileServer())
+	return http.StripPrefix(s.adminPath, s.spaServer)
 }
 
 func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
+	s.ensureRoutingAssets()
 	// For SPA routes that don't match files, serve index.html
 	// This allows client-side routing to work
-	path := strings.TrimPrefix(r.URL.Path, s.Config.Admin.Path)
+	path := strings.TrimPrefix(r.URL.Path, s.adminPath)
 
 	// Only serve SPA fallback for admin paths
-	if strings.HasPrefix(r.URL.Path, s.Config.Admin.Path) {
+	if strings.HasPrefix(r.URL.Path, s.adminPath) {
 		// Check if this is an API call that shouldn't get the SPA
 		if strings.HasPrefix(path, "/api/") {
 			http.NotFound(w, r)
@@ -228,8 +235,7 @@ func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Serve index.html for SPA routing
-		indexHandler := NewSPAFileServer()
-		indexHandler.ServeHTTP(w, &http.Request{
+		s.spaServer.ServeHTTP(w, &http.Request{
 			Method: "GET",
 			URL:    &url.URL{Path: "/index.html"},
 			Header: r.Header,
@@ -242,6 +248,7 @@ func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerWithCore(ctx context.Context) error {
+	s.ensureRoutingAssets()
 	if s.Config.Core.ServiceURL == "" {
 		log.Warn().Msg("Core service URL not configured, skipping registration")
 		return nil
@@ -267,7 +274,7 @@ func (s *Server) registerWithCore(ctx context.Context) error {
 		},
 		HealthURL: fmt.Sprintf("http://%s/health", serverAddr),
 		Metadata: map[string]string{
-			"spa_path":    s.Config.Admin.Path,
+			"spa_path":    s.adminPath,
 			"description": "Aegion Administration Interface",
 		},
 	}
@@ -351,4 +358,14 @@ func (spa *SPAFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spa.fileServer.ServeHTTP(w, r)
+}
+
+func (s *Server) ensureRoutingAssets() {
+	if s.adminPath == "" {
+		s.adminPath = normalizeAdminPath(s.Config.Admin.Path)
+		s.Config.Admin.Path = s.adminPath
+	}
+	if s.spaServer == nil {
+		s.spaServer = NewSPAFileServer()
+	}
 }

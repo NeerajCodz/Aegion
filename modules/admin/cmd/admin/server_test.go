@@ -25,6 +25,7 @@ func TestNormalizeAdminPath(t *testing.T) {
 		{name: "trim trailing slash", input: "/admin/", want: "/admin"},
 		{name: "root stays root", input: "/", want: "/"},
 		{name: "trim many trailing slashes", input: "/aegion///", want: "/aegion"},
+		{name: "all slashes fallback to default", input: "////", want: "/aegion"},
 	}
 
 	for _, tc := range tests {
@@ -324,6 +325,46 @@ func TestSetupRouter(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("Health endpoint not working, got status %d", rec.Code)
+	}
+}
+
+func TestSetupRouterInitializesRoutingAssets(t *testing.T) {
+	s := &Server{
+		Config: &Config{},
+	}
+	s.Config.Admin.Path = " admin "
+
+	if r := s.setupRouter(); r == nil {
+		t.Fatal("setupRouter() returned nil")
+	}
+	if s.Config.Admin.Path != "/admin" {
+		t.Fatalf("expected normalized admin path /admin, got %q", s.Config.Admin.Path)
+	}
+	if s.adminPath != "/admin" {
+		t.Fatalf("expected cached adminPath /admin, got %q", s.adminPath)
+	}
+	if s.spaServer == nil {
+		t.Fatal("expected spaServer to be initialized")
+	}
+}
+
+func TestSPAHandlerReusesCachedServer(t *testing.T) {
+	s := &Server{
+		Config: &Config{},
+	}
+	s.Config.Admin.Path = "/admin"
+
+	first := s.spaHandler()
+	if first == nil || s.spaServer == nil {
+		t.Fatal("expected non-nil handler and cached spaServer")
+	}
+	cached := s.spaServer
+	second := s.spaHandler()
+	if second == nil {
+		t.Fatal("expected non-nil second handler")
+	}
+	if s.spaServer != cached {
+		t.Fatal("expected cached spaServer to be reused")
 	}
 }
 
