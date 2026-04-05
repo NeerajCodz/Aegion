@@ -261,6 +261,35 @@ func TestRunHealthCommand(t *testing.T) {
 			t.Fatalf("expected health failure output, got %q", stderr.String())
 		}
 	})
+
+	t.Run("health command fails on non-2xx status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/health" {
+				http.NotFound(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		parsed, err := url.Parse(srv.URL)
+		if err != nil {
+			t.Fatalf("failed to parse test server URL: %v", err)
+		}
+		_, port, err := net.SplitHostPort(parsed.Host)
+		if err != nil {
+			t.Fatalf("failed to parse host/port: %v", err)
+		}
+		t.Setenv("AEGION_PORT", port)
+
+		deps, _, stderr, _, _, _ := buildRunDeps(validMainConfig())
+		if code := run([]string{"health"}, deps); code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if got := stderr.String(); !strings.Contains(got, "status 503") {
+			t.Fatalf("expected status failure output, got %q", got)
+		}
+	})
 }
 
 func TestRunUnknownSubcommand(t *testing.T) {
@@ -491,7 +520,7 @@ func TestRunServerAndShutdownPaths(t *testing.T) {
 
 func TestAsConcreteServer(t *testing.T) {
 	live := &Server{}
-	if got := asConcreteServer(&liveServer{server: live}); got != live {
+	if got := asConcreteServer(live); got != live {
 		t.Fatalf("expected live server passthrough")
 	}
 
@@ -499,6 +528,88 @@ func TestAsConcreteServer(t *testing.T) {
 	if fallback == nil {
 		t.Fatalf("expected non-nil fallback server")
 	}
+}
+
+func TestMainVersionPath(t *testing.T) {
+	origArgs := os.Args
+	defer func() {
+		os.Args = origArgs
+	}()
+
+	os.Args = []string{"aegion", "-version"}
+	main()
+}
+
+func TestDefaultMainDepsHooksSmoke(t *testing.T) {
+	deps := defaultMainDeps()
+	cfg := validMainConfig()
+
+	if _, err := deps.loadConfig("definitely-missing.yaml"); err == nil {
+		t.Fatalf("expected loadConfig error for missing file")
+	}
+
+	_ = deps.validateConfig(cfg)
+
+	log := deps.newLogger(logger.Config{Level: "info", Format: "json"})
+	if log == nil {
+		t.Fatalf("expected logger instance")
+	}
+
+	if _, err := deps.connectDB(context.Background(), database.Config{URL: "://invalid"}); err == nil {
+		t.Fatalf("expected connectDB to fail for invalid URL")
+	}
+
+	migrator := deps.newMigrator(&database.DB{Pool: nil})
+	if migrator == nil {
+		t.Fatalf("expected migrator instance")
+	}
+
+	workerMgr := deps.newWorkerMgr(log, &database.DB{Pool: nil})
+	if workerMgr == nil {
+		t.Fatalf("expected worker manager instance")
+	}
+
+	server, err := deps.newServer(context.Background(), &ServerConfig{
+		Config:         cfg,
+		DB:             &database.DB{Pool: nil},
+		Log:            log,
+		WorkerManager:  workerMgr,
+		AdminBootstrap: false,
+	})
+	if err != nil {
+		t.Fatalf("newServer returned error: %v", err)
+	}
+	if server.Handler() == nil {
+		t.Fatalf("expected runtime server handler")
+	}
+
+	httpServer := deps.newHTTPServer(cfg, server.Handler())
+	if httpServer == nil {
+		t.Fatalf("expected http server instance")
+	}
+
+	lifecycle := deps.newLifecycle(&LifecycleConfig{
+		Log:           log,
+		Server:        asConcreteServer(server),
+		HTTPServer:    httpServer,
+		WorkerManager: workerMgr,
+	})
+	if lifecycle == nil {
+		t.Fatalf("expected lifecycle instance")
+	}
+
+	sigCh := deps.newSignalChan()
+	if sigCh == nil {
+		t.Fatalf("expected signal channel")
+	}
+	deps.notifySignals(sigCh, os.Interrupt)
+	deps.stopSignals(sigCh)
+
+	cfg.Server.TLS.Enabled = false
+	httpServer.Addr = "127.0.0.1:0"
+	deps.startHTTPServer(cfg, log, httpServer)
+	time.Sleep(25 * time.Millisecond)
+	_ = httpServer.Close()
 }
 
 func TestDefaultMainDeps(t *testing.T) {

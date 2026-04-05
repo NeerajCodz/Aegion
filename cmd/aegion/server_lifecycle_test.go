@@ -79,6 +79,26 @@ func TestHandleReadyDatabaseUnavailable(t *testing.T) {
 	}
 }
 
+func TestHandleReadyDatabaseHealthy(t *testing.T) {
+	s := newTestServer(t)
+	s.db = &database.DB{Pool: nil}
+
+	originalPing := pingDatabase
+	pingDatabase = func(ctx context.Context, db *database.DB) error { return nil }
+	defer func() { pingDatabase = originalPing }()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	s.handleReady(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"ready"`) {
+		t.Fatalf("expected readiness success body, got %q", rec.Body.String())
+	}
+}
+
 func TestServerBootstrapGettersAndShutdown(t *testing.T) {
 	s := newTestServer(t)
 	s.flowService = flows.NewService(newRouteFlowStore(), flows.DefaultConfig())

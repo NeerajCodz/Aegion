@@ -743,6 +743,70 @@ func TestRule_ApplyRewrite_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestRule_ApplyRewrite_NormalizesAddPrefix(t *testing.T) {
+	rule := Rule{
+		Rewrite: &RewriteConfig{
+			AddPrefix: "v2/",
+		},
+	}
+
+	result := rule.ApplyRewrite("/users")
+	assert.Equal(t, "/v2/users", result)
+}
+
+func TestRuleEngine_sortRules_ReordersByPriority(t *testing.T) {
+	engine := &RuleEngine{
+		rules: []Rule{
+			{ID: "low", Priority: 10, Enabled: true},
+			{ID: "high", Priority: 100, Enabled: true},
+			{ID: "medium", Priority: 50, Enabled: true},
+		},
+	}
+
+	engine.sortRules()
+	rules := engine.GetRules()
+
+	require.Len(t, rules, 3)
+	assert.Equal(t, "high", rules[0].ID)
+	assert.Equal(t, "medium", rules[1].ID)
+	assert.Equal(t, "low", rules[2].ID)
+}
+
+func TestCheckCapabilities(t *testing.T) {
+	tests := []struct {
+		name         string
+		sess         *session.Session
+		requiredCaps []string
+		wantErr      error
+	}{
+		{
+			name:         "nil session",
+			sess:         nil,
+			requiredCaps: []string{"read:users"},
+			wantErr:      ErrAuthenticationRequired,
+		},
+		{
+			name:         "no required capabilities",
+			sess:         &session.Session{ID: uuid.New(), IdentityID: uuid.New(), Active: true},
+			requiredCaps: nil,
+			wantErr:      nil,
+		},
+		{
+			name:         "fail closed when capabilities required",
+			sess:         &session.Session{ID: uuid.New(), IdentityID: uuid.New(), Active: true},
+			requiredCaps: []string{"read:users"},
+			wantErr:      ErrInsufficientPrivileges,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkCapabilities(tt.sess, tt.requiredCaps)
+			assert.Equal(t, tt.wantErr, err)
+		})
+	}
+}
+
 // TestRuleEngine_SortRules_AlreadySorted tests sorting already sorted rules
 func TestRuleEngine_SortRules_AlreadySorted(t *testing.T) {
 	rules := []Rule{

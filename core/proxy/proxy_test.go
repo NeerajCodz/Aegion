@@ -17,6 +17,26 @@ import (
 	"github.com/aegion/aegion/core/session"
 )
 
+type failingWriteResponseWriter struct {
+	header     http.Header
+	statusCode int
+}
+
+func (w *failingWriteResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingWriteResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+}
+
+func (w *failingWriteResponseWriter) Write([]byte) (int, error) {
+	return 0, errors.New("forced write failure")
+}
+
 func TestProxy_ServeHTTP(t *testing.T) {
 	// Create test upstream server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,11 +60,11 @@ func TestProxy_ServeHTTP(t *testing.T) {
 	// Create rules
 	rules := []Rule{
 		{
-			ID:      "api-rule",
-			Path:    "/api/*",
-			Methods: []string{"GET", "POST"},
-			Target:  "test-upstream",
-			Enabled: true,
+			ID:       "api-rule",
+			Path:     "/api/*",
+			Methods:  []string{"GET", "POST"},
+			Target:   "test-upstream",
+			Enabled:  true,
 			Priority: 100,
 		},
 	}
@@ -97,7 +117,7 @@ func TestProxy_ServeHTTP(t *testing.T) {
 			proxy.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.expectedStatus, w.Code)
-			
+
 			if tt.expectedHeader != "" {
 				assert.Equal(t, tt.expectedHeader, w.Header().Get("Content-Type"))
 			}
@@ -115,7 +135,7 @@ func TestProxy_Forward(t *testing.T) {
 		assert.NotEmpty(t, r.Header.Get("X-Request-ID"))
 		assert.NotEmpty(t, r.Header.Get("X-Forwarded-For"))
 		assert.NotEmpty(t, r.Header.Get("X-Forwarded-Proto"))
-		
+
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("upstream response"))
 	}))
@@ -161,7 +181,7 @@ func TestProxy_ForwardWithSessionHeaders(t *testing.T) {
 		assert.Equal(t, sessionID.String(), r.Header.Get("X-Aegion-Session-ID"))
 		assert.Equal(t, identityID.String(), r.Header.Get("X-Aegion-Identity-ID"))
 		assert.Equal(t, string(session.AAL2), r.Header.Get("X-Aegion-AAL"))
-		
+
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("authenticated response"))
 	}))
@@ -173,9 +193,9 @@ func TestProxy_ForwardWithSessionHeaders(t *testing.T) {
 
 	// Create session
 	sess := &session.Session{
-		ID:         sessionID,
-		IdentityID: identityID,
-		AAL:        session.AAL2,
+		ID:              sessionID,
+		IdentityID:      identityID,
+		AAL:             session.AAL2,
 		AuthenticatedAt: time.Now(),
 	}
 
@@ -263,10 +283,10 @@ func TestProxy_CircuitBreakerIntegration(t *testing.T) {
 	// Create rules
 	rules := []Rule{
 		{
-			ID:      "fail-rule",
-			Path:    "/fail",
-			Target:  "failing-upstream",
-			Enabled: true,
+			ID:       "fail-rule",
+			Path:     "/fail",
+			Target:   "failing-upstream",
+			Enabled:  true,
 			Priority: 100,
 		},
 	}
@@ -282,7 +302,7 @@ func TestProxy_CircuitBreakerIntegration(t *testing.T) {
 		req := httptest.NewRequest("GET", "/fail", nil)
 		w := httptest.NewRecorder()
 		proxy.ServeHTTP(w, req)
-		
+
 		// Should get an error response (either from upstream or circuit breaker)
 		assert.True(t, w.Code >= 500, "Expected 5xx status, got %d", w.Code)
 	}
@@ -312,10 +332,10 @@ func TestProxy_RequestTimeout(t *testing.T) {
 	// Create rules
 	rules := []Rule{
 		{
-			ID:      "timeout-rule",
-			Path:    "/slow",
-			Target:  "slow-upstream",
-			Enabled: true,
+			ID:       "timeout-rule",
+			Path:     "/slow",
+			Target:   "slow-upstream",
+			Enabled:  true,
 			Priority: 100,
 		},
 	}
@@ -332,6 +352,111 @@ func TestProxy_RequestTimeout(t *testing.T) {
 
 	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
 	assert.Contains(t, w.Body.String(), "Request timeout")
+}
+
+func TestProxy_ServeHTTP_RuleRateLimitExceeded(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"test": {URL: upstream.URL},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{
+			ID:       "limited",
+			Path:     "/limited",
+			Target:   "test",
+			Enabled:  true,
+			Priority: 100,
+			RateLimit: &RateLimitConfig{
+				RequestsPerSecond: 0,
+				ByIP:              true,
+			},
+		},
+	})
+
+	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	req := httptest.NewRequest("GET", "/limited", nil)
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Contains(t, w.Body.String(), "Rate limit exceeded")
+}
+
+func TestProxy_ServeHTTP_GlobalRateLimitExceeded(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"test": {URL: upstream.URL},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{
+			ID:       "limited-global",
+			Path:     "/limited-global",
+			Target:   "test",
+			Enabled:  true,
+			Priority: 100,
+		},
+	})
+
+	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy.limiter = NewRateLimiter(RateLimitConfig{
+		RequestsPerSecond: 0,
+		ByIP:              true,
+	}, NewMemoryStore())
+
+	req := httptest.NewRequest("GET", "/limited-global", nil)
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assert.Contains(t, w.Body.String(), "Rate limit exceeded")
+}
+
+func TestProxy_ServeHTTP_AccessErrorFromCheckAccess(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"protected": {URL: upstream.URL},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{
+			ID:          "protected",
+			Path:        "/protected",
+			Target:      "protected",
+			RequireAuth: true,
+			Enabled:     true,
+			Priority:    100,
+		},
+	})
+
+	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy.limiter = nil
+
+	req := httptest.NewRequest("GET", "/protected", nil)
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Contains(t, w.Body.String(), "Authentication required")
 }
 
 // TestProxy_HandleRateLimitExceeded tests rate limit exceeded error handling
@@ -388,6 +513,55 @@ func TestProxy_HandleAccessError_NoSession(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.NotEmpty(t, w.Body.String())
+}
+
+func TestProxy_HandleAccessError_StatusMapping(t *testing.T) {
+	tests := []struct {
+		name           string
+		err            error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "authentication required",
+			err:            ErrAuthenticationRequired,
+			expectedStatus: http.StatusUnauthorized,
+			expectedBody:   "Authentication required",
+		},
+		{
+			name:           "insufficient privileges",
+			err:            ErrInsufficientPrivileges,
+			expectedStatus: http.StatusForbidden,
+			expectedBody:   "Insufficient privileges",
+		},
+	}
+
+	config := DefaultConfig()
+	logger := zerolog.New(zerolog.NewTestWriter(t))
+	proxy := NewProxy(config, nil, logger)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/test", nil)
+			req = req.WithContext(withRequestID(req.Context(), "test-123"))
+			w := httptest.NewRecorder()
+
+			proxy.handleAccessError(w, req, tt.err, time.Now())
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			assert.Contains(t, w.Body.String(), tt.expectedBody)
+		})
+	}
+}
+
+func TestProxy_WriteErrorResponse_WriteFailure(t *testing.T) {
+	proxy := NewProxy(DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
+	w := &failingWriteResponseWriter{}
+
+	proxy.writeErrorResponse(w, http.StatusBadGateway, "backend unavailable", "req-1")
+
+	assert.Equal(t, http.StatusBadGateway, w.statusCode)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 }
 
 // TestResponseWriter_WriteHeader tests status code capture
@@ -473,6 +647,29 @@ func TestProxy_InjectSessionHeaders_WithImpersonation(t *testing.T) {
 	assert.Equal(t, impersonatorID.String(), req.Header.Get("X-Aegion-Impersonator-ID"))
 }
 
+func TestProxy_GetCircuitBreaker_UsesConfiguredUpstreamBreaker(t *testing.T) {
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"custom": {
+			URL: "http://example.com",
+			CircuitBreaker: &CircuitBreakerConfig{
+				FailureThreshold: 7,
+				Timeout:          time.Minute,
+				SuccessThreshold: 2,
+			},
+		},
+	}
+
+	proxy := NewProxy(config, nil, zerolog.New(zerolog.NewTestWriter(t)))
+	delete(proxy.breakers, "custom")
+
+	breaker := proxy.getCircuitBreaker("custom")
+	require.NotNil(t, breaker)
+	assert.Equal(t, 7, breaker.config.FailureThreshold)
+	assert.Equal(t, time.Minute, breaker.config.Timeout)
+	assert.Equal(t, 2, breaker.config.SuccessThreshold)
+}
+
 // TestProxy_AddForwardedHeaders_WithTLS tests X-Forwarded-Proto header for HTTPS
 func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
 	config := DefaultConfig()
@@ -488,6 +685,24 @@ func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
 	// Should add forwarded headers
 	assert.NotEmpty(t, reqCopy.Header.Get("X-Forwarded-For"))
 	assert.NotEmpty(t, reqCopy.Header.Get("X-Forwarded-Host"))
+}
+
+func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
+	proxy := NewProxy(DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
+
+	original := httptest.NewRequest("GET", "http://edge.example.com/original", nil)
+	original.Host = "edge.example.com"
+	original.Header.Set("X-Forwarded-For", "203.0.113.10")
+	original.Header.Set("X-Forwarded-Proto", "https")
+	original.Header.Set("X-Forwarded-Host", "gateway.example.com")
+
+	forwarded := httptest.NewRequest("GET", "http://upstream.example.com/resource", nil)
+
+	proxy.addForwardedHeaders(forwarded, original)
+
+	assert.Equal(t, "203.0.113.10, 203.0.113.10", forwarded.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, "https", forwarded.Header.Get("X-Forwarded-Proto"))
+	assert.Equal(t, "gateway.example.com", forwarded.Header.Get("X-Forwarded-Host"))
 }
 
 // TestProxy_ServeHTTP_PreservesExistingRequestID tests request ID preservation
@@ -576,6 +791,43 @@ func TestProxy_ServeHTTP_CircuitBreakerOpen(t *testing.T) {
 	// Should reject due to circuit breaker being open
 	// Status could be 503 or other error code
 	assert.True(t, w.Code >= 400)
+}
+
+func TestProxy_ServeHTTP_CircuitBreakerRejectsWhenOpen(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	config := DefaultConfig()
+	config.Upstreams = map[string]Upstream{
+		"test": {
+			URL: upstream.URL,
+			CircuitBreaker: &CircuitBreakerConfig{
+				FailureThreshold: 1,
+				Timeout:          time.Hour,
+				SuccessThreshold: 1,
+			},
+		},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{ID: "test", Path: "/test", Target: "test", Enabled: true, Priority: 100},
+	})
+
+	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy.limiter = nil
+
+	breaker := proxy.getCircuitBreaker("test")
+	breaker.RecordFailure()
+	require.Equal(t, StateOpen, breaker.GetState())
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+	proxy.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), "upstream is unhealthy")
 }
 
 // TestProxy_ServeHTTP_InvalidUpstreamURL tests internal server error for invalid upstream URL
@@ -730,10 +982,10 @@ func BenchmarkProxy_ServeHTTP(b *testing.B) {
 
 	rules := []Rule{
 		{
-			ID:      "bench-rule",
-			Path:    "/api/*",
-			Target:  "bench-upstream",
-			Enabled: true,
+			ID:       "bench-rule",
+			Path:     "/api/*",
+			Target:   "bench-upstream",
+			Enabled:  true,
 			Priority: 100,
 		},
 	}

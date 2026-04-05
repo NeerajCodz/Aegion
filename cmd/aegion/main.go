@@ -95,30 +95,6 @@ func parseFlagsWithArgs(args []string) (*flags, error) {
 	return f, nil
 }
 
-type liveMigrator struct {
-	migrator *database.Migrator
-}
-
-func (m *liveMigrator) Migrate(ctx context.Context) error {
-	return m.migrator.Migrate(ctx)
-}
-
-type liveServer struct {
-	server *Server
-}
-
-func (s *liveServer) Handler() http.Handler {
-	return s.server.Handler()
-}
-
-type liveLifecycle struct {
-	lifecycle *Lifecycle
-}
-
-func (l *liveLifecycle) Shutdown(ctx context.Context) error {
-	return l.lifecycle.Shutdown(ctx)
-}
-
 func defaultMainDeps() mainDeps {
 	return mainDeps{
 		stdout: os.Stdout,
@@ -132,7 +108,7 @@ func defaultMainDeps() mainDeps {
 		newLogger: logger.New,
 		connectDB: database.Connect,
 		newMigrator: func(db *database.DB) migrator {
-			return &liveMigrator{migrator: database.NewMigrator(db, migrations, "migrations")}
+			return database.NewMigrator(db, migrations, "migrations")
 		},
 		newWorkerMgr: func(log *logger.Logger, db *database.DB) *workers.Manager {
 			return workers.NewManager(workers.ManagerConfig{
@@ -145,7 +121,7 @@ func defaultMainDeps() mainDeps {
 			if err != nil {
 				return nil, err
 			}
-			return &liveServer{server: s}, nil
+			return s, nil
 		},
 		newHTTPServer: func(cfg *config.Config, handler http.Handler) *http.Server {
 			return &http.Server{
@@ -157,7 +133,7 @@ func defaultMainDeps() mainDeps {
 			}
 		},
 		newLifecycle: func(cfg *LifecycleConfig) lifecycleManager {
-			return &liveLifecycle{lifecycle: NewLifecycle(cfg)}
+			return NewLifecycle(cfg)
 		},
 		newSignalChan: func() chan os.Signal {
 			return make(chan os.Signal, 1)
@@ -365,8 +341,8 @@ func runHealthCommand(stdout, stderr io.Writer) int {
 }
 
 func asConcreteServer(s runtimeServer) *Server {
-	if live, ok := s.(*liveServer); ok {
-		return live.server
+	if live, ok := s.(*Server); ok {
+		return live
 	}
 	// Test doubles can still drive lifecycle with a minimal shell server.
 	return &Server{}

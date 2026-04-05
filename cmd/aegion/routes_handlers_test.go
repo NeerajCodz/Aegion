@@ -234,6 +234,16 @@ func TestModuleHandlers(t *testing.T) {
 		}
 
 		req = httptest.NewRequest(http.MethodPost, "/internal/registry/register", mustJSONBody(t, registry.RegistrationRequest{
+			ID:      "invalid-module",
+			Version: "v1.0.0",
+		}))
+		rec = httptest.NewRecorder()
+		s.handleModuleRegister(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		req = httptest.NewRequest(http.MethodPost, "/internal/registry/register", mustJSONBody(t, registry.RegistrationRequest{
 			ID:      "password",
 			Name:    "password",
 			Version: "v1.0.0",
@@ -250,10 +260,17 @@ func TestModuleHandlers(t *testing.T) {
 	})
 
 	t.Run("deregister and not found", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/internal/registry/deregister", mustJSONBody(t, registry.DeregistrationRequest{
+		req := httptest.NewRequest(http.MethodPost, "/internal/registry/deregister", bytes.NewBufferString("{"))
+		rec := httptest.NewRecorder()
+		s.handleModuleDeregister(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		req = httptest.NewRequest(http.MethodPost, "/internal/registry/deregister", mustJSONBody(t, registry.DeregistrationRequest{
 			ModuleID: "password",
 		}))
-		rec := httptest.NewRecorder()
+		rec = httptest.NewRecorder()
 		s.handleModuleDeregister(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
@@ -269,6 +286,16 @@ func TestModuleHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("get module not found", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/internal/registry/modules/missing", nil)
+		req = withURLParam(req, "id", "missing")
+		s.handleGetModule(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+	})
+
 	t.Run("heartbeat scenarios", func(t *testing.T) {
 		registerTestModule(t, s, "heartbeat-module", registry.EndpointHTTP, "http://localhost:9010")
 
@@ -277,6 +304,14 @@ func TestModuleHandlers(t *testing.T) {
 		s.handleModuleHeartbeat(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/internal/registry/heartbeat", nil)
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "missing-module"))
+		s.handleModuleHeartbeat(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
 		}
 
 		rec = httptest.NewRecorder()
@@ -347,6 +382,24 @@ func TestModuleProxyHandler(t *testing.T) {
 			t.Fatalf("expected proxied response body, got %q", body)
 		}
 	})
+}
+
+func TestSetupRoutes_EnablesCORSMiddleware(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.Server.CORS.Enabled = true
+	router := SetupRoutes(s)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "https://example.com")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "https://example.com" {
+		t.Fatalf("expected CORS allow origin header to be set")
+	}
 }
 
 func TestSetupRoutes_InternalAuthAndAdminMount(t *testing.T) {

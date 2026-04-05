@@ -39,6 +39,10 @@ type Server struct {
 	workerManager *workers.Manager
 }
 
+var pingDatabase = func(ctx context.Context, db *database.DB) error {
+	return db.Pool.Ping(ctx)
+}
+
 // NewServer creates and initializes a new server instance.
 func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	// Initialize auth token generator
@@ -240,7 +244,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	// Check database connection
-	if err := s.db.Pool.Ping(r.Context()); err != nil {
+	if err := pingDatabase(r.Context(), s.db); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"status":"not ready","reason":"database unavailable"}`))

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -284,6 +285,54 @@ func TestHealthChecker_Timeout(t *testing.T) {
 
 	metrics := hc.GetMetrics()
 	assert.NotNil(t, metrics.LastError)
+}
+
+func TestNewHealthChecker_DisablesRedirectFollowing(t *testing.T) {
+	redirectFollowed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, "/final", http.StatusFound)
+			return
+		}
+		if r.URL.Path == "/final" {
+			redirectFollowed = true
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	hc := NewHealthChecker(HealthCheckerConfig{
+		URL:     server.URL + "/redirect",
+		Timeout: time.Second,
+		Logger:  zerolog.New(zerolog.NewTestWriter(t)),
+	})
+
+	resp, err := hc.client.Get(server.URL + "/redirect")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+	assert.False(t, redirectFollowed)
+}
+
+func TestHealthChecker_RecordFailure_AlreadyUnhealthy(t *testing.T) {
+	hc := NewHealthChecker(HealthCheckerConfig{
+		URL:    "http://example.com/health",
+		Logger: zerolog.New(zerolog.NewTestWriter(t)),
+	})
+
+	firstErr := errors.New("first failure")
+	secondErr := errors.New("second failure")
+
+	hc.recordFailure(firstErr)
+	hc.recordFailure(secondErr)
+
+	metrics := hc.GetMetrics()
+	assert.Equal(t, HealthStatusUnhealthy, metrics.Status)
+	assert.Equal(t, int64(2), metrics.FailureCount)
+	assert.Equal(t, secondErr, metrics.LastError)
 }
 
 func TestHealthStatus_String(t *testing.T) {
