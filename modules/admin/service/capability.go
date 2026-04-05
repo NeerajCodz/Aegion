@@ -237,10 +237,7 @@ func matchPermission(granted, required string) bool {
 	return false
 }
 
-// RequireCapability is a helper that panics if the capability check fails.
-// Use only in contexts where you want to fail fast.
-func (s *Service) RequireCapability(ctx context.Context, operatorID uuid.UUID, permission string) {
-	if err := s.EvaluateCapability(ctx, operatorID, permission); err != nil {
-		panic(err)
-	}
+// RequireCapability is a helper that returns an error when the capability check fails.
+func (s *Service) RequireCapability(ctx context.Context, operatorID uuid.UUID, permission string) error {
+	return s.EvaluateCapability(ctx, operatorID, permission)
 }

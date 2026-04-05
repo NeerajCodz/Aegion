@@ -267,12 +267,8 @@ func TestHasCapabilityAndRequireCapability(t *testing.T) {
 	assert.True(t, svc.HasCapability(context.Background(), operator.ID, PermAuditRead))
 	assert.False(t, svc.HasCapability(context.Background(), operator.ID, PermOperatorsCreate))
 
-	assert.NotPanics(t, func() {
-		svc.RequireCapability(context.Background(), operator.ID, PermAuditRead)
-	})
-	assert.Panics(t, func() {
-		svc.RequireCapability(context.Background(), operator.ID, PermOperatorsCreate)
-	})
+	assert.NoError(t, svc.RequireCapability(context.Background(), operator.ID, PermAuditRead))
+	assert.ErrorIs(t, svc.RequireCapability(context.Background(), operator.ID, PermOperatorsCreate), ErrPermissionDenied)
 }
 
 func TestGetEffectivePermissionsWithOverrides(t *testing.T) {
