@@ -14,14 +14,14 @@ import (
 )
 
 var (
-	ErrInvalidRequest       = errors.New("invalid_request")
-	ErrUnauthorizedClient   = errors.New("unauthorized_client")
-	ErrAccessDenied         = errors.New("access_denied")
+	ErrInvalidRequest          = errors.New("invalid_request")
+	ErrUnauthorizedClient      = errors.New("unauthorized_client")
+	ErrAccessDenied            = errors.New("access_denied")
 	ErrUnsupportedResponseType = errors.New("unsupported_response_type")
-	ErrInvalidScope         = errors.New("invalid_scope")
-	ErrServerError          = errors.New("server_error")
-	ErrPKCERequired         = errors.New("pkce_required")
-	ErrInvalidPKCE          = errors.New("invalid_pkce")
+	ErrInvalidScope            = errors.New("invalid_scope")
+	ErrServerError             = errors.New("server_error")
+	ErrPKCERequired            = errors.New("pkce_required")
+	ErrInvalidPKCE             = errors.New("invalid_pkce")
 )
 
 // AuthorizationStore interface for authorization operations.
@@ -247,14 +247,14 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 		}
 
 		consent := &store.ConsentSession{
-			ID:         store.GenerateClientID(), // reuse generator
-			ClientID:   challenge.ClientID,
-			IdentityID: challenge.IdentityID,
-			Scopes:     grantedScopes,
-			Audience:   challenge.RequestedAudience,
-			Remember:   true,
+			ID:          store.GenerateClientID(), // reuse generator
+			ClientID:    challenge.ClientID,
+			IdentityID:  challenge.IdentityID,
+			Scopes:      grantedScopes,
+			Audience:    challenge.RequestedAudience,
+			Remember:    true,
 			RememberFor: rememberFor,
-			ExpiresAt:  expiresAt,
+			ExpiresAt:   expiresAt,
 		}
 		_ = s.store.CreateConsentSession(ctx, consent)
 	}
@@ -278,7 +278,7 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 		CodeChallengeMethod: loginChallenge.CodeChallengeMethod,
 		Nonce:               loginChallenge.Nonce,
 		State:               loginChallenge.State,
-		ACR:                 "aal1", // TODO: determine from session
+		ACR:                 "aal1",          // TODO: determine from session
 		AMR:                 []string{"pwd"}, // TODO: determine from session
 		ExpiresAt:           time.Now().UTC().Add(10 * time.Minute),
 	}

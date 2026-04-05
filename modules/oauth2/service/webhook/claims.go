@@ -16,10 +16,10 @@ import (
 
 // ClaimsRequest represents a request to inject claims into a token.
 type ClaimsRequest struct {
-	IdentityID string            `json:"identity_id"`
-	ClientID   string            `json:"client_id"`
-	Scopes     []string          `json:"scopes"`
-	TokenType  string            `json:"token_type"` // "access", "id"
+	IdentityID string                 `json:"identity_id"`
+	ClientID   string                 `json:"client_id"`
+	Scopes     []string               `json:"scopes"`
+	TokenType  string                 `json:"token_type"`       // "access", "id"
 	Claims     map[string]interface{} `json:"claims,omitempty"` // Existing claims
 }
 
@@ -86,7 +86,9 @@ func (c *ClaimsHookClient) InjectClaims(ctx context.Context, req *ClaimsRequest)
 	if err != nil {
 		return nil, fmt.Errorf("webhook request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Check status
 	if resp.StatusCode != http.StatusOK {

@@ -9,45 +9,45 @@ import (
 
 // SCIM 2.0 Schema URNs
 const (
-	SchemaUser     = "urn:ietf:params:scim:schemas:core:2.0:User"
-	SchemaGroup    = "urn:ietf:params:scim:schemas:core:2.0:Group"
+	SchemaUser         = "urn:ietf:params:scim:schemas:core:2.0:User"
+	SchemaGroup        = "urn:ietf:params:scim:schemas:core:2.0:Group"
 	SchemaListResponse = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
-	SchemaError    = "urn:ietf:params:scim:api:messages:2.0:Error"
-	SchemaPatchOp  = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+	SchemaError        = "urn:ietf:params:scim:api:messages:2.0:Error"
+	SchemaPatchOp      = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
 )
 
 // SCIMUser represents a SCIM 2.0 User resource.
 type SCIMUser struct {
-	Schemas     []string          `json:"schemas"`
-	ID          string            `json:"id"`
-	ExternalID  string            `json:"externalId,omitempty"`
-	UserName    string            `json:"userName"`
-	Name        *Name             `json:"name,omitempty"`
-	DisplayName string            `json:"displayName,omitempty"`
-	NickName    string            `json:"nickName,omitempty"`
-	ProfileURL  string            `json:"profileUrl,omitempty"`
-	Title       string            `json:"title,omitempty"`
-	UserType    string            `json:"userType,omitempty"`
-	Locale      string            `json:"locale,omitempty"`
-	Timezone    string            `json:"timezone,omitempty"`
-	Active      bool              `json:"active"`
-	Emails      []Email           `json:"emails,omitempty"`
-	PhoneNumbers []PhoneNumber    `json:"phoneNumbers,omitempty"`
-	Addresses   []Address         `json:"addresses,omitempty"`
-	Groups      []GroupRef        `json:"groups,omitempty"`
-	Roles       []Role            `json:"roles,omitempty"`
-	Entitlements []Entitlement    `json:"entitlements,omitempty"`
-	Meta        Meta              `json:"meta"`
+	Schemas      []string      `json:"schemas"`
+	ID           string        `json:"id"`
+	ExternalID   string        `json:"externalId,omitempty"`
+	UserName     string        `json:"userName"`
+	Name         *Name         `json:"name,omitempty"`
+	DisplayName  string        `json:"displayName,omitempty"`
+	NickName     string        `json:"nickName,omitempty"`
+	ProfileURL   string        `json:"profileUrl,omitempty"`
+	Title        string        `json:"title,omitempty"`
+	UserType     string        `json:"userType,omitempty"`
+	Locale       string        `json:"locale,omitempty"`
+	Timezone     string        `json:"timezone,omitempty"`
+	Active       bool          `json:"active"`
+	Emails       []Email       `json:"emails,omitempty"`
+	PhoneNumbers []PhoneNumber `json:"phoneNumbers,omitempty"`
+	Addresses    []Address     `json:"addresses,omitempty"`
+	Groups       []GroupRef    `json:"groups,omitempty"`
+	Roles        []Role        `json:"roles,omitempty"`
+	Entitlements []Entitlement `json:"entitlements,omitempty"`
+	Meta         Meta          `json:"meta"`
 }
 
 // SCIMGroup represents a SCIM 2.0 Group resource.
 type SCIMGroup struct {
-	Schemas     []string   `json:"schemas"`
-	ID          string     `json:"id"`
-	ExternalID  string     `json:"externalId,omitempty"`
-	DisplayName string     `json:"displayName"`
-	Members     []Member   `json:"members,omitempty"`
-	Meta        Meta       `json:"meta"`
+	Schemas     []string `json:"schemas"`
+	ID          string   `json:"id"`
+	ExternalID  string   `json:"externalId,omitempty"`
+	DisplayName string   `json:"displayName"`
+	Members     []Member `json:"members,omitempty"`
+	Meta        Meta     `json:"meta"`
 }
 
 // Name represents the name attribute of a User.
@@ -140,10 +140,10 @@ type ListResponse struct {
 
 // ErrorResponse represents a SCIM 2.0 Error Response.
 type ErrorResponse struct {
-	Schemas []string `json:"schemas"`
-	ScimType string  `json:"scimType,omitempty"`
-	Detail   string  `json:"detail,omitempty"`
-	Status   string  `json:"status"`
+	Schemas  []string `json:"schemas"`
+	ScimType string   `json:"scimType,omitempty"`
+	Detail   string   `json:"detail,omitempty"`
+	Status   string   `json:"status"`
 }
 
 // PatchRequest represents a SCIM 2.0 Patch Operation Request.
@@ -154,23 +154,23 @@ type PatchRequest struct {
 
 // PatchOperation represents a single patch operation.
 type PatchOperation struct {
-	Op    string      `json:"op"`    // "add", "remove", "replace"
+	Op    string      `json:"op"` // "add", "remove", "replace"
 	Path  string      `json:"path,omitempty"`
 	Value interface{} `json:"value,omitempty"`
 }
 
 // ServiceProviderConfig represents SCIM service provider configuration.
 type ServiceProviderConfig struct {
-	Schemas               []string              `json:"schemas"`
-	DocumentationURI      string                `json:"documentationUri,omitempty"`
-	Patch                 Supported             `json:"patch"`
-	Bulk                  BulkConfig            `json:"bulk"`
-	Filter                FilterConfig          `json:"filter"`
-	ChangePassword        Supported             `json:"changePassword"`
-	Sort                  Supported             `json:"sort"`
-	ETag                  Supported             `json:"etag"`
+	Schemas               []string               `json:"schemas"`
+	DocumentationURI      string                 `json:"documentationUri,omitempty"`
+	Patch                 Supported              `json:"patch"`
+	Bulk                  BulkConfig             `json:"bulk"`
+	Filter                FilterConfig           `json:"filter"`
+	ChangePassword        Supported              `json:"changePassword"`
+	Sort                  Supported              `json:"sort"`
+	ETag                  Supported              `json:"etag"`
 	AuthenticationSchemes []AuthenticationScheme `json:"authenticationSchemes"`
-	Meta                  Meta                  `json:"meta"`
+	Meta                  Meta                   `json:"meta"`
 }
 
 // Supported represents a boolean capability with support.
@@ -230,17 +230,17 @@ type Attribute struct {
 
 // SCIMMapping represents the mapping between SCIM and Aegion identity fields.
 type SCIMMapping struct {
-	ID               uuid.UUID          `db:"id"`
-	Name             string             `db:"name"`
-	Description      string             `db:"description"`
-	UserNameSource   string             `db:"username_source"`   // "email", "preferred_username", "custom"
-	UserNameCustom   string             `db:"username_custom"`   // custom field name if UserNameSource is "custom"
-	EmailSource      string             `db:"email_source"`      // which email to use: "primary", "work", "personal"
-	NameMapping      map[string]string  `db:"name_mapping"`      // SCIM name fields to Aegion profile fields
-	AttributeMapping map[string]string  `db:"attribute_mapping"` // custom attribute mapping
-	GroupMapping     map[string]string  `db:"group_mapping"`     // SCIM group to Aegion role mapping
-	CreatedAt        time.Time          `db:"created_at"`
-	UpdatedAt        time.Time          `db:"updated_at"`
+	ID               uuid.UUID         `db:"id"`
+	Name             string            `db:"name"`
+	Description      string            `db:"description"`
+	UserNameSource   string            `db:"username_source"`   // "email", "preferred_username", "custom"
+	UserNameCustom   string            `db:"username_custom"`   // custom field name if UserNameSource is "custom"
+	EmailSource      string            `db:"email_source"`      // which email to use: "primary", "work", "personal"
+	NameMapping      map[string]string `db:"name_mapping"`      // SCIM name fields to Aegion profile fields
+	AttributeMapping map[string]string `db:"attribute_mapping"` // custom attribute mapping
+	GroupMapping     map[string]string `db:"group_mapping"`     // SCIM group to Aegion role mapping
+	CreatedAt        time.Time         `db:"created_at"`
+	UpdatedAt        time.Time         `db:"updated_at"`
 }
 
 // SCIMToken represents an API token for SCIM endpoints.

@@ -174,22 +174,22 @@ func TestEmailMessageConstructionFormat(t *testing.T) {
 	courier := New(cfg)
 
 	tests := []struct {
-		name     string
+		name      string
 		recipient string
-		subject  string
-		body     string
+		subject   string
+		body      string
 	}{
 		{
-			name:     "simple email",
+			name:      "simple email",
 			recipient: "user@example.com",
-			subject:  "Welcome",
-			body:     "Welcome to our service",
+			subject:   "Welcome",
+			body:      "Welcome to our service",
 		},
 		{
-			name:     "html email",
+			name:      "html email",
 			recipient: "user@example.com",
-			subject:  "Report",
-			body:     "<html><body><h1>Report</h1></body></html>",
+			subject:   "Report",
+			body:      "<html><body><h1>Report</h1></body></html>",
 		},
 	}
 
@@ -525,9 +525,9 @@ func TestCourierDbField(t *testing.T) {
 
 func TestSMTPConfigVariationsDetailed(t *testing.T) {
 	tests := []struct {
-		name       string
-		host       string
-		port       int
+		name        string
+		host        string
+		port        int
 		authEnabled bool
 	}{
 		{"Gmail SMTP", "smtp.gmail.com", 587, true},

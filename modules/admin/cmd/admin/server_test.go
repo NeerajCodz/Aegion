@@ -370,7 +370,7 @@ func TestSPAHandlerReusesCachedServer(t *testing.T) {
 
 func TestSecurityHeaders(t *testing.T) {
 	s := &Server{Config: &Config{}}
-	
+
 	handler := s.securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -387,10 +387,10 @@ func TestSecurityHeaders(t *testing.T) {
 
 func TestLogRequest(t *testing.T) {
 	s := &Server{Config: &Config{}}
-	
+
 	handler := s.logRequest(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("test"))
+		_, _ = w.Write([]byte("test"))
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
@@ -523,15 +523,19 @@ func TestSPAHandler(t *testing.T) {
 
 func TestSecurityHeaders_InDevMode(t *testing.T) {
 	// Set dev mode
-	os.Setenv("AEGION_ENV", "dev")
-	defer os.Unsetenv("AEGION_ENV")
+	if err := os.Setenv("AEGION_ENV", "dev"); err != nil {
+		t.Fatalf("failed to set AEGION_ENV: %v", err)
+	}
+	defer func() {
+		_ = os.Unsetenv("AEGION_ENV")
+	}()
 
 	s := &Server{Config: &Config{}}
-	
+
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	
+
 	handler := s.securityHeaders(nextHandler)
 	if handler == nil {
 		t.Fatal("securityHeaders returned nil in dev mode")

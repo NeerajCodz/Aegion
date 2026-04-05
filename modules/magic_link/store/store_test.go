@@ -27,7 +27,7 @@ func TestCodeType_Constants(t *testing.T) {
 func TestCode_Structure(t *testing.T) {
 	now := time.Now()
 	identityID := uuid.New()
-	
+
 	code := &Code{
 		ID:         uuid.New(),
 		IdentityID: &identityID,
@@ -56,7 +56,7 @@ func TestCode_Structure(t *testing.T) {
 
 func TestCode_WithNullableFields(t *testing.T) {
 	now := time.Now()
-	
+
 	// Test code without identity (for login flow)
 	code := &Code{
 		ID:         uuid.New(),
@@ -92,7 +92,7 @@ func testGenerateCode(length int, charset string) string {
 		}
 		return string(result)
 	}
-	
+
 	// Simple implementation for testing
 	result := make([]byte, length)
 	for i := range result {
@@ -106,7 +106,7 @@ func testGenerateToken(length int) string {
 	if length == 0 {
 		return ""
 	}
-	
+
 	// Simple implementation for testing - just create a predictable token
 	data := make([]byte, length)
 	for i := range data {
@@ -147,7 +147,7 @@ func TestGenerateCode(t *testing.T) {
 					return false
 				}
 				for _, char := range code {
-					if !((char >= '0' && char <= '9') || (char >= 'A' && char <= 'Z')) {
+					if (char < '0' || char > '9') && (char < 'A' || char > 'Z') {
 						return false
 					}
 				}
@@ -175,7 +175,7 @@ func TestGenerateCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			code := testGenerateCode(tt.length, tt.charset)
-			
+
 			assert.True(t, tt.validate(code), "Generated code '%s' failed validation", code)
 			assert.Equal(t, tt.length, len(code))
 		})
@@ -191,7 +191,7 @@ func TestGenerateCode_Randomness(t *testing.T) {
 
 	for i := 0; i < iterations; i++ {
 		// Modify charset slightly to get different results
-		modifiedCharset := charset + string(rune('A' + i%26))
+		modifiedCharset := charset + string(rune('A'+i%26))
 		code := testGenerateCode(length, modifiedCharset)
 		codes[code] = true
 	}
@@ -241,14 +241,14 @@ func TestGenerateToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			token := testGenerateToken(tt.length)
-			
+
 			assert.NotEmpty(t, token)
-			
+
 			// Decode the base64 token to check length
 			decoded, err := base64.RawURLEncoding.DecodeString(token)
 			require.NoError(t, err)
 			assert.Equal(t, tt.length, len(decoded))
-			
+
 			// Check that it's valid base64 URL encoding
 			assert.True(t, isValidBase64URL(token))
 		})
@@ -280,7 +280,7 @@ func TestGenerateToken_EdgeCases(t *testing.T) {
 	t.Run("very small length", func(t *testing.T) {
 		token := testGenerateToken(1)
 		assert.NotEmpty(t, token)
-		
+
 		decoded, err := base64.RawURLEncoding.DecodeString(token)
 		require.NoError(t, err)
 		assert.Equal(t, 1, len(decoded))
@@ -299,7 +299,7 @@ func TestStore_ErrorDefinitions(t *testing.T) {
 	assert.NotNil(t, ErrCodeExpired)
 	assert.NotNil(t, ErrCodeUsed)
 	assert.NotNil(t, ErrRateLimited)
-	
+
 	// Check error messages are meaningful
 	assert.Contains(t, ErrCodeNotFound.Error(), "not found")
 	assert.Contains(t, ErrCodeExpired.Error(), "expired")
@@ -313,32 +313,32 @@ func TestStore_Interface_Methods(t *testing.T) {
 
 	store := &Store{}
 	ctx := context.Background()
-	
+
 	// These will panic with nil database, but we're just testing method signatures
 	assert.Panics(t, func() {
 		_, _ = store.Create(ctx, "user@example.com", "login", nil, time.Hour)
 	})
-	
+
 	assert.Panics(t, func() {
 		_, _ = store.GetByCode(ctx, "user@example.com", "123456", "login")
 	})
-	
+
 	assert.Panics(t, func() {
 		_, _ = store.GetByToken(ctx, "token123")
 	})
-	
+
 	assert.Panics(t, func() {
 		_ = store.MarkUsed(ctx, uuid.New())
 	})
-	
+
 	assert.Panics(t, func() {
 		_ = store.InvalidatePrevious(ctx, "user@example.com", "login")
 	})
-	
+
 	assert.Panics(t, func() {
 		_ = store.CheckRateLimit(ctx, "key", 5, time.Hour)
 	})
-	
+
 	assert.Panics(t, func() {
 		_, _ = store.Cleanup(ctx)
 	})
@@ -346,7 +346,7 @@ func TestStore_Interface_Methods(t *testing.T) {
 
 func TestValidation_Logic(t *testing.T) {
 	// Test validation logic that might be used in store methods
-	
+
 	t.Run("recipient validation", func(t *testing.T) {
 		tests := []struct {
 			recipient string
@@ -354,37 +354,37 @@ func TestValidation_Logic(t *testing.T) {
 		}{
 			{"user@example.com", true},
 			{"", false},
-			{"   ", false}, // whitespace only
-			{"user@", false}, // incomplete email
+			{"   ", false},          // whitespace only
+			{"user@", false},        // incomplete email
 			{"@example.com", false}, // missing user part
 		}
-		
+
 		for _, tt := range tests {
 			// More sophisticated email validation
-			isValid := tt.recipient != "" && 
-						strings.TrimSpace(tt.recipient) == tt.recipient && 
-						strings.Contains(tt.recipient, "@") &&
-						len(strings.Split(tt.recipient, "@")) == 2 &&
-						strings.Split(tt.recipient, "@")[0] != "" &&
-						strings.Split(tt.recipient, "@")[1] != ""
-			
+			isValid := tt.recipient != "" &&
+				strings.TrimSpace(tt.recipient) == tt.recipient &&
+				strings.Contains(tt.recipient, "@") &&
+				len(strings.Split(tt.recipient, "@")) == 2 &&
+				strings.Split(tt.recipient, "@")[0] != "" &&
+				strings.Split(tt.recipient, "@")[1] != ""
+
 			assert.Equal(t, tt.valid, isValid, "Recipient validation failed for: %s", tt.recipient)
 		}
 	})
-	
+
 	t.Run("code type validation", func(t *testing.T) {
 		validTypes := []string{"login", "verification", "recovery"}
-		
+
 		for _, validType := range validTypes {
 			assert.Contains(t, validTypes, validType)
 		}
-		
+
 		invalidTypes := []string{"", "invalid", "LOGIN", "123"}
 		for _, invalidType := range invalidTypes {
 			assert.NotContains(t, validTypes, invalidType)
 		}
 	})
-	
+
 	t.Run("TTL validation", func(t *testing.T) {
 		tests := []struct {
 			ttl   time.Duration
@@ -392,11 +392,11 @@ func TestValidation_Logic(t *testing.T) {
 		}{
 			{15 * time.Minute, true},
 			{time.Hour, true},
-			{0, false}, // Zero TTL
-			{-time.Minute, false}, // Negative TTL
+			{0, false},               // Zero TTL
+			{-time.Minute, false},    // Negative TTL
 			{time.Nanosecond, false}, // Too short
 		}
-		
+
 		for _, tt := range tests {
 			isValid := tt.ttl > time.Second // Reasonable minimum
 			assert.Equal(t, tt.valid, isValid, "TTL validation failed for: %v", tt.ttl)
@@ -409,28 +409,28 @@ func TestTimeHandling(t *testing.T) {
 		now := time.Now()
 		ttl := 15 * time.Minute
 		expiresAt := now.Add(ttl)
-		
+
 		assert.True(t, expiresAt.After(now))
 		assert.True(t, expiresAt.Before(now.Add(16*time.Minute)))
 	})
-	
+
 	t.Run("expiration check", func(t *testing.T) {
 		now := time.Now()
-		
+
 		// Not expired
 		future := now.Add(time.Hour)
 		assert.False(t, now.After(future))
-		
+
 		// Expired
 		past := now.Add(-time.Hour)
 		assert.True(t, now.After(past))
 	})
-	
+
 	t.Run("rate limit window", func(t *testing.T) {
 		now := time.Now()
 		window := time.Hour
 		windowStart := now.Add(-window)
-		
+
 		assert.True(t, windowStart.Before(now))
 		assert.Equal(t, window, now.Sub(windowStart))
 	})
@@ -438,12 +438,12 @@ func TestTimeHandling(t *testing.T) {
 
 func TestRateLimit_Logic(t *testing.T) {
 	tests := []struct {
-		name         string
-		key          string
-		limit        int
-		window       time.Duration
-		expectValid  bool
-		description  string
+		name        string
+		key         string
+		limit       int
+		window      time.Duration
+		expectValid bool
+		description string
 	}{
 		{
 			name:        "valid rate limit params",
@@ -494,12 +494,12 @@ func TestRateLimit_Logic(t *testing.T) {
 			description: "Rate limit window too short",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Basic validation logic that would be used in store
 			isValid := tt.key != "" && tt.limit > 0 && tt.window > time.Second
-			
+
 			assert.Equal(t, tt.expectValid, isValid, tt.description)
 		})
 	}
@@ -531,18 +531,18 @@ func TestRateLimit_KeyGeneration(t *testing.T) {
 			expected:  "recover:user@example.com",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.operation+"_key", func(t *testing.T) {
 			var key string
-			
+
 			switch tt.operation {
 			case "login", "recover":
 				key = tt.operation + ":" + tt.email
 			case "verify":
 				key = tt.operation + ":" + tt.identity
 			}
-			
+
 			assert.Equal(t, tt.expected, key)
 		})
 	}
@@ -552,7 +552,7 @@ func TestContext_Handling(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
-		
+
 		select {
 		case <-ctx.Done():
 			assert.NotNil(t, ctx.Err())
@@ -560,13 +560,13 @@ func TestContext_Handling(t *testing.T) {
 			t.Error("Context should be canceled")
 		}
 	})
-	
+
 	t.Run("context timeout", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
 		defer cancel()
-		
+
 		time.Sleep(10 * time.Millisecond) // Wait for timeout
-		
+
 		// After sleep, context should be done
 		assert.True(t, ctx.Err() != nil, "Context should have an error")
 		assert.Equal(t, context.DeadlineExceeded, ctx.Err())
@@ -577,25 +577,25 @@ func TestUUID_Operations(t *testing.T) {
 	t.Run("uuid generation", func(t *testing.T) {
 		id1 := uuid.New().String()
 		id2 := uuid.New().String()
-		
+
 		assert.NotEqual(t, id1, id2)
 		assert.NotEmpty(t, id1)
 		assert.NotEmpty(t, id2)
-		
+
 		// Verify UUID format
 		_, err1 := uuid.Parse(id1)
 		_, err2 := uuid.Parse(id2)
 		assert.NoError(t, err1)
 		assert.NoError(t, err2)
 	})
-	
+
 	t.Run("uuid parsing", func(t *testing.T) {
 		validUUID := uuid.New().String()
 		invalidUUID := "not-a-uuid"
-		
+
 		_, err1 := uuid.Parse(validUUID)
 		_, err2 := uuid.Parse(invalidUUID)
-		
+
 		assert.NoError(t, err1)
 		assert.Error(t, err2)
 	})
@@ -617,7 +617,7 @@ func TestDatabase_OperationPatterns(t *testing.T) {
 			ExpiresAt: now.Add(15 * time.Minute),
 			CreatedAt: now,
 		}
-		
+
 		// Validate required fields
 		assert.NotEqual(t, uuid.Nil, code.ID)
 		assert.NotEmpty(t, code.Recipient)
@@ -627,27 +627,27 @@ func TestDatabase_OperationPatterns(t *testing.T) {
 		assert.Nil(t, code.UsedAt)
 		assert.True(t, code.ExpiresAt.After(code.CreatedAt))
 	})
-	
+
 	t.Run("query by code", func(t *testing.T) {
 		// Test query parameters
 		recipient := "user@example.com"
 		otpCode := "123456"
 		codeType := "login"
-		
+
 		assert.NotEmpty(t, recipient)
 		assert.NotEmpty(t, otpCode)
 		assert.NotEmpty(t, codeType)
 		assert.Contains(t, []string{"login", "verification", "recovery"}, codeType)
 	})
-	
+
 	t.Run("mark used operation", func(t *testing.T) {
 		now := time.Now()
 		codeID := uuid.New()
-		
+
 		// Simulate marking as used
 		used := true
 		usedAt := &now
-		
+
 		assert.NotEqual(t, uuid.Nil, codeID)
 		assert.True(t, used)
 		assert.NotNil(t, usedAt)
@@ -659,7 +659,7 @@ func TestDatabase_OperationPatterns(t *testing.T) {
 func BenchmarkGenerateCode(b *testing.B) {
 	length := 6
 	charset := "0123456789"
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		testGenerateCode(length, charset)
@@ -668,7 +668,7 @@ func BenchmarkGenerateCode(b *testing.B) {
 
 func BenchmarkGenerateToken(b *testing.B) {
 	length := 32
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		testGenerateToken(length)
@@ -677,7 +677,7 @@ func BenchmarkGenerateToken(b *testing.B) {
 
 func BenchmarkCryptoRand(b *testing.B) {
 	buffer := make([]byte, 32)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = rand.Read(buffer)
@@ -687,7 +687,7 @@ func BenchmarkCryptoRand(b *testing.B) {
 func BenchmarkBase64Encoding(b *testing.B) {
 	data := make([]byte, 32)
 	_, _ = rand.Read(data)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		base64.RawURLEncoding.EncodeToString(data)
@@ -721,9 +721,8 @@ func mockCommandTagDelete(rowsAffected int64) pgconn.CommandTag {
 
 // fakeRow implements pgx.Row for testing
 type fakeRow struct {
-	data    []interface{}
-	err     error
-	scanIdx int
+	data []interface{}
+	err  error
 }
 
 func (r *fakeRow) Scan(dest ...interface{}) error {
@@ -798,7 +797,7 @@ func TestStore_New(t *testing.T) {
 	// Test NewWithDB constructor
 	db := &fakeDB{}
 	store := NewWithDB(db)
-	
+
 	assert.NotNil(t, store)
 	assert.Equal(t, 6, store.codeLength)
 	assert.Equal(t, "0123456789", store.codeCharset)
@@ -807,9 +806,9 @@ func TestStore_New(t *testing.T) {
 func TestStore_SetCodeConfig(t *testing.T) {
 	db := &fakeDB{}
 	store := NewWithDB(db)
-	
+
 	store.SetCodeConfig(8, "0123456789ABCDEF")
-	
+
 	assert.Equal(t, 8, store.codeLength)
 	assert.Equal(t, "0123456789ABCDEF", store.codeCharset)
 }
@@ -823,10 +822,10 @@ func TestStore_Create_Success(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	identityID := uuid.New()
 	code, err := store.Create(context.Background(), "user@example.com", CodeTypeLogin, &identityID, 15*time.Minute)
-	
+
 	require.NoError(t, err)
 	assert.NotNil(t, code)
 	assert.NotEqual(t, uuid.Nil, code.ID)
@@ -844,9 +843,9 @@ func TestStore_Create_DBError(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	_, err := store.Create(context.Background(), "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
-	
+
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "database connection failed")
 }
@@ -856,7 +855,7 @@ func TestStore_GetByCode_Success(t *testing.T) {
 	expectedIdentityID := uuid.New()
 	expiresAt := time.Now().UTC().Add(15 * time.Minute)
 	createdAt := time.Now().UTC()
-	
+
 	db := &fakeDB{
 		queryRowFn: func(ctx context.Context, sql string, optionsAndArgs ...interface{}) pgx.Row {
 			assert.Contains(t, sql, "SELECT")
@@ -878,9 +877,9 @@ func TestStore_GetByCode_Success(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	code, err := store.GetByCode(context.Background(), "user@example.com", "123456", CodeTypeLogin)
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, expectedID, code.ID)
 	assert.Equal(t, "user@example.com", code.Recipient)
@@ -894,9 +893,9 @@ func TestStore_GetByCode_NotFound(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	_, err := store.GetByCode(context.Background(), "user@example.com", "123456", CodeTypeLogin)
-	
+
 	assert.ErrorIs(t, err, ErrCodeNotFound)
 }
 
@@ -905,7 +904,7 @@ func TestStore_GetByCode_Expired(t *testing.T) {
 	// Code expired 1 hour ago
 	expiresAt := time.Now().UTC().Add(-1 * time.Hour)
 	createdAt := time.Now().UTC().Add(-2 * time.Hour)
-	
+
 	db := &fakeDB{
 		queryRowFn: func(ctx context.Context, sql string, optionsAndArgs ...interface{}) pgx.Row {
 			return &fakeRow{
@@ -925,9 +924,9 @@ func TestStore_GetByCode_Expired(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	_, err := store.GetByCode(context.Background(), "user@example.com", "123456", CodeTypeLogin)
-	
+
 	assert.ErrorIs(t, err, ErrCodeExpired)
 }
 
@@ -938,9 +937,9 @@ func TestStore_GetByCode_DBError(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	_, err := store.GetByCode(context.Background(), "user@example.com", "123456", CodeTypeLogin)
-	
+
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, ErrCodeNotFound)
 }
@@ -949,7 +948,7 @@ func TestStore_GetByToken_Success(t *testing.T) {
 	expectedID := uuid.New()
 	expiresAt := time.Now().UTC().Add(15 * time.Minute)
 	createdAt := time.Now().UTC()
-	
+
 	db := &fakeDB{
 		queryRowFn: func(ctx context.Context, sql string, optionsAndArgs ...interface{}) pgx.Row {
 			assert.Contains(t, sql, "WHERE token = $1")
@@ -970,9 +969,9 @@ func TestStore_GetByToken_Success(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	code, err := store.GetByToken(context.Background(), "mytoken123")
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, expectedID, code.ID)
 	assert.Equal(t, "mytoken123", code.Token)
@@ -985,9 +984,9 @@ func TestStore_GetByToken_NotFound(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	_, err := store.GetByToken(context.Background(), "nonexistent")
-	
+
 	assert.ErrorIs(t, err, ErrCodeNotFound)
 }
 
@@ -995,7 +994,7 @@ func TestStore_GetByToken_Expired(t *testing.T) {
 	expectedID := uuid.New()
 	expiresAt := time.Now().UTC().Add(-1 * time.Hour)
 	createdAt := time.Now().UTC().Add(-2 * time.Hour)
-	
+
 	db := &fakeDB{
 		queryRowFn: func(ctx context.Context, sql string, optionsAndArgs ...interface{}) pgx.Row {
 			return &fakeRow{
@@ -1015,9 +1014,9 @@ func TestStore_GetByToken_Expired(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	_, err := store.GetByToken(context.Background(), "expiredtoken")
-	
+
 	assert.ErrorIs(t, err, ErrCodeExpired)
 }
 
@@ -1031,9 +1030,9 @@ func TestStore_MarkUsed_Success(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.MarkUsed(context.Background(), codeID)
-	
+
 	assert.NoError(t, err)
 }
 
@@ -1046,9 +1045,9 @@ func TestStore_MarkUsed_AlreadyUsed(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.MarkUsed(context.Background(), codeID)
-	
+
 	assert.ErrorIs(t, err, ErrCodeUsed)
 }
 
@@ -1060,9 +1059,9 @@ func TestStore_MarkUsed_DBError(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.MarkUsed(context.Background(), codeID)
-	
+
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, ErrCodeUsed)
 }
@@ -1076,9 +1075,9 @@ func TestStore_InvalidatePrevious_Success(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.InvalidatePrevious(context.Background(), "user@example.com", CodeTypeLogin)
-	
+
 	assert.NoError(t, err)
 }
 
@@ -1090,9 +1089,9 @@ func TestStore_InvalidatePrevious_NoOp(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.InvalidatePrevious(context.Background(), "user@example.com", CodeTypeLogin)
-	
+
 	assert.NoError(t, err)
 }
 
@@ -1104,9 +1103,9 @@ func TestStore_CheckRateLimit_UnderLimit(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.CheckRateLimit(context.Background(), "login:user@example.com", 5, time.Hour)
-	
+
 	assert.NoError(t, err)
 }
 
@@ -1117,9 +1116,9 @@ func TestStore_CheckRateLimit_AtLimit(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.CheckRateLimit(context.Background(), "login:user@example.com", 5, time.Hour)
-	
+
 	assert.NoError(t, err)
 }
 
@@ -1130,9 +1129,9 @@ func TestStore_CheckRateLimit_OverLimit(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.CheckRateLimit(context.Background(), "login:user@example.com", 5, time.Hour)
-	
+
 	assert.ErrorIs(t, err, ErrRateLimited)
 }
 
@@ -1143,9 +1142,9 @@ func TestStore_CheckRateLimit_DBError(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	err := store.CheckRateLimit(context.Background(), "login:user@example.com", 5, time.Hour)
-	
+
 	assert.Error(t, err)
 	assert.NotErrorIs(t, err, ErrRateLimited)
 }
@@ -1164,9 +1163,9 @@ func TestStore_Cleanup_Success(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	deleted, err := store.Cleanup(context.Background())
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, int64(10), deleted)
 	assert.Equal(t, 2, callCount)
@@ -1179,9 +1178,9 @@ func TestStore_Cleanup_FirstQueryError(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	deleted, err := store.Cleanup(context.Background())
-	
+
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), deleted)
 }
@@ -1198,9 +1197,9 @@ func TestStore_Cleanup_SecondQueryError(t *testing.T) {
 		},
 	}
 	store := NewWithDB(db)
-	
+
 	deleted, err := store.Cleanup(context.Background())
-	
+
 	assert.Error(t, err)
 	// First delete succeeded, returned that count
 	assert.Equal(t, int64(5), deleted)
@@ -1209,12 +1208,12 @@ func TestStore_Cleanup_SecondQueryError(t *testing.T) {
 func TestStore_generateCode_Length(t *testing.T) {
 	db := &fakeDB{}
 	store := NewWithDB(db)
-	
+
 	// Default config: 6 digits
 	code, err := store.generateCode()
 	require.NoError(t, err)
 	assert.Len(t, code, 6)
-	
+
 	// Custom config
 	store.SetCodeConfig(8, "0123456789ABCDEF")
 	code, err = store.generateCode()
@@ -1225,7 +1224,7 @@ func TestStore_generateCode_Length(t *testing.T) {
 func TestStore_generateCode_Charset(t *testing.T) {
 	db := &fakeDB{}
 	store := NewWithDB(db)
-	
+
 	// Test numeric charset
 	store.SetCodeConfig(6, "0123456789")
 	for i := 0; i < 10; i++ {
@@ -1240,10 +1239,10 @@ func TestStore_generateCode_Charset(t *testing.T) {
 func TestStore_generateToken_Format(t *testing.T) {
 	db := &fakeDB{}
 	store := NewWithDB(db)
-	
+
 	token, err := store.generateToken()
 	require.NoError(t, err)
-	
+
 	// Verify base64 URL safe
 	decoded, err := base64.RawURLEncoding.DecodeString(token)
 	require.NoError(t, err)
@@ -1253,7 +1252,7 @@ func TestStore_generateToken_Format(t *testing.T) {
 func TestStore_generateToken_Uniqueness(t *testing.T) {
 	db := &fakeDB{}
 	store := NewWithDB(db)
-	
+
 	tokens := make(map[string]bool)
 	for i := 0; i < 100; i++ {
 		token, err := store.generateToken()
@@ -1273,7 +1272,7 @@ func TestStore_CodeTypes(t *testing.T) {
 		{CodeTypeVerification, "verification"},
 		{CodeTypeRecovery, "recovery"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := &fakeDB{
@@ -1290,7 +1289,7 @@ func TestStore_CodeTypes(t *testing.T) {
 				},
 			}
 			store := NewWithDB(db)
-			
+
 			_, err := store.Create(context.Background(), "user@example.com", tt.codeType, nil, 15*time.Minute)
 			assert.NoError(t, err)
 		})

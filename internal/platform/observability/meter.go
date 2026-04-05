@@ -20,26 +20,26 @@ type MeterWrapper struct {
 	httpResponseSize    metric.Int64Histogram
 
 	// Database metrics
-	dbConnectionCount   metric.Int64UpDownCounter
-	dbQueryDuration     metric.Float64Histogram
-	dbQueryCount        metric.Int64Counter
+	dbConnectionCount metric.Int64UpDownCounter
+	dbQueryDuration   metric.Float64Histogram
+	dbQueryCount      metric.Int64Counter
 
 	// Application metrics
-	activeUsers         metric.Int64UpDownCounter
-	activeSessions      metric.Int64UpDownCounter
-	moduleCount         metric.Int64UpDownCounter
-	moduleHealthy       metric.Int64UpDownCounter
+	activeUsers    metric.Int64UpDownCounter
+	activeSessions metric.Int64UpDownCounter
+	moduleCount    metric.Int64UpDownCounter
+	moduleHealthy  metric.Int64UpDownCounter
 
 	// System metrics
-	memoryUsage         metric.Int64UpDownCounter
-	cpuUsage            metric.Float64UpDownCounter
-	goroutineCount      metric.Int64UpDownCounter
+	memoryUsage    metric.Int64UpDownCounter
+	cpuUsage       metric.Float64UpDownCounter
+	goroutineCount metric.Int64UpDownCounter
 }
 
 // NewMeterWrapper creates a new meter wrapper with common metrics
 func NewMeterWrapper(serviceName string) (*MeterWrapper, error) {
 	meter := otel.Meter(serviceName)
-	
+
 	mw := &MeterWrapper{
 		meter: meter,
 	}
@@ -202,11 +202,11 @@ func (m *MeterWrapper) RecordHTTPRequest(ctx context.Context, method, path strin
 
 	m.httpRequestCount.Add(ctx, 1, metric.WithAttributes(attrs...))
 	m.httpRequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attrs...))
-	
+
 	if requestSize > 0 {
 		m.httpRequestSize.Record(ctx, requestSize, metric.WithAttributes(attrs...))
 	}
-	
+
 	if responseSize > 0 {
 		m.httpResponseSize.Record(ctx, responseSize, metric.WithAttributes(attrs...))
 	}
@@ -308,7 +308,7 @@ func (m *MeterWrapper) CreateCustomHistogram(name, description, unit string, bou
 		metric.WithDescription(description),
 		metric.WithUnit(unit),
 	}
-	
+
 	if len(boundaries) > 0 {
 		opts = append(opts, metric.WithExplicitBucketBoundaries(boundaries...))
 	}

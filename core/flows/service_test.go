@@ -12,19 +12,19 @@ import (
 
 // MockFlowStore is a mock implementation of FlowStore for testing
 type MockFlowStore struct {
-	flows          map[uuid.UUID]*Flow
-	flowsByCSRF    map[string]*Flow
+	flows           map[uuid.UUID]*Flow
+	flowsByCSRF     map[string]*Flow
 	flowsByIdentity map[string][]*Flow
-	createCalls    int
-	getCalls       int
-	updateCalls    int
-	deleteCalls    int
+	createCalls     int
+	getCalls        int
+	updateCalls     int
+	deleteCalls     int
 }
 
 func NewMockFlowStore() *MockFlowStore {
 	return &MockFlowStore{
-		flows:          make(map[uuid.UUID]*Flow),
-		flowsByCSRF:    make(map[string]*Flow),
+		flows:           make(map[uuid.UUID]*Flow),
+		flowsByCSRF:     make(map[string]*Flow),
 		flowsByIdentity: make(map[string][]*Flow),
 	}
 }
@@ -101,7 +101,7 @@ func TestNewService_DefaultsZeroTTL(t *testing.T) {
 	// We can verify this by creating a flow and checking its expiry
 	ctx := context.Background()
 	flow, _ := service.CreateLoginFlow(ctx, "/auth/login")
-	
+
 	// Flow should have been created with default TTL
 	assert.NotNil(t, flow)
 	now := time.Now().UTC()
@@ -495,7 +495,7 @@ func TestService_Cleanup(t *testing.T) {
 	service := NewService(store, config)
 
 	ctx := context.Background()
-	
+
 	// Create a flow that will expire
 	_, _ = service.CreateLoginFlow(ctx, "/auth/login")
 

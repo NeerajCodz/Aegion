@@ -60,7 +60,7 @@ func TestWithComponent(t *testing.T) {
 	if componentLogger == nil {
 		t.Error("WithComponent() returned nil logger")
 	}
-	
+
 	if componentLogger == logger {
 		t.Error("WithComponent() returned same logger instance instead of new one")
 	}
@@ -73,7 +73,7 @@ func TestWithRequestID(t *testing.T) {
 	if requestLogger == nil {
 		t.Error("WithRequestID() returned nil logger")
 	}
-	
+
 	if requestLogger == logger {
 		t.Error("WithRequestID() returned same logger instance instead of new one")
 	}
@@ -115,13 +115,13 @@ func TestFromContext(t *testing.T) {
 func TestWithContext(t *testing.T) {
 	logger := New(Config{Level: "info", Format: "json"})
 	ctx := context.Background()
-	
+
 	newCtx := logger.WithContext(ctx)
-	
+
 	if newCtx == nil {
 		t.Error("WithContext() returned nil context")
 	}
-	
+
 	// Verify the logger can be retrieved from the context
 	retrievedLogger := FromContext(newCtx)
 	if retrievedLogger != logger {
@@ -136,19 +136,19 @@ func TestLoggerMethods(t *testing.T) {
 	if event := logger.Debug(); event == nil {
 		t.Error("Debug() returned nil event")
 	}
-	
+
 	if event := logger.Info(); event == nil {
 		t.Error("Info() returned nil event")
 	}
-	
+
 	if event := logger.Warn(); event == nil {
 		t.Error("Warn() returned nil event")
 	}
-	
+
 	if event := logger.Error(); event == nil {
 		t.Error("Error() returned nil event")
 	}
-	
+
 	// Test With() method - just test that it doesn't panic
 	ctx := logger.With()
 	_ = ctx // Use the context to avoid unused variable error
@@ -158,7 +158,7 @@ func TestContextKey(t *testing.T) {
 	// Test that ContextKey is a distinct type
 	key1 := ContextKey{}
 	key2 := ContextKey{}
-	
+
 	// Two instances of ContextKey should be equal (empty structs)
 	ctx := context.WithValue(context.Background(), key1, "value1")
 	if value := ctx.Value(key2); value != "value1" {
@@ -178,7 +178,7 @@ func TestLoggerFatal(t *testing.T) {
 func TestFromContextWithLogger(t *testing.T) {
 	logger := New(Config{Level: "debug", Format: "json"})
 	ctx := context.WithValue(context.Background(), ContextKey{}, logger)
-	
+
 	retrieved := FromContext(ctx)
 	if retrieved == nil {
 		t.Error("FromContext() returned nil when logger was in context")
@@ -187,7 +187,7 @@ func TestFromContextWithLogger(t *testing.T) {
 
 func TestFromContextWithoutLogger(t *testing.T) {
 	ctx := context.Background()
-	
+
 	retrieved := FromContext(ctx)
 	if retrieved == nil {
 		t.Error("FromContext() returned nil when no logger in context")
@@ -197,12 +197,12 @@ func TestFromContextWithoutLogger(t *testing.T) {
 func TestWithContextExtended(t *testing.T) {
 	logger := New(Config{Level: "info", Format: "json"})
 	ctx := context.Background()
-	
+
 	newCtx := logger.WithContext(ctx)
 	if newCtx == ctx {
 		t.Error("WithContext() should return new context")
 	}
-	
+
 	// Verify the logger is stored in context
 	retrieved := FromContext(newCtx)
 	if retrieved == nil {
@@ -212,14 +212,14 @@ func TestWithContextExtended(t *testing.T) {
 
 func TestWithTraceContext(t *testing.T) {
 	logger := New(Config{Level: "info", Format: "json"})
-	
+
 	// Test with empty context (no trace info)
 	ctx := context.Background()
 	newLogger := logger.withTraceContext(ctx)
 	if newLogger == nil {
 		t.Error("withTraceContext() returned nil")
 	}
-	
+
 	// Test with request ID in context via router middleware key
 	type requestIDKey struct{}
 	ctxWithRequestID := context.WithValue(ctx, requestIDKey{}, "test-request-123")
@@ -233,14 +233,14 @@ func TestGetTraceInfoFromContext(t *testing.T) {
 	// Test with empty context
 	ctx := context.Background()
 	traceInfo := getTraceInfoFromContext(ctx)
-	
+
 	// Should return zero values for empty context
 	if traceInfo.TraceID != "" || traceInfo.SpanID != "" {
 		t.Error("expected empty trace info for empty context")
 	}
 
 	// Test with TraceInfo type in context
-	ctxWithTraceInfo := context.WithValue(ctx, "trace_info", TraceInfo{
+	ctxWithTraceInfo := context.WithValue(ctx, traceInfoContextKey, TraceInfo{
 		TraceID: "test-trace-id",
 		SpanID:  "test-span-id",
 	})
@@ -257,7 +257,7 @@ func TestGetTraceInfoFromContext(t *testing.T) {
 		TraceID string
 		SpanID  string
 	}
-	ctxWithOtherType := context.WithValue(ctx, "trace_info", otherTraceInfo{
+	ctxWithOtherType := context.WithValue(ctx, traceInfoContextKey, otherTraceInfo{
 		TraceID: "other-trace-id",
 		SpanID:  "other-span-id",
 	})
@@ -272,20 +272,20 @@ func TestGetRequestIDFromContext(t *testing.T) {
 	// Test with empty context
 	ctx := context.Background()
 	requestID := getRequestIDFromContext(ctx)
-	
+
 	if requestID != "" {
 		t.Errorf("expected empty request ID for empty context, got %q", requestID)
 	}
-	
+
 	// Test with request_id key and string value
-	ctxWithRequestID := context.WithValue(ctx, "request_id", "my-request-123")
+	ctxWithRequestID := context.WithValue(ctx, requestIDContextKey, "my-request-123")
 	requestID = getRequestIDFromContext(ctxWithRequestID)
 	if requestID != "my-request-123" {
 		t.Errorf("expected request ID 'my-request-123', got %q", requestID)
 	}
 
 	// Test with wrong type (should return empty)
-	ctxWithWrongType := context.WithValue(ctx, "request_id", 12345)
+	ctxWithWrongType := context.WithValue(ctx, requestIDContextKey, 12345)
 	requestID = getRequestIDFromContext(ctxWithWrongType)
 	if requestID != "" {
 		t.Errorf("expected empty request ID for wrong type, got %q", requestID)

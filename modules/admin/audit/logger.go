@@ -10,21 +10,21 @@ import (
 
 // AuditEntry represents a single audit log entry.
 type AuditEntry struct {
-	ID          uuid.UUID       `json:"id" db:"id"`
-	Timestamp   time.Time       `json:"timestamp" db:"timestamp"`
-	ActorID     uuid.UUID       `json:"actorId" db:"actor_id"`
-	ActorEmail  string          `json:"actorEmail" db:"actor_email"`
-	Action      string          `json:"action" db:"action"`
-	EntityType  string          `json:"entityType" db:"entity_type"`
-	EntityID    string          `json:"entityId" db:"entity_id"`
-	Before      json.RawMessage `json:"before,omitempty" db:"before"`
-	After       json.RawMessage `json:"after,omitempty" db:"after"`
-	Reason      string          `json:"reason,omitempty" db:"reason"`
-	IPAddress   string          `json:"ipAddress,omitempty" db:"ip_address"`
-	UserAgent   string          `json:"userAgent,omitempty" db:"user_agent"`
-	RequestID   string          `json:"requestId,omitempty" db:"request_id"`
-	SessionID   string          `json:"sessionId,omitempty" db:"session_id"`
-	Metadata    json.RawMessage `json:"metadata,omitempty" db:"metadata"`
+	ID         uuid.UUID       `json:"id" db:"id"`
+	Timestamp  time.Time       `json:"timestamp" db:"timestamp"`
+	ActorID    uuid.UUID       `json:"actorId" db:"actor_id"`
+	ActorEmail string          `json:"actorEmail" db:"actor_email"`
+	Action     string          `json:"action" db:"action"`
+	EntityType string          `json:"entityType" db:"entity_type"`
+	EntityID   string          `json:"entityId" db:"entity_id"`
+	Before     json.RawMessage `json:"before,omitempty" db:"before"`
+	After      json.RawMessage `json:"after,omitempty" db:"after"`
+	Reason     string          `json:"reason,omitempty" db:"reason"`
+	IPAddress  string          `json:"ipAddress,omitempty" db:"ip_address"`
+	UserAgent  string          `json:"userAgent,omitempty" db:"user_agent"`
+	RequestID  string          `json:"requestId,omitempty" db:"request_id"`
+	SessionID  string          `json:"sessionId,omitempty" db:"session_id"`
+	Metadata   json.RawMessage `json:"metadata,omitempty" db:"metadata"`
 }
 
 // Common audit actions
@@ -41,11 +41,11 @@ const (
 	ActionSessionRevokedAll = "session.revoked_all"
 
 	// MFA management actions
-	ActionMFAEnabled        = "mfa.enabled"
-	ActionMFADisabled       = "mfa.disabled"
-	ActionMFADeviceAdded    = "mfa.device.added"
-	ActionMFADeviceRemoved  = "mfa.device.removed"
-	ActionMFADeviceReset    = "mfa.device.reset"
+	ActionMFAEnabled       = "mfa.enabled"
+	ActionMFADisabled      = "mfa.disabled"
+	ActionMFADeviceAdded   = "mfa.device.added"
+	ActionMFADeviceRemoved = "mfa.device.removed"
+	ActionMFADeviceReset   = "mfa.device.reset"
 
 	// OAuth2 management actions
 	ActionOAuth2ClientCreated = "oauth2.client.created"
@@ -62,14 +62,14 @@ const (
 	ActionSystemConfigUpdated = "system.config.updated"
 
 	// Admin team management actions
-	ActionAdminRoleAssigned   = "admin.role.assigned"
-	ActionAdminRoleRemoved    = "admin.role.removed"
-	ActionAdminGrantAdded     = "admin.grant.added"
-	ActionAdminGrantRevoked   = "admin.grant.revoked"
-	ActionAdminDenyAdded      = "admin.deny.added"
-	ActionAdminDenyRemoved    = "admin.deny.removed"
-	ActionAdminCreated        = "admin.created"
-	ActionAdminDeleted        = "admin.deleted"
+	ActionAdminRoleAssigned = "admin.role.assigned"
+	ActionAdminRoleRemoved  = "admin.role.removed"
+	ActionAdminGrantAdded   = "admin.grant.added"
+	ActionAdminGrantRevoked = "admin.grant.revoked"
+	ActionAdminDenyAdded    = "admin.deny.added"
+	ActionAdminDenyRemoved  = "admin.deny.removed"
+	ActionAdminCreated      = "admin.created"
+	ActionAdminDeleted      = "admin.deleted"
 
 	// Role management actions
 	ActionRoleCreated = "role.created"
@@ -77,26 +77,26 @@ const (
 	ActionRoleDeleted = "role.deleted"
 
 	// SCIM actions
-	ActionSCIMUserCreated    = "scim.user.created"
-	ActionSCIMUserUpdated    = "scim.user.updated"
-	ActionSCIMUserDeleted    = "scim.user.deleted"
-	ActionSCIMGroupCreated   = "scim.group.created"
-	ActionSCIMGroupUpdated   = "scim.group.updated"
-	ActionSCIMGroupDeleted   = "scim.group.deleted"
-	ActionSCIMTokenCreated   = "scim.token.created"
-	ActionSCIMTokenDeleted   = "scim.token.deleted"
-	ActionSCIMTokenUsed      = "scim.token.used"
+	ActionSCIMUserCreated  = "scim.user.created"
+	ActionSCIMUserUpdated  = "scim.user.updated"
+	ActionSCIMUserDeleted  = "scim.user.deleted"
+	ActionSCIMGroupCreated = "scim.group.created"
+	ActionSCIMGroupUpdated = "scim.group.updated"
+	ActionSCIMGroupDeleted = "scim.group.deleted"
+	ActionSCIMTokenCreated = "scim.token.created"
+	ActionSCIMTokenDeleted = "scim.token.deleted"
+	ActionSCIMTokenUsed    = "scim.token.used"
 
 	// Authentication actions
-	ActionLoginSuccess       = "auth.login.success"
-	ActionLoginFailed        = "auth.login.failed"
-	ActionPasswordChanged    = "auth.password.changed"
-	ActionPasswordReset      = "auth.password.reset"
+	ActionLoginSuccess    = "auth.login.success"
+	ActionLoginFailed     = "auth.login.failed"
+	ActionPasswordChanged = "auth.password.changed"
+	ActionPasswordReset   = "auth.password.reset"
 
 	// Security events
-	ActionSecurityViolation   = "security.violation"
-	ActionRateLimitExceeded   = "security.rate_limit_exceeded"
-	ActionSuspiciousActivity  = "security.suspicious_activity"
+	ActionSecurityViolation  = "security.violation"
+	ActionRateLimitExceeded  = "security.rate_limit_exceeded"
+	ActionSuspiciousActivity = "security.suspicious_activity"
 )
 
 // Entity types
@@ -130,9 +130,9 @@ type AuditFilter struct {
 
 // AuditQueryResult represents the result of an audit query.
 type AuditQueryResult struct {
-	Entries    []*AuditEntry `json:"entries"`
-	Total      int           `json:"total"`
-	HasMore    bool          `json:"hasMore"`
+	Entries []*AuditEntry `json:"entries"`
+	Total   int           `json:"total"`
+	HasMore bool          `json:"hasMore"`
 }
 
 // Store defines the interface for audit log persistence.

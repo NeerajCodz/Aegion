@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -169,7 +171,7 @@ func main() {
 func run(args []string, deps mainDeps) int {
 	normalizedArgs, command, err := normalizeCLIArgs(args)
 	if err != nil {
-		fmt.Fprintf(deps.stderr, "Failed to parse flags: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Failed to parse flags: %v\n", err)
 		return 1
 	}
 	if command == "health" {
@@ -178,23 +180,23 @@ func run(args []string, deps mainDeps) int {
 
 	f, err := parseFlagsWithArgs(normalizedArgs)
 	if err != nil {
-		fmt.Fprintf(deps.stderr, "Failed to parse flags: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Failed to parse flags: %v\n", err)
 		return 1
 	}
 
 	if f.showVersion {
-		fmt.Fprintf(deps.stdout, "Aegion %s (built %s)\n", version, buildTime)
+		_, _ = fmt.Fprintf(deps.stdout, "Aegion %s (built %s)\n", version, buildTime)
 		return 0
 	}
 
 	cfg, err := deps.loadConfig(f.configPath)
 	if err != nil {
-		fmt.Fprintf(deps.stderr, "Failed to load configuration: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Failed to load configuration: %v\n", err)
 		return 1
 	}
 
 	if err := deps.validateConfig(cfg); err != nil {
-		fmt.Fprintf(deps.stderr, "Invalid configuration: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Invalid configuration: %v\n", err)
 		return 1
 	}
 
@@ -221,7 +223,7 @@ func run(args []string, deps mainDeps) int {
 		ConnMaxIdleTime: cfg.Database.ConnMaxIdleTime.Duration(),
 	})
 	if err != nil {
-		fmt.Fprintf(deps.stderr, "Failed to connect to database: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Failed to connect to database: %v\n", err)
 		return 1
 	}
 	defer db.Close()
@@ -229,7 +231,7 @@ func run(args []string, deps mainDeps) int {
 
 	migrator := deps.newMigrator(db)
 	if err := migrator.Migrate(ctx); err != nil {
-		fmt.Fprintf(deps.stderr, "Failed to run migrations: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Failed to run migrations: %v\n", err)
 		return 1
 	}
 	log.Info().Msg("Migrations complete")
@@ -253,7 +255,7 @@ func run(args []string, deps mainDeps) int {
 		AdminBootstrap: f.adminBootstrap,
 	})
 	if err != nil {
-		fmt.Fprintf(deps.stderr, "Failed to initialize server: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Failed to initialize server: %v\n", err)
 		return 1
 	}
 
@@ -284,7 +286,7 @@ func run(args []string, deps mainDeps) int {
 
 	if err := lifecycle.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Error during shutdown")
-		fmt.Fprintf(deps.stderr, "Error during shutdown: %v\n", err)
+		_, _ = fmt.Fprintf(deps.stderr, "Error during shutdown: %v\n", err)
 		return 1
 	}
 
@@ -321,22 +323,30 @@ func runHealthCommand(stdout, stderr io.Writer) int {
 	if port == "" {
 		port = "8080"
 	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum < 1 || portNum > 65535 {
+		_, _ = fmt.Fprintf(stderr, "Health check failed: invalid AEGION_PORT %q\n", port)
+		return 1
+	}
 
-	url := "http://127.0.0.1:" + port + "/health"
+	url := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(portNum)) + "/health"
 	client := &http.Client{Timeout: 2 * time.Second}
+	// #nosec G704 -- URL is constrained to localhost and a validated numeric port.
 	resp, err := client.Get(url)
 	if err != nil {
-		fmt.Fprintf(stderr, "Health check failed: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "Health check failed: %v\n", err)
 		return 1
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		fmt.Fprintf(stderr, "Health check failed: status %d\n", resp.StatusCode)
+		_, _ = fmt.Fprintf(stderr, "Health check failed: status %d\n", resp.StatusCode)
 		return 1
 	}
 
-	fmt.Fprintln(stdout, "ok")
+	_, _ = fmt.Fprintln(stdout, "ok")
 	return 0
 }
 

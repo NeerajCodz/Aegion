@@ -171,11 +171,15 @@ magic_link:
 
 func TestLoad_EnvironmentVariableExpansion(t *testing.T) {
 	// Set environment variables for testing
-	os.Setenv("TEST_DB_URL", "postgres://env-user:env-pass@env-host/env-db")
-	os.Setenv("TEST_SECRET", "environment-secret-32-characters-long")
+	if err := os.Setenv("TEST_DB_URL", "postgres://env-user:env-pass@env-host/env-db"); err != nil {
+		t.Fatalf("failed to set TEST_DB_URL: %v", err)
+	}
+	if err := os.Setenv("TEST_SECRET", "environment-secret-32-characters-long"); err != nil {
+		t.Fatalf("failed to set TEST_SECRET: %v", err)
+	}
 	defer func() {
-		os.Unsetenv("TEST_DB_URL")
-		os.Unsetenv("TEST_SECRET")
+		_ = os.Unsetenv("TEST_DB_URL")
+		_ = os.Unsetenv("TEST_SECRET")
 	}()
 
 	configContent := `
@@ -304,11 +308,13 @@ func TestApplyEnvOverrides(t *testing.T) {
 	}
 
 	for key, value := range envVars {
-		os.Setenv(key, value)
+		if err := os.Setenv(key, value); err != nil {
+			t.Fatalf("failed to set %s: %v", key, err)
+		}
 	}
 	defer func() {
 		for key := range envVars {
-			os.Unsetenv(key)
+			_ = os.Unsetenv(key)
 		}
 	}()
 
@@ -584,11 +590,15 @@ security:
 
 func TestLoad_Integration(t *testing.T) {
 	// Integration test with defaults, env overrides, and validation
-	os.Setenv("AEGION_DATABASE_URL", "postgres://integration:test@localhost/integration_db")
-	os.Setenv("AEGION_LOG_LEVEL", "debug")
+	if err := os.Setenv("AEGION_DATABASE_URL", "postgres://integration:test@localhost/integration_db"); err != nil {
+		t.Fatalf("failed to set AEGION_DATABASE_URL: %v", err)
+	}
+	if err := os.Setenv("AEGION_LOG_LEVEL", "debug"); err != nil {
+		t.Fatalf("failed to set AEGION_LOG_LEVEL: %v", err)
+	}
 	defer func() {
-		os.Unsetenv("AEGION_DATABASE_URL")
-		os.Unsetenv("AEGION_LOG_LEVEL")
+		_ = os.Unsetenv("AEGION_DATABASE_URL")
+		_ = os.Unsetenv("AEGION_LOG_LEVEL")
 	}()
 
 	configContent := `
@@ -613,7 +623,7 @@ secrets:
 	require.NoError(t, err)
 
 	// Verify defaults were applied
-	assert.Equal(t, "0.0.0.0", cfg.Server.Host) // Default
+	assert.Equal(t, "0.0.0.0", cfg.Server.Host)                          // Default
 	assert.Equal(t, Duration(60*time.Second), cfg.Server.RequestTimeout) // Default
 
 	// Verify config values were loaded
@@ -621,7 +631,7 @@ secrets:
 
 	// Verify env overrides were applied
 	assert.Equal(t, "postgres://integration:test@localhost/integration_db", cfg.Database.URL) // From env
-	assert.Equal(t, "debug", cfg.Log.Level) // From env
+	assert.Equal(t, "debug", cfg.Log.Level)                                                   // From env
 
 	// Verify validation passes
 	err = cfg.Validate()

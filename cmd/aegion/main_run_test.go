@@ -586,6 +586,7 @@ func TestDefaultMainDepsHooksSmoke(t *testing.T) {
 	httpServer := deps.newHTTPServer(cfg, server.Handler())
 	if httpServer == nil {
 		t.Fatalf("expected http server instance")
+		return
 	}
 
 	lifecycle := deps.newLifecycle(&LifecycleConfig{

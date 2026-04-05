@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	ErrInvalidClient       = errors.New("invalid_client")
-	ErrInvalidScope        = errors.New("invalid_scope")
-	ErrUnauthorizedClient  = errors.New("unauthorized_client")
+	ErrInvalidClient      = errors.New("invalid_client")
+	ErrInvalidScope       = errors.New("invalid_scope")
+	ErrUnauthorizedClient = errors.New("unauthorized_client")
 )
 
 // GrantStore interface for grant operations.
@@ -73,7 +73,7 @@ func (s *ClientCredentialsService) IssueClientCredentials(ctx context.Context, r
 
 	// Parse requested scopes
 	scopes := parseScopes(req.Scope)
-	
+
 	// Validate scopes against client allowed scopes
 	for _, requestedScope := range scopes {
 		allowed := false

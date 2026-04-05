@@ -21,7 +21,9 @@ func TestRequestIDMiddleware(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.Header.Get("X-Request-ID") == "" {
 		t.Fatalf("expected X-Request-ID header to be set")
@@ -38,7 +40,9 @@ func TestSecurityHeadersProd(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.Header.Get("Strict-Transport-Security") == "" {
 		t.Fatalf("expected HSTS header in production mode")
@@ -61,7 +65,9 @@ func TestSecurityHeadersDevMode(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.Header.Get("Strict-Transport-Security") != "" {
 		t.Fatalf("expected no HSTS header in dev mode")
@@ -114,7 +120,9 @@ func TestCORSMiddlewarePreflight(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected preflight to return %d, got %d", http.StatusNoContent, resp.StatusCode)

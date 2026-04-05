@@ -14,6 +14,7 @@ func TestNew_UsesDefaultCodeConfig(t *testing.T) {
 	s := New(nil)
 	if s == nil {
 		t.Fatalf("expected non-nil store")
+		return
 	}
 	if s.codeLength != 6 {
 		t.Fatalf("expected default code length 6, got %d", s.codeLength)

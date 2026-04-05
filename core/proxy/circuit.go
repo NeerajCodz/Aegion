@@ -50,10 +50,10 @@ type CircuitBreaker struct {
 	lastStateTime time.Time
 
 	// Metrics
-	totalRequests   int64
-	totalFailures   int64
-	totalSuccesses  int64
-	rejectedCount   int64
+	totalRequests  int64
+	totalFailures  int64
+	totalSuccesses int64
+	rejectedCount  int64
 }
 
 // NewCircuitBreaker creates a new circuit breaker with the given configuration.
@@ -187,12 +187,13 @@ func (cb *CircuitBreaker) setState(newState State) {
 	if cb.state != newState {
 		cb.state = newState
 		cb.lastStateTime = time.Now()
-		
+
 		// Reset counters when state changes
-		if newState == StateClosed {
+		switch newState {
+		case StateClosed:
 			cb.failures = 0
 			cb.successes = 0
-		} else if newState == StateHalfOpen {
+		case StateHalfOpen:
 			cb.successes = 0
 		}
 	}

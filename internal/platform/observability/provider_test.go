@@ -17,7 +17,7 @@ import (
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/sdk/resource"
-	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -333,7 +333,7 @@ func TestProviderInitMethodsSuccessWithLocalCollector(t *testing.T) {
 
 	// Restore globals changed by init* methods.
 	t.Cleanup(func() {
-		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 		otel.SetMeterProvider(metricnoop.NewMeterProvider())
 		global.SetLoggerProvider(lognoop.NewLoggerProvider())
 	})

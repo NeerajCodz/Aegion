@@ -295,8 +295,8 @@ func (s *handlerRevocationStore) InvalidateRefreshTokenFamily(ctx context.Contex
 }
 
 type handlerDeviceStore struct {
-	client      *store.Client
-	deviceCode  *store.DeviceCode
+	client       *store.Client
+	deviceCode   *store.DeviceCode
 	deviceByUser *store.DeviceCode
 }
 

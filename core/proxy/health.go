@@ -59,16 +59,16 @@ type HealthCheckerConfig struct {
 
 // HealthChecker performs periodic health checks on an upstream service.
 type HealthChecker struct {
-	config    HealthCheckerConfig
-	client    *http.Client
-	logger    zerolog.Logger
-	
-	status    HealthStatus
-	lastCheck time.Time
-	lastError error
-	checkCount int64
+	config HealthCheckerConfig
+	client *http.Client
+	logger zerolog.Logger
+
+	status       HealthStatus
+	lastCheck    time.Time
+	lastError    error
+	checkCount   int64
 	failureCount int64
-	
+
 	mutex   sync.RWMutex
 	stop    chan struct{}
 	stopped chan struct{}
@@ -111,7 +111,7 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 // Start begins health checking in a separate goroutine.
 func (hc *HealthChecker) Start() {
 	defer close(hc.stopped)
-	
+
 	ticker := time.NewTicker(hc.config.Interval)
 	defer ticker.Stop()
 
@@ -165,7 +165,7 @@ func (hc *HealthChecker) GetMetrics() HealthMetrics {
 // performCheck performs a single health check.
 func (hc *HealthChecker) performCheck() {
 	now := time.Now()
-	
+
 	hc.mutex.Lock()
 	hc.checkCount++
 	hc.lastCheck = now
@@ -195,7 +195,9 @@ func (hc *HealthChecker) performCheck() {
 		hc.recordFailure(err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Check status code
 	if resp.StatusCode != hc.config.ExpectedStatus {
@@ -271,9 +273,9 @@ func (hm HealthMetrics) IsHealthy() bool {
 
 // UpstreamHealth represents the overall health status of an upstream.
 type UpstreamHealth struct {
-	Name           string           `json:"name"`
-	URL            string           `json:"url"`
-	Health         HealthMetrics    `json:"health"`
+	Name           string                `json:"name"`
+	URL            string                `json:"url"`
+	Health         HealthMetrics         `json:"health"`
 	CircuitBreaker CircuitBreakerMetrics `json:"circuit_breaker,omitempty"`
 }
 
@@ -286,7 +288,7 @@ func (p *Proxy) GetUpstreamHealth() []UpstreamHealth {
 
 	for name, checker := range p.healthCheckers {
 		upstream := p.config.Upstreams[name]
-		
+
 		uh := UpstreamHealth{
 			Name:   name,
 			URL:    upstream.URL,

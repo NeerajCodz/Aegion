@@ -3,7 +3,7 @@
 # Builds the main core binary with embedded Rust engines
 # =============================================================================
 
-ARG BASE_IMAGE=golang:1.25-bookworm
+ARG BASE_IMAGE=golang:1.25.8-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 # Stage 1: Build Rust libraries

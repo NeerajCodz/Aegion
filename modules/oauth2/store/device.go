@@ -180,15 +180,15 @@ func (s *Store) CleanupExpiredDeviceCodes(ctx context.Context) (int64, error) {
 
 // JWTAssertion represents a JWT bearer assertion for replay protection.
 type JWTAssertion struct {
-	JTI       string    `json:"jti"`
-	ClientID  string    `json:"client_id"`
-	Issuer    string    `json:"issuer"`
-	Subject   string    `json:"subject"`
-	Audience  string    `json:"audience"`
-	Used      bool      `json:"used"`
+	JTI       string     `json:"jti"`
+	ClientID  string     `json:"client_id"`
+	Issuer    string     `json:"issuer"`
+	Subject   string     `json:"subject"`
+	Audience  string     `json:"audience"`
+	Used      bool       `json:"used"`
 	UsedAt    *time.Time `json:"used_at,omitempty"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // CreateJWTAssertion stores a JWT assertion for replay detection.

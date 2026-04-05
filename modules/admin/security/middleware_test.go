@@ -19,7 +19,9 @@ func TestCSRFProtectionSetsCookie(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var csrfCookie *http.Cookie
 	for _, cookie := range resp.Cookies() {
@@ -62,7 +64,9 @@ func TestCSRFProtectionAcceptsValidToken(t *testing.T) {
 	handler.ServeHTTP(getRec, getReq)
 
 	resp := getRec.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var csrfCookie *http.Cookie
 	for _, cookie := range resp.Cookies() {

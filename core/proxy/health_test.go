@@ -311,7 +311,9 @@ func TestNewHealthChecker_DisablesRedirectFollowing(t *testing.T) {
 
 	resp, err := hc.client.Get(server.URL + "/redirect")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	assert.Equal(t, http.StatusFound, resp.StatusCode)
 	assert.False(t, redirectFollowed)

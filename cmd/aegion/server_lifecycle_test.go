@@ -205,7 +205,9 @@ func TestLifecycleShutdown_CleansRegistryAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create listener: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	serveDone := make(chan struct{})
 	go func() {
@@ -304,7 +306,9 @@ func TestLifecycleDrainHTTP_DeadlineExceededForcesClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	go func() {
 		_ = httpSrv.Serve(ln)
@@ -362,7 +366,9 @@ func TestLifecycleDrainHTTP_ReturnsContextErrorWhenCanceled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	go func() {
 		_ = httpSrv.Serve(ln)

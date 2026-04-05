@@ -160,7 +160,7 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ github.sha }}
-            BASE_IMAGE=golang:1.25.1-bookworm
+            BASE_IMAGE=golang:1.25.8-bookworm
             RUNTIME_IMAGE=debian:bookworm-slim
 
   # ---------------------------------------------------------------------------

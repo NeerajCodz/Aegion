@@ -70,15 +70,15 @@ func NewDiscoveryService(issuer, baseURL string) *DiscoveryService {
 // GetDiscoveryDocument returns the OIDC discovery metadata.
 func (s *DiscoveryService) GetDiscoveryDocument(ctx context.Context) (*DiscoveryDocument, error) {
 	doc := &DiscoveryDocument{
-		Issuer:                issuer(s.issuer),
-		AuthorizationEndpoint: fmt.Sprintf("%s/oauth2/authorize", s.baseURL),
-		TokenEndpoint:         fmt.Sprintf("%s/oauth2/token", s.baseURL),
-		UserinfoEndpoint:      fmt.Sprintf("%s/oidc/userinfo", s.baseURL),
-		JwksURI:               fmt.Sprintf("%s/.well-known/jwks.json", s.baseURL),
-		RevocationEndpoint:    fmt.Sprintf("%s/oauth2/revoke", s.baseURL),
-		IntrospectionEndpoint: fmt.Sprintf("%s/oauth2/introspect", s.baseURL),
+		Issuer:                      issuer(s.issuer),
+		AuthorizationEndpoint:       fmt.Sprintf("%s/oauth2/authorize", s.baseURL),
+		TokenEndpoint:               fmt.Sprintf("%s/oauth2/token", s.baseURL),
+		UserinfoEndpoint:            fmt.Sprintf("%s/oidc/userinfo", s.baseURL),
+		JwksURI:                     fmt.Sprintf("%s/.well-known/jwks.json", s.baseURL),
+		RevocationEndpoint:          fmt.Sprintf("%s/oauth2/revoke", s.baseURL),
+		IntrospectionEndpoint:       fmt.Sprintf("%s/oauth2/introspect", s.baseURL),
 		DeviceAuthorizationEndpoint: fmt.Sprintf("%s/oauth2/device/authorize", s.baseURL),
-		EndSessionEndpoint:    fmt.Sprintf("%s/oauth2/logout", s.baseURL),
+		EndSessionEndpoint:          fmt.Sprintf("%s/oauth2/logout", s.baseURL),
 
 		ScopesSupported: []string{
 			"openid",

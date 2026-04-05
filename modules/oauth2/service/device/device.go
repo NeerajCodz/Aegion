@@ -14,12 +14,12 @@ import (
 )
 
 var (
-	ErrSlowDown       = errors.New("slow_down")
+	ErrSlowDown             = errors.New("slow_down")
 	ErrAuthorizationPending = errors.New("authorization_pending")
-	ErrExpiredToken   = errors.New("expired_token")
-	ErrAccessDenied   = errors.New("access_denied")
-	ErrInvalidClient  = errors.New("invalid_client")
-	ErrInvalidGrant   = errors.New("invalid_grant")
+	ErrExpiredToken         = errors.New("expired_token")
+	ErrAccessDenied         = errors.New("access_denied")
+	ErrInvalidClient        = errors.New("invalid_client")
+	ErrInvalidGrant         = errors.New("invalid_grant")
 )
 
 // DeviceStore interface for device flow operations.
@@ -35,20 +35,20 @@ type DeviceStore interface {
 
 // DeviceService handles device authorization flow.
 type DeviceService struct {
-	store                DeviceStore
-	deviceCodeTTL        time.Duration
-	pollingInterval      int // seconds
-	verificationURI      string
+	store                   DeviceStore
+	deviceCodeTTL           time.Duration
+	pollingInterval         int // seconds
+	verificationURI         string
 	verificationURIComplete bool
 }
 
 // NewDeviceService creates a new device service.
 func NewDeviceService(store DeviceStore, deviceCodeTTL time.Duration, pollingInterval int, verificationURI string) *DeviceService {
 	return &DeviceService{
-		store:           store,
-		deviceCodeTTL:   deviceCodeTTL,
-		pollingInterval: pollingInterval,
-		verificationURI: verificationURI,
+		store:                   store,
+		deviceCodeTTL:           deviceCodeTTL,
+		pollingInterval:         pollingInterval,
+		verificationURI:         verificationURI,
 		verificationURIComplete: true,
 	}
 }
@@ -86,12 +86,12 @@ func (s *DeviceService) RequestDeviceAuthorization(ctx context.Context, req *Dev
 
 	// Create device code record
 	dc := &store.DeviceCode{
-		DeviceCode:  deviceCode,
-		UserCode:    userCode,
-		ClientID:    client.ID,
-		Scopes:      scopes,
-		ExpiresAt:   time.Now().UTC().Add(s.deviceCodeTTL),
-		Interval:    s.pollingInterval,
+		DeviceCode: deviceCode,
+		UserCode:   userCode,
+		ClientID:   client.ID,
+		Scopes:     scopes,
+		ExpiresAt:  time.Now().UTC().Add(s.deviceCodeTTL),
+		Interval:   s.pollingInterval,
 	}
 
 	if err := s.store.CreateDeviceCode(ctx, dc); err != nil {

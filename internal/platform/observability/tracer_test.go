@@ -21,77 +21,77 @@ func TestNewTracerWrapper(t *testing.T) {
 func TestTracerWrapper_StartSpan(t *testing.T) {
 	// Set up a no-op tracer to avoid actual telemetry
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
-	ctx, span := tracer.StartSpan(ctx, "test-operation")
+
+	_, span := tracer.StartSpan(ctx, "test-operation")
 	assert.NotNil(t, ctx)
 	assert.NotNil(t, span)
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_StartHTTPSpan(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	req := httptest.NewRequest("GET", "/api/v1/users?limit=10", nil)
 	req.Header.Set("User-Agent", "test-agent/1.0")
 	req.Header.Set("X-Forwarded-For", "192.168.1.100")
-	
+
 	ctx, span := tracer.StartHTTPSpan(context.Background(), req)
 	assert.NotNil(t, ctx)
 	assert.NotNil(t, span)
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_StartDatabaseSpan(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
+
 	ctx, span := tracer.StartDatabaseSpan(ctx, "SELECT", "users")
 	assert.NotNil(t, ctx)
 	assert.NotNil(t, span)
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_StartServiceSpan(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
+
 	ctx, span := tracer.StartServiceSpan(ctx, "auth", "validate_token")
 	assert.NotNil(t, ctx)
 	assert.NotNil(t, span)
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_StartModuleSpan(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
+
 	ctx, span := tracer.StartModuleSpan(ctx, "user-management", "create_user")
 	assert.NotNil(t, ctx)
 	assert.NotNil(t, span)
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_FinishHTTPSpan(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	_, span := tracer.StartSpan(context.Background(), "test")
-	
+
 	// Test various status codes
 	testCases := []struct {
 		statusCode   int
@@ -101,7 +101,7 @@ func TestTracerWrapper_FinishHTTPSpan(t *testing.T) {
 		{400, 512},
 		{500, 256},
 	}
-	
+
 	for _, tc := range testCases {
 		tracer.FinishHTTPSpan(span, tc.statusCode, tc.responseSize)
 		// No assertions here since we're using no-op tracer
@@ -111,24 +111,24 @@ func TestTracerWrapper_FinishHTTPSpan(t *testing.T) {
 
 func TestTracerWrapper_TraceIDAndSpanID(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
+
 	// With no-op tracer, IDs should be empty
 	traceID := tracer.TraceID(ctx)
 	spanID := tracer.SpanID(ctx)
-	
+
 	assert.Empty(t, traceID)
 	assert.Empty(t, spanID)
 }
 
 func TestTracerWrapper_TraceHeader(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
+
 	// With no-op tracer, header should be empty
 	header := tracer.TraceHeader(ctx)
 	assert.Empty(t, header)
@@ -136,10 +136,10 @@ func TestTracerWrapper_TraceHeader(t *testing.T) {
 
 func TestTracerWrapper_WithSpan(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
+
 	called := false
 	err := tracer.WithSpan(ctx, "test-operation", func(ctx context.Context, span trace.Span) error {
 		called = true
@@ -147,30 +147,30 @@ func TestTracerWrapper_WithSpan(t *testing.T) {
 		assert.NotNil(t, span)
 		return nil
 	})
-	
+
 	assert.NoError(t, err)
 	assert.True(t, called)
 }
 
 func TestTracerWrapper_WithSpanError(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
-	
+
 	testErr := assert.AnError
 	err := tracer.WithSpan(context.Background(), "test-operation", func(ctx context.Context, span trace.Span) error {
 		return testErr
 	})
-	
+
 	assert.Equal(t, testErr, err)
 }
 
 func TestGetClientIP(t *testing.T) {
 	tests := []struct {
-		name           string
-		headers        map[string]string
-		remoteAddr     string
-		expectedIP     string
+		name       string
+		headers    map[string]string
+		remoteAddr string
+		expectedIP string
 	}{
 		{
 			name:       "X-Forwarded-For header",
@@ -207,16 +207,16 @@ func TestGetClientIP(t *testing.T) {
 			expectedIP: "192.168.1.100",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/", nil)
 			req.RemoteAddr = tt.remoteAddr
-			
+
 			for key, value := range tt.headers {
 				req.Header.Set(key, value)
 			}
-			
+
 			ip := getClientIP(req)
 			assert.Equal(t, tt.expectedIP, ip)
 		})
@@ -225,60 +225,60 @@ func TestGetClientIP(t *testing.T) {
 
 func TestTracerWrapper_AddEvent(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
-	ctx, span := tracer.StartSpan(ctx, "test-operation")
+
+	_, span := tracer.StartSpan(ctx, "test-operation")
 	assert.NotNil(t, span)
-	
+
 	// AddEvent should not panic
 	tracer.AddEvent(span, "test-event")
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_SetUserID(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
-	ctx, span := tracer.StartSpan(ctx, "test-operation")
+
+	_, span := tracer.StartSpan(ctx, "test-operation")
 	assert.NotNil(t, span)
-	
+
 	// SetUserID should not panic
 	tracer.SetUserID(span, "user-123")
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_SetSessionID(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
-	ctx, span := tracer.StartSpan(ctx, "test-operation")
+
+	_, span := tracer.StartSpan(ctx, "test-operation")
 	assert.NotNil(t, span)
-	
+
 	// SetSessionID should not panic
 	tracer.SetSessionID(span, "session-456")
-	
+
 	span.End()
 }
 
 func TestTracerWrapper_SetRequestID(t *testing.T) {
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
-	
+
 	tracer := NewTracerWrapper("test-service")
 	ctx := context.Background()
-	
-	ctx, span := tracer.StartSpan(ctx, "test-operation")
+
+	_, span := tracer.StartSpan(ctx, "test-operation")
 	assert.NotNil(t, span)
-	
+
 	// SetRequestID should not panic
 	tracer.SetRequestID(span, "request-789")
-	
+
 	span.End()
 }

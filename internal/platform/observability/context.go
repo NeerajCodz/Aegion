@@ -43,7 +43,7 @@ func GetTraceInfoForLogger(ctx context.Context) TraceInfoForLogger {
 	if info, ok := ctx.Value(TraceInfoContextKey).(TraceInfoForLogger); ok {
 		return info
 	}
-	
+
 	// Fallback: extract from OpenTelemetry span directly
 	span := trace.SpanFromContext(ctx)
 	if span != nil && span.SpanContext().IsValid() {
@@ -52,7 +52,7 @@ func GetTraceInfoForLogger(ctx context.Context) TraceInfoForLogger {
 			SpanID:  span.SpanContext().SpanID().String(),
 		}
 	}
-	
+
 	return TraceInfoForLogger{}
 }
 

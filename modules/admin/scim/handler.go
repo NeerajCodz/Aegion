@@ -69,7 +69,7 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		token := strings.TrimPrefix(auth, "Bearer ")
-		
+
 		// Validate token
 		scimToken, err := h.service.ValidateToken(r.Context(), token)
 		if err != nil {
@@ -116,7 +116,7 @@ func (h *Handler) GetServiceProviderConfig(w http.ResponseWriter, r *http.Reques
 // GetSchemas returns all supported schemas.
 func (h *Handler) GetSchemas(w http.ResponseWriter, r *http.Request) {
 	schemas := h.service.GetSchemas()
-	
+
 	response := &ListResponse{
 		Schemas:      []string{SchemaListResponse},
 		TotalResults: len(schemas),
@@ -124,7 +124,7 @@ func (h *Handler) GetSchemas(w http.ResponseWriter, r *http.Request) {
 		StartIndex:   1,
 		Resources:    schemas,
 	}
-	
+
 	h.writeJSON(w, http.StatusOK, response)
 }
 
@@ -132,14 +132,14 @@ func (h *Handler) GetSchemas(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetSchema(w http.ResponseWriter, r *http.Request) {
 	schemaID := chi.URLParam(r, "id")
 	schemas := h.service.GetSchemas()
-	
+
 	for _, schema := range schemas {
 		if schema.ID == schemaID {
 			h.writeJSON(w, http.StatusOK, schema)
 			return
 		}
 	}
-	
+
 	h.writeError(w, http.StatusNotFound, "notFound", "Schema not found")
 }
 
@@ -154,14 +154,14 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("sortOrder") == "descending" {
 		sortOrder = SortDescending
 	}
-	
+
 	startIndex := 1
 	if si := r.URL.Query().Get("startIndex"); si != "" {
 		if parsed, err := strconv.Atoi(si); err == nil && parsed > 0 {
 			startIndex = parsed
 		}
 	}
-	
+
 	count := 20
 	if c := r.URL.Query().Get("count"); c != "" {
 		if parsed, err := strconv.Atoi(c); err == nil && parsed > 0 {
@@ -300,14 +300,14 @@ func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("sortOrder") == "descending" {
 		sortOrder = SortDescending
 	}
-	
+
 	startIndex := 1
 	if si := r.URL.Query().Get("startIndex"); si != "" {
 		if parsed, err := strconv.Atoi(si); err == nil && parsed > 0 {
 			startIndex = parsed
 		}
 	}
-	
+
 	count := 20
 	if c := r.URL.Query().Get("count"); c != "" {
 		if parsed, err := strconv.Atoi(c); err == nil && parsed > 0 {

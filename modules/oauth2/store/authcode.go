@@ -7,25 +7,25 @@ import (
 
 // AuthCode represents an OAuth2 authorization code.
 type AuthCode struct {
-	Code                  string    `json:"code"`
-	ClientID              string    `json:"client_id"`
-	IdentityID            string    `json:"identity_id"`
-	SessionID             string    `json:"session_id"`
-	RedirectURI           string    `json:"redirect_uri"`
-	Scopes                []string  `json:"scopes"`
-	Audience              []string  `json:"audience,omitempty"`
-	CodeChallenge         *string   `json:"code_challenge,omitempty"`
-	CodeChallengeMethod   *string   `json:"code_challenge_method,omitempty"`
-	Nonce                 *string   `json:"nonce,omitempty"`
-	State                 *string   `json:"state,omitempty"`
-	ACR                   string    `json:"acr"`
-	AMR                   []string  `json:"amr"`
-	AuthTime              time.Time `json:"auth_time"`
-	RequestObject         *string   `json:"request_object,omitempty"`
-	Used                  bool      `json:"used"`
-	UsedAt                *time.Time `json:"used_at,omitempty"`
-	ExpiresAt             time.Time `json:"expires_at"`
-	CreatedAt             time.Time `json:"created_at"`
+	Code                string     `json:"code"`
+	ClientID            string     `json:"client_id"`
+	IdentityID          string     `json:"identity_id"`
+	SessionID           string     `json:"session_id"`
+	RedirectURI         string     `json:"redirect_uri"`
+	Scopes              []string   `json:"scopes"`
+	Audience            []string   `json:"audience,omitempty"`
+	CodeChallenge       *string    `json:"code_challenge,omitempty"`
+	CodeChallengeMethod *string    `json:"code_challenge_method,omitempty"`
+	Nonce               *string    `json:"nonce,omitempty"`
+	State               *string    `json:"state,omitempty"`
+	ACR                 string     `json:"acr"`
+	AMR                 []string   `json:"amr"`
+	AuthTime            time.Time  `json:"auth_time"`
+	RequestObject       *string    `json:"request_object,omitempty"`
+	Used                bool       `json:"used"`
+	UsedAt              *time.Time `json:"used_at,omitempty"`
+	ExpiresAt           time.Time  `json:"expires_at"`
+	CreatedAt           time.Time  `json:"created_at"`
 }
 
 // CreateAuthCode creates a new authorization code.

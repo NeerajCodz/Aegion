@@ -42,9 +42,9 @@ func (m *MockStore) GetActorSummary(actorID uuid.UUID, days int) (map[string]int
 // Test Logger Creation
 func TestNewLogger(t *testing.T) {
 	mockStore := &MockStore{}
-	
+
 	logger := NewLogger(mockStore)
-	
+
 	assert.NotNil(t, logger)
 	assert.Equal(t, mockStore, logger.store)
 }
@@ -53,7 +53,7 @@ func TestNewLogger(t *testing.T) {
 func TestLogAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	entry := &AuditEntry{
 		ActorID:    uuid.New(),
 		ActorEmail: "admin@example.com",
@@ -62,16 +62,16 @@ func TestLogAction(t *testing.T) {
 		EntityID:   "user123",
 		Reason:     "New user registration",
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
-		return e.Action == ActionUserCreated && 
-			   e.ActorEmail == "admin@example.com" &&
-			   !e.Timestamp.IsZero() &&
-			   e.ID != uuid.Nil
+		return e.Action == ActionUserCreated &&
+			e.ActorEmail == "admin@example.com" &&
+			!e.Timestamp.IsZero() &&
+			e.ID != uuid.Nil
 	})).Return(nil)
-	
+
 	err := logger.LogAction(entry)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -79,20 +79,20 @@ func TestLogAction(t *testing.T) {
 func TestLogActionAutoFields(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	entry := &AuditEntry{
 		ActorID:    uuid.New(),
 		ActorEmail: "admin@example.com",
 		Action:     ActionUserCreated,
 	}
-	
+
 	// Should auto-generate ID and timestamp
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.ID != uuid.Nil && !e.Timestamp.IsZero()
 	})).Return(nil)
-	
+
 	err := logger.LogAction(entry)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -101,10 +101,10 @@ func TestLogActionAutoFields(t *testing.T) {
 func TestLogUserAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	userID := "user123"
-	
+
 	beforeState := map[string]interface{}{
 		"active": false,
 		"email":  "old@example.com",
@@ -116,20 +116,20 @@ func TestLogUserAction(t *testing.T) {
 	metadata := map[string]interface{}{
 		"ip_address": "192.168.1.1",
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionUserUpdated &&
-			   e.EntityType == EntityTypeUser &&
-			   e.EntityID == userID &&
-			   e.ActorID == actorID &&
-			   e.Reason == "Profile update" &&
-			   len(e.Before) > 0 &&
-			   len(e.After) > 0 &&
-			   len(e.Metadata) > 0
+			e.EntityType == EntityTypeUser &&
+			e.EntityID == userID &&
+			e.ActorID == actorID &&
+			e.Reason == "Profile update" &&
+			len(e.Before) > 0 &&
+			len(e.After) > 0 &&
+			len(e.Metadata) > 0
 	})).Return(nil)
-	
+
 	err := logger.LogUserAction(actorID, "admin@example.com", ActionUserUpdated, userID, "Profile update", beforeState, afterState, metadata)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -137,22 +137,22 @@ func TestLogUserAction(t *testing.T) {
 func TestLogSessionAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	sessionID := "session123"
 	metadata := map[string]interface{}{
 		"reason": "Suspicious activity",
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionSessionRevoked &&
-			   e.EntityType == EntityTypeSession &&
-			   e.EntityID == sessionID &&
-			   e.ActorID == actorID
+			e.EntityType == EntityTypeSession &&
+			e.EntityID == sessionID &&
+			e.ActorID == actorID
 	})).Return(nil)
-	
+
 	err := logger.LogSessionAction(actorID, "admin@example.com", ActionSessionRevoked, sessionID, "Security breach", metadata)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -160,10 +160,10 @@ func TestLogSessionAction(t *testing.T) {
 func TestLogMFAAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	userID := "user123"
-	
+
 	beforeState := map[string]interface{}{
 		"enabled": false,
 	}
@@ -171,15 +171,15 @@ func TestLogMFAAction(t *testing.T) {
 		"enabled": true,
 		"device":  "totp",
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionMFAEnabled &&
-			   e.EntityType == EntityTypeMFA &&
-			   e.EntityID == userID
+			e.EntityType == EntityTypeMFA &&
+			e.EntityID == userID
 	})).Return(nil)
-	
+
 	err := logger.LogMFAAction(actorID, "admin@example.com", ActionMFAEnabled, userID, "User requested MFA", beforeState, afterState, nil)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -187,23 +187,23 @@ func TestLogMFAAction(t *testing.T) {
 func TestLogOAuth2ClientAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	clientID := "client123"
-	
+
 	clientData := map[string]interface{}{
 		"name":         "Test App",
 		"redirect_uri": "https://app.example.com/callback",
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionOAuth2ClientCreated &&
-			   e.EntityType == EntityTypeOAuth2Client &&
-			   e.EntityID == clientID
+			e.EntityType == EntityTypeOAuth2Client &&
+			e.EntityID == clientID
 	})).Return(nil)
-	
+
 	err := logger.LogOAuth2ClientAction(actorID, "admin@example.com", ActionOAuth2ClientCreated, clientID, "New application", nil, clientData, nil)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -211,23 +211,23 @@ func TestLogOAuth2ClientAction(t *testing.T) {
 func TestLogPolicyAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	policyID := "policy123"
-	
+
 	policyData := map[string]interface{}{
-		"name": "Access Control Policy",
+		"name":  "Access Control Policy",
 		"rules": []string{"allow users.read", "deny users.delete"},
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionPolicyCreated &&
-			   e.EntityType == EntityTypePolicy &&
-			   e.EntityID == policyID
+			e.EntityType == EntityTypePolicy &&
+			e.EntityID == policyID
 	})).Return(nil)
-	
+
 	err := logger.LogPolicyAction(actorID, "admin@example.com", ActionPolicyCreated, policyID, "New access policy", nil, policyData, nil)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -235,22 +235,22 @@ func TestLogPolicyAction(t *testing.T) {
 func TestLogAdminAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	targetAdminID := "admin456"
-	
+
 	roleData := map[string]interface{}{
 		"role": "user_manager",
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionAdminRoleAssigned &&
-			   e.EntityType == EntityTypeAdmin &&
-			   e.EntityID == targetAdminID
+			e.EntityType == EntityTypeAdmin &&
+			e.EntityID == targetAdminID
 	})).Return(nil)
-	
+
 	err := logger.LogAdminAction(actorID, "admin@example.com", ActionAdminRoleAssigned, targetAdminID, "Role assignment", nil, roleData, nil)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -258,23 +258,23 @@ func TestLogAdminAction(t *testing.T) {
 func TestLogSCIMAction(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	scimUserID := "scim_user123"
-	
+
 	userData := map[string]interface{}{
 		"userName": "john.doe",
 		"active":   true,
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionSCIMUserCreated &&
-			   e.EntityType == EntityTypeSCIMUser &&
-			   e.EntityID == scimUserID
+			e.EntityType == EntityTypeSCIMUser &&
+			e.EntityID == scimUserID
 	})).Return(nil)
-	
+
 	err := logger.LogSCIMAction(actorID, "scim@example.com", ActionSCIMUserCreated, EntityTypeSCIMUser, scimUserID, "SCIM provisioning", nil, userData, nil)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -282,22 +282,22 @@ func TestLogSCIMAction(t *testing.T) {
 func TestLogSecurityEvent(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	metadata := map[string]interface{}{
 		"ip_address":    "192.168.1.100",
 		"user_agent":    "Suspicious Bot",
 		"attempt_count": 5,
 	}
-	
+
 	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
 		return e.Action == ActionSecurityViolation &&
-			   e.EntityType == "security" &&
-			   e.Reason == "Multiple failed login attempts"
+			e.EntityType == "security" &&
+			e.Reason == "Multiple failed login attempts"
 	})).Return(nil)
-	
+
 	err := logger.LogSecurityEvent(actorID, "user@example.com", ActionSecurityViolation, "login_attempts", "Multiple failed login attempts", metadata)
-	
+
 	assert.NoError(t, err)
 	mockStore.AssertExpectations(t)
 }
@@ -306,13 +306,13 @@ func TestLogSecurityEvent(t *testing.T) {
 func TestQueryEntries(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	filter := &AuditFilter{
-		Actions:  []string{ActionUserCreated, ActionUserUpdated},
-		Limit:    10,
-		Offset:   0,
+		Actions: []string{ActionUserCreated, ActionUserUpdated},
+		Limit:   10,
+		Offset:  0,
 	}
-	
+
 	entries := []*AuditEntry{
 		{
 			ID:         uuid.New(),
@@ -327,17 +327,17 @@ func TestQueryEntries(t *testing.T) {
 			EntityID:   "user2",
 		},
 	}
-	
+
 	expectedResult := &AuditQueryResult{
 		Entries: entries,
 		Total:   2,
 		HasMore: false,
 	}
-	
+
 	mockStore.On("QueryEntries", filter).Return(expectedResult, nil)
-	
+
 	result, err := logger.QueryEntries(filter)
-	
+
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResult, result)
 	assert.Len(t, result.Entries, 2)
@@ -347,7 +347,7 @@ func TestQueryEntries(t *testing.T) {
 func TestGetEntry(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	entryID := uuid.New()
 	expectedEntry := &AuditEntry{
 		ID:         entryID,
@@ -355,11 +355,11 @@ func TestGetEntry(t *testing.T) {
 		EntityType: EntityTypeUser,
 		EntityID:   "user123",
 	}
-	
+
 	mockStore.On("GetEntry", entryID).Return(expectedEntry, nil)
-	
+
 	entry, err := logger.GetEntry(entryID)
-	
+
 	assert.NoError(t, err)
 	assert.Equal(t, expectedEntry, entry)
 	mockStore.AssertExpectations(t)
@@ -368,21 +368,21 @@ func TestGetEntry(t *testing.T) {
 func TestGetActorSummary(t *testing.T) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	actorID := uuid.New()
 	days := 30
-	
+
 	expectedSummary := map[string]int{
-		ActionUserCreated:  5,
-		ActionUserUpdated:  10,
-		ActionUserDeleted:  2,
+		ActionUserCreated:    5,
+		ActionUserUpdated:    10,
+		ActionUserDeleted:    2,
 		ActionSessionRevoked: 3,
 	}
-	
+
 	mockStore.On("GetActorSummary", actorID, days).Return(expectedSummary, nil)
-	
+
 	summary, err := logger.GetActorSummary(actorID, days)
-	
+
 	assert.NoError(t, err)
 	assert.Equal(t, expectedSummary, summary)
 	assert.Equal(t, 5, summary[ActionUserCreated])
@@ -395,7 +395,7 @@ func TestAuditFilter(t *testing.T) {
 	entityType := EntityTypeUser
 	fromTime := time.Now().Add(-24 * time.Hour)
 	toTime := time.Now()
-	
+
 	filter := &AuditFilter{
 		ActorID:    &actorID,
 		Actions:    []string{ActionUserCreated, ActionUserUpdated},
@@ -405,7 +405,7 @@ func TestAuditFilter(t *testing.T) {
 		Limit:      100,
 		Offset:     0,
 	}
-	
+
 	assert.Equal(t, actorID, *filter.ActorID)
 	assert.Contains(t, filter.Actions, ActionUserCreated)
 	assert.Equal(t, EntityTypeUser, *filter.EntityType)
@@ -424,7 +424,7 @@ func TestAuditConstants(t *testing.T) {
 	assert.Equal(t, "policy.created", ActionPolicyCreated)
 	assert.Equal(t, "admin.role.assigned", ActionAdminRoleAssigned)
 	assert.Equal(t, "scim.user.created", ActionSCIMUserCreated)
-	
+
 	// Test entity type constants
 	assert.Equal(t, "user", EntityTypeUser)
 	assert.Equal(t, "session", EntityTypeSession)
@@ -451,7 +451,7 @@ func TestAuditEntryJSONSerialization(t *testing.T) {
 		RequestID:  "req-123",
 		SessionID:  "session-456",
 	}
-	
+
 	// Test that all fields are properly tagged for JSON
 	assert.NotEmpty(t, entry.ID)
 	assert.NotEmpty(t, entry.ActorEmail)
@@ -464,9 +464,9 @@ func TestAuditEntryJSONSerialization(t *testing.T) {
 func BenchmarkLogAction(b *testing.B) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	mockStore.On("WriteEntry", mock.Anything).Return(nil)
-	
+
 	entry := &AuditEntry{
 		ActorID:    uuid.New(),
 		ActorEmail: "admin@example.com",
@@ -474,7 +474,7 @@ func BenchmarkLogAction(b *testing.B) {
 		EntityType: EntityTypeUser,
 		EntityID:   "user123",
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = logger.LogAction(entry)
@@ -484,14 +484,14 @@ func BenchmarkLogAction(b *testing.B) {
 func BenchmarkLogUserAction(b *testing.B) {
 	mockStore := &MockStore{}
 	logger := NewLogger(mockStore)
-	
+
 	mockStore.On("WriteEntry", mock.Anything).Return(nil)
-	
+
 	actorID := uuid.New()
 	before := map[string]interface{}{"active": false}
 	after := map[string]interface{}{"active": true}
 	metadata := map[string]interface{}{"source": "admin"}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = logger.LogUserAction(actorID, "admin@example.com", ActionUserUpdated, "user123", "test", before, after, metadata)

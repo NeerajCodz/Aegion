@@ -15,14 +15,14 @@ import (
 func TestMockFlowStore_CreateAndRetrieve(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	flow, _ := NewFlow(TypeLogin, "/auth/login", 15*time.Minute)
-	
+
 	// Create
 	err := store.Create(ctx, flow)
 	require.NoError(t, err)
 	assert.Equal(t, 1, store.createCalls)
-	
+
 	// Retrieve
 	retrieved, err := store.Get(ctx, flow.ID)
 	require.NoError(t, err)
@@ -33,9 +33,9 @@ func TestMockFlowStore_CreateAndRetrieve(t *testing.T) {
 func TestMockFlowStore_GetNonExistent(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	flow, err := store.Get(ctx, uuid.New())
-	
+
 	assert.ErrorIs(t, err, ErrFlowNotFound)
 	assert.Nil(t, flow)
 }
@@ -43,12 +43,12 @@ func TestMockFlowStore_GetNonExistent(t *testing.T) {
 func TestMockFlowStore_GetByCSRF(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	flow, _ := NewFlow(TypeLogin, "/auth/login", 15*time.Minute)
 	require.NoError(t, store.Create(ctx, flow))
-	
+
 	retrieved, err := store.GetByCSRF(ctx, flow.CSRFToken)
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, flow.ID, retrieved.ID)
 }
@@ -56,9 +56,9 @@ func TestMockFlowStore_GetByCSRF(t *testing.T) {
 func TestMockFlowStore_GetByCSRF_NotFound(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	flow, err := store.GetByCSRF(ctx, "invalid-csrf")
-	
+
 	assert.ErrorIs(t, err, ErrFlowNotFound)
 	assert.Nil(t, flow)
 }
@@ -66,17 +66,17 @@ func TestMockFlowStore_GetByCSRF_NotFound(t *testing.T) {
 func TestMockFlowStore_Update(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	flow, _ := NewFlow(TypeLogin, "/auth/login", 15*time.Minute)
 	require.NoError(t, store.Create(ctx, flow))
-	
+
 	// Update the flow
 	flow.State = StateCompleted
 	err := store.Update(ctx, flow)
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, 1, store.updateCalls)
-	
+
 	// Verify update was persisted
 	retrieved, _ := store.Get(ctx, flow.ID)
 	assert.Equal(t, StateCompleted, retrieved.State)
@@ -85,15 +85,15 @@ func TestMockFlowStore_Update(t *testing.T) {
 func TestMockFlowStore_Delete(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	flow, _ := NewFlow(TypeLogin, "/auth/login", 15*time.Minute)
 	require.NoError(t, store.Create(ctx, flow))
-	
+
 	// Delete
 	err := store.Delete(ctx, flow.ID)
 	require.NoError(t, err)
 	assert.Equal(t, 1, store.deleteCalls)
-	
+
 	// Verify it's gone
 	_, err = store.Get(ctx, flow.ID)
 	assert.ErrorIs(t, err, ErrFlowNotFound)
@@ -102,7 +102,7 @@ func TestMockFlowStore_Delete(t *testing.T) {
 func TestMockFlowStore_DeleteExpired(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	// Create flows with different expiry times
 	flow1 := &Flow{
 		ID:        uuid.New(),
@@ -111,7 +111,7 @@ func TestMockFlowStore_DeleteExpired(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(-10 * time.Minute), // expired
 		CSRFToken: "token1",
 	}
-	
+
 	flow2 := &Flow{
 		ID:        uuid.New(),
 		Type:      TypeLogin,
@@ -119,19 +119,19 @@ func TestMockFlowStore_DeleteExpired(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute), // not expired
 		CSRFToken: "token2",
 	}
-	
+
 	require.NoError(t, store.Create(ctx, flow1))
 	require.NoError(t, store.Create(ctx, flow2))
-	
+
 	deleted, err := store.DeleteExpired(ctx)
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), deleted)
-	
+
 	// Verify expired flow is gone
 	_, err = store.Get(ctx, flow1.ID)
 	assert.ErrorIs(t, err, ErrFlowNotFound)
-	
+
 	// Verify active flow still exists
 	retrieved, err := store.Get(ctx, flow2.ID)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestMockFlowStore_DeleteExpired(t *testing.T) {
 func TestMockFlowStore_DeleteTerminalFlows(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	// Create flows with terminal states
 	completedFlow := &Flow{
 		ID:        uuid.New(),
@@ -150,7 +150,7 @@ func TestMockFlowStore_DeleteTerminalFlows(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 		CSRFToken: "token1",
 	}
-	
+
 	failedFlow := &Flow{
 		ID:        uuid.New(),
 		Type:      TypeLogin,
@@ -158,7 +158,7 @@ func TestMockFlowStore_DeleteTerminalFlows(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 		CSRFToken: "token2",
 	}
-	
+
 	activeFlow := &Flow{
 		ID:        uuid.New(),
 		Type:      TypeLogin,
@@ -166,13 +166,13 @@ func TestMockFlowStore_DeleteTerminalFlows(t *testing.T) {
 		ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
 		CSRFToken: "token3",
 	}
-	
+
 	require.NoError(t, store.Create(ctx, completedFlow))
 	require.NoError(t, store.Create(ctx, failedFlow))
 	require.NoError(t, store.Create(ctx, activeFlow))
-	
+
 	deleted, err := store.DeleteExpired(ctx)
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), deleted)
 }
@@ -180,9 +180,9 @@ func TestMockFlowStore_DeleteTerminalFlows(t *testing.T) {
 func TestMockFlowStore_ListByIdentity(t *testing.T) {
 	store := NewMockFlowStore()
 	ctx := context.Background()
-	
+
 	identityID := uuid.New()
-	
+
 	flow1 := &Flow{
 		ID:         uuid.New(),
 		Type:       TypeLogin,
@@ -191,7 +191,7 @@ func TestMockFlowStore_ListByIdentity(t *testing.T) {
 		ExpiresAt:  time.Now().UTC().Add(10 * time.Minute),
 		CSRFToken:  "token1",
 	}
-	
+
 	flow2 := &Flow{
 		ID:         uuid.New(),
 		Type:       TypeSettings,
@@ -200,10 +200,10 @@ func TestMockFlowStore_ListByIdentity(t *testing.T) {
 		ExpiresAt:  time.Now().UTC().Add(10 * time.Minute),
 		CSRFToken:  "token2",
 	}
-	
+
 	require.NoError(t, store.Create(ctx, flow1))
 	require.NoError(t, store.Create(ctx, flow2))
-	
+
 	// Mock store ListByIdentity returns nil for now (not implemented in mock)
 	// Just verify the method exists and doesn't panic
 	flows, err := store.ListByIdentity(ctx, identityID, TypeLogin)

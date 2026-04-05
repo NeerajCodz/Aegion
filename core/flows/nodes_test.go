@@ -78,9 +78,9 @@ func TestNewAnchorNode(t *testing.T) {
 
 func TestGetErrorMessage(t *testing.T) {
 	tests := []struct {
-		name      string
-		errID     string
-		expected  string
+		name     string
+		errID    string
+		expected string
 	}{
 		{
 			name:     "invalid credentials",
@@ -270,7 +270,7 @@ func TestWithDisabled(t *testing.T) {
 
 func TestNodeAttributesChaining(t *testing.T) {
 	node := NewInputNode("password", InputTypePassword, "Password", true)
-	
+
 	// Chain multiple modifiers
 	node = WithPlaceholder(node, "At least 8 characters")
 	node = WithMinLength(node, 8)

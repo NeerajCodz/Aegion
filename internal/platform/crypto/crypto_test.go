@@ -132,7 +132,7 @@ func TestEncryptFieldKeyValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			key := make([]byte, tt.keyLen)
 			_, err := EncryptField(key, plaintext, aad)
-			
+
 			if tt.wantError != nil {
 				if err != tt.wantError {
 					t.Errorf("EncryptField() error = %v, want %v", err, tt.wantError)
@@ -167,7 +167,7 @@ func TestDecryptFieldKeyValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			key := make([]byte, tt.keyLen)
 			_, err := DecryptField(key, ciphertext, aad)
-			
+
 			if tt.wantError != nil {
 				if err != tt.wantError {
 					t.Errorf("DecryptField() error = %v, want %v", err, tt.wantError)
@@ -187,33 +187,33 @@ func TestDecryptFieldKeyValidation(t *testing.T) {
 // and can be called without compilation errors
 func TestFunctionSignatures(t *testing.T) {
 	// Test that we can call all functions (they may fail due to missing Rust lib, but should compile)
-	
+
 	// HashPassword
 	_, err := HashPassword("test")
 	if err != nil && err != ErrHashFailed {
 		t.Logf("HashPassword returned expected error or ErrHashFailed: %v", err)
 	}
-	
+
 	// VerifyPassword
 	_, err = VerifyPassword("test", "hash")
 	if err != nil && err != ErrVerifyFailed {
 		t.Logf("VerifyPassword returned expected error or ErrVerifyFailed: %v", err)
 	}
-	
+
 	// GenerateKey
 	_, err = GenerateKey()
 	if err != nil && err != ErrRngFailed {
 		t.Logf("GenerateKey returned expected error or ErrRngFailed: %v", err)
 	}
-	
+
 	// Test with valid key size to test Go-level validation
 	validKey := make([]byte, KeySize)
-	
+
 	_, err = EncryptField(validKey, []byte("test"), []byte("aad"))
 	if err != nil && err != ErrEncryptFailed {
 		t.Logf("EncryptField returned expected error or ErrEncryptFailed: %v", err)
 	}
-	
+
 	_, err = DecryptField(validKey, "test", []byte("aad"))
 	if err != nil && err != ErrDecryptFailed {
 		t.Logf("DecryptField returned expected error or ErrDecryptFailed: %v", err)
@@ -223,13 +223,13 @@ func TestFunctionSignatures(t *testing.T) {
 func BenchmarkConstantTimeCompare(b *testing.B) {
 	// Test different sizes to ensure it's truly constant time
 	sizes := []int{16, 32, 64, 128, 256, 512, 1024}
-	
+
 	for _, size := range sizes {
 		a := make([]byte, size)
 		bb := make([]byte, size)
 		// Make them different in the last byte to test worst case
 		bb[len(bb)-1] = 1
-		
+
 		b.Run(fmt.Sprintf("size_%d", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				ConstantTimeCompare(a, bb)

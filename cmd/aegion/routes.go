@@ -429,9 +429,10 @@ func (s *Server) handleModuleRegister(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.registry.Register(req)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if err == registry.ErrModuleAlreadyExists {
+		switch err {
+		case registry.ErrModuleAlreadyExists:
 			status = http.StatusConflict
-		} else if err == registry.ErrInvalidModule {
+		case registry.ErrInvalidModule:
 			status = http.StatusBadRequest
 		}
 		writeError(w, status, "registration failed", err)

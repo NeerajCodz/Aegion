@@ -386,7 +386,7 @@ func TestRegistryResponseStructures(t *testing.T) {
 		Version:   "1.0.0",
 		Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
 		HealthURL: "http://localhost:8080/health",
-		Metadata: map[string]string{"env": "prod"},
+		Metadata:  map[string]string{"env": "prod"},
 	}
 
 	resp, err := registry.Register(req)
@@ -422,10 +422,10 @@ func TestRegistryMetadataPreservation(t *testing.T) {
 	registry := New(DefaultConfig())
 
 	metadata := map[string]string{
-		"version":      "2.3.4",
-		"team":         "backend",
-		"region":       "us-west-2",
-		"environment":  "staging",
+		"version":     "2.3.4",
+		"team":        "backend",
+		"region":      "us-west-2",
+		"environment": "staging",
 	}
 
 	req := RegistrationRequest{

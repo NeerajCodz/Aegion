@@ -33,7 +33,7 @@ func (t *TracerWrapper) StartSpan(ctx context.Context, name string, opts ...trac
 // StartHTTPSpan starts a span for an HTTP request
 func (t *TracerWrapper) StartHTTPSpan(ctx context.Context, r *http.Request) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s %s", r.Method, r.URL.Path)
-	
+
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
@@ -66,7 +66,7 @@ func (t *TracerWrapper) StartHTTPSpan(ctx context.Context, r *http.Request) (con
 // StartDatabaseSpan starts a span for a database operation
 func (t *TracerWrapper) StartDatabaseSpan(ctx context.Context, operation, table string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("db.%s %s", operation, table)
-	
+
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
@@ -82,7 +82,7 @@ func (t *TracerWrapper) StartDatabaseSpan(ctx context.Context, operation, table 
 // StartServiceSpan starts a span for a service operation
 func (t *TracerWrapper) StartServiceSpan(ctx context.Context, service, operation string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("%s.%s", service, operation)
-	
+
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(
@@ -97,7 +97,7 @@ func (t *TracerWrapper) StartServiceSpan(ctx context.Context, service, operation
 // StartModuleSpan starts a span for a module operation
 func (t *TracerWrapper) StartModuleSpan(ctx context.Context, moduleID, operation string) (context.Context, trace.Span) {
 	spanName := fmt.Sprintf("module.%s.%s", moduleID, operation)
-	
+
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(

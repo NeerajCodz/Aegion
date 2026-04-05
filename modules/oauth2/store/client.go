@@ -196,7 +196,12 @@ func (s *Store) ListClients(ctx context.Context, ownerID *string, limit, offset 
 		limit = 100
 	}
 
-	var rows interface{ Close(); Next() bool; Scan(dest ...interface{}) error; Err() error }
+	var rows interface {
+		Close()
+		Next() bool
+		Scan(dest ...interface{}) error
+		Err() error
+	}
 	var err error
 
 	if ownerID != nil {

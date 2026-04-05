@@ -36,7 +36,7 @@ func TestMemoryStore_Allow(t *testing.T) {
 
 	// Wait for token refill and try again
 	time.Sleep(time.Second + 100*time.Millisecond)
-	
+
 	allowed, waitTime, err = store.Allow(key, limit, window)
 	require.NoError(t, err)
 	assert.True(t, allowed, "request after refill should be allowed")
@@ -99,7 +99,7 @@ func TestTokenBucket_Refill(t *testing.T) {
 	bucket := &tokenBucket{
 		tokens:     2,
 		capacity:   5,
-		refillRate: 2, // 2 tokens per second
+		refillRate: 2,                                // 2 tokens per second
 		lastRefill: time.Now().Add(-2 * time.Second), // 2 seconds ago
 	}
 
@@ -262,10 +262,10 @@ func TestRateLimiter_MultipleKeys(t *testing.T) {
 
 func TestGetClientIP(t *testing.T) {
 	tests := []struct {
-		name           string
-		headers        map[string]string
-		remoteAddr     string
-		expectedIP     string
+		name       string
+		headers    map[string]string
+		remoteAddr string
+		expectedIP string
 	}{
 		{
 			name: "X-Forwarded-For single IP",
@@ -332,7 +332,7 @@ func TestGetClientIP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/test", nil)
 			req.RemoteAddr = tt.remoteAddr
-			
+
 			for key, value := range tt.headers {
 				req.Header.Set(key, value)
 			}
@@ -364,17 +364,17 @@ func TestRateLimiter_ConcurrentRequests(t *testing.T) {
 		wg.Add(1)
 		go func(goroutineID int) {
 			defer wg.Done()
-			
+
 			for j := 0; j < numRequestsPerGoroutine; j++ {
 				req := httptest.NewRequest("GET", "/test", nil)
 				req.RemoteAddr = "192.168.1.100:12345" // Same IP for all requests
-				
+
 				allowed, _, err := limiter.Allow(req)
 				// Rate limiting can return an error, which is fine
 				if err != nil && err != ErrRateLimitExceeded {
 					require.NoError(t, err) // Fail only on unexpected errors
 				}
-				
+
 				mu.Lock()
 				if allowed {
 					allowedCount++
@@ -389,7 +389,7 @@ func TestRateLimiter_ConcurrentRequests(t *testing.T) {
 	wg.Wait()
 
 	totalRequests := numGoroutines * numRequestsPerGoroutine
-	t.Logf("Total requests: %d, Allowed: %d, Denied: %d", 
+	t.Logf("Total requests: %d, Allowed: %d, Denied: %d",
 		totalRequests, allowedCount, deniedCount)
 
 	// Should have some requests allowed and some denied
@@ -575,7 +575,7 @@ func TestRateLimiter_NewRateLimiter_NilStore(t *testing.T) {
 // TestMemoryStore_Allow_EdgeCases tests edge cases for token bucket
 func TestMemoryStore_Allow_EdgeCases(t *testing.T) {
 	store := NewMemoryStore()
-	
+
 	// Test with limit of 1
 	allowed, _, err := store.Allow("key1", 1, time.Second)
 	require.NoError(t, err)
@@ -707,7 +707,7 @@ func TestRateLimiter_GenerateKeys_MultipleMode(t *testing.T) {
 	limiter := NewRateLimiter(config, store)
 
 	sessionID := uuid.New()
-	ctx := session.WithSession(httptest.NewRequest("GET", "/api/users", nil).Context(), 
+	ctx := session.WithSession(httptest.NewRequest("GET", "/api/users", nil).Context(),
 		&session.Session{ID: sessionID})
 	req := httptest.NewRequest("GET", "/api/users", nil).WithContext(ctx)
 	req.RemoteAddr = "192.168.1.100:12345"

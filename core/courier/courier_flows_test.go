@@ -27,7 +27,7 @@ func TestEmailQueueingWorkflow(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	_ = New(cfg)  // Just verify New works, don't need reference
+	_ = New(cfg) // Just verify New works, don't need reference
 
 	// Create message
 	recipient := "user@example.com"
@@ -128,7 +128,7 @@ func TestVerificationEmailFullFlow(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	_ = New(cfg)  // Verify New works
+	_ = New(cfg) // Verify New works
 
 	identityID := uuid.New()
 	code := "123456"
@@ -169,7 +169,7 @@ func TestPasswordResetEmailFullFlow(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	_ = New(cfg)  // Verify New works
+	_ = New(cfg) // Verify New works
 
 	identityID := uuid.New()
 	resetCode := "reset-token-abc123"
@@ -207,7 +207,7 @@ func TestMagicLinkEmailFullFlow(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	_ = New(cfg)  // Verify New works
+	_ = New(cfg) // Verify New works
 
 	recipient := "user@example.com"
 	link := "https://example.com/signin?token=abc123"
@@ -249,7 +249,7 @@ func TestBulkMessageQueueing(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	_ = New(cfg)  // Verify New works
+	_ = New(cfg) // Verify New works
 
 	recipients := []string{
 		"user1@example.com",
@@ -328,11 +328,11 @@ func TestBatchProcessingWithVariousSizes(t *testing.T) {
 
 func TestMessageCleanupLogicSimulation(t *testing.T) {
 	tests := []struct {
-		name           string
-		status         MessageStatus
-		ageInDays      int
-		cleanupDays    int
-		shouldDelete   bool
+		name         string
+		status       MessageStatus
+		ageInDays    int
+		cleanupDays  int
+		shouldDelete bool
 	}{
 		{"sent, old enough", StatusSent, 30, 7, true},
 		{"sent, too new", StatusSent, 2, 7, false},
@@ -503,9 +503,9 @@ func TestMessageDeduplication(t *testing.T) {
 
 func TestTemplateDataTypes(t *testing.T) {
 	tests := []struct {
-		name     string
-		data     map[string]interface{}
-		hasData  bool
+		name    string
+		data    map[string]interface{}
+		hasData bool
 	}{
 		{
 			name: "string data",
@@ -526,7 +526,7 @@ func TestTemplateDataTypes(t *testing.T) {
 		{
 			name: "bool data",
 			data: map[string]interface{}{
-				"isPremium": true,
+				"isPremium":  true,
 				"isVerified": false,
 			},
 			hasData: true,
@@ -690,13 +690,13 @@ func TestBackoffWithMaxCap(t *testing.T) {
 	maxDelay := 5 * time.Second
 
 	tests := []struct {
-		name       string
-		attempt    int
-		capped     time.Duration
+		name    string
+		attempt int
+		capped  time.Duration
 	}{
 		{"attempt 1", 1, 100 * time.Millisecond},
 		{"attempt 5", 5, 1600 * time.Millisecond},
-		{"attempt 7", 7, 5 * time.Second}, // Capped at maxDelay
+		{"attempt 7", 7, 5 * time.Second},   // Capped at maxDelay
 		{"attempt 10", 10, 5 * time.Second}, // Still capped
 	}
 

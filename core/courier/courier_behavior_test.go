@@ -394,7 +394,9 @@ func startStubSMTPServer(t *testing.T) *stubSMTPServer {
 }
 
 func handleSMTPConn(conn net.Conn, out chan<- string) {
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 	_, _ = conn.Write([]byte("220 localhost Simple SMTP\r\n"))
 	buf := make([]byte, 4096)
 	inData := false
@@ -465,7 +467,9 @@ func splitCRLF(s string) []string {
 
 func TestSendEmailLiveSMTP(t *testing.T) {
 	smtpStub := startStubSMTPServer(t)
-	defer smtpStub.listener.Close()
+	defer func() {
+		_ = smtpStub.listener.Close()
+	}()
 
 	addr := smtpStub.listener.Addr().(*net.TCPAddr)
 	c := New(Config{

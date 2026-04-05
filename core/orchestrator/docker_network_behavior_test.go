@@ -317,15 +317,13 @@ func TestDockerClient_ContainerOps_WithSeams(t *testing.T) {
 				},
 			},
 			NetworkSettings: &container.NetworkSettings{
-				NetworkSettingsBase: container.NetworkSettingsBase{
-					Ports: nat.PortMap{
-						nat.Port("8080/tcp"): {{HostIP: "0.0.0.0", HostPort: "18080"}},
-					},
-				},
 				Networks: map[string]*network.EndpointSettings{
 					DefaultNetworkName: {IPAddress: "10.0.0.10"},
 				},
 			},
+		}
+		inspectResp.NetworkSettings.Ports = nat.PortMap{
+			nat.Port("8080/tcp"): {{HostIP: "0.0.0.0", HostPort: "18080"}},
 		}
 
 		d.containerInspectFn = func(context.Context, string) (container.InspectResponse, error) {
@@ -347,9 +345,9 @@ func TestDockerClient_ContainerOps_WithSeams(t *testing.T) {
 			t.Fatalf("expected healthy status, got %q err=%v", health, err)
 		}
 
-		inspectResp.ContainerJSONBase.State.Health = nil
-		inspectResp.ContainerJSONBase.State.Running = false
-		inspectResp.ContainerJSONBase.State.Status = "exited"
+		inspectResp.State.Health = nil
+		inspectResp.State.Running = false
+		inspectResp.State.Status = "exited"
 		d.containerInspectFn = func(context.Context, string) (container.InspectResponse, error) {
 			return inspectResp, nil
 		}

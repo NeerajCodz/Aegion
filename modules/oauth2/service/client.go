@@ -16,11 +16,11 @@ import (
 )
 
 var (
-	ErrInvalidClient        = errors.New("invalid client")
-	ErrInvalidSecret        = errors.New("invalid client secret")
-	ErrInvalidRedirectURI   = errors.New("invalid redirect URI")
-	ErrInvalidGrantType     = errors.New("invalid grant type")
-	ErrInvalidScope         = errors.New("invalid scope")
+	ErrInvalidClient         = errors.New("invalid client")
+	ErrInvalidSecret         = errors.New("invalid client secret")
+	ErrInvalidRedirectURI    = errors.New("invalid redirect URI")
+	ErrInvalidGrantType      = errors.New("invalid grant type")
+	ErrInvalidScope          = errors.New("invalid scope")
 	ErrUnsupportedAuthMethod = errors.New("unsupported authentication method")
 )
 
@@ -150,10 +150,10 @@ func (s *ClientService) CreateClient(ctx context.Context, req *CreateClientReque
 		SubjectType:              "public",
 		IDTokenSignedResponseAlg: "RS256",
 		AccessTokenStrategy:      "jwt",
-		AccessTokenTTL:           900,  // 15 minutes
+		AccessTokenTTL:           900,     // 15 minutes
 		RefreshTokenTTL:          2592000, // 30 days
-		IDTokenTTL:               3600, // 1 hour
-		AuthCodeTTL:              600,  // 10 minutes
+		IDTokenTTL:               3600,    // 1 hour
+		AuthCodeTTL:              600,     // 10 minutes
 		RequirePKCE:              requirePKCE,
 		RequireConsent:           requireConsent,
 		AllowOfflineAccess:       allowOfflineAccess,

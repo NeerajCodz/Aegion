@@ -1,0 +1,4 @@
+# Temporary allowlist for upstream-unavailable fixes.
+# Trivy reports CVE-2026-34040 with fixed version v29.3.1 for github.com/docker/docker,
+# but the highest published Go module tag is currently v28.5.2+incompatible.
+CVE-2026-34040

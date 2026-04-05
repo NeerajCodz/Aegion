@@ -9,7 +9,7 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
     XChaCha20Poly1305, XNonce,
 };
-use rand::RngCore;
+use rand::TryRng;
 
 /// Key size for XChaCha20-Poly1305 (256 bits)
 pub const KEY_SIZE: usize = 32;
@@ -46,7 +46,7 @@ pub fn encrypt_field(
 
     // Generate random nonce
     let mut nonce_bytes = [0u8; NONCE_SIZE];
-    rand::thread_rng()
+    rand::rng()
         .try_fill_bytes(&mut nonce_bytes)
         .map_err(|_| CryptoError::RngError)?;
     let nonce = XNonce::from_slice(&nonce_bytes);
@@ -125,7 +125,7 @@ pub fn decrypt_field(
 /// Generate a random 32-byte encryption key
 pub fn generate_key() -> Result<[u8; KEY_SIZE], CryptoError> {
     let mut key = [0u8; KEY_SIZE];
-    rand::thread_rng()
+    rand::rng()
         .try_fill_bytes(&mut key)
         .map_err(|_| CryptoError::RngError)?;
     Ok(key)

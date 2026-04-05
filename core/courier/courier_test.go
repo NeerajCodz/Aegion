@@ -315,30 +315,30 @@ func TestTemplateRendering(t *testing.T) {
 		shouldError   bool
 	}{
 		{
-			name:         "simple template",
-			template:     "Hello {{.name}}",
-			templateData: map[string]interface{}{"name": "Alice"},
+			name:          "simple template",
+			template:      "Hello {{.name}}",
+			templateData:  map[string]interface{}{"name": "Alice"},
 			expectedMatch: "Hello Alice",
 			shouldError:   false,
 		},
 		{
-			name:         "template with multiple fields",
-			template:     "Hello {{.name}}, your code is {{.code}}",
-			templateData: map[string]interface{}{"name": "Bob", "code": "123456"},
+			name:          "template with multiple fields",
+			template:      "Hello {{.name}}, your code is {{.code}}",
+			templateData:  map[string]interface{}{"name": "Bob", "code": "123456"},
 			expectedMatch: "Hello Bob, your code is 123456",
 			shouldError:   false,
 		},
 		{
-			name:         "template with HTML",
-			template:     "<h1>{{.title}}</h1><p>{{.message}}</p>",
-			templateData: map[string]interface{}{"title": "Welcome", "message": "Hello user"},
+			name:          "template with HTML",
+			template:      "<h1>{{.title}}</h1><p>{{.message}}</p>",
+			templateData:  map[string]interface{}{"title": "Welcome", "message": "Hello user"},
 			expectedMatch: "<h1>Welcome</h1><p>Hello user</p>",
 			shouldError:   false,
 		},
 		{
-			name:         "empty template data",
-			template:     "Static content",
-			templateData: map[string]interface{}{},
+			name:          "empty template data",
+			template:      "Static content",
+			templateData:  map[string]interface{}{},
 			expectedMatch: "Static content",
 			shouldError:   false,
 		},
@@ -500,11 +500,11 @@ func TestSMSGatewayIntegration(t *testing.T) {
 
 func TestRetryLogic(t *testing.T) {
 	tests := []struct {
-		name             string
-		sendCount        int
-		maxRetries       int
-		shouldAbandon    bool
-		expectedCount    int
+		name          string
+		sendCount     int
+		maxRetries    int
+		shouldAbandon bool
+		expectedCount int
 	}{
 		{"first attempt", 0, 3, false, 1},
 		{"second attempt", 1, 3, false, 2},
@@ -798,17 +798,17 @@ func TestVerificationEmailCreation(t *testing.T) {
 
 	// Create the verification message manually for testing
 	msg := &Message{
-		ID:        uuid.New(),
-		Type:      MessageTypeEmail,
-		Status:    StatusQueued,
-		Recipient: recipient,
-		Subject:   "Verify your email address",
-		Body:      fmt.Sprintf("<h1>Email Verification</h1><p>Your verification code is: <strong>%s</strong></p>", verificationCode),
-		IdentityID: &identityID,
-		SourceModule: "core",
+		ID:             uuid.New(),
+		Type:           MessageTypeEmail,
+		Status:         StatusQueued,
+		Recipient:      recipient,
+		Subject:        "Verify your email address",
+		Body:           fmt.Sprintf("<h1>Email Verification</h1><p>Your verification code is: <strong>%s</strong></p>", verificationCode),
+		IdentityID:     &identityID,
+		SourceModule:   "core",
 		IdempotencyKey: fmt.Sprintf("verify:%s:%s", identityID.String(), verificationCode),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 
 	assert.Equal(t, recipient, msg.Recipient)
@@ -840,17 +840,17 @@ func TestPasswordResetEmailCreation(t *testing.T) {
 	recipient := "user@example.com"
 
 	msg := &Message{
-		ID:        uuid.New(),
-		Type:      MessageTypeEmail,
-		Status:    StatusQueued,
-		Recipient: recipient,
-		Subject:   "Reset your password",
-		Body:      fmt.Sprintf("<h1>Password Reset</h1><p>Your password reset code is: <strong>%s</strong></p>", resetCode),
-		IdentityID: &identityID,
-		SourceModule: "core",
+		ID:             uuid.New(),
+		Type:           MessageTypeEmail,
+		Status:         StatusQueued,
+		Recipient:      recipient,
+		Subject:        "Reset your password",
+		Body:           fmt.Sprintf("<h1>Password Reset</h1><p>Your password reset code is: <strong>%s</strong></p>", resetCode),
+		IdentityID:     &identityID,
+		SourceModule:   "core",
 		IdempotencyKey: fmt.Sprintf("reset:%s:%s", identityID.String(), resetCode),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 
 	assert.Equal(t, recipient, msg.Recipient)
@@ -881,16 +881,16 @@ func TestMagicLinkEmailCreation(t *testing.T) {
 	code := "magic-code-456"
 
 	msg := &Message{
-		ID:        uuid.New(),
-		Type:      MessageTypeEmail,
-		Status:    StatusQueued,
-		Recipient: recipient,
-		Subject:   "Sign in to your account",
-		Body:      fmt.Sprintf(`<h1>Sign In</h1><p>Click the link below to sign in:</p><p><a href="%s">Sign In</a></p><p>Or enter this code: <strong>%s</strong></p>`, magicLink, code),
-		SourceModule: "magic_link",
+		ID:             uuid.New(),
+		Type:           MessageTypeEmail,
+		Status:         StatusQueued,
+		Recipient:      recipient,
+		Subject:        "Sign in to your account",
+		Body:           fmt.Sprintf(`<h1>Sign In</h1><p>Click the link below to sign in:</p><p><a href="%s">Sign In</a></p><p>Or enter this code: <strong>%s</strong></p>`, magicLink, code),
+		SourceModule:   "magic_link",
 		IdempotencyKey: fmt.Sprintf("magic:%s", code),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
 	}
 
 	assert.Equal(t, recipient, msg.Recipient)

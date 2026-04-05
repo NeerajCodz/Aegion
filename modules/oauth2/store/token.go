@@ -8,59 +8,59 @@ import (
 
 // AccessToken represents an OAuth2 access token.
 type AccessToken struct {
-	JTI         string            `json:"jti"`
-	Signature   *string           `json:"-"` // for opaque tokens
-	ClientID    string            `json:"client_id"`
-	IdentityID  string            `json:"identity_id"`
-	SessionID   string            `json:"session_id"`
-	Scopes      []string          `json:"scopes"`
-	Audience    []string          `json:"audience"`
-	Issuer      string            `json:"issuer"`
-	Subject     string            `json:"subject"`
-	ExtraClaims map[string]any    `json:"extra_claims,omitempty"`
-	Revoked     bool              `json:"revoked"`
-	RevokedAt   *time.Time        `json:"revoked_at,omitempty"`
-	ExpiresAt   time.Time         `json:"expires_at"`
-	CreatedAt   time.Time         `json:"created_at"`
+	JTI         string         `json:"jti"`
+	Signature   *string        `json:"-"` // for opaque tokens
+	ClientID    string         `json:"client_id"`
+	IdentityID  string         `json:"identity_id"`
+	SessionID   string         `json:"session_id"`
+	Scopes      []string       `json:"scopes"`
+	Audience    []string       `json:"audience"`
+	Issuer      string         `json:"issuer"`
+	Subject     string         `json:"subject"`
+	ExtraClaims map[string]any `json:"extra_claims,omitempty"`
+	Revoked     bool           `json:"revoked"`
+	RevokedAt   *time.Time     `json:"revoked_at,omitempty"`
+	ExpiresAt   time.Time      `json:"expires_at"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 // RefreshToken represents an OAuth2 refresh token.
 type RefreshToken struct {
-	ID                    string            `json:"id"`
-	FamilyID              string            `json:"family_id"`
-	ClientID              string            `json:"client_id"`
-	IdentityID            string            `json:"identity_id"`
-	SessionID             string            `json:"session_id"`
-	Scopes                []string          `json:"scopes"`
-	Audience              []string          `json:"audience,omitempty"`
-	Active                bool              `json:"active"`
-	Used                  bool              `json:"used"`
-	UsedAt                *time.Time        `json:"used_at,omitempty"`
-	SuccessorID           *string           `json:"successor_id,omitempty"`
-	GracePeriodExpiresAt  *time.Time        `json:"grace_period_expires_at,omitempty"`
-	FirstUsedAt           *time.Time        `json:"first_used_at,omitempty"`
-	AccessTokenJTI        *string           `json:"access_token_jti,omitempty"`
-	ExtraClaims           map[string]any    `json:"extra_claims,omitempty"`
-	ExpiresAt             time.Time         `json:"expires_at"`
-	CreatedAt             time.Time         `json:"created_at"`
+	ID                   string         `json:"id"`
+	FamilyID             string         `json:"family_id"`
+	ClientID             string         `json:"client_id"`
+	IdentityID           string         `json:"identity_id"`
+	SessionID            string         `json:"session_id"`
+	Scopes               []string       `json:"scopes"`
+	Audience             []string       `json:"audience,omitempty"`
+	Active               bool           `json:"active"`
+	Used                 bool           `json:"used"`
+	UsedAt               *time.Time     `json:"used_at,omitempty"`
+	SuccessorID          *string        `json:"successor_id,omitempty"`
+	GracePeriodExpiresAt *time.Time     `json:"grace_period_expires_at,omitempty"`
+	FirstUsedAt          *time.Time     `json:"first_used_at,omitempty"`
+	AccessTokenJTI       *string        `json:"access_token_jti,omitempty"`
+	ExtraClaims          map[string]any `json:"extra_claims,omitempty"`
+	ExpiresAt            time.Time      `json:"expires_at"`
+	CreatedAt            time.Time      `json:"created_at"`
 }
 
 // IDToken represents an OIDC ID token.
 type IDToken struct {
-	JTI         string            `json:"jti"`
-	ClientID    string            `json:"client_id"`
-	IdentityID  string            `json:"identity_id"`
-	SessionID   string            `json:"session_id"`
-	Nonce       *string           `json:"nonce,omitempty"`
-	ATHash      *string           `json:"at_hash,omitempty"`
-	CHash       *string           `json:"c_hash,omitempty"`
-	ACR         string            `json:"acr"`
-	AMR         []string          `json:"amr"`
-	AuthTime    time.Time         `json:"auth_time"`
-	ExtraClaims map[string]any    `json:"extra_claims,omitempty"`
-	Revoked     bool              `json:"revoked"`
-	ExpiresAt   time.Time         `json:"expires_at"`
-	CreatedAt   time.Time         `json:"created_at"`
+	JTI         string         `json:"jti"`
+	ClientID    string         `json:"client_id"`
+	IdentityID  string         `json:"identity_id"`
+	SessionID   string         `json:"session_id"`
+	Nonce       *string        `json:"nonce,omitempty"`
+	ATHash      *string        `json:"at_hash,omitempty"`
+	CHash       *string        `json:"c_hash,omitempty"`
+	ACR         string         `json:"acr"`
+	AMR         []string       `json:"amr"`
+	AuthTime    time.Time      `json:"auth_time"`
+	ExtraClaims map[string]any `json:"extra_claims,omitempty"`
+	Revoked     bool           `json:"revoked"`
+	ExpiresAt   time.Time      `json:"expires_at"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 // CreateAccessToken stores a new access token.

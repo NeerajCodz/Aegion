@@ -18,7 +18,7 @@ func TestCircuitBreaker_InitialState(t *testing.T) {
 	cb := NewCircuitBreaker(config)
 
 	assert.Equal(t, StateClosed, cb.GetState())
-	
+
 	metrics := cb.GetMetrics()
 	assert.Equal(t, StateClosed, metrics.State)
 	assert.Equal(t, int64(0), metrics.TotalRequests)
@@ -49,7 +49,7 @@ func TestCircuitBreaker_ClosedState(t *testing.T) {
 
 	// Should still be closed
 	assert.Equal(t, StateClosed, cb.GetState())
-	
+
 	metrics := cb.GetMetrics()
 	assert.Equal(t, int64(10), metrics.TotalRequests)
 	assert.Equal(t, int64(5), metrics.TotalSuccesses)
@@ -69,7 +69,7 @@ func TestCircuitBreaker_OpenOnFailures(t *testing.T) {
 	for i := 0; i < config.FailureThreshold; i++ {
 		assert.True(t, cb.Allow(), "request should be allowed before opening")
 		cb.RecordFailure()
-		
+
 		if i < config.FailureThreshold-1 {
 			assert.Equal(t, StateClosed, cb.GetState(), "should still be closed")
 		}
@@ -141,7 +141,7 @@ func TestCircuitBreaker_HalfOpenToClosedOnSuccess(t *testing.T) {
 	// Record successes until threshold
 	for i := 0; i < config.SuccessThreshold; i++ {
 		cb.RecordSuccess()
-		
+
 		if i < config.SuccessThreshold-1 {
 			assert.Equal(t, StateHalfOpen, cb.GetState(), "should still be half-open")
 		}
@@ -205,7 +205,7 @@ func TestCircuitBreaker_Reset(t *testing.T) {
 	// Should be closed and allow requests
 	assert.Equal(t, StateClosed, cb.GetState())
 	assert.True(t, cb.Allow())
-	
+
 	metrics := cb.GetMetrics()
 	assert.Equal(t, 0, metrics.Failures)
 	assert.Equal(t, 0, metrics.Successes)
@@ -223,7 +223,7 @@ func TestCircuitBreaker_Metrics(t *testing.T) {
 	// Make some requests and record results
 	for i := 0; i < 10; i++ {
 		assert.True(t, cb.Allow())
-		
+
 		if i%2 == 0 {
 			cb.RecordSuccess()
 		} else {
@@ -238,44 +238,44 @@ func TestCircuitBreaker_Metrics(t *testing.T) {
 	assert.Equal(t, int64(5), metrics.TotalFailures)
 	assert.Equal(t, float64(0.5), metrics.SuccessRate())
 	assert.Equal(t, float64(0.5), metrics.FailureRate())
-	
+
 	// The current failures should be reset after successes
 	assert.Equal(t, 1, metrics.Failures) // Last operation was a failure
 }
 
 func TestCircuitBreakerMetrics_Rates(t *testing.T) {
 	tests := []struct {
-		name               string
-		totalRequests      int64
-		totalSuccesses     int64
+		name                string
+		totalRequests       int64
+		totalSuccesses      int64
 		expectedSuccessRate float64
 		expectedFailureRate float64
 	}{
 		{
-			name:               "no requests",
-			totalRequests:      0,
-			totalSuccesses:     0,
+			name:                "no requests",
+			totalRequests:       0,
+			totalSuccesses:      0,
 			expectedSuccessRate: 0,
 			expectedFailureRate: 0,
 		},
 		{
-			name:               "all successes",
-			totalRequests:      10,
-			totalSuccesses:     10,
+			name:                "all successes",
+			totalRequests:       10,
+			totalSuccesses:      10,
 			expectedSuccessRate: 1.0,
 			expectedFailureRate: 0,
 		},
 		{
-			name:               "all failures",
-			totalRequests:      10,
-			totalSuccesses:     0,
+			name:                "all failures",
+			totalRequests:       10,
+			totalSuccesses:      0,
 			expectedSuccessRate: 0,
 			expectedFailureRate: 1.0,
 		},
 		{
-			name:               "mixed results",
-			totalRequests:      10,
-			totalSuccesses:     7,
+			name:                "mixed results",
+			totalRequests:       10,
+			totalSuccesses:      7,
 			expectedSuccessRate: 0.7,
 			expectedFailureRate: 0.3,
 		},
@@ -344,7 +344,7 @@ func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 
 	totalOperations := numGoroutines * numOperationsPerGoroutine
-	t.Logf("Total operations: %d, Allowed: %d, Denied: %d", 
+	t.Logf("Total operations: %d, Allowed: %d, Denied: %d",
 		totalOperations, allowedCount, deniedCount)
 
 	// Verify that all operations were accounted for
@@ -352,7 +352,7 @@ func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
 
 	// Get final metrics
 	metrics := cb.GetMetrics()
-	t.Logf("Final state: %s, Success rate: %.2f", 
+	t.Logf("Final state: %s, Success rate: %.2f",
 		metrics.State.String(), metrics.SuccessRate())
 
 	// Should have some operations (exact number depends on timing)
@@ -369,7 +369,7 @@ func TestCircuitBreaker_StateTransitions(t *testing.T) {
 	cb := NewCircuitBreaker(config)
 
 	// Test complete state transition cycle
-	
+
 	// 1. Start in Closed state
 	assert.Equal(t, StateClosed, cb.GetState())
 	assert.True(t, cb.Allow())
@@ -422,7 +422,7 @@ func TestCircuitBreaker_EdgeCases(t *testing.T) {
 	// Single success should close circuit
 	assert.True(t, cb.Allow())
 	assert.Equal(t, StateHalfOpen, cb.GetState())
-	
+
 	cb.RecordSuccess()
 	assert.Equal(t, StateClosed, cb.GetState())
 }

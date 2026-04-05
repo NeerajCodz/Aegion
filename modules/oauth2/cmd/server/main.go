@@ -42,11 +42,11 @@ type Config struct {
 		IdleTimeout  time.Duration `yaml:"idle_timeout"`
 	} `yaml:"server"`
 	OAuth2 struct {
-		Issuer              string        `yaml:"issuer"`
-		BaseURL             string        `yaml:"base_url"`
-		DeviceCodeTTL       time.Duration `yaml:"device_code_ttl"`
-		DevicePollInterval  int           `yaml:"device_poll_interval"`
-		DeviceVerificationURI string      `yaml:"device_verification_uri"`
+		Issuer                string        `yaml:"issuer"`
+		BaseURL               string        `yaml:"base_url"`
+		DeviceCodeTTL         time.Duration `yaml:"device_code_ttl"`
+		DevicePollInterval    int           `yaml:"device_poll_interval"`
+		DeviceVerificationURI string        `yaml:"device_verification_uri"`
 	} `yaml:"oauth2"`
 }
 
@@ -56,7 +56,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("Aegion OAuth2 Module v%s\n", version)
+		_, _ = fmt.Printf("Aegion OAuth2 Module v%s\n", version)
 		return
 	}
 
@@ -205,27 +205,27 @@ type deviceStoreAdapter struct {
 }
 
 func (a *deviceStoreAdapter) GetDeviceCode(ctx context.Context, deviceCode string) (*store.DeviceCode, error) {
-	return a.Store.GetDeviceCodeByDeviceCode(ctx, deviceCode)
+	return a.GetDeviceCodeByDeviceCode(ctx, deviceCode)
 }
 
 func (a *deviceStoreAdapter) MarkDeviceCodeApproved(ctx context.Context, deviceCode, identityID string, scopes []string) error {
-	dc, err := a.Store.GetDeviceCodeByDeviceCode(ctx, deviceCode)
+	dc, err := a.GetDeviceCodeByDeviceCode(ctx, deviceCode)
 	if err != nil {
 		return err
 	}
-	return a.Store.ApproveDeviceCode(ctx, dc.UserCode, identityID, "")
+	return a.ApproveDeviceCode(ctx, dc.UserCode, identityID, "")
 }
 
 func (a *deviceStoreAdapter) MarkDeviceCodeDenied(ctx context.Context, deviceCode string) error {
-	dc, err := a.Store.GetDeviceCodeByDeviceCode(ctx, deviceCode)
+	dc, err := a.GetDeviceCodeByDeviceCode(ctx, deviceCode)
 	if err != nil {
 		return err
 	}
-	return a.Store.DenyDeviceCode(ctx, dc.UserCode)
+	return a.DenyDeviceCode(ctx, dc.UserCode)
 }
 
 func (a *deviceStoreAdapter) MarkDeviceCodeUsed(ctx context.Context, deviceCode string) error {
-	return a.Store.DeleteDeviceCode(ctx, deviceCode)
+	return a.DeleteDeviceCode(ctx, deviceCode)
 }
 
 type accessTokenValidator struct {

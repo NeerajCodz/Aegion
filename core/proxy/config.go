@@ -112,12 +112,12 @@ type RateLimitConfig struct {
 // DefaultConfig returns sensible proxy defaults.
 func DefaultConfig() Config {
 	return Config{
-		Upstreams:               make(map[string]Upstream),
-		Timeout:                 30 * time.Second,
-		MaxRetries:              3,
-		RetryBackoff:            time.Second,
-		EnableHealthChecks:      true,
-		HealthCheckInterval:     30 * time.Second,
+		Upstreams:           make(map[string]Upstream),
+		Timeout:             30 * time.Second,
+		MaxRetries:          3,
+		RetryBackoff:        time.Second,
+		EnableHealthChecks:  true,
+		HealthCheckInterval: 30 * time.Second,
 		Transport: TransportConfig{
 			MaxIdleConns:          100,
 			MaxIdleConnsPerHost:   10,

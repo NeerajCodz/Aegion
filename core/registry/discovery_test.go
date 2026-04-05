@@ -687,9 +687,9 @@ func TestDiscoveryEndpointWithMetadata(t *testing.T) {
 			{Type: EndpointHTTP, URL: "http://localhost:8080"},
 		},
 		Metadata: map[string]string{
-			"version":      "1.0.0",
-			"region":       "us-west",
-			"environment":  "production",
+			"version":     "1.0.0",
+			"region":      "us-west",
+			"environment": "production",
 		},
 	}
 	_, err := registry.Register(req)

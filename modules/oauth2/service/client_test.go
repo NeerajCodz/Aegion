@@ -13,19 +13,19 @@ import (
 )
 
 type mockClientStore struct {
-	client        *store.Client
-	clients       []*store.Client
-	createErr     error
-	getErr        error
-	updateErr     error
-	updateHashErr error
-	deleteErr     error
-	listErr       error
-	lastCreated   *store.Client
-	lastUpdated   *store.Client
-	lastSecretID  string
+	client         *store.Client
+	clients        []*store.Client
+	createErr      error
+	getErr         error
+	updateErr      error
+	updateHashErr  error
+	deleteErr      error
+	listErr        error
+	lastCreated    *store.Client
+	lastUpdated    *store.Client
+	lastSecretID   string
 	lastSecretHash string
-	lastDeletedID string
+	lastDeletedID  string
 }
 
 func (m *mockClientStore) CreateClient(ctx context.Context, client *store.Client) error {
