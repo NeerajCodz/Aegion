@@ -3,6 +3,17 @@
 -- Migration: 0001_oauth2_clients
 -- =============================================================================
 
+-- Ensure UUID generation and shared updated_at trigger function exist
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- OAuth2 Clients
 CREATE TABLE oa2_clients (
     id                          TEXT PRIMARY KEY,
