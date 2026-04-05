@@ -2,6 +2,9 @@
 
 This document defines the canonical monorepo layout for Aegion. The structure mirrors the runtime model: `core` is the hub, `modules/` contains every capability as a separately deployable image, `rust/` contains all performance-critical engines, and `internal/` holds the shared platform contracts everything depends on.
 
+> **Implementation status (current repo):** currently implemented modules are `password`, `magic_link`, and `admin`.
+> Additional module trees shown below are the target structure for future phases.
+
 ---
 
 ## Full layout
@@ -235,7 +238,9 @@ aegion/
 │
 ├── configs/
 │   ├── aegion.yaml                ← development default config (safe defaults, local URLs)
-│   └── aegion.prod.yaml.example   ← production config template with all fields annotated
+│   ├── aegion.production.yaml     ← production-oriented configuration
+│   ├── aegion.staging.yaml        ← staging-oriented configuration
+│   └── aegion.test.yaml           ← test configuration
 │
 ├── build/
 │   ├── Dockerfile.base            ← shared base image: Go + Rust toolchain + CA certs + non-root user
@@ -321,7 +326,7 @@ Thin shell scripts that wrap build and codegen commands. No business logic here.
 
 ### `configs/`
 
-Config templates only. The development default (`aegion.yaml`) uses safe localhost defaults and is safe to commit. The production template (`aegion.prod.yaml.example`) has all fields documented with production guidance and placeholder values — it is never used directly.
+Config files are environment-specific. The development default (`aegion.yaml`) uses safe localhost defaults; `aegion.production.yaml`, `aegion.staging.yaml`, and `aegion.test.yaml` provide environment variants.
 
 ### `build/`
 

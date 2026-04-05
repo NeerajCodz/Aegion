@@ -30,6 +30,9 @@ If you change runtime values, behavior changes without changing product shape.
 
 After first boot, many operational values are expected to be managed in runtime config storage.
 
+> **Implementation status (current repo):** active module config blocks are `password`, `magic_link`, and `admin`.
+> Other module examples in this document are forward-looking target-state examples.
+
 ---
 
 ## Super-repo resolution model

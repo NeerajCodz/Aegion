@@ -2,6 +2,9 @@
 
 Every Aegion capability is a module. Every module is a standalone Docker image. `core` pulls and orchestrates them.
 
+> **Implementation status (current repo):** implemented modules are `password`, `magic_link`, and `admin` (plus `core`).
+> Other modules in this document describe the target architecture and roadmap direction.
+
 ---
 
 ## The fundamental model

@@ -26,14 +26,14 @@ cd Aegion
 go mod download
 
 # Setup Rust components
-cd rust/security-engine
-cargo build
-cd ../..
+cd rust
+cargo build --workspace
+cd ..
 
 # Install Node.js dependencies (admin panel)
-cd web/admin
+cd modules/admin/ui
 npm install
-cd ../..
+cd ../../..
 ```
 
 ### 2. Database Setup
@@ -49,7 +49,7 @@ docker run -d \
   postgres:14
 
 # Run migrations
-go run cmd/aegion/main.go migrate --config configs/development.yaml
+go run ./cmd/aegion -migrate -config configs/development.yaml
 ```
 
 ### 3. Configuration
@@ -95,17 +95,17 @@ email:
 
 ```bash
 # Run the main server
-go run cmd/aegion/main.go serve --config configs/development.yaml
+go run ./cmd/aegion -config configs/development.yaml
 
-# With live reload (using air)
-air -c .air.toml
+# Optional live reload wrapper
+make dev
 ```
 
 #### Admin Panel (Development)
 
 ```bash
 # Start development server
-cd web/admin
+cd modules/admin/ui
 npm run dev
 
 # Panel available at http://localhost:3000
@@ -115,7 +115,7 @@ npm run dev
 
 ```bash
 # Use development compose file
-docker-compose -f docker-compose.dev.yml up
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up
 ```
 
 ## Building
@@ -127,22 +127,23 @@ docker-compose -f docker-compose.dev.yml up
 make build
 
 # Or build manually
-go build -o build/aegion cmd/aegion/main.go
-cargo build --release --manifest-path rust/security-engine/Cargo.toml
-cd web/admin && npm run build
+go build -o bin/aegion ./cmd/aegion
+cd rust && cargo build --release --workspace
+cd ..
+cd modules/admin/ui && npm run build
 ```
 
 ### Cross-Platform Builds
 
 ```bash
 # Linux
-GOOS=linux GOARCH=amd64 go build -o build/aegion-linux cmd/aegion/main.go
+GOOS=linux GOARCH=amd64 go build -o build/aegion-linux ./cmd/aegion
 
 # Windows  
-GOOS=windows GOARCH=amd64 go build -o build/aegion.exe cmd/aegion/main.go
+GOOS=windows GOARCH=amd64 go build -o build/aegion.exe ./cmd/aegion
 
 # macOS
-GOOS=darwin GOARCH=amd64 go build -o build/aegion-darwin cmd/aegion/main.go
+GOOS=darwin GOARCH=amd64 go build -o build/aegion-darwin ./cmd/aegion
 ```
 
 ## Testing
@@ -158,10 +159,10 @@ go test -v -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
 
 # Run specific package
-go test ./internal/identity
+go test ./core/session
 
 # Run Rust tests
-cd rust/security-engine
+cd rust
 cargo test
 ```
 
@@ -169,20 +170,20 @@ cargo test
 
 ```bash
 # Start test database
-docker-compose -f docker-compose.test.yml up -d postgres
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d postgres redis
 
 # Run integration tests
 go test -tags=integration ./tests/...
 
 # Clean up
-docker-compose -f docker-compose.test.yml down -v
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down -v
 ```
 
 ### E2E Tests
 
 ```bash
 # Start full environment
-docker-compose -f docker-compose.test.yml up -d
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
 
 # Run end-to-end tests
 cd tests/e2e
@@ -236,7 +237,7 @@ Key style rules:
 
 ```bash
 # Format code
-cd rust/security-engine
+cd rust
 cargo fmt
 
 # Run Clippy linter
@@ -249,7 +250,7 @@ cargo geiger
 ### JavaScript/TypeScript
 
 ```bash
-cd web/admin
+cd modules/admin/ui
 
 # Format with Prettier
 npm run format
@@ -346,7 +347,7 @@ func init() {
 Add new security policies in Rust:
 
 ```bash
-cd rust/security-engine/src
+cd rust/crypto/src
 mkdir new_policy
 cd new_policy
 ```
@@ -372,7 +373,7 @@ impl Policy for NewPolicy {
 
 ```bash
 # Generate new migration
-go run cmd/aegion/main.go migrate create add_new_table
+migrate create -ext sql -dir core/migrations -seq add_new_table
 
 # Edit migration files in migrations/
 # - {timestamp}_add_new_table.up.sql
@@ -383,13 +384,10 @@ go run cmd/aegion/main.go migrate create add_new_table
 
 ```bash
 # Apply migrations
-go run cmd/aegion/main.go migrate up --config configs/development.yaml
+go run ./cmd/aegion -migrate -config configs/development.yaml
 
-# Rollback last migration
-go run cmd/aegion/main.go migrate down 1 --config configs/development.yaml
-
-# Check status
-go run cmd/aegion/main.go migrate status --config configs/development.yaml
+# Note: rollback/status subcommands are not exposed by the current CLI.
+# Use your migration tooling directly for rollback workflows.
 ```
 
 ## Debugging
@@ -398,7 +396,7 @@ go run cmd/aegion/main.go migrate status --config configs/development.yaml
 
 ```bash
 # Run with debugger
-dlv debug cmd/aegion/main.go -- serve --config configs/development.yaml
+dlv debug ./cmd/aegion -- -config configs/development.yaml
 
 # Attach to running process
 dlv attach $(pgrep aegion)
@@ -419,7 +417,7 @@ logging:
 
 ```bash
 # Enable query logging
-DATABASE_LOG_QUERIES=true go run cmd/aegion/main.go serve
+DATABASE_LOG_QUERIES=true go run ./cmd/aegion -config configs/development.yaml
 
 # Connect to development database
 psql postgres://aegion:aegion_dev@localhost:5432/aegion_dev
@@ -488,7 +486,7 @@ go clean -modcache
 go mod download
 
 # Rebuild Rust components
-cd rust/security-engine && cargo clean && cargo build
+cd rust && cargo clean && cargo build --workspace
 ```
 
 **Database Connection**:
@@ -506,7 +504,7 @@ psql postgres://aegion:aegion_dev@localhost:5432/aegion_dev -c "SELECT 1;"
 netstat -tulpn | grep :8080
 
 # Use different port
-AEGION_PORT=8081 go run cmd/aegion/main.go serve
+AEGION_PORT=8081 go run ./cmd/aegion -config configs/development.yaml
 ```
 
 ### Getting Help

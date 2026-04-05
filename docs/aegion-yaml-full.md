@@ -215,7 +215,6 @@ secrets:
 #  Change the password immediately after first login via /aegion → Settings.
 # ─────────────────────────────────────────────────────────────────────────────
 operator:
-  username: admin
   email:    admin@example.com
   password: CHANGE-ME-before-production    # Minimum 12 characters
 

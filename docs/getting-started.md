@@ -6,8 +6,8 @@ Welcome to Aegion! This guide will help you set up and run your identity platfor
 
 Before starting, ensure you have the following installed:
 
-- **Go 1.22+** - Required for building the core API
-- **Rust 1.75+** - Required for the security engine
+- **Go 1.25.5+** - Required for building the core API
+- **Rust 1.81+** - Required for Rust security components
 - **Docker & Docker Compose** - For containerized deployment
 - **Node.js 20+** - For admin panel development
 - **PostgreSQL 14+** - Database (can use Docker)
@@ -27,10 +27,10 @@ cd Aegion
 
 ```bash
 # Start all services
-docker-compose up -d
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
 
 # Check status
-docker-compose ps
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml ps
 ```
 
 This will start:
@@ -40,16 +40,16 @@ This will start:
 
 ### 3. Bootstrap Admin User
 
-Create your first admin user:
+Set your bootstrap operator credentials before first boot:
 
 ```bash
-# Bootstrap with email
-docker-compose exec aegion aegion bootstrap --admin-email admin@example.com
+# Edit configs/aegion.yaml
+operator:
+  email: admin@example.com
+  password: your-secure-password
 
-# Or with custom password
-docker-compose exec aegion aegion bootstrap \
-  --admin-email admin@example.com \
-  --admin-password your-secure-password
+# Optional: force bootstrap when required
+go run ./cmd/aegion -admin-bootstrap -config configs/aegion.yaml
 ```
 
 ### 4. Access the Admin Panel
@@ -74,7 +74,7 @@ docker run -d \
 
 # Run migrations
 cd Aegion
-go run cmd/aegion/main.go migrate --config configs/aegion.yaml
+go run ./cmd/aegion -migrate -config configs/aegion.yaml
 ```
 
 ### 2. Build and Run
@@ -84,7 +84,7 @@ go run cmd/aegion/main.go migrate --config configs/aegion.yaml
 make build
 
 # Run with configuration
-./aegion.exe serve --config configs/aegion.yaml
+./bin/aegion -config configs/aegion.yaml
 ```
 
 ## Configuration
@@ -174,23 +174,21 @@ ports:
 
 ```bash
 # Check PostgreSQL is running
-docker-compose logs postgres
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml logs postgres
 
 # Reset database
-docker-compose down -v
-docker-compose up -d
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down -v
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
 ```
 
 ### Admin Bootstrap Fails
 
 ```bash
 # Check logs
-docker-compose logs aegion
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml logs aegion
 
-# Manual user creation
-docker-compose exec aegion aegion admin create-operator \
-  --email admin@example.com \
-  --password your-password
+# Force bootstrap manually
+go run ./cmd/aegion -admin-bootstrap -config configs/aegion.yaml
 ```
 
 For more help, check the [GitHub Issues](https://github.com/NeerajCodz/Aegion/issues) or create a new one.

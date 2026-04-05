@@ -14,11 +14,11 @@ git clone https://github.com/NeerajCodz/Aegion
 cd Aegion
 
 # Start services
-docker-compose up -d
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
 
 # Check status
-docker-compose ps
-docker-compose logs aegion
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml ps
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml logs aegion
 ```
 
 ### Production Docker Compose
@@ -26,7 +26,7 @@ docker-compose logs aegion
 Use the production configuration:
 
 ```yaml
-# docker-compose.prod.yml
+# deploy/docker-compose.prod.yml
 version: '3.8'
 
 services:
@@ -38,7 +38,7 @@ services:
     environment:
       - AEGION_CONFIG=/etc/aegion/aegion.yaml
     volumes:
-      - ./configs/production.yaml:/etc/aegion/aegion.yaml:ro
+      - ./configs/aegion.production.yaml:/etc/aegion/aegion.yaml:ro
       - aegion_data:/var/lib/aegion
     depends_on:
       - postgres
@@ -88,7 +88,7 @@ secrets:
 
 ```bash
 # Deploy production
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d
 ```
 
 ## Environment Variables Reference
@@ -142,7 +142,7 @@ docker-compose -f docker-compose.prod.yml up -d
 ### Complete Production Config
 
 ```yaml
-# configs/production.yaml
+# configs/aegion.production.yaml
 server:
   host: "0.0.0.0"
   port: 8080
@@ -216,7 +216,7 @@ SMTP_PASSWORD=your-smtp-password
 ### Using Docker Secrets
 
 ```yaml
-# In docker-compose.prod.yml
+# In deploy/docker-compose.prod.yml
 services:
   aegion:
     secrets:
@@ -336,7 +336,7 @@ curl http://localhost:8080/health
 ### Docker Health Checks
 
 ```yaml
-# In docker-compose.yml
+# In deploy/docker-compose.yml
 healthcheck:
   test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
   interval: 30s
@@ -411,7 +411,7 @@ tracing:
 Run multiple Aegion instances:
 
 ```yaml
-# docker-compose.scale.yml
+# deploy/docker-compose.scale.yml
 services:
   aegion:
     deploy:
@@ -438,7 +438,7 @@ database:
 Use PgBouncer for connection pooling:
 
 ```yaml
-# docker-compose.yml
+# deploy/docker-compose.yml
 pgbouncer:
   image: pgbouncer/pgbouncer:latest
   environment:
@@ -521,7 +521,7 @@ backup:
 psql -U aegion -h localhost aegion < backup.sql
 
 # 2. Restart services
-docker-compose up -d
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d
 
 # 3. Verify functionality
 curl http://localhost:8080/health
@@ -652,19 +652,19 @@ security:
 **Container Won't Start**:
 ```bash
 # Check logs
-docker-compose logs aegion
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml logs aegion
 
 # Check configuration
-docker-compose exec aegion aegion validate --config /etc/aegion/aegion.yaml
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml exec aegion /app/aegion -migrate -config /config/aegion.yaml
 ```
 
 **Database Connection Issues**:
 ```bash
 # Test database connectivity
-docker-compose exec aegion pg_isready -h postgres -p 5432
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml exec aegion pg_isready -h postgres -p 5432
 
-# Check migrations
-docker-compose exec aegion aegion migrate status
+# Check migration logs
+docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml logs aegion | grep -i migration
 ```
 
 **SSL/TLS Issues**:
@@ -682,7 +682,7 @@ openssl s_client -connect your-domain.com:443
 docker stats
 
 # Enable debug logging temporarily
-docker-compose exec aegion aegion serve --log-level debug
+AEGION_LOG_LEVEL=debug docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d
 ```
 
 For more help, check the [Development Guide](development.md) or create an issue on [GitHub](https://github.com/NeerajCodz/Aegion/issues).
