@@ -8,5 +8,6 @@ f348124f3287716c3f471cd83115704761f5c8a3:modules/admin/scim/handler_test.go:gene
 ed155adf31fe83e4e2580d182f97f9820da5782f:modules/magic_link/service/service_test.go:generic-api-key:124
 ed155adf31fe83e4e2580d182f97f9820da5782f:modules/magic_link/service/service_test.go:generic-api-key:125
 1942289adfe67aec27c06654e39d93bb80a36508:internal/platform/config/config_test.go:generic-api-key:175
+da21c81c1364cb87590aa98567f3023aa5687117:internal/platform/config/config_test.go:generic-api-key:177
 65a4434dc96db54690bf384ba79f738250447051:docs/deployment.md:generic-api-key:631
 484a7e81899dad303d15def0c9924e6df901cd1b:rust/crypto/src/encrypt.rs:generic-api-key:199
