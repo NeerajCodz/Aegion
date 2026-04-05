@@ -173,7 +173,7 @@ func TestConcurrentWorkerRegisterAndAccess(t *testing.T) {
 
 // TestConcurrentWorkerStartStop tests concurrent start/stop operations
 func TestConcurrentWorkerStartStop(t *testing.T) {
-	var managers []*Manager
+	managers := make([]*Manager, 5)
 	var wg sync.WaitGroup
 
 	// Create managers concurrently
@@ -192,7 +192,7 @@ func TestConcurrentWorkerStartStop(t *testing.T) {
 				}
 				manager.Register(worker)
 			}
-			managers = append(managers, manager)
+			managers[id] = manager
 		}(i)
 	}
 

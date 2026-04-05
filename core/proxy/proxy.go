@@ -46,7 +46,7 @@ type Proxy struct {
 	breakers    map[string]*CircuitBreaker
 	breakersMux sync.RWMutex
 	logger      zerolog.Logger
-	
+
 	// Health checking
 	healthCheckers map[string]*HealthChecker
 	healthMux      sync.RWMutex
@@ -321,7 +321,7 @@ func (p *Proxy) injectSessionHeaders(req *http.Request, sess *session.Session) {
 	req.Header.Set("X-Aegion-Identity-ID", sess.IdentityID.String())
 	req.Header.Set("X-Aegion-AAL", string(sess.AAL))
 	req.Header.Set("X-Aegion-Authenticated-At", sess.AuthenticatedAt.Format(time.RFC3339))
-	
+
 	if sess.IsImpersonation && sess.ImpersonatorID != nil {
 		req.Header.Set("X-Aegion-Impersonation", "true")
 		req.Header.Set("X-Aegion-Impersonator-ID", sess.ImpersonatorID.String())
@@ -331,7 +331,7 @@ func (p *Proxy) injectSessionHeaders(req *http.Request, sess *session.Session) {
 // addForwardedHeaders adds standard forwarded headers.
 func (p *Proxy) addForwardedHeaders(req, original *http.Request) {
 	clientIP := getClientIP(original)
-	
+
 	// X-Forwarded-For
 	if prior := original.Header.Get("X-Forwarded-For"); prior != "" {
 		req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
@@ -362,10 +362,24 @@ func (p *Proxy) startHealthCheckers() {
 	defer p.healthMux.Unlock()
 
 	for name, checker := range p.healthCheckers {
-		go func(name string, checker *HealthChecker) {
-			p.logger.Info().Str("upstream", name).Msg("starting health checker")
-			checker.Start()
-		}(name, checker)
+		p.logger.Info().Str("upstream", name).Msg("starting health checker")
+		go checker.Start()
+	}
+}
+
+// Close shuts down background components started by the proxy.
+func (p *Proxy) Close() {
+	p.healthMux.Lock()
+	defer p.healthMux.Unlock()
+
+	for name, checker := range p.healthCheckers {
+		checker.Stop()
+		delete(p.healthCheckers, name)
+		p.logger.Info().Str("upstream", name).Msg("stopped health checker")
+	}
+
+	if transport, ok := p.transport.(*http.Transport); ok {
+		transport.CloseIdleConnections()
 	}
 }
 
@@ -402,7 +416,7 @@ func (p *Proxy) handleError(w http.ResponseWriter, r *http.Request, err error, s
 
 func (p *Proxy) handleRateLimitExceeded(w http.ResponseWriter, r *http.Request, waitTime time.Duration, err error, start time.Time) {
 	requestID := getRequestIDFromContext(r.Context())
-	
+
 	// Add rate limit headers
 	w.Header().Set("X-RateLimit-Limit", "100") // This should come from config
 	w.Header().Set("X-RateLimit-Remaining", "0")

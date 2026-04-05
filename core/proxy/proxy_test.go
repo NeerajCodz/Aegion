@@ -37,6 +37,13 @@ func (w *failingWriteResponseWriter) Write([]byte) (int, error) {
 	return 0, errors.New("forced write failure")
 }
 
+func newProxyForTest(t testing.TB, config Config, rules *RuleEngine, logger zerolog.Logger) *Proxy {
+	t.Helper()
+	proxy := NewProxy(config, rules, logger)
+	t.Cleanup(proxy.Close)
+	return proxy
+}
+
 func TestProxy_ServeHTTP(t *testing.T) {
 	// Create test upstream server
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +79,7 @@ func TestProxy_ServeHTTP(t *testing.T) {
 
 	// Create proxy
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	tests := []struct {
 		name           string
@@ -147,7 +154,7 @@ func TestProxy_Forward(t *testing.T) {
 
 	// Create proxy
 	config := DefaultConfig()
-	proxy := NewProxy(config, nil, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, nil, zerolog.New(zerolog.NewTestWriter(t)))
 
 	// Create test request
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -201,7 +208,7 @@ func TestProxy_ForwardWithSessionHeaders(t *testing.T) {
 
 	// Create proxy
 	config := DefaultConfig()
-	proxy := NewProxy(config, nil, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, nil, zerolog.New(zerolog.NewTestWriter(t)))
 
 	// Create test request with session
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -233,7 +240,7 @@ func TestProxy_ForwardWithPathRewrite(t *testing.T) {
 
 	// Create proxy
 	config := DefaultConfig()
-	proxy := NewProxy(config, nil, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, nil, zerolog.New(zerolog.NewTestWriter(t)))
 
 	// Create test request
 	req := httptest.NewRequest("GET", "/api/v1/users", nil)
@@ -294,7 +301,7 @@ func TestProxy_CircuitBreakerIntegration(t *testing.T) {
 
 	// Create proxy
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	// Make requests to the failing upstream
 	// Circuit breaker behavior depends on implementation
@@ -343,7 +350,7 @@ func TestProxy_RequestTimeout(t *testing.T) {
 
 	// Create proxy
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	// Make request that should timeout
 	req := httptest.NewRequest("GET", "/slow", nil)
@@ -379,7 +386,7 @@ func TestProxy_ServeHTTP_RuleRateLimitExceeded(t *testing.T) {
 		},
 	})
 
-	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, engine, zerolog.New(zerolog.NewTestWriter(t)))
 	req := httptest.NewRequest("GET", "/limited", nil)
 	w := httptest.NewRecorder()
 
@@ -410,7 +417,7 @@ func TestProxy_ServeHTTP_GlobalRateLimitExceeded(t *testing.T) {
 		},
 	})
 
-	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, engine, zerolog.New(zerolog.NewTestWriter(t)))
 	proxy.limiter = NewRateLimiter(RateLimitConfig{
 		RequestsPerSecond: 0,
 		ByIP:              true,
@@ -447,7 +454,7 @@ func TestProxy_ServeHTTP_AccessErrorFromCheckAccess(t *testing.T) {
 		},
 	})
 
-	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, engine, zerolog.New(zerolog.NewTestWriter(t)))
 	proxy.limiter = nil
 
 	req := httptest.NewRequest("GET", "/protected", nil)
@@ -463,7 +470,7 @@ func TestProxy_ServeHTTP_AccessErrorFromCheckAccess(t *testing.T) {
 func TestProxy_HandleRateLimitExceeded(t *testing.T) {
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = req.WithContext(withRequestID(req.Context(), "test-123"))
@@ -483,7 +490,7 @@ func TestProxy_HandleRateLimitExceeded(t *testing.T) {
 func TestProxy_HandleAccessError_AuthenticationRequired(t *testing.T) {
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = req.WithContext(withRequestID(req.Context(), "test-123"))
@@ -501,7 +508,7 @@ func TestProxy_HandleAccessError_AuthenticationRequired(t *testing.T) {
 func TestProxy_HandleAccessError_NoSession(t *testing.T) {
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = req.WithContext(withRequestID(req.Context(), "test-123"))
@@ -538,7 +545,7 @@ func TestProxy_HandleAccessError_StatusMapping(t *testing.T) {
 
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -555,7 +562,7 @@ func TestProxy_HandleAccessError_StatusMapping(t *testing.T) {
 }
 
 func TestProxy_WriteErrorResponse_WriteFailure(t *testing.T) {
-	proxy := NewProxy(DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
 	w := &failingWriteResponseWriter{}
 
 	proxy.writeErrorResponse(w, http.StatusBadGateway, "backend unavailable", "req-1")
@@ -597,7 +604,7 @@ func TestResponseWriter_WriteHeader_MultipleWriteAttempts(t *testing.T) {
 func TestProxy_GetCircuitBreaker_Creates(t *testing.T) {
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	breaker1 := proxy.getCircuitBreaker("test-upstream")
 	assert.NotNil(t, breaker1)
@@ -611,7 +618,7 @@ func TestProxy_GetCircuitBreaker_Creates(t *testing.T) {
 func TestProxy_GetCircuitBreaker_DifferentUpstreams(t *testing.T) {
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	breaker1 := proxy.getCircuitBreaker("upstream-1")
 	breaker2 := proxy.getCircuitBreaker("upstream-2")
@@ -627,7 +634,7 @@ func TestProxy_GetCircuitBreaker_DifferentUpstreams(t *testing.T) {
 func TestProxy_InjectSessionHeaders_WithImpersonation(t *testing.T) {
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	impersonatorID := uuid.New()
 	sess := &session.Session{
@@ -660,7 +667,7 @@ func TestProxy_GetCircuitBreaker_UsesConfiguredUpstreamBreaker(t *testing.T) {
 		},
 	}
 
-	proxy := NewProxy(config, nil, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, nil, zerolog.New(zerolog.NewTestWriter(t)))
 	delete(proxy.breakers, "custom")
 
 	breaker := proxy.getCircuitBreaker("custom")
@@ -674,7 +681,7 @@ func TestProxy_GetCircuitBreaker_UsesConfiguredUpstreamBreaker(t *testing.T) {
 func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
 	config := DefaultConfig()
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, nil, logger)
+	proxy := newProxyForTest(t, config, nil, logger)
 
 	req := httptest.NewRequest("GET", "https://example.com/test", nil)
 	req.TLS = &tls.ConnectionState{} // Indicates HTTPS
@@ -688,7 +695,7 @@ func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
 }
 
 func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
-	proxy := NewProxy(DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
 
 	original := httptest.NewRequest("GET", "http://edge.example.com/original", nil)
 	original.Host = "edge.example.com"
@@ -722,7 +729,7 @@ func TestProxy_ServeHTTP_PreservesExistingRequestID(t *testing.T) {
 	}
 	engine := NewRuleEngine(rules)
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	existingID := "custom-123"
 	req := httptest.NewRequest("GET", "/test", nil)
@@ -747,7 +754,7 @@ func TestProxy_ServeHTTP_NoRuleMatched(t *testing.T) {
 	})
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	req := httptest.NewRequest("GET", "/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -775,7 +782,7 @@ func TestProxy_ServeHTTP_CircuitBreakerOpen(t *testing.T) {
 	})
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	// Manually open the circuit breaker
 	breaker := proxy.getCircuitBreaker("test")
@@ -815,7 +822,7 @@ func TestProxy_ServeHTTP_CircuitBreakerRejectsWhenOpen(t *testing.T) {
 		{ID: "test", Path: "/test", Target: "test", Enabled: true, Priority: 100},
 	})
 
-	proxy := NewProxy(config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+	proxy := newProxyForTest(t, config, engine, zerolog.New(zerolog.NewTestWriter(t)))
 	proxy.limiter = nil
 
 	breaker := proxy.getCircuitBreaker("test")
@@ -842,7 +849,7 @@ func TestProxy_ServeHTTP_InvalidUpstreamURL(t *testing.T) {
 	})
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -860,7 +867,7 @@ func TestProxy_ServeHTTP_UpstreamNotFound(t *testing.T) {
 	})
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -876,7 +883,7 @@ func TestProxy_RequestIDGeneration(t *testing.T) {
 	engine := NewRuleEngine([]Rule{})
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	req1 := httptest.NewRequest("GET", "/test", nil)
 	req2 := httptest.NewRequest("GET", "/test", nil)
@@ -917,7 +924,7 @@ func TestProxy_RequestTimeout_ContextCancellation(t *testing.T) {
 	})
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	req := httptest.NewRequest("GET", "/slow", nil)
 	w := httptest.NewRecorder()
@@ -944,7 +951,7 @@ func TestProxy_ConcurrentRequests(t *testing.T) {
 	})
 
 	logger := zerolog.New(zerolog.NewTestWriter(t))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(t, config, engine, logger)
 
 	// Send concurrent requests
 	done := make(chan bool, 100)
@@ -992,7 +999,7 @@ func BenchmarkProxy_ServeHTTP(b *testing.B) {
 	engine := NewRuleEngine(rules)
 
 	logger := zerolog.New(zerolog.NewTestWriter(&testing.T{}))
-	proxy := NewProxy(config, engine, logger)
+	proxy := newProxyForTest(b, config, engine, logger)
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {

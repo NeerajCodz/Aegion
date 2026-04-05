@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -298,6 +299,7 @@ type fakeStore struct {
 	apiKeysByPrefix map[string]*store.APIKey
 	updatedLastUsed bool
 	auditLogs       []*store.AuditLogEntry
+	auditLogsMu     sync.RWMutex
 	createdAPIKey   *store.APIKey
 
 	authenticateFn       func(ctx context.Context, email, password string) (*store.Operator, error)
@@ -347,6 +349,8 @@ func (f *fakeStore) ListAuditLogs(ctx context.Context, filter store.AuditFilter,
 }
 
 func (f *fakeStore) LogAction(ctx context.Context, entry *store.AuditLogEntry) error {
+	f.auditLogsMu.Lock()
+	defer f.auditLogsMu.Unlock()
 	f.auditLogs = append(f.auditLogs, entry)
 	return nil
 }
@@ -1159,10 +1163,16 @@ func TestAuditLogMiddlewareCapturesStatus(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	}))
 	handler.ServeHTTP(rec, req)
-	require.Eventually(t, func() bool { return len(fs.auditLogs) > 0 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		fs.auditLogsMu.RLock()
+		defer fs.auditLogsMu.RUnlock()
+		return len(fs.auditLogs) > 0
+	}, time.Second, 10*time.Millisecond)
 
 	assert.Equal(t, http.StatusCreated, rec.Code)
+	fs.auditLogsMu.RLock()
 	last := fs.auditLogs[len(fs.auditLogs)-1]
+	fs.auditLogsMu.RUnlock()
 	assert.Equal(t, "create", last.Action)
 	assert.Equal(t, "operator", last.ResourceType)
 	assert.Equal(t, "127.0.0.1", last.IPAddress)
