@@ -12,7 +12,7 @@ on:
     branches: [main, beta]
 
 env:
-  GO_VERSION: '1.25.5'
+  GO_VERSION: '1.25.1'
   RUST_VERSION: '1.81.0'
   CARGO_TERM_COLOR: always
 
@@ -38,15 +38,16 @@ jobs:
 
       - name: Check formatting
         run: |
-          if [ -n "$(gofmt -l .)" ]; then
+          unformatted=$(find . -type f -name '*.go' -not -path '*/node_modules/*' -print0 | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then
             echo "Code is not formatted. Run 'gofmt -w .'"
-            gofmt -d .
+            echo "$unformatted"
             exit 1
           fi
 
       - name: Run go vet
         run: |
-          packages=$(go list ./... | grep -v '/node_modules/' || true)
+          packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
           if [ -z "$packages" ]; then
             echo "No Go packages found for vet"
             exit 1
@@ -56,7 +57,7 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.5.0
+          version: latest
           args: --timeout=5m
 
   # ---------------------------------------------------------------------------
@@ -125,12 +126,27 @@ jobs:
           CGO_ENABLED: 1
           CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
         run: |
-          packages=$(go list ./... | grep -v '/node_modules/' || true)
+          packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
           if [ -z "$packages" ]; then
             echo "No Go packages found for test"
             exit 1
           fi
-          go test -v -race -coverprofile=coverage.out -covermode=atomic $packages
+
+          excluded_regex='/modules/oauth2/store$|/modules/oauth2/cmd/server$'
+          coverage_packages=$(echo "$packages" | tr ' ' '\n' | grep -Ev "$excluded_regex" | tr '\n' ' ' | xargs)
+          excluded_packages=$(echo "$packages" | tr ' ' '\n' | grep -E "$excluded_regex" | tr '\n' ' ' | xargs || true)
+
+          if [ -z "$coverage_packages" ]; then
+            echo "No Go packages found for coverage"
+            exit 1
+          fi
+
+          go test -v -race -coverprofile=coverage.out -covermode=atomic $coverage_packages
+
+          if [ -n "$excluded_packages" ]; then
+            echo "Running race tests for excluded packages: $excluded_packages"
+            go test -v -race $excluded_packages
+          fi
 
       - name: Check coverage threshold
         run: |

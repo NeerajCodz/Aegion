@@ -20,7 +20,7 @@ permissions:
   security-events: write
 
 env:
-  GO_VERSION: '1.25.5'
+  GO_VERSION: '1.25.1'
   RUST_VERSION: '1.81.0'
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
       - name: Resolve Go package list
         id: go-packages
         run: |
-          packages=$(go list ./... | grep -v '/node_modules/' | tr '\n' ' ')
+          packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' | tr '\n' ' ')
           echo "value=$packages" >> $GITHUB_OUTPUT
 
       - name: Run gosec
@@ -115,7 +115,7 @@ jobs:
           cache-from: type=gha
           build-args: |
             VERSION=security-scan
-            BASE_IMAGE=golang:1.25.5-bookworm
+            BASE_IMAGE=golang:1.25.1-bookworm
             RUNTIME_IMAGE=debian:bookworm-slim
         continue-on-error: true
 

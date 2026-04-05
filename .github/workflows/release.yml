@@ -11,7 +11,7 @@ on:
       - 'v*'
 
 env:
-  GO_VERSION: '1.25.5'
+  GO_VERSION: '1.25.1'
   RUST_VERSION: '1.81.0'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository }}
@@ -171,7 +171,7 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
-            BASE_IMAGE=golang:1.25.5-bookworm
+            BASE_IMAGE=golang:1.25.1-bookworm
             RUNTIME_IMAGE=debian:bookworm-slim
 
   # ---------------------------------------------------------------------------
