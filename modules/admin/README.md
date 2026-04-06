@@ -20,7 +20,7 @@ The admin module is configured through YAML files and environment variables.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `AEGION_CONFIG_PATH` | Path to configuration file | `admin.yaml` |
+| `AEGION_CONFIG_PATH` | Path to configuration file | `aegion.yaml` |
 | `DATABASE_URL` | PostgreSQL connection string | - |
 | `AEGION_LOG_PRETTY` | Enable pretty logging | `false` |
 
@@ -124,13 +124,13 @@ The SPA is served at `/admin/*` and provides a complete administrative interface
 
 4. **Set up configuration**
    ```bash
-   cp admin.yaml.example admin.yaml
-   # Edit admin.yaml with your database settings
+    cp configs/aegion.example.yaml configs/aegion.yaml
+    # Edit configs/aegion.yaml with your database settings
    ```
 
 5. **Run the admin module**
    ```bash
-   go run ./cmd/admin -config admin.yaml
+    go run ./cmd/admin -config configs/aegion.yaml
    ```
 
 The admin interface will be available at `http://localhost:8082/admin`.
@@ -159,10 +159,10 @@ The admin module includes its own migration system for admin-specific tables.
 
 ```bash
 # Run migrations
-./admin -migrate -config admin.yaml
+./admin -migrate -config configs/aegion.yaml
 
 # Check migration status
-./admin -migrate -status -config admin.yaml
+./admin -migrate -status -config configs/aegion.yaml
 ```
 
 ## Security Considerations
@@ -185,8 +185,8 @@ docker run -d \
   -p 8082:8082 \
   -e DATABASE_URL="postgres://user:pass@host:5432/aegion" \
   -e AEGION_CORE_URL="http://aegion-core:8080" \
-  -v /path/to/admin.yaml:/admin.yaml \
-  aegion/admin:latest -config /admin.yaml
+  -v /path/to/aegion.yaml:/config/aegion.yaml \
+  aegion/admin:latest -config /config/aegion.yaml
 ```
 
 ### Kubernetes Deployment

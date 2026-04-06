@@ -219,14 +219,27 @@ type MagicLinkConfig struct {
 
 // AdminConfig configures the admin module.
 type AdminConfig struct {
-	Enabled               bool     `yaml:"enabled"`
-	Path                  string   `yaml:"path"`
-	SessionLifespan       Duration `yaml:"session_lifespan"`
-	DefaultPageSize       int      `yaml:"default_page_size"`
-	MaxPageSize           int      `yaml:"max_page_size"`
-	APIKeyPrefix          string   `yaml:"api_key_prefix"`
-	APIKeyLookupPrefixLen int      `yaml:"api_key_lookup_prefix_len"`
-	APIKeyEntropyBytes    int      `yaml:"api_key_entropy_bytes"`
+	Enabled               bool            `yaml:"enabled"`
+	Path                  string          `yaml:"path"`
+	SessionLifespan       Duration        `yaml:"session_lifespan"`
+	DefaultPageSize       int             `yaml:"default_page_size"`
+	MaxPageSize           int             `yaml:"max_page_size"`
+	APIKeyPrefix          string          `yaml:"api_key_prefix"`
+	APIKeyLookupPrefixLen int             `yaml:"api_key_lookup_prefix_len"`
+	APIKeyEntropyBytes    int             `yaml:"api_key_entropy_bytes"`
+	SCIM                  AdminSCIMConfig `yaml:"scim"`
+}
+
+// AdminSCIMConfig configures SCIM behavior under the admin module.
+type AdminSCIMConfig struct {
+	Enabled                    bool     `yaml:"enabled"`
+	BasePath                   string   `yaml:"base_path"`
+	TokenPrefix                string   `yaml:"token_prefix"`
+	TokenLookupPrefixLen       int      `yaml:"token_lookup_prefix_len"`
+	TokenEntropyBytes          int      `yaml:"token_entropy_bytes"`
+	DefaultPageSize            int      `yaml:"default_page_size"`
+	MaxPageSize                int      `yaml:"max_page_size"`
+	TokenLastUsedUpdateTimeout Duration `yaml:"token_last_used_update_timeout"`
 }
 
 // Duration wraps time.Duration for YAML unmarshaling.
@@ -378,6 +391,27 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Admin.APIKeyEntropyBytes == 0 {
 		cfg.Admin.APIKeyEntropyBytes = 32
+	}
+	if cfg.Admin.SCIM.BasePath == "" {
+		cfg.Admin.SCIM.BasePath = "/scim/v2"
+	}
+	if cfg.Admin.SCIM.TokenPrefix == "" {
+		cfg.Admin.SCIM.TokenPrefix = "aegion_scim_"
+	}
+	if cfg.Admin.SCIM.TokenLookupPrefixLen == 0 {
+		cfg.Admin.SCIM.TokenLookupPrefixLen = 12
+	}
+	if cfg.Admin.SCIM.TokenEntropyBytes == 0 {
+		cfg.Admin.SCIM.TokenEntropyBytes = 32
+	}
+	if cfg.Admin.SCIM.DefaultPageSize == 0 {
+		cfg.Admin.SCIM.DefaultPageSize = 20
+	}
+	if cfg.Admin.SCIM.MaxPageSize == 0 {
+		cfg.Admin.SCIM.MaxPageSize = 1000
+	}
+	if cfg.Admin.SCIM.TokenLastUsedUpdateTimeout == 0 {
+		cfg.Admin.SCIM.TokenLastUsedUpdateTimeout = Duration(2 * time.Second)
 	}
 }
 
