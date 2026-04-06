@@ -55,6 +55,7 @@ type Bus struct {
 	mu            sync.RWMutex
 	maxRetries    int
 	retryDelay    time.Duration
+	batchSize     int
 	beginTx       func(ctx context.Context) (eventTx, error)
 	queryRows     func(ctx context.Context, query string, args ...interface{}) (eventRows, error)
 	execStmt      func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error)
@@ -81,6 +82,7 @@ type Config struct {
 	DB         *pgxpool.Pool
 	MaxRetries int
 	RetryDelay time.Duration
+	BatchSize  int // Number of events to process per batch (default: 100)
 }
 
 // New creates a new event bus.
@@ -91,12 +93,16 @@ func New(cfg Config) *Bus {
 	if cfg.RetryDelay == 0 {
 		cfg.RetryDelay = time.Second
 	}
+	if cfg.BatchSize == 0 {
+		cfg.BatchSize = 100
+	}
 
 	b := &Bus{
 		db:            cfg.DB,
 		subscriptions: make(map[string][]Subscription),
 		maxRetries:    cfg.MaxRetries,
 		retryDelay:    cfg.RetryDelay,
+		batchSize:     cfg.BatchSize,
 	}
 	b.beginTx = func(ctx context.Context) (eventTx, error) {
 		if b.db == nil {
@@ -244,7 +250,7 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 	}
 
 	// Get pending deliveries
-	rows, err := b.queryRows(ctx, `
+	rows, err := b.queryRows(ctx, fmt.Sprintf(`
 		SELECT d.id, d.event_id, d.attempt_count,
 			   e.event_type, e.source_module, e.entity_type, e.entity_id,
 			   e.identity_id, e.payload, e.metadata, e.occurred_at
@@ -254,9 +260,9 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 		  AND d.status IN ('pending', 'failed')
 		  AND d.next_retry_at <= NOW()
 		ORDER BY e.occurred_at
-		LIMIT 100
+		LIMIT %d
 		FOR UPDATE SKIP LOCKED
-	`, subscriber)
+	`, b.batchSize), subscriber)
 	if err != nil {
 		return err
 	}
