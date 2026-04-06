@@ -32,11 +32,12 @@ var (
 
 // Command line flags
 type flags struct {
-	configPath     string
-	migrateOnly    bool
-	showVersion    bool
-	adminBootstrap bool
-	enableWorkers  bool
+	configPath      string
+	migrateOnly     bool
+	showVersion     bool
+	adminBootstrap  bool
+	enableWorkers   bool
+	shutdownTimeout time.Duration
 }
 
 type runtimeServer interface {
@@ -76,6 +77,7 @@ func parseFlags() *flags {
 	flag.BoolVar(&f.showVersion, "version", false, "Show version and exit")
 	flag.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
 	flag.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
+	flag.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "Graceful shutdown timeout")
 	flag.Parse()
 	return f
 }
@@ -90,6 +92,7 @@ func parseFlagsWithArgs(args []string) (*flags, error) {
 	fs.BoolVar(&f.showVersion, "version", false, "Show version and exit")
 	fs.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
 	fs.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
+	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "Graceful shutdown timeout")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -281,7 +284,7 @@ func run(args []string, deps mainDeps) int {
 
 	log.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), f.shutdownTimeout)
 	defer shutdownCancel()
 
 	if err := lifecycle.Shutdown(shutdownCtx); err != nil {
@@ -329,8 +332,16 @@ func runHealthCommand(stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	timeout := strings.TrimSpace(os.Getenv("AEGION_HEALTH_TIMEOUT"))
+	timeoutDuration := 2 * time.Second
+	if timeout != "" {
+		if parsed, err := time.ParseDuration(timeout); err == nil && parsed > 0 {
+			timeoutDuration = parsed
+		}
+	}
+
 	url := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(portNum)) + "/health"
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: timeoutDuration}
 	// #nosec G704 -- URL is constrained to localhost and a validated numeric port.
 	resp, err := client.Get(url)
 	if err != nil {
