@@ -288,6 +288,11 @@ func (rl *RateLimiter) Reset(key string) error {
 	return rl.store.Reset(key)
 }
 
+// Limit returns the configured requests per second limit.
+func (rl *RateLimiter) Limit() int {
+	return int(rl.config.RequestsPerSecond)
+}
+
 // GetMetrics returns rate limiting metrics for monitoring.
 func (rl *RateLimiter) GetMetrics(keys []string) map[string]int {
 	metrics := make(map[string]int)
