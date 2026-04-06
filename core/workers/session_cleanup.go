@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/logger"
@@ -10,14 +11,11 @@ import (
 
 // SessionCleanupConfig configures the session cleanup worker.
 type SessionCleanupConfig struct {
-	DB       *pgxpool.Pool
-	Log      *logger.Logger
-	Interval time.Duration // How often to run cleanup (default: 1 hour)
-}
-
-// SessionCleanupWorker periodically cleans up expired sessions.
-type SessionCleanupWorker struct {
-	*BaseWorker
+	DB            *pgxpool.Pool
+	Log           *logger.Logger
+	Interval      time.Duration // How often to run cleanup (default: 1 hour)
+	ExpiredAfter  time.Duration // Delete sessions expired more than this (default: 7 days)
+	InactiveAfter time.Duration // Delete inactive sessions after this (default: 1 day)
 }
 
 // NewSessionCleanupWorker creates a new session cleanup worker.
@@ -25,10 +23,25 @@ func NewSessionCleanupWorker(cfg SessionCleanupConfig) *SessionCleanupWorker {
 	if cfg.Interval == 0 {
 		cfg.Interval = time.Hour
 	}
+	if cfg.ExpiredAfter == 0 {
+		cfg.ExpiredAfter = 7 * 24 * time.Hour
+	}
+	if cfg.InactiveAfter == 0 {
+		cfg.InactiveAfter = 24 * time.Hour
+	}
 
 	return &SessionCleanupWorker{
-		BaseWorker: NewBaseWorker("session_cleanup", cfg.DB, cfg.Log, cfg.Interval),
+		BaseWorker:    NewBaseWorker("session_cleanup", cfg.DB, cfg.Log, cfg.Interval),
+		expiredAfter:  cfg.ExpiredAfter,
+		inactiveAfter: cfg.InactiveAfter,
 	}
+}
+
+// SessionCleanupWorker periodically cleans up expired sessions.
+type SessionCleanupWorker struct {
+	*BaseWorker
+	expiredAfter  time.Duration
+	inactiveAfter time.Duration
 }
 
 // Start begins the session cleanup worker.
@@ -40,13 +53,17 @@ func (w *SessionCleanupWorker) Start(ctx context.Context) error {
 func (w *SessionCleanupWorker) cleanup(ctx context.Context) error {
 	w.Log().Debug().Msg("starting session cleanup")
 
-	// Delete expired sessions (expired more than 7 days ago)
-	// and inactive sessions (revoked more than 1 day ago)
-	result, err := w.exec(ctx, `
+	// Build dynamic SQL based on configured durations
+	days := int(w.expiredAfter.Hours() / 24)
+	hours := int(w.inactiveAfter.Hours())
+
+	sql := fmt.Sprintf(`
 		DELETE FROM core_sessions
-		WHERE expires_at < NOW() - INTERVAL '7 days'
-		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '1 day')
-	`)
+		WHERE expires_at < NOW() - INTERVAL '%d days'
+		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '%d hours')
+	`, days, hours)
+
+	result, err := w.exec(ctx, sql)
 	if err != nil {
 		return err
 	}
