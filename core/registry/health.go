@@ -11,10 +11,11 @@ import (
 
 // HealthChecker performs periodic health checks on registered modules.
 type HealthChecker struct {
-	registry *Registry
-	interval time.Duration
-	timeout  time.Duration
-	client   *http.Client
+	registry     *Registry
+	interval     time.Duration
+	timeout      time.Duration
+	initialDelay time.Duration
+	client       *http.Client
 
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
@@ -24,10 +25,15 @@ type HealthChecker struct {
 
 // NewHealthChecker creates a new health checker.
 func NewHealthChecker(registry *Registry, interval, timeout time.Duration) *HealthChecker {
+	initialDelay := 5 * time.Second
+	if interval > 0 && interval < 10*time.Second {
+		initialDelay = interval / 2
+	}
 	return &HealthChecker{
-		registry: registry,
-		interval: interval,
-		timeout:  timeout,
+		registry:     registry,
+		interval:     interval,
+		timeout:      timeout,
+		initialDelay: initialDelay,
 		client: &http.Client{
 			Timeout: timeout,
 		},
@@ -78,7 +84,7 @@ func (h *HealthChecker) run() {
 	defer ticker.Stop()
 
 	// Run initial check after a short delay
-	time.Sleep(5 * time.Second)
+	time.Sleep(h.initialDelay)
 	h.checkAll()
 
 	for {
