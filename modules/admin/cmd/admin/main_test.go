@@ -140,6 +140,18 @@ func TestLoadConfig_InvalidFileAndYAML(t *testing.T) {
 }
 
 func TestParseMainFlags(t *testing.T) {
+	t.Run("uses aegion superconfig default path", func(t *testing.T) {
+		flags, err := parseMainFlags(nil, func(_ string, fallback string) string {
+			return fallback
+		})
+		if err != nil {
+			t.Fatalf("parseMainFlags returned error: %v", err)
+		}
+		if flags.configPath != "aegion.yaml" {
+			t.Fatalf("expected default config path aegion.yaml, got %q", flags.configPath)
+		}
+	})
+
 	t.Run("uses env default config path", func(t *testing.T) {
 		flags, err := parseMainFlags(nil, func(key, fallback string) string {
 			if key == "AEGION_CONFIG_PATH" {
@@ -173,6 +185,101 @@ func TestParseMainFlags(t *testing.T) {
 			t.Fatalf("expected parse error for unknown flag")
 		}
 	})
+}
+
+func TestLoadConfig_AegionSuperconfigMapping(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "aegion.yaml")
+
+	configYAML := strings.TrimSpace(`
+module_versions:
+  admin: latest
+
+database:
+  url: postgres://super:config@localhost:5432/aegion
+  max_open_connections: 31
+  max_idle_connections: 7
+  connection_max_idle_time: 9m
+
+server:
+  host: 127.0.0.1
+  port: 8092
+  read_timeout: 22s
+  write_timeout: 33s
+  idle_timeout: 44s
+
+admin:
+  enabled: true
+  path: /aegion
+  session_lifespan: 6h
+  default_page_size: 30
+  max_page_size: 300
+  api_key_prefix: aegion_live_
+  api_key_lookup_prefix_len: 10
+  api_key_entropy_bytes: 40
+  scim:
+    enabled: true
+    base_path: /api/admin/scim/v2
+    token_prefix: aegion_scim_live_
+    token_lookup_prefix_len: 9
+    token_entropy_bytes: 48
+    default_page_size: 35
+    max_page_size: 1200
+    token_last_used_update_timeout: 3s
+
+log:
+  level: warn
+  format: json
+`)
+
+	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+
+	if cfg.Database.URL != "postgres://super:config@localhost:5432/aegion" {
+		t.Fatalf("expected mapped database url, got %q", cfg.Database.URL)
+	}
+	if cfg.Database.MaxConns != 31 || cfg.Database.MinConns != 7 {
+		t.Fatalf("expected mapped db conns 31/7, got %d/%d", cfg.Database.MaxConns, cfg.Database.MinConns)
+	}
+	if cfg.Database.MaxIdleTime != "9m0s" {
+		t.Fatalf("expected mapped max idle time 9m0s, got %q", cfg.Database.MaxIdleTime)
+	}
+
+	if cfg.Server.Address != "127.0.0.1" || cfg.Server.Port != 8092 {
+		t.Fatalf("expected mapped server 127.0.0.1:8092, got %s:%d", cfg.Server.Address, cfg.Server.Port)
+	}
+	if cfg.Server.ReadTimeout != 22*time.Second || cfg.Server.WriteTimeout != 33*time.Second || cfg.Server.IdleTimeout != 44*time.Second {
+		t.Fatalf("expected mapped server timeouts 22s/33s/44s, got %v/%v/%v", cfg.Server.ReadTimeout, cfg.Server.WriteTimeout, cfg.Server.IdleTimeout)
+	}
+
+	if cfg.Admin.Path != "/aegion" || cfg.Admin.DefaultPageSize != 30 || cfg.Admin.MaxPageSize != 300 {
+		t.Fatalf("expected mapped admin path/page settings, got path=%q default=%d max=%d", cfg.Admin.Path, cfg.Admin.DefaultPageSize, cfg.Admin.MaxPageSize)
+	}
+	if cfg.Admin.APIKeyPrefix != "aegion_live_" || cfg.Admin.APIKeyPrefixLen != 10 || cfg.Admin.APIKeyEntropy != 40 {
+		t.Fatalf("expected mapped admin API key settings, got prefix=%q len=%d entropy=%d", cfg.Admin.APIKeyPrefix, cfg.Admin.APIKeyPrefixLen, cfg.Admin.APIKeyEntropy)
+	}
+
+	if !cfg.Admin.SCIM.Enabled {
+		t.Fatalf("expected mapped scim enabled true")
+	}
+	if cfg.Admin.SCIM.BasePath != "/api/admin/scim/v2" {
+		t.Fatalf("expected mapped scim base path, got %q", cfg.Admin.SCIM.BasePath)
+	}
+	if cfg.Admin.SCIM.TokenPrefix != "aegion_scim_live_" || cfg.Admin.SCIM.TokenLookupPrefixLen != 9 || cfg.Admin.SCIM.TokenEntropyBytes != 48 {
+		t.Fatalf("expected mapped scim token settings, got prefix=%q len=%d entropy=%d", cfg.Admin.SCIM.TokenPrefix, cfg.Admin.SCIM.TokenLookupPrefixLen, cfg.Admin.SCIM.TokenEntropyBytes)
+	}
+	if cfg.Admin.SCIM.DefaultPageSize != 35 || cfg.Admin.SCIM.MaxPageSize != 1200 {
+		t.Fatalf("expected mapped scim page settings 35/1200, got %d/%d", cfg.Admin.SCIM.DefaultPageSize, cfg.Admin.SCIM.MaxPageSize)
+	}
+	if cfg.Admin.SCIM.TokenLastUsedUpdateTimeout != 3*time.Second {
+		t.Fatalf("expected mapped scim last-used timeout 3s, got %v", cfg.Admin.SCIM.TokenLastUsedUpdateTimeout)
+	}
 }
 
 func TestSetupLogger(t *testing.T) {

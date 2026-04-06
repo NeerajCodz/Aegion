@@ -294,6 +294,13 @@ func TestApplyDefaults(t *testing.T) {
 	assert.Equal(t, "aegion_", cfg.Admin.APIKeyPrefix)
 	assert.Equal(t, 12, cfg.Admin.APIKeyLookupPrefixLen)
 	assert.Equal(t, 32, cfg.Admin.APIKeyEntropyBytes)
+	assert.Equal(t, "/scim/v2", cfg.Admin.SCIM.BasePath)
+	assert.Equal(t, "aegion_scim_", cfg.Admin.SCIM.TokenPrefix)
+	assert.Equal(t, 12, cfg.Admin.SCIM.TokenLookupPrefixLen)
+	assert.Equal(t, 32, cfg.Admin.SCIM.TokenEntropyBytes)
+	assert.Equal(t, 20, cfg.Admin.SCIM.DefaultPageSize)
+	assert.Equal(t, 1000, cfg.Admin.SCIM.MaxPageSize)
+	assert.Equal(t, Duration(2*time.Second), cfg.Admin.SCIM.TokenLastUsedUpdateTimeout)
 }
 
 func TestApplyDefaults_DoesNotOverrideExisting(t *testing.T) {

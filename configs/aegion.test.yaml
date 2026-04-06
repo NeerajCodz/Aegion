@@ -250,6 +250,15 @@ admin:
   api_key_prefix: "aegion_"
   api_key_lookup_prefix_len: 12
   api_key_entropy_bytes: 32
+  scim:
+    enabled: true
+    base_path: /scim/v2
+    token_prefix: aegion_scim_
+    token_lookup_prefix_len: 12
+    token_entropy_bytes: 32
+    default_page_size: 20
+    max_page_size: 1000
+    token_last_used_update_timeout: 2s
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Observability — Minimal for tests

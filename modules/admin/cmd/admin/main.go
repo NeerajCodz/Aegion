@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
+	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
@@ -50,6 +51,16 @@ type Config struct {
 		APIKeyPrefix     string        `yaml:"api_key_prefix"`
 		APIKeyPrefixLen  int           `yaml:"api_key_lookup_prefix_len"`
 		APIKeyEntropy    int           `yaml:"api_key_entropy_bytes"`
+		SCIM             struct {
+			Enabled                    bool          `yaml:"enabled"`
+			BasePath                   string        `yaml:"base_path"`
+			TokenPrefix                string        `yaml:"token_prefix"`
+			TokenLookupPrefixLen       int           `yaml:"token_lookup_prefix_len"`
+			TokenEntropyBytes          int           `yaml:"token_entropy_bytes"`
+			DefaultPageSize            int           `yaml:"default_page_size"`
+			MaxPageSize                int           `yaml:"max_page_size"`
+			TokenLastUsedUpdateTimeout time.Duration `yaml:"token_last_used_update_timeout"`
+		} `yaml:"scim"`
 	} `yaml:"admin"`
 	Core struct {
 		ServiceURL string `yaml:"service_url"`
@@ -133,7 +144,7 @@ func parseMainFlags(args []string, envLookup func(string, string) string) (*main
 	fs.SetOutput(io.Discard)
 
 	f := &mainFlags{}
-	fs.StringVar(&f.configPath, "config", envLookup("AEGION_CONFIG_PATH", "admin.yaml"), "Configuration file path")
+	fs.StringVar(&f.configPath, "config", envLookup("AEGION_CONFIG_PATH", "aegion.yaml"), "Configuration file path")
 	fs.BoolVar(&f.version, "version", false, "Show version")
 	fs.BoolVar(&f.migrate, "migrate", false, "Run migrations only")
 
@@ -280,8 +291,16 @@ func loadConfig(path string) (*Config, error) {
 	expanded := os.ExpandEnv(string(data))
 
 	var cfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
+	if isAegionSuperConfig([]byte(expanded)) {
+		superCfg, err := platformconfig.Load(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse config: %w", err)
+		}
+		cfg = mapPlatformConfig(superCfg)
+	} else {
+		if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse config: %w", err)
+		}
 	}
 
 	// Set defaults
@@ -321,6 +340,27 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Admin.APIKeyEntropy == 0 {
 		cfg.Admin.APIKeyEntropy = 32
 	}
+	if cfg.Admin.SCIM.BasePath == "" {
+		cfg.Admin.SCIM.BasePath = "/scim/v2"
+	}
+	if cfg.Admin.SCIM.TokenPrefix == "" {
+		cfg.Admin.SCIM.TokenPrefix = "aegion_scim_"
+	}
+	if cfg.Admin.SCIM.TokenLookupPrefixLen == 0 {
+		cfg.Admin.SCIM.TokenLookupPrefixLen = 12
+	}
+	if cfg.Admin.SCIM.TokenEntropyBytes == 0 {
+		cfg.Admin.SCIM.TokenEntropyBytes = 32
+	}
+	if cfg.Admin.SCIM.DefaultPageSize == 0 {
+		cfg.Admin.SCIM.DefaultPageSize = 20
+	}
+	if cfg.Admin.SCIM.MaxPageSize == 0 {
+		cfg.Admin.SCIM.MaxPageSize = 1000
+	}
+	if cfg.Admin.SCIM.TokenLastUsedUpdateTimeout == 0 {
+		cfg.Admin.SCIM.TokenLastUsedUpdateTimeout = 2 * time.Second
+	}
 	if cfg.Database.MaxConns == 0 {
 		cfg.Database.MaxConns = 25
 	}
@@ -334,6 +374,68 @@ func loadConfig(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func isAegionSuperConfig(data []byte) bool {
+	var root map[string]interface{}
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return false
+	}
+
+	if _, ok := root["module_versions"]; ok {
+		return true
+	}
+	if _, ok := root["secrets"]; ok {
+		return true
+	}
+	if _, ok := root["sessions"]; ok {
+		return true
+	}
+	if _, ok := root["password"]; ok {
+		return true
+	}
+	if _, ok := root["magic_link"]; ok {
+		return true
+	}
+
+	return false
+}
+
+func mapPlatformConfig(superCfg *platformconfig.Config) Config {
+	var cfg Config
+
+	cfg.Database.URL = superCfg.Database.URL
+	cfg.Database.MaxConns = int32(superCfg.Database.MaxOpenConns)
+	cfg.Database.MinConns = int32(superCfg.Database.MaxIdleConns)
+	cfg.Database.MaxIdleTime = superCfg.Database.ConnMaxIdleTime.Duration().String()
+
+	cfg.Server.Address = superCfg.Server.Host
+	cfg.Server.Port = superCfg.Server.Port
+	cfg.Server.ReadTimeout = superCfg.Server.ReadTimeout.Duration()
+	cfg.Server.WriteTimeout = superCfg.Server.WriteTimeout.Duration()
+	cfg.Server.IdleTimeout = superCfg.Server.IdleTimeout.Duration()
+
+	cfg.Admin.Enabled = superCfg.Admin.Enabled
+	cfg.Admin.Path = superCfg.Admin.Path
+	cfg.Admin.SessionLifespan = superCfg.Admin.SessionLifespan.Duration()
+	cfg.Admin.DefaultPageSize = superCfg.Admin.DefaultPageSize
+	cfg.Admin.MaxPageSize = superCfg.Admin.MaxPageSize
+	cfg.Admin.APIKeyPrefix = superCfg.Admin.APIKeyPrefix
+	cfg.Admin.APIKeyPrefixLen = superCfg.Admin.APIKeyLookupPrefixLen
+	cfg.Admin.APIKeyEntropy = superCfg.Admin.APIKeyEntropyBytes
+	cfg.Admin.SCIM.Enabled = superCfg.Admin.SCIM.Enabled
+	cfg.Admin.SCIM.BasePath = superCfg.Admin.SCIM.BasePath
+	cfg.Admin.SCIM.TokenPrefix = superCfg.Admin.SCIM.TokenPrefix
+	cfg.Admin.SCIM.TokenLookupPrefixLen = superCfg.Admin.SCIM.TokenLookupPrefixLen
+	cfg.Admin.SCIM.TokenEntropyBytes = superCfg.Admin.SCIM.TokenEntropyBytes
+	cfg.Admin.SCIM.DefaultPageSize = superCfg.Admin.SCIM.DefaultPageSize
+	cfg.Admin.SCIM.MaxPageSize = superCfg.Admin.SCIM.MaxPageSize
+	cfg.Admin.SCIM.TokenLastUsedUpdateTimeout = superCfg.Admin.SCIM.TokenLastUsedUpdateTimeout.Duration()
+
+	cfg.Log.Level = superCfg.Log.Level
+	cfg.Log.Format = superCfg.Log.Format
+
+	return cfg
 }
 
 func setupLogger(logConfig LogConfig) {
