@@ -60,7 +60,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	tokenHash := store.HashAPIKeyToken(token)
 
 	now := time.Now().UTC()
-	expiresAt := now.Add(sessionTokenExpiry)
+	expiresAt := now.Add(h.config.SessionTokenExpiry)
 
 	key := &store.APIKey{
 		ID:         uuid.New(),

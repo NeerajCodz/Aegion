@@ -55,8 +55,6 @@ func DefaultHandlerConfig() HandlerConfig {
 	}
 }
 
-const sessionTokenExpiry = 8 * time.Hour
-
 // OperatorView is the API representation used by auth and operator endpoints.
 type OperatorView struct {
 	ID          string                 `json:"id"`
@@ -96,7 +94,12 @@ type Handler struct {
 }
 
 // New creates a new admin handler.
-func New(svc Service, cfg HandlerConfig) *Handler {
+func New(svc Service, cfgOverride ...HandlerConfig) *Handler {
+	cfg := DefaultHandlerConfig()
+	if len(cfgOverride) > 0 {
+		cfg = cfgOverride[0]
+	}
+
 	if cfg.DefaultPageSize == 0 {
 		cfg.DefaultPageSize = 20
 	}
@@ -218,8 +221,17 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 
 // parsePagination extracts pagination parameters from request.
 func (h *Handler) parsePagination(r *http.Request) (page, perPage, offset int) {
+	return parsePaginationWithConfig(r, h.config)
+}
+
+// parsePagination retains backward compatibility for tests and helper callers.
+func parsePagination(r *http.Request) (page, perPage, offset int) {
+	return parsePaginationWithConfig(r, DefaultHandlerConfig())
+}
+
+func parsePaginationWithConfig(r *http.Request, cfg HandlerConfig) (page, perPage, offset int) {
 	page = 1
-	perPage = h.config.DefaultPageSize
+	perPage = cfg.DefaultPageSize
 
 	if p := r.URL.Query().Get("page"); p != "" {
 		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
@@ -228,7 +240,7 @@ func (h *Handler) parsePagination(r *http.Request) (page, perPage, offset int) {
 	}
 
 	if pp := r.URL.Query().Get("per_page"); pp != "" {
-		if parsed, err := strconv.Atoi(pp); err == nil && parsed > 0 && parsed <= h.config.MaxPageSize {
+		if parsed, err := strconv.Atoi(pp); err == nil && parsed > 0 && parsed <= cfg.MaxPageSize {
 			perPage = parsed
 		}
 	}
