@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -100,6 +101,9 @@ type Manager struct {
 	lifespan     time.Duration
 	idleTimeout  time.Duration
 
+	cleanupExpiredAfter  time.Duration
+	cleanupInactiveAfter time.Duration
+
 	execStmt   func(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
 	queryRowFn func(ctx context.Context, sql string, args ...interface{}) pgx.Row
 	queryRows  func(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
@@ -133,16 +137,31 @@ type ManagerConfig struct {
 	CookieConfig CookieConfig
 	Lifespan     time.Duration
 	IdleTimeout  time.Duration
+
+	// Cleanup configuration
+	CleanupExpiredAfter  time.Duration // Delete sessions expired more than this (default: 7 days)
+	CleanupInactiveAfter time.Duration // Delete inactive sessions after this (default: 1 day)
 }
 
 // NewManager creates a new session manager.
 func NewManager(cfg ManagerConfig) *Manager {
+	expiredAfter := cfg.CleanupExpiredAfter
+	if expiredAfter == 0 {
+		expiredAfter = 7 * 24 * time.Hour
+	}
+	inactiveAfter := cfg.CleanupInactiveAfter
+	if inactiveAfter == 0 {
+		inactiveAfter = 24 * time.Hour
+	}
+
 	m := &Manager{
-		db:           cfg.DB,
-		cookieSecret: cfg.CookieSecret,
-		cookieConfig: cfg.CookieConfig,
-		lifespan:     cfg.Lifespan,
-		idleTimeout:  cfg.IdleTimeout,
+		db:                   cfg.DB,
+		cookieSecret:         cfg.CookieSecret,
+		cookieConfig:         cfg.CookieConfig,
+		lifespan:             cfg.Lifespan,
+		idleTimeout:          cfg.IdleTimeout,
+		cleanupExpiredAfter:  expiredAfter,
+		cleanupInactiveAfter: inactiveAfter,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -435,11 +454,16 @@ func (m *Manager) ClearCookie(w http.ResponseWriter) {
 
 // Cleanup removes expired sessions.
 func (m *Manager) Cleanup(ctx context.Context) (int64, error) {
-	result, err := m.execStmt(ctx, `
+	expiredDays := int(m.cleanupExpiredAfter.Hours() / 24)
+	inactiveHours := int(m.cleanupInactiveAfter.Hours())
+
+	sql := fmt.Sprintf(`
 		DELETE FROM core_sessions
-		WHERE expires_at < NOW() - INTERVAL '7 days'
-		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '1 day')
-	`)
+		WHERE expires_at < NOW() - INTERVAL '%d days'
+		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '%d hours')
+	`, expiredDays, inactiveHours)
+
+	result, err := m.execStmt(ctx, sql)
 	if err != nil {
 		return 0, err
 	}
