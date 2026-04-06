@@ -46,6 +46,9 @@ type Config struct {
 
 	// Development mode (relaxed security)
 	DevMode bool
+
+	// Shutdown timeout for graceful shutdown
+	ShutdownTimeout time.Duration
 }
 
 // CORSConfig holds CORS settings.
@@ -83,10 +86,11 @@ func DefaultConfig() Config {
 			RequestsPerSecond: 100,
 			Burst:             200,
 		},
-		RequestTimeout: 60 * time.Second,
-		ModuleTimeout:  30 * time.Second,
-		TrustProxy:     false,
-		DevMode:        false,
+		RequestTimeout:  60 * time.Second,
+		ModuleTimeout:   30 * time.Second,
+		TrustProxy:      false,
+		DevMode:         false,
+		ShutdownTimeout: 30 * time.Second,
 	}
 }
 
