@@ -45,7 +45,7 @@ func (h *Handler) ListOperators(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage, offset := parsePagination(r)
+	page, perPage, offset := h.parsePagination(r)
 
 	// List operators
 	operators, total, err := h.service.ListOperators(r.Context(), operator.ID, perPage, offset)
@@ -432,7 +432,7 @@ func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage, offset := parsePagination(r)
+	page, perPage, offset := h.parsePagination(r)
 	if perPage > 500 {
 		perPage = 500
 	}
@@ -502,7 +502,7 @@ func (h *Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage, offset := parsePagination(r)
+	page, perPage, offset := h.parsePagination(r)
 
 	// List roles
 	roles, total, err := h.service.ListRoles(r.Context(), operator.ID, perPage, offset)

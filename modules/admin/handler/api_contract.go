@@ -269,7 +269,7 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage, offset := parsePagination(r)
+	page, perPage, offset := h.parsePagination(r)
 	identityFilter := strings.TrimSpace(r.URL.Query().Get("identity_id"))
 
 	where := "WHERE cs.active = TRUE AND cs.expires_at > NOW()"

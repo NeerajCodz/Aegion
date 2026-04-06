@@ -71,7 +71,7 @@ func (h *Handler) ListIdentities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage, offset := parsePagination(r)
+	page, perPage, offset := h.parsePagination(r)
 	sort := r.URL.Query().Get("sort")
 	filter := r.URL.Query().Get("filter")
 
@@ -228,7 +228,7 @@ func (h *Handler) SearchIdentities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage, offset := parsePagination(r)
+	page, perPage, offset := h.parsePagination(r)
 
 	identities, total, err := h.searchIdentitiesInStore(r.Context(), req, perPage, offset)
 	if err != nil {

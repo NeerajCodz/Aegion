@@ -26,7 +26,7 @@ func (h *Handler) ListIdentitySessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage, offset := parsePagination(r)
+	page, perPage, offset := h.parsePagination(r)
 
 	sessions, total, err := h.listSessionsForIdentity(r.Context(), identityID, perPage, offset)
 	if err != nil {
