@@ -100,7 +100,7 @@ func NewProxy(config Config, rules *RuleEngine, logger zerolog.Logger) *Proxy {
 			proxy.healthCheckers[name] = NewHealthChecker(HealthCheckerConfig{
 				URL:      upstream.URL + upstream.HealthCheck,
 				Interval: config.HealthCheckInterval,
-				Timeout:  5 * time.Second,
+				Timeout:  config.Transport.DialTimeout,
 				Logger:   logger,
 			})
 		}
