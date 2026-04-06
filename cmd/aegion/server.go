@@ -46,15 +46,19 @@ var pingDatabase = func(ctx context.Context, db *database.DB) error {
 // NewServer creates and initializes a new server instance.
 func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	// Initialize auth token generator
-	var internalSecret []byte
+	var internalSecret string
 	if len(cfg.Config.Secrets.Internal) > 0 {
-		internalSecret = []byte(cfg.Config.Secrets.Internal[0])
+		internalSecret = cfg.Config.Secrets.Internal[0]
+	} else if len(cfg.Config.Secrets.Cookie) > 0 {
+		internalSecret = cfg.Config.Secrets.Cookie[0]
+	} else if len(cfg.Config.Secrets.Cipher) > 0 {
+		internalSecret = cfg.Config.Secrets.Cipher[0]
 	} else {
-		internalSecret = []byte("default-internal-secret-for-dev")
+		internalSecret = "dev-internal-secret-change-me-32chars"
 	}
 
 	tokenGen, err := authtoken.NewGenerator(authtoken.GeneratorConfig{
-		Secret: internalSecret,
+		Secret: []byte(internalSecret),
 		TTL:    5 * time.Minute,
 	})
 	if err != nil {
