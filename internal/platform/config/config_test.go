@@ -125,11 +125,18 @@ password:
   min_length: 8
   require_uppercase: true
   hibp_enabled: true
+  hibp_host: api.pwnedpasswords.com
+  hibp_timeout: 5s
+  hibp_ignore_network_errors: true
+  hibp_min_breach_count: 1
 
 magic_link:
   enabled: true
   code_length: 6
   link_lifespan: 15m
+  rate_limit: 5
+  rate_window: 1h
+  recovery_rate_limit: 3
 `
 
 	// Create temporary file
@@ -164,9 +171,16 @@ magic_link:
 	assert.Equal(t, 8, cfg.Password.MinLength)
 	assert.True(t, cfg.Password.RequireUppercase)
 	assert.True(t, cfg.Password.HIBPEnabled)
+	assert.Equal(t, "api.pwnedpasswords.com", cfg.Password.HIBPHost)
+	assert.Equal(t, Duration(5*time.Second), cfg.Password.HIBPTimeout)
+	assert.True(t, cfg.Password.HIBPIgnoreNetworkErrors)
+	assert.Equal(t, 1, cfg.Password.HIBPMinBreachCount)
 	assert.True(t, cfg.MagicLink.Enabled)
 	assert.Equal(t, 6, cfg.MagicLink.CodeLength)
 	assert.Equal(t, Duration(15*time.Minute), cfg.MagicLink.LinkLifespan)
+	assert.Equal(t, 5, cfg.MagicLink.RateLimit)
+	assert.Equal(t, Duration(time.Hour), cfg.MagicLink.RateWindow)
+	assert.Equal(t, 3, cfg.MagicLink.RecoveryRateLimit)
 }
 
 func TestLoad_EnvironmentVariableExpansion(t *testing.T) {
@@ -259,16 +273,27 @@ func TestApplyDefaults(t *testing.T) {
 
 	// Password defaults
 	assert.Equal(t, 8, cfg.Password.MinLength)
+	assert.Equal(t, "api.pwnedpasswords.com", cfg.Password.HIBPHost)
+	assert.Equal(t, Duration(5*time.Second), cfg.Password.HIBPTimeout)
+	assert.Equal(t, 1, cfg.Password.HIBPMinBreachCount)
 
 	// Magic Link defaults
 	assert.Equal(t, 6, cfg.MagicLink.CodeLength)
 	assert.Equal(t, "0123456789", cfg.MagicLink.CodeCharset)
 	assert.Equal(t, Duration(15*time.Minute), cfg.MagicLink.LinkLifespan)
 	assert.Equal(t, Duration(15*time.Minute), cfg.MagicLink.CodeLifespan)
+	assert.Equal(t, 5, cfg.MagicLink.RateLimit)
+	assert.Equal(t, Duration(time.Hour), cfg.MagicLink.RateWindow)
+	assert.Equal(t, 3, cfg.MagicLink.RecoveryRateLimit)
 
 	// Admin defaults
 	assert.Equal(t, "/aegion", cfg.Admin.Path)
 	assert.Equal(t, Duration(4*time.Hour), cfg.Admin.SessionLifespan)
+	assert.Equal(t, 20, cfg.Admin.DefaultPageSize)
+	assert.Equal(t, 100, cfg.Admin.MaxPageSize)
+	assert.Equal(t, "aegion_", cfg.Admin.APIKeyPrefix)
+	assert.Equal(t, 12, cfg.Admin.APIKeyLookupPrefixLen)
+	assert.Equal(t, 32, cfg.Admin.APIKeyEntropyBytes)
 }
 
 func TestApplyDefaults_DoesNotOverrideExisting(t *testing.T) {

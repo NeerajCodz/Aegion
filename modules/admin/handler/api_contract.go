@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,8 +57,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := "aegion_" + strings.ReplaceAll(uuid.NewString(), "-", "") + strings.ReplaceAll(uuid.NewString(), "-", "")
-	prefix := token[7:19]
+	token, err := h.generateAPIKeyToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create session token")
+		return
+	}
+	prefix := h.lookupPrefix(token)
 	tokenHash := store.HashAPIKeyToken(token)
 
 	now := time.Now().UTC()
@@ -86,6 +92,27 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Token:    token,
 		Operator: operatorView,
 	})
+}
+
+func (h *Handler) generateAPIKeyToken() (string, error) {
+	entropy := h.config.APIKeyEntropyBytes
+	if entropy < 16 {
+		entropy = 16
+	}
+	b := make([]byte, entropy)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return h.config.APIKeyPrefix + base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func (h *Handler) lookupPrefix(token string) string {
+	start := len(h.config.APIKeyPrefix)
+	end := start + h.config.APIKeyPrefixLen
+	if len(token) < end {
+		return ""
+	}
+	return token[start:end]
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {

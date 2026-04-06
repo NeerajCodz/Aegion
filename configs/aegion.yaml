@@ -196,3 +196,8 @@ admin:
   enabled: true
   path: /aegion
   session_lifespan: 4h
+  default_page_size: 20
+  max_page_size: 100
+  api_key_prefix: "aegion_"
+  api_key_lookup_prefix_len: 12
+  api_key_entropy_bytes: 32

@@ -45,6 +45,11 @@ type Config struct {
 		BootstrapEnabled bool          `yaml:"bootstrap_enabled"`
 		Path             string        `yaml:"path"`
 		SessionLifespan  time.Duration `yaml:"session_lifespan"`
+		DefaultPageSize  int           `yaml:"default_page_size"`
+		MaxPageSize      int           `yaml:"max_page_size"`
+		APIKeyPrefix     string        `yaml:"api_key_prefix"`
+		APIKeyPrefixLen  int           `yaml:"api_key_lookup_prefix_len"`
+		APIKeyEntropy    int           `yaml:"api_key_entropy_bytes"`
 	} `yaml:"admin"`
 	Core struct {
 		ServiceURL string `yaml:"service_url"`
@@ -226,7 +231,14 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 	adminService := service.New(adminStore, service.Config{
 		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
-	adminHandler := handler.New(adminService, handler.DefaultHandlerConfig())
+	adminHandler := handler.New(adminService, handler.HandlerConfig{
+		SessionTokenExpiry: cfg.Admin.SessionLifespan,
+		DefaultPageSize:    cfg.Admin.DefaultPageSize,
+		MaxPageSize:        cfg.Admin.MaxPageSize,
+		APIKeyPrefix:       cfg.Admin.APIKeyPrefix,
+		APIKeyPrefixLen:    cfg.Admin.APIKeyPrefixLen,
+		APIKeyEntropyBytes: cfg.Admin.APIKeyEntropy,
+	})
 
 	server := &Server{
 		Config:  cfg,
@@ -293,6 +305,21 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if cfg.Admin.SessionLifespan == 0 {
 		cfg.Admin.SessionLifespan = 4 * time.Hour
+	}
+	if cfg.Admin.DefaultPageSize == 0 {
+		cfg.Admin.DefaultPageSize = 20
+	}
+	if cfg.Admin.MaxPageSize == 0 {
+		cfg.Admin.MaxPageSize = 100
+	}
+	if cfg.Admin.APIKeyPrefix == "" {
+		cfg.Admin.APIKeyPrefix = "aegion_"
+	}
+	if cfg.Admin.APIKeyPrefixLen == 0 {
+		cfg.Admin.APIKeyPrefixLen = 12
+	}
+	if cfg.Admin.APIKeyEntropy == 0 {
+		cfg.Admin.APIKeyEntropy = 32
 	}
 	if cfg.Database.MaxConns == 0 {
 		cfg.Database.MaxConns = 25

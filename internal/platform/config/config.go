@@ -219,9 +219,14 @@ type MagicLinkConfig struct {
 
 // AdminConfig configures the admin module.
 type AdminConfig struct {
-	Enabled         bool     `yaml:"enabled"`
-	Path            string   `yaml:"path"`
-	SessionLifespan Duration `yaml:"session_lifespan"`
+	Enabled               bool     `yaml:"enabled"`
+	Path                  string   `yaml:"path"`
+	SessionLifespan       Duration `yaml:"session_lifespan"`
+	DefaultPageSize       int      `yaml:"default_page_size"`
+	MaxPageSize           int      `yaml:"max_page_size"`
+	APIKeyPrefix          string   `yaml:"api_key_prefix"`
+	APIKeyLookupPrefixLen int      `yaml:"api_key_lookup_prefix_len"`
+	APIKeyEntropyBytes    int      `yaml:"api_key_entropy_bytes"`
 }
 
 // Duration wraps time.Duration for YAML unmarshaling.
@@ -358,6 +363,21 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Admin.SessionLifespan == 0 {
 		cfg.Admin.SessionLifespan = Duration(4 * time.Hour)
+	}
+	if cfg.Admin.DefaultPageSize == 0 {
+		cfg.Admin.DefaultPageSize = 20
+	}
+	if cfg.Admin.MaxPageSize == 0 {
+		cfg.Admin.MaxPageSize = 100
+	}
+	if cfg.Admin.APIKeyPrefix == "" {
+		cfg.Admin.APIKeyPrefix = "aegion_"
+	}
+	if cfg.Admin.APIKeyLookupPrefixLen == 0 {
+		cfg.Admin.APIKeyLookupPrefixLen = 12
+	}
+	if cfg.Admin.APIKeyEntropyBytes == 0 {
+		cfg.Admin.APIKeyEntropyBytes = 32
 	}
 }
 
