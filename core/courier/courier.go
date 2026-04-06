@@ -74,6 +74,8 @@ type Courier struct {
 	smtp        SMTPConfig
 	templates   map[string]*template.Template
 	maxRetries  int
+	codeExpiry  time.Duration
+	linkExpiry  time.Duration
 	execStmt    func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error)
 	queryRows   func(ctx context.Context, query string, args ...interface{}) (courierRows, error)
 	sendEmailFn func(to, subject, body string) error
@@ -95,6 +97,8 @@ type Config struct {
 	DB         *pgxpool.Pool
 	SMTP       SMTPConfig
 	MaxRetries int
+	CodeExpiry time.Duration // Expiry for verification codes (default: 15 minutes)
+	LinkExpiry time.Duration // Expiry for magic links (default: 15 minutes)
 }
 
 // New creates a new courier.
@@ -102,12 +106,20 @@ func New(cfg Config) *Courier {
 	if cfg.MaxRetries == 0 {
 		cfg.MaxRetries = 3
 	}
+	if cfg.CodeExpiry == 0 {
+		cfg.CodeExpiry = 15 * time.Minute
+	}
+	if cfg.LinkExpiry == 0 {
+		cfg.LinkExpiry = 15 * time.Minute
+	}
 
 	c := &Courier{
 		db:         cfg.DB,
 		smtp:       cfg.SMTP,
 		templates:  make(map[string]*template.Template),
 		maxRetries: cfg.MaxRetries,
+		codeExpiry: cfg.CodeExpiry,
+		linkExpiry: cfg.LinkExpiry,
 	}
 	c.execStmt = func(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
 		if c.db == nil {
@@ -406,10 +418,10 @@ func (c *Courier) SendVerificationEmail(ctx context.Context, to string, code str
 		<body>
 			<h1>Email Verification</h1>
 			<p>Your verification code is: <strong>%s</strong></p>
-			<p>This code will expire in 15 minutes.</p>
+			<p>This code will expire in %s.</p>
 		</body>
 		</html>
-	`, code)
+	`, code, c.codeExpiry)
 
 	return c.QueueEmail(ctx, to, subject, body,
 		WithIdentity(identityID),
@@ -426,11 +438,11 @@ func (c *Courier) SendPasswordResetEmail(ctx context.Context, to string, code st
 		<body>
 			<h1>Password Reset</h1>
 			<p>Your password reset code is: <strong>%s</strong></p>
-			<p>This code will expire in 15 minutes.</p>
+			<p>This code will expire in %s.</p>
 			<p>If you did not request this, please ignore this email.</p>
 		</body>
 		</html>
-	`, code)
+	`, code, c.codeExpiry)
 
 	return c.QueueEmail(ctx, to, subject, body,
 		WithIdentity(identityID),
@@ -449,10 +461,10 @@ func (c *Courier) SendMagicLinkEmail(ctx context.Context, to string, link string
 			<p>Click the link below to sign in:</p>
 			<p><a href="%s">Sign In</a></p>
 			<p>Or enter this code: <strong>%s</strong></p>
-			<p>This link will expire in 15 minutes.</p>
+			<p>This link will expire in %s.</p>
 		</body>
 		</html>
-	`, link, code)
+	`, link, code, c.linkExpiry)
 
 	return c.QueueEmail(ctx, to, subject, body,
 		WithSource("magic_link"),
