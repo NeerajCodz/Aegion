@@ -4,6 +4,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -44,6 +45,10 @@ type HandlerConfig struct {
 	SessionTokenExpiry time.Duration // Session token expiry (default: 8 hours)
 	DefaultPageSize    int           // Default pagination page size (default: 20)
 	MaxPageSize        int           // Maximum pagination page size (default: 100)
+	APIKeyPrefix       string        // API key token prefix (default: aegion_)
+	APIKeyPrefixLen    int           // Lookup prefix chars after token prefix (default: 12)
+	APIKeyEntropyBytes int           // Random token entropy bytes (default: 32)
+	Logger             *slog.Logger  // Structured logger (default: slog.Default)
 }
 
 // DefaultHandlerConfig returns default handler configuration.
@@ -52,6 +57,9 @@ func DefaultHandlerConfig() HandlerConfig {
 		SessionTokenExpiry: 8 * time.Hour,
 		DefaultPageSize:    20,
 		MaxPageSize:        100,
+		APIKeyPrefix:       "aegion_",
+		APIKeyPrefixLen:    12,
+		APIKeyEntropyBytes: 32,
 	}
 }
 
@@ -91,6 +99,7 @@ type Handler struct {
 	service Service
 	db      dbQuerier
 	config  HandlerConfig
+	log     *slog.Logger
 }
 
 // New creates a new admin handler.
@@ -109,7 +118,20 @@ func New(svc Service, cfgOverride ...HandlerConfig) *Handler {
 	if cfg.SessionTokenExpiry == 0 {
 		cfg.SessionTokenExpiry = 8 * time.Hour
 	}
-	return &Handler{service: svc, config: cfg}
+	if cfg.APIKeyPrefix == "" {
+		cfg.APIKeyPrefix = "aegion_"
+	}
+	if cfg.APIKeyPrefixLen == 0 {
+		cfg.APIKeyPrefixLen = 12
+	}
+	if cfg.APIKeyEntropyBytes == 0 {
+		cfg.APIKeyEntropyBytes = 32
+	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Handler{service: svc, config: cfg, log: logger.With("component", "admin.handler")}
 }
 
 func (h *Handler) dbConn() dbQuerier {

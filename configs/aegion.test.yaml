@@ -245,6 +245,11 @@ admin:
   path: /aegion
   session_lifespan: 30m
   require_reauth: false
+  default_page_size: 20
+  max_page_size: 100
+  api_key_prefix: "aegion_"
+  api_key_lookup_prefix_len: 12
+  api_key_entropy_bytes: 32
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Observability — Minimal for tests

@@ -272,6 +272,11 @@ admin:
   # Require re-authentication for sensitive operations
   require_reauth: true
   reauth_timeout: 5m
+  default_page_size: ${AEGION_ADMIN_DEFAULT_PAGE_SIZE:-20}
+  max_page_size: ${AEGION_ADMIN_MAX_PAGE_SIZE:-100}
+  api_key_prefix: ${AEGION_ADMIN_API_KEY_PREFIX:-aegion_}
+  api_key_lookup_prefix_len: ${AEGION_ADMIN_API_KEY_LOOKUP_PREFIX_LEN:-12}
+  api_key_entropy_bytes: ${AEGION_ADMIN_API_KEY_ENTROPY_BYTES:-32}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Observability

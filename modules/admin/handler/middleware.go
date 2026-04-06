@@ -40,15 +40,22 @@ func IPAddressFromContext(ctx context.Context) string {
 // RequireAdmin middleware validates that the request is from an authenticated operator.
 func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		// Get identity ID from session context headers
 		identityIDStr := r.Header.Get("X-Aegion-Session-Identity-ID")
 		if identityIDStr == "" {
 			// Try Authorization header for API key auth
 			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(auth, "Bearer aegion_") {
+			if strings.HasPrefix(auth, "Bearer "+h.config.APIKeyPrefix) {
 				h.handleAPIKeyAuth(w, r, next, auth)
 				return
 			}
+
+			h.log.WarnContext(r.Context(), "admin auth missing credentials",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
 
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 			return
@@ -56,6 +63,11 @@ func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 
 		identityID, err := uuid.Parse(identityIDStr)
 		if err != nil {
+			h.log.WarnContext(r.Context(), "admin auth invalid identity header",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"error", err.Error(),
+			)
 			writeError(w, http.StatusUnauthorized, "invalid_session", "Invalid session identity")
 			return
 		}
@@ -63,6 +75,11 @@ func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 		// Check if identity is an operator
 		operator, err := h.service.GetOperatorByIdentityID(r.Context(), identityID)
 		if err != nil {
+			h.log.WarnContext(r.Context(), "admin auth identity is not operator",
+				"identity_id", identityID.String(),
+				"path", r.URL.Path,
+				"method", r.Method,
+			)
 			writeError(w, http.StatusForbidden, "not_operator", "Access denied. Operator status required.")
 			return
 		}
@@ -70,6 +87,14 @@ func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 		// Store operator and IP in context
 		ctx := context.WithValue(r.Context(), contextKeyOperator, operator)
 		ctx = context.WithValue(ctx, contextKeyIPAddress, getClientIP(r))
+
+		h.log.InfoContext(ctx, "admin auth success",
+			"operator_id", operator.ID.String(),
+			"identity_id", operator.IdentityID.String(),
+			"path", r.URL.Path,
+			"method", r.Method,
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -79,32 +104,45 @@ func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next http.Handler, auth string) {
 	// Extract API key from Authorization header
 	apiKey := strings.TrimPrefix(auth, "Bearer ")
-	if apiKey == "" || !strings.HasPrefix(apiKey, "aegion_") {
+	if apiKey == "" || !strings.HasPrefix(apiKey, h.config.APIKeyPrefix) {
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "Invalid API key format")
 		return
 	}
 
-	// Extract prefix for lookup (first 12 chars after "aegion_")
-	if len(apiKey) < 20 {
+	// Extract prefix for lookup (configured chars after token prefix)
+	minLen := len(h.config.APIKeyPrefix) + h.config.APIKeyPrefixLen
+	if len(apiKey) < minLen {
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "Invalid API key")
 		return
 	}
-	keyPrefix := apiKey[7:19] // "aegion_" is 7 chars, prefix is next 12
+	keyPrefix := apiKey[len(h.config.APIKeyPrefix):minLen]
 
 	// Look up API key
 	key, err := h.service.Store().GetAPIKeyByPrefix(r.Context(), keyPrefix)
 	if err != nil {
+		h.log.WarnContext(r.Context(), "admin api key not found",
+			"prefix", keyPrefix,
+			"path", r.URL.Path,
+		)
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "Invalid or expired API key")
 		return
 	}
 
 	if !store.ValidateAPIKeyToken(apiKey, key.KeyHash) {
+		h.log.WarnContext(r.Context(), "admin api key hash mismatch",
+			"key_id", key.ID.String(),
+			"operator_id", key.OperatorID.String(),
+		)
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "Invalid or expired API key")
 		return
 	}
 
 	// Check expiration
 	if key.ExpiresAt != nil && time.Now().UTC().After(*key.ExpiresAt) {
+		h.log.WarnContext(r.Context(), "admin api key expired",
+			"key_id", key.ID.String(),
+			"expires_at", key.ExpiresAt.Format(time.RFC3339),
+		)
 		writeError(w, http.StatusUnauthorized, "api_key_expired", "API key has expired")
 		return
 	}
@@ -112,6 +150,10 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	// Get operator for the API key
 	operator, err := h.service.Store().GetOperator(r.Context(), key.OperatorID)
 	if err != nil {
+		h.log.WarnContext(r.Context(), "admin api key operator missing",
+			"key_id", key.ID.String(),
+			"operator_id", key.OperatorID.String(),
+		)
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "API key operator not found")
 		return
 	}
@@ -122,6 +164,15 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	// Store operator and IP in context
 	ctx := context.WithValue(r.Context(), contextKeyOperator, operator)
 	ctx = context.WithValue(ctx, contextKeyIPAddress, getClientIP(r))
+	ctx = context.WithValue(ctx, contextKey("aegion.admin.auth_method"), "api_key")
+	ctx = context.WithValue(ctx, contextKey("aegion.admin.auth_key_id"), key.ID.String())
+
+	h.log.InfoContext(ctx, "admin api key auth success",
+		"operator_id", operator.ID.String(),
+		"key_id", key.ID.String(),
+		"path", r.URL.Path,
+		"method", r.Method,
+	)
 
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
@@ -217,4 +268,21 @@ func (h *Handler) logAdminAction(r *http.Request, action, resourceType string, s
 
 	// Log action (best effort)
 	_ = h.service.Store().LogAction(ctx, entry)
+
+	if h.log != nil {
+		h.log.InfoContext(r.Context(), "admin action audited",
+			"action", action,
+			"resource_type", resourceType,
+			"resource_id", resourceID,
+			"status_code", statusCode,
+			"operator_id", fmtUUID(operator),
+		)
+	}
+}
+
+func fmtUUID(op *store.Operator) string {
+	if op == nil {
+		return ""
+	}
+	return op.ID.String()
 }
