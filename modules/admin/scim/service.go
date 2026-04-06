@@ -5,8 +5,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -19,6 +22,45 @@ import (
 type Service struct {
 	store    Store
 	registry *registry.Registry
+	config   Config
+	log      *slog.Logger
+}
+
+var (
+	ErrInvalidFilter       = errors.New("invalid filter")
+	ErrRequiredUserName    = errors.New("userName is required")
+	ErrRequiredDisplayName = errors.New("displayName is required")
+	ErrInvalidTokenFormat  = errors.New("invalid token format")
+	ErrInvalidTokenLength  = errors.New("invalid token length")
+	ErrTokenNotFound       = errors.New("token not found")
+	ErrTokenInactive       = errors.New("token is inactive")
+	ErrTokenExpired        = errors.New("token has expired")
+	ErrTokenInvalid        = errors.New("invalid token")
+)
+
+// Config configures SCIM service behavior.
+type Config struct {
+	BasePath                   string
+	TokenPrefix                string
+	TokenLookupPrefixLen       int
+	TokenEntropyBytes          int
+	DefaultPageSize            int
+	MaxPageSize                int
+	TokenLastUsedUpdateTimeout time.Duration
+	Logger                     *slog.Logger
+}
+
+// DefaultConfig returns default SCIM service configuration.
+func DefaultConfig() Config {
+	return Config{
+		BasePath:                   "/scim/v2",
+		TokenPrefix:                "aegion_scim_",
+		TokenLookupPrefixLen:       12,
+		TokenEntropyBytes:          32,
+		DefaultPageSize:            20,
+		MaxPageSize:                1000,
+		TokenLastUsedUpdateTimeout: 2 * time.Second,
+	}
 }
 
 // Store defines the interface for SCIM persistence operations.
@@ -58,11 +100,53 @@ type Store interface {
 }
 
 // NewService creates a new SCIM service.
-func NewService(store Store, registry *registry.Registry) *Service {
+func NewService(store Store, registry *registry.Registry, cfgOverride ...Config) *Service {
+	cfg := DefaultConfig()
+	if len(cfgOverride) > 0 {
+		cfg = cfgOverride[0]
+	}
+	if cfg.BasePath == "" {
+		cfg.BasePath = "/scim/v2"
+	}
+	if cfg.TokenPrefix == "" {
+		cfg.TokenPrefix = "aegion_scim_"
+	}
+	if cfg.TokenLookupPrefixLen == 0 {
+		cfg.TokenLookupPrefixLen = 12
+	}
+	if cfg.TokenEntropyBytes == 0 {
+		cfg.TokenEntropyBytes = 32
+	}
+	if cfg.DefaultPageSize == 0 {
+		cfg.DefaultPageSize = 20
+	}
+	if cfg.MaxPageSize == 0 {
+		cfg.MaxPageSize = 1000
+	}
+	if cfg.TokenLastUsedUpdateTimeout == 0 {
+		cfg.TokenLastUsedUpdateTimeout = 2 * time.Second
+	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Service{
 		store:    store,
 		registry: registry,
+		config:   cfg,
+		log:      logger.With("component", "admin.scim.service"),
 	}
+}
+
+// DefaultPageSize returns configured default page size.
+func (s *Service) DefaultPageSize() int {
+	return s.config.DefaultPageSize
+}
+
+// MaxPageSize returns configured max page size.
+func (s *Service) MaxPageSize() int {
+	return s.config.MaxPageSize
 }
 
 // GetServiceProviderConfig returns the SCIM service provider configuration.
@@ -80,7 +164,7 @@ func (s *Service) GetServiceProviderConfig() *ServiceProviderConfig {
 		},
 		Filter: FilterConfig{
 			Supported:  true,
-			MaxResults: 1000,
+			MaxResults: s.config.MaxPageSize,
 		},
 		ChangePassword: Supported{
 			Supported: false, // Password changes not supported via SCIM
@@ -101,7 +185,7 @@ func (s *Service) GetServiceProviderConfig() *ServiceProviderConfig {
 		},
 		Meta: Meta{
 			ResourceType: "ServiceProviderConfig",
-			Location:     "/scim/v2/ServiceProviderConfig",
+			Location:     s.resourceLocation("ServiceProviderConfig", ""),
 		},
 	}
 }
@@ -235,7 +319,7 @@ func (s *Service) getUserSchema() *Schema {
 		},
 		Meta: Meta{
 			ResourceType: "Schema",
-			Location:     "/scim/v2/Schemas/" + SchemaUser,
+			Location:     s.resourceLocation("Schemas", SchemaUser),
 		},
 	}
 }
@@ -292,7 +376,7 @@ func (s *Service) getGroupSchema() *Schema {
 		},
 		Meta: Meta{
 			ResourceType: "Schema",
-			Location:     "/scim/v2/Schemas/" + SchemaGroup,
+			Location:     s.resourceLocation("Schemas", SchemaGroup),
 		},
 	}
 }
@@ -321,10 +405,10 @@ func (s *Service) ListUsers(ctx context.Context, filter string, sortBy string, s
 		startIndex = 1
 	}
 	if count <= 0 {
-		count = 20
+		count = s.config.DefaultPageSize
 	}
-	if count > 1000 {
-		count = 1000
+	if count > s.config.MaxPageSize {
+		count = s.config.MaxPageSize
 	}
 
 	users, total, err := s.store.ListUsers(ctx, parsedFilter, sortBy, sortOrder, startIndex, count)
@@ -357,13 +441,13 @@ func (s *Service) CreateUser(ctx context.Context, user *SCIMUser) (*SCIMUser, er
 		ResourceType: "User",
 		Created:      &now,
 		LastModified: &now,
-		Location:     "/scim/v2/Users/" + user.ID,
+		Location:     s.resourceLocation("Users", user.ID),
 		Version:      "1",
 	}
 
 	// Validate required fields
 	if user.UserName == "" {
-		return nil, fmt.Errorf("userName is required")
+		return nil, ErrRequiredUserName
 	}
 
 	err := s.store.CreateUser(ctx, user)
@@ -391,7 +475,7 @@ func (s *Service) UpdateUser(ctx context.Context, id string, user *SCIMUser) (*S
 
 	user.Meta = existing.Meta
 	user.Meta.LastModified = &now
-	user.Meta.Location = "/scim/v2/Users/" + id
+	user.Meta.Location = s.resourceLocation("Users", id)
 
 	err = s.store.UpdateUser(ctx, user)
 	if err != nil {
@@ -435,10 +519,10 @@ func (s *Service) ListGroups(ctx context.Context, filter string, sortBy string, 
 		startIndex = 1
 	}
 	if count <= 0 {
-		count = 20
+		count = s.config.DefaultPageSize
 	}
-	if count > 1000 {
-		count = 1000
+	if count > s.config.MaxPageSize {
+		count = s.config.MaxPageSize
 	}
 
 	groups, total, err := s.store.ListGroups(ctx, parsedFilter, sortBy, sortOrder, startIndex, count)
@@ -471,13 +555,13 @@ func (s *Service) CreateGroup(ctx context.Context, group *SCIMGroup) (*SCIMGroup
 		ResourceType: "Group",
 		Created:      &now,
 		LastModified: &now,
-		Location:     "/scim/v2/Groups/" + group.ID,
+		Location:     s.resourceLocation("Groups", group.ID),
 		Version:      "1",
 	}
 
 	// Validate required fields
 	if group.DisplayName == "" {
-		return nil, fmt.Errorf("displayName is required")
+		return nil, ErrRequiredDisplayName
 	}
 
 	err := s.store.CreateGroup(ctx, group)
@@ -505,7 +589,7 @@ func (s *Service) UpdateGroup(ctx context.Context, id string, group *SCIMGroup) 
 
 	group.Meta = existing.Meta
 	group.Meta.LastModified = &now
-	group.Meta.Location = "/scim/v2/Groups/" + id
+	group.Meta.Location = s.resourceLocation("Groups", id)
 
 	err = s.store.UpdateGroup(ctx, group)
 	if err != nil {
@@ -530,18 +614,21 @@ func (s *Service) DeleteGroup(ctx context.Context, id string) error {
 // CreateSCIMToken creates a new SCIM API token.
 func (s *Service) CreateSCIMToken(ctx context.Context, name, description string, permissions []string, expiresAt *time.Time, createdBy uuid.UUID) (*SCIMToken, string, error) {
 	// Generate token
-	tokenBytes := make([]byte, 32)
+	tokenBytes := make([]byte, s.config.TokenEntropyBytes)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nil, "", fmt.Errorf("failed to generate token: %w", err)
 	}
-	token := "aegion_scim_" + base64.RawURLEncoding.EncodeToString(tokenBytes)
+	token := s.config.TokenPrefix + base64.RawURLEncoding.EncodeToString(tokenBytes)
 
 	// Hash token for storage
 	hash := sha256.Sum256([]byte(token))
 	tokenHash := base64.StdEncoding.EncodeToString(hash[:])
 
-	// Generate prefix for lookup (first 12 chars after "aegion_scim_")
-	prefix := token[12:24]
+	// Generate prefix for lookup.
+	prefix, err := s.tokenLookupPrefix(token)
+	if err != nil {
+		return nil, "", err
+	}
 
 	scimToken := &SCIMToken{
 		ID:          uuid.New(),
@@ -556,7 +643,7 @@ func (s *Service) CreateSCIMToken(ctx context.Context, name, description string,
 		Active:      true,
 	}
 
-	err := s.store.CreateSCIMToken(ctx, scimToken)
+	err = s.store.CreateSCIMToken(ctx, scimToken)
 	if err != nil {
 		return nil, "", err
 	}
@@ -566,44 +653,42 @@ func (s *Service) CreateSCIMToken(ctx context.Context, name, description string,
 
 // ValidateToken validates a SCIM API token and returns the token info.
 func (s *Service) ValidateToken(ctx context.Context, token string) (*SCIMToken, error) {
-	if !strings.HasPrefix(token, "aegion_scim_") {
-		return nil, fmt.Errorf("invalid token format")
+	prefix, err := s.tokenLookupPrefix(token)
+	if err != nil {
+		return nil, err
 	}
-
-	if len(token) < 24 {
-		return nil, fmt.Errorf("invalid token length")
-	}
-
-	// Extract prefix for lookup
-	prefix := token[12:24]
 
 	scimToken, err := s.store.GetSCIMTokenByPrefix(ctx, prefix)
 	if err != nil {
-		return nil, fmt.Errorf("token not found: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrTokenNotFound, err)
 	}
 
 	// Check if active
 	if !scimToken.Active {
-		return nil, fmt.Errorf("token is inactive")
+		return nil, ErrTokenInactive
 	}
 
 	// Check expiration
 	if scimToken.ExpiresAt != nil && time.Now().UTC().After(*scimToken.ExpiresAt) {
-		return nil, fmt.Errorf("token has expired")
+		return nil, ErrTokenExpired
 	}
 
 	// Validate token hash
 	hash := sha256.Sum256([]byte(token))
 	tokenHash := base64.StdEncoding.EncodeToString(hash[:])
 
-	if tokenHash != scimToken.TokenHash {
-		return nil, fmt.Errorf("invalid token")
+	if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(scimToken.TokenHash)) != 1 {
+		return nil, ErrTokenInvalid
 	}
 
 	// Update last used timestamp (best effort)
-	go func() {
-		_ = s.store.UpdateSCIMTokenLastUsed(context.Background(), scimToken.ID)
-	}()
+	go func(tokenID uuid.UUID) {
+		updateCtx, cancel := context.WithTimeout(context.Background(), s.config.TokenLastUsedUpdateTimeout)
+		defer cancel()
+		if err := s.store.UpdateSCIMTokenLastUsed(updateCtx, tokenID); err != nil {
+			s.log.WarnContext(updateCtx, "failed to update SCIM token last-used timestamp", "token_id", tokenID.String(), "error", err)
+		}
+	}(scimToken.ID)
 
 	return scimToken, nil
 }
@@ -631,7 +716,7 @@ func (s *Service) parseFilter(filter string) (*Filter, error) {
 	// Simple parsing for common patterns like 'userName eq "john"'
 	parts := strings.Split(filter, " ")
 	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid filter format")
+		return nil, fmt.Errorf("%w format", ErrInvalidFilter)
 	}
 
 	// Remove quotes from value
@@ -642,4 +727,23 @@ func (s *Service) parseFilter(filter string) (*Filter, error) {
 		Operator:  parts[1],
 		Value:     value,
 	}, nil
+}
+
+func (s *Service) tokenLookupPrefix(token string) (string, error) {
+	if !strings.HasPrefix(token, s.config.TokenPrefix) {
+		return "", ErrInvalidTokenFormat
+	}
+	tail := strings.TrimPrefix(token, s.config.TokenPrefix)
+	if len(tail) < s.config.TokenLookupPrefixLen {
+		return "", ErrInvalidTokenLength
+	}
+	return tail[:s.config.TokenLookupPrefixLen], nil
+}
+
+func (s *Service) resourceLocation(resource, id string) string {
+	base := strings.TrimRight(s.config.BasePath, "/")
+	if id == "" {
+		return base + "/" + resource
+	}
+	return base + "/" + resource + "/" + id
 }

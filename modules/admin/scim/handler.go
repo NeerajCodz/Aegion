@@ -3,6 +3,8 @@ package scim
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,11 +15,51 @@ import (
 // Handler handles SCIM 2.0 HTTP requests.
 type Handler struct {
 	service *Service
+	config  HandlerConfig
+	log     *slog.Logger
+}
+
+// HandlerConfig configures SCIM HTTP handler behavior.
+type HandlerConfig struct {
+	DefaultPageSize int
+	MaxPageSize     int
+	Logger          *slog.Logger
+}
+
+// DefaultHandlerConfig returns default SCIM handler settings.
+func DefaultHandlerConfig() HandlerConfig {
+	return HandlerConfig{
+		DefaultPageSize: 20,
+		MaxPageSize:     1000,
+	}
 }
 
 // NewHandler creates a new SCIM handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, cfgOverride ...HandlerConfig) *Handler {
+	cfg := DefaultHandlerConfig()
+	if len(cfgOverride) > 0 {
+		cfg = cfgOverride[0]
+	}
+	if service != nil {
+		if cfg.DefaultPageSize == 0 {
+			cfg.DefaultPageSize = service.DefaultPageSize()
+		}
+		if cfg.MaxPageSize == 0 {
+			cfg.MaxPageSize = service.MaxPageSize()
+		}
+	}
+	if cfg.DefaultPageSize == 0 {
+		cfg.DefaultPageSize = 20
+	}
+	if cfg.MaxPageSize == 0 {
+		cfg.MaxPageSize = 1000
+	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &Handler{service: service, config: cfg, log: logger.With("component", "admin.scim.handler")}
 }
 
 // RegisterRoutes registers SCIM 2.0 routes.
@@ -68,11 +110,12 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		token := strings.TrimPrefix(auth, "Bearer ")
+		token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
 
 		// Validate token
 		scimToken, err := h.service.ValidateToken(r.Context(), token)
 		if err != nil {
+			h.log.WarnContext(r.Context(), "SCIM authentication failed", "error", err)
 			h.writeError(w, http.StatusUnauthorized, "invalidCredentials", "Invalid or expired token")
 			return
 		}
@@ -89,11 +132,13 @@ func (h *Handler) requirePermission(permission string) func(http.HandlerFunc) ht
 		return func(w http.ResponseWriter, r *http.Request) {
 			token := scimTokenFromContext(r.Context())
 			if token == nil {
+				h.log.WarnContext(r.Context(), "SCIM permission denied: no token in context", "permission", permission)
 				h.writeError(w, http.StatusUnauthorized, "invalidCredentials", "Authentication required")
 				return
 			}
 
 			if !h.service.HasPermission(token, permission) {
+				h.log.WarnContext(r.Context(), "SCIM permission denied", "permission", permission, "token_id", token.ID.String())
 				h.writeError(w, http.StatusForbidden, "insufficientRights", "Insufficient permissions")
 				return
 			}
@@ -155,23 +200,12 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		sortOrder = SortDescending
 	}
 
-	startIndex := 1
-	if si := r.URL.Query().Get("startIndex"); si != "" {
-		if parsed, err := strconv.Atoi(si); err == nil && parsed > 0 {
-			startIndex = parsed
-		}
-	}
-
-	count := 20
-	if c := r.URL.Query().Get("count"); c != "" {
-		if parsed, err := strconv.Atoi(c); err == nil && parsed > 0 {
-			count = parsed
-		}
-	}
+	startIndex, count := h.parsePagination(r)
 
 	response, err := h.service.ListUsers(r.Context(), filter, sortBy, sortOrder, startIndex, count)
 	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM list users failed", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to list users")
 		return
 	}
 
@@ -184,6 +218,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.service.GetUser(r.Context(), id)
 	if err != nil {
+		h.log.WarnContext(r.Context(), "SCIM get user failed", "user_id", id, "error", err)
 		h.writeError(w, http.StatusNotFound, "notFound", "User not found")
 		return
 	}
@@ -201,7 +236,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	createdUser, err := h.service.CreateUser(r.Context(), &user)
 	if err != nil {
-		if strings.Contains(err.Error(), "userName is required") {
+		if errors.Is(err, ErrRequiredUserName) {
 			h.writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 			return
 		}
@@ -209,7 +244,8 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusConflict, "uniqueness", err.Error())
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM create user failed", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to create user")
 		return
 	}
 
@@ -232,7 +268,8 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusNotFound, "notFound", "User not found")
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM update user failed", "user_id", id, "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to update user")
 		return
 	}
 
@@ -265,7 +302,8 @@ func (h *Handler) PatchUser(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM patch user failed", "user_id", id, "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to patch user")
 		return
 	}
 
@@ -282,7 +320,8 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusNotFound, "notFound", "User not found")
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM delete user failed", "user_id", id, "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to delete user")
 		return
 	}
 
@@ -301,23 +340,12 @@ func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 		sortOrder = SortDescending
 	}
 
-	startIndex := 1
-	if si := r.URL.Query().Get("startIndex"); si != "" {
-		if parsed, err := strconv.Atoi(si); err == nil && parsed > 0 {
-			startIndex = parsed
-		}
-	}
-
-	count := 20
-	if c := r.URL.Query().Get("count"); c != "" {
-		if parsed, err := strconv.Atoi(c); err == nil && parsed > 0 {
-			count = parsed
-		}
-	}
+	startIndex, count := h.parsePagination(r)
 
 	response, err := h.service.ListGroups(r.Context(), filter, sortBy, sortOrder, startIndex, count)
 	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM list groups failed", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to list groups")
 		return
 	}
 
@@ -330,6 +358,7 @@ func (h *Handler) GetGroup(w http.ResponseWriter, r *http.Request) {
 
 	group, err := h.service.GetGroup(r.Context(), id)
 	if err != nil {
+		h.log.WarnContext(r.Context(), "SCIM get group failed", "group_id", id, "error", err)
 		h.writeError(w, http.StatusNotFound, "notFound", "Group not found")
 		return
 	}
@@ -347,7 +376,7 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	createdGroup, err := h.service.CreateGroup(r.Context(), &group)
 	if err != nil {
-		if strings.Contains(err.Error(), "displayName is required") {
+		if errors.Is(err, ErrRequiredDisplayName) {
 			h.writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 			return
 		}
@@ -355,7 +384,8 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusConflict, "uniqueness", err.Error())
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM create group failed", "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to create group")
 		return
 	}
 
@@ -378,7 +408,8 @@ func (h *Handler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusNotFound, "notFound", "Group not found")
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM update group failed", "group_id", id, "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to update group")
 		return
 	}
 
@@ -411,7 +442,8 @@ func (h *Handler) PatchGroup(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusBadRequest, "invalidValue", err.Error())
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM patch group failed", "group_id", id, "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to patch group")
 		return
 	}
 
@@ -428,7 +460,8 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusNotFound, "notFound", "Group not found")
 			return
 		}
-		h.writeError(w, http.StatusInternalServerError, "internalError", err.Error())
+		h.log.ErrorContext(r.Context(), "SCIM delete group failed", "group_id", id, "error", err)
+		h.writeError(w, http.StatusInternalServerError, "internalError", "Failed to delete group")
 		return
 	}
 
@@ -456,4 +489,25 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, scimType, detail
 	w.Header().Set("Content-Type", "application/scim+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(errorResp)
+}
+
+func (h *Handler) parsePagination(r *http.Request) (startIndex, count int) {
+	startIndex = 1
+	if si := r.URL.Query().Get("startIndex"); si != "" {
+		if parsed, err := strconv.Atoi(si); err == nil && parsed > 0 {
+			startIndex = parsed
+		}
+	}
+
+	count = h.config.DefaultPageSize
+	if c := r.URL.Query().Get("count"); c != "" {
+		if parsed, err := strconv.Atoi(c); err == nil && parsed > 0 {
+			count = parsed
+		}
+	}
+	if count > h.config.MaxPageSize {
+		count = h.config.MaxPageSize
+	}
+
+	return startIndex, count
 }
