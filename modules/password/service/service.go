@@ -36,6 +36,8 @@ type Config struct {
 	RequireNumber    bool
 	RequireSpecial   bool
 	HIBPEnabled      bool
+	HIBPTimeout      time.Duration // Timeout for HIBP API requests (default: 5s)
+	HIBPBaseURL      string        // Base URL for HIBP API (default: https://api.pwnedpasswords.com/range/)
 	HistoryCount     int
 }
 
@@ -70,6 +72,12 @@ func New(store credentialStore, hasher Hasher, config Config) *Service {
 	}
 	if config.HistoryCount == 0 {
 		config.HistoryCount = 5
+	}
+	if config.HIBPTimeout == 0 {
+		config.HIBPTimeout = 5 * time.Second
+	}
+	if config.HIBPBaseURL == "" {
+		config.HIBPBaseURL = "https://api.pwnedpasswords.com/range/"
 	}
 
 	return &Service{
@@ -311,7 +319,7 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 	suffix := hashStr[5:]
 
 	// Query HIBP API
-	url := fmt.Sprintf("https://api.pwnedpasswords.com/range/%s", prefix)
+	url := fmt.Sprintf("%s%s", s.config.HIBPBaseURL, prefix)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -320,7 +328,7 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 	}
 	req.Header.Set("User-Agent", "Aegion-Identity-Server")
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: s.config.HIBPTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		// Don't fail registration if HIBP is unavailable
