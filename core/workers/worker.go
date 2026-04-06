@@ -27,18 +27,20 @@ type Worker interface {
 
 // Manager coordinates multiple workers.
 type Manager struct {
-	db      *pgxpool.Pool
-	log     *logger.Logger
-	workers []Worker
-	wg      sync.WaitGroup
-	cancel  context.CancelFunc
-	mu      sync.Mutex
+	db          *pgxpool.Pool
+	log         *logger.Logger
+	workers     []Worker
+	wg          sync.WaitGroup
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	stopTimeout time.Duration
 }
 
 // ManagerConfig configures the worker manager.
 type ManagerConfig struct {
-	DB  *pgxpool.Pool
-	Log *logger.Logger
+	DB          *pgxpool.Pool
+	Log         *logger.Logger
+	StopTimeout time.Duration // Timeout for graceful shutdown (default: 30 seconds)
 }
 
 // NewManager creates a new worker manager.
@@ -48,10 +50,16 @@ func NewManager(cfg ManagerConfig) *Manager {
 		log = logger.New(logger.Config{Level: "info", Format: "json"})
 	}
 
+	stopTimeout := cfg.StopTimeout
+	if stopTimeout == 0 {
+		stopTimeout = 30 * time.Second
+	}
+
 	return &Manager{
-		db:      cfg.DB,
-		log:     log.WithComponent("worker_manager"),
-		workers: make([]Worker, 0),
+		db:          cfg.DB,
+		log:         log.WithComponent("worker_manager"),
+		workers:     make([]Worker, 0),
+		stopTimeout: stopTimeout,
 	}
 }
 
@@ -113,7 +121,7 @@ func (m *Manager) Stop() {
 	select {
 	case <-done:
 		m.log.Info().Msg("all workers stopped gracefully")
-	case <-time.After(30 * time.Second):
+	case <-time.After(m.stopTimeout):
 		m.log.Warn().Msg("timeout waiting for workers to stop")
 	}
 }
