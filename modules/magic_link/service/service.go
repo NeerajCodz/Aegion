@@ -21,13 +21,14 @@ var (
 
 // Config holds magic link service configuration.
 type Config struct {
-	BaseURL      string        // Base URL for magic links
-	CodeLength   int           // OTP code length
-	CodeCharset  string        // Characters to use for OTP
-	LinkLifespan time.Duration // Magic link validity
-	CodeLifespan time.Duration // OTP code validity
-	RateLimit    int           // Max requests per window
-	RateWindow   time.Duration // Rate limit window
+	BaseURL           string        // Base URL for magic links
+	CodeLength        int           // OTP code length
+	CodeCharset       string        // Characters to use for OTP
+	LinkLifespan      time.Duration // Magic link validity
+	CodeLifespan      time.Duration // OTP code validity
+	RateLimit         int           // Max requests per window
+	RateWindow        time.Duration // Rate limit window
+	RecoveryRateLimit int           // Max recovery requests per window (default: 3)
 }
 
 // Courier interface for sending messages.
@@ -72,6 +73,9 @@ func New(st codeStore, courier Courier, config Config) *Service {
 	}
 	if config.RateWindow == 0 {
 		config.RateWindow = time.Hour
+	}
+	if config.RecoveryRateLimit == 0 {
+		config.RecoveryRateLimit = 3
 	}
 
 	st.SetCodeConfig(config.CodeLength, config.CodeCharset)
@@ -232,7 +236,7 @@ func (s *Service) SendRecoveryCode(ctx context.Context, email string, identityID
 
 	// Check rate limit
 	rateLimitKey := fmt.Sprintf("recover:%s", email)
-	if err := s.store.CheckRateLimit(ctx, rateLimitKey, 3, s.config.RateWindow); err != nil {
+	if err := s.store.CheckRateLimit(ctx, rateLimitKey, s.config.RecoveryRateLimit, s.config.RateWindow); err != nil {
 		if errors.Is(err, store.ErrRateLimited) {
 			return ErrRateLimited
 		}
