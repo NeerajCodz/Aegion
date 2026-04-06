@@ -417,9 +417,14 @@ func (p *Proxy) handleError(w http.ResponseWriter, r *http.Request, err error, s
 func (p *Proxy) handleRateLimitExceeded(w http.ResponseWriter, r *http.Request, waitTime time.Duration, err error, start time.Time) {
 	requestID := getRequestIDFromContext(r.Context())
 
-	// Add rate limit headers
-	w.Header().Set("X-RateLimit-Limit", "100") // This should come from config
-	w.Header().Set("X-RateLimit-Remaining", "0")
+	limit := 100
+	remaining := 0
+	if p.limiter != nil {
+		limit = p.limiter.Limit()
+	}
+
+	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
 	w.Header().Set("Retry-After", strconv.Itoa(int(waitTime.Seconds())))
 
 	p.logger.Warn().
