@@ -191,23 +191,30 @@ type BruteForceConfig struct {
 
 // PasswordConfig configures the password module.
 type PasswordConfig struct {
-	Enabled          bool `yaml:"enabled"`
-	MinLength        int  `yaml:"min_length"`
-	RequireUppercase bool `yaml:"require_uppercase"`
-	RequireLowercase bool `yaml:"require_lowercase"`
-	RequireNumber    bool `yaml:"require_number"`
-	RequireSpecial   bool `yaml:"require_special"`
-	HIBPEnabled      bool `yaml:"hibp_enabled"`
-	HistoryCount     int  `yaml:"history_count"`
+	Enabled                 bool     `yaml:"enabled"`
+	MinLength               int      `yaml:"min_length"`
+	RequireUppercase        bool     `yaml:"require_uppercase"`
+	RequireLowercase        bool     `yaml:"require_lowercase"`
+	RequireNumber           bool     `yaml:"require_number"`
+	RequireSpecial          bool     `yaml:"require_special"`
+	HIBPEnabled             bool     `yaml:"hibp_enabled"`
+	HIBPHost                string   `yaml:"hibp_host"`
+	HIBPTimeout             Duration `yaml:"hibp_timeout"`
+	HIBPIgnoreNetworkErrors bool     `yaml:"hibp_ignore_network_errors"`
+	HIBPMinBreachCount      int      `yaml:"hibp_min_breach_count"`
+	HistoryCount            int      `yaml:"history_count"`
 }
 
 // MagicLinkConfig configures the magic link module.
 type MagicLinkConfig struct {
-	Enabled      bool     `yaml:"enabled"`
-	CodeLength   int      `yaml:"code_length"`
-	CodeCharset  string   `yaml:"code_charset"`
-	LinkLifespan Duration `yaml:"link_lifespan"`
-	CodeLifespan Duration `yaml:"code_lifespan"`
+	Enabled           bool     `yaml:"enabled"`
+	CodeLength        int      `yaml:"code_length"`
+	CodeCharset       string   `yaml:"code_charset"`
+	LinkLifespan      Duration `yaml:"link_lifespan"`
+	CodeLifespan      Duration `yaml:"code_lifespan"`
+	RateLimit         int      `yaml:"rate_limit"`
+	RateWindow        Duration `yaml:"rate_window"`
+	RecoveryRateLimit int      `yaml:"recovery_rate_limit"`
 }
 
 // AdminConfig configures the admin module.
@@ -313,6 +320,18 @@ func applyDefaults(cfg *Config) {
 	if cfg.Password.MinLength == 0 {
 		cfg.Password.MinLength = 8
 	}
+	if cfg.Password.HIBPHost == "" {
+		cfg.Password.HIBPHost = "api.pwnedpasswords.com"
+	}
+	if cfg.Password.HIBPTimeout == 0 {
+		cfg.Password.HIBPTimeout = Duration(5 * time.Second)
+	}
+	if cfg.Password.HIBPMinBreachCount == 0 {
+		cfg.Password.HIBPMinBreachCount = 1
+	}
+	if !cfg.Password.HIBPEnabled {
+		cfg.Password.HIBPIgnoreNetworkErrors = true
+	}
 	if cfg.MagicLink.CodeLength == 0 {
 		cfg.MagicLink.CodeLength = 6
 	}
@@ -324,6 +343,15 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.MagicLink.CodeLifespan == 0 {
 		cfg.MagicLink.CodeLifespan = Duration(15 * time.Minute)
+	}
+	if cfg.MagicLink.RateLimit == 0 {
+		cfg.MagicLink.RateLimit = 5
+	}
+	if cfg.MagicLink.RateWindow == 0 {
+		cfg.MagicLink.RateWindow = Duration(time.Hour)
+	}
+	if cfg.MagicLink.RecoveryRateLimit == 0 {
+		cfg.MagicLink.RecoveryRateLimit = 3
 	}
 	if cfg.Admin.Path == "" {
 		cfg.Admin.Path = "/aegion"

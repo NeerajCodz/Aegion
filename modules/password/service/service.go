@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -30,15 +32,17 @@ var (
 
 // Config holds password service configuration.
 type Config struct {
-	MinLength        int
-	RequireUppercase bool
-	RequireLowercase bool
-	RequireNumber    bool
-	RequireSpecial   bool
-	HIBPEnabled      bool
-	HIBPTimeout      time.Duration // Timeout for HIBP API requests (default: 5s)
-	HIBPBaseURL      string        // Base URL for HIBP API (default: https://api.pwnedpasswords.com/range/)
-	HistoryCount     int
+	MinLength               int
+	RequireUppercase        bool
+	RequireLowercase        bool
+	RequireNumber           bool
+	RequireSpecial          bool
+	HIBPEnabled             bool
+	HIBPTimeout             time.Duration // Timeout for HIBP API requests (default: 5s)
+	HIBPBaseURL             string        // Base URL for HIBP API (default: https://api.pwnedpasswords.com/range/)
+	HIBPIgnoreNetworkErrors bool          // Ignore network/API errors (default: true)
+	HIBPMinBreachCount      int           // Minimum breach count to reject password (default: 1)
+	HistoryCount            int
 }
 
 // Hasher interface for password hashing.
@@ -78,6 +82,12 @@ func New(store credentialStore, hasher Hasher, config Config) *Service {
 	}
 	if config.HIBPBaseURL == "" {
 		config.HIBPBaseURL = "https://api.pwnedpasswords.com/range/"
+	}
+	if !config.HIBPEnabled {
+		config.HIBPIgnoreNetworkErrors = true
+	}
+	if config.HIBPMinBreachCount == 0 {
+		config.HIBPMinBreachCount = 1
 	}
 
 	return &Service{
@@ -321,24 +331,31 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 	// Query HIBP API
 	url := fmt.Sprintf("%s%s", s.config.HIBPBaseURL, prefix)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		// Don't fail registration if HIBP is unavailable
-		return nil
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
+		return err
 	}
 	req.Header.Set("User-Agent", "Aegion-Identity-Server")
 
 	client := &http.Client{Timeout: s.config.HIBPTimeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		// Don't fail registration if HIBP is unavailable
-		return nil
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
+		return err
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
 		return nil
 	}
 
@@ -351,12 +368,34 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 	lines := strings.Split(string(body), "\n")
 	for _, line := range lines {
 		parts := strings.Split(strings.TrimSpace(line), ":")
-		if len(parts) >= 1 && strings.EqualFold(parts[0], suffix) {
-			return ErrPasswordBreached
+		if len(parts) >= 2 && strings.EqualFold(parts[0], suffix) {
+			count, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err != nil {
+				continue
+			}
+			if count >= s.config.HIBPMinBreachCount {
+				return ErrPasswordBreached
+			}
 		}
 	}
 
 	return nil
+}
+
+// HIBPBaseURLFromHost builds a HIBP range endpoint from host.
+func HIBPBaseURLFromHost(host string) string {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return "https://api.pwnedpasswords.com/range/"
+	}
+	if strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://") {
+		u, err := url.Parse(h)
+		if err == nil {
+			u.Path = strings.TrimRight(u.Path, "/") + "/range/"
+			return u.String()
+		}
+	}
+	return "https://" + strings.Trim(h, "/") + "/range/"
 }
 
 // checkHistory checks if password matches any historical passwords.

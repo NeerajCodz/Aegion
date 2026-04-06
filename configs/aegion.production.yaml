@@ -249,6 +249,10 @@ password:
   require_number: true
   require_special: true
   hibp_enabled: true
+  hibp_host: ${AEGION_PASSWORD_HIBP_HOST:-api.pwnedpasswords.com}
+  hibp_timeout: ${AEGION_PASSWORD_HIBP_TIMEOUT:-5s}
+  hibp_ignore_network_errors: ${AEGION_PASSWORD_HIBP_IGNORE_NETWORK_ERRORS:-true}
+  hibp_min_breach_count: ${AEGION_PASSWORD_HIBP_MIN_BREACH_COUNT:-1}
   history_count: 10
 
 magic_link:
@@ -257,6 +261,9 @@ magic_link:
   code_charset: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # Excludes ambiguous chars
   link_lifespan: 10m
   code_lifespan: 10m
+  rate_limit: ${AEGION_MAGIC_LINK_RATE_LIMIT:-5}
+  rate_window: ${AEGION_MAGIC_LINK_RATE_WINDOW:-1h}
+  recovery_rate_limit: ${AEGION_MAGIC_LINK_RECOVERY_RATE_LIMIT:-3}
 
 admin:
   enabled: true

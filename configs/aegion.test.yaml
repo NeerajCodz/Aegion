@@ -223,6 +223,10 @@ password:
   require_special: false
   # Disable HIBP for faster tests
   hibp_enabled: false
+  hibp_host: api.pwnedpasswords.com
+  hibp_timeout: 2s
+  hibp_ignore_network_errors: true
+  hibp_min_breach_count: 1
   history_count: 0
 
 magic_link:
@@ -232,6 +236,9 @@ magic_link:
   # Very short expiry for testing expiration
   link_lifespan: 1m
   code_lifespan: 1m
+  rate_limit: 10
+  rate_window: 1m
+  recovery_rate_limit: 10
 
 admin:
   enabled: true
