@@ -39,6 +39,22 @@ type Service interface {
 	ListAuditLogs(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error)
 }
 
+// HandlerConfig holds handler configuration.
+type HandlerConfig struct {
+	SessionTokenExpiry time.Duration // Session token expiry (default: 8 hours)
+	DefaultPageSize    int           // Default pagination page size (default: 20)
+	MaxPageSize        int           // Maximum pagination page size (default: 100)
+}
+
+// DefaultHandlerConfig returns default handler configuration.
+func DefaultHandlerConfig() HandlerConfig {
+	return HandlerConfig{
+		SessionTokenExpiry: 8 * time.Hour,
+		DefaultPageSize:    20,
+		MaxPageSize:        100,
+	}
+}
+
 const sessionTokenExpiry = 8 * time.Hour
 
 // OperatorView is the API representation used by auth and operator endpoints.
@@ -76,11 +92,21 @@ type SystemSettingsResponse struct {
 type Handler struct {
 	service Service
 	db      dbQuerier
+	config  HandlerConfig
 }
 
 // New creates a new admin handler.
-func New(svc Service) *Handler {
-	return &Handler{service: svc}
+func New(svc Service, cfg HandlerConfig) *Handler {
+	if cfg.DefaultPageSize == 0 {
+		cfg.DefaultPageSize = 20
+	}
+	if cfg.MaxPageSize == 0 {
+		cfg.MaxPageSize = 100
+	}
+	if cfg.SessionTokenExpiry == 0 {
+		cfg.SessionTokenExpiry = 8 * time.Hour
+	}
+	return &Handler{service: svc, config: cfg}
 }
 
 func (h *Handler) dbConn() dbQuerier {
@@ -191,9 +217,9 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 
 // parsePagination extracts pagination parameters from request.
-func parsePagination(r *http.Request) (page, perPage, offset int) {
+func (h *Handler) parsePagination(r *http.Request) (page, perPage, offset int) {
 	page = 1
-	perPage = 20
+	perPage = h.config.DefaultPageSize
 
 	if p := r.URL.Query().Get("page"); p != "" {
 		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
@@ -202,7 +228,7 @@ func parsePagination(r *http.Request) (page, perPage, offset int) {
 	}
 
 	if pp := r.URL.Query().Get("per_page"); pp != "" {
-		if parsed, err := strconv.Atoi(pp); err == nil && parsed > 0 && parsed <= 100 {
+		if parsed, err := strconv.Atoi(pp); err == nil && parsed > 0 && parsed <= h.config.MaxPageSize {
 			perPage = parsed
 		}
 	}

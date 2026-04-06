@@ -226,7 +226,7 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 	adminService := service.New(adminStore, service.Config{
 		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
-	adminHandler := handler.New(adminService)
+	adminHandler := handler.New(adminService, handler.DefaultHandlerConfig())
 
 	server := &Server{
 		Config:  cfg,
