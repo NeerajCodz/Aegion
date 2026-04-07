@@ -20,6 +20,7 @@ import (
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
 	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/platform/observability"
 )
 
 //go:embed migrations/*.sql
@@ -48,22 +49,27 @@ type lifecycleManager interface {
 	Shutdown(ctx context.Context) error
 }
 
+type telemetryProvider interface {
+	Shutdown(ctx context.Context) error
+}
+
 type mainDeps struct {
-	stdout          io.Writer
-	stderr          io.Writer
-	loadConfig      func(path string) (*config.Config, error)
-	validateConfig  func(cfg *config.Config) error
-	newLogger       func(cfg logger.Config) *logger.Logger
-	connectDB       func(ctx context.Context, cfg database.Config) (*database.DB, error)
-	newMigrator     func(db *database.DB) migrator
-	newWorkerMgr    func(log *logger.Logger, db *database.DB) *workers.Manager
-	newServer       func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error)
-	newHTTPServer   func(cfg *config.Config, handler http.Handler) *http.Server
-	newLifecycle    func(cfg *LifecycleConfig) lifecycleManager
-	newSignalChan   func() chan os.Signal
-	notifySignals   func(c chan<- os.Signal, sig ...os.Signal)
-	stopSignals     func(c chan<- os.Signal)
-	startHTTPServer func(cfg *config.Config, log *logger.Logger, httpServer *http.Server)
+	stdout           io.Writer
+	stderr           io.Writer
+	loadConfig       func(path string) (*config.Config, error)
+	validateConfig   func(cfg *config.Config) error
+	newLogger        func(cfg logger.Config) *logger.Logger
+	connectDB        func(ctx context.Context, cfg database.Config) (*database.DB, error)
+	newMigrator      func(db *database.DB) migrator
+	newWorkerMgr     func(log *logger.Logger, db *database.DB) *workers.Manager
+	newObservability func(ctx context.Context, cfg *config.Config) (telemetryProvider, error)
+	newServer        func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error)
+	newHTTPServer    func(cfg *config.Config, handler http.Handler) *http.Server
+	newLifecycle     func(cfg *LifecycleConfig) lifecycleManager
+	newSignalChan    func() chan os.Signal
+	notifySignals    func(c chan<- os.Signal, sig ...os.Signal)
+	stopSignals      func(c chan<- os.Signal)
+	startHTTPServer  func(cfg *config.Config, log *logger.Logger, httpServer *http.Server)
 }
 
 type migrator interface {
@@ -120,6 +126,13 @@ func defaultMainDeps() mainDeps {
 				DB:  db.Pool,
 				Log: log,
 			})
+		},
+		newObservability: func(ctx context.Context, cfg *config.Config) (telemetryProvider, error) {
+			obsCfg := observability.DefaultConfig()
+			obsCfg.ServiceName = "aegion"
+			obsCfg.ServiceVersion = version
+
+			return observability.NewProvider(ctx, obsCfg)
 		},
 		newServer: func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error) {
 			s, err := NewServer(ctx, cfg)
@@ -218,6 +231,20 @@ func run(args []string, deps mainDeps) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var telemetry telemetryProvider
+	if deps.newObservability != nil {
+		telemetry, err = deps.newObservability(ctx, cfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(deps.stderr, "Failed to initialize observability: %v\n", err)
+			return 1
+		}
+		defer func() {
+			if telemetry != nil {
+				_ = telemetry.Shutdown(context.Background())
+			}
+		}()
+	}
+
 	db, err := deps.connectDB(ctx, database.Config{
 		URL:             cfg.Database.URL,
 		MaxOpenConns:    int32(cfg.Database.MaxOpenConns),
@@ -276,6 +303,7 @@ func run(args []string, deps mainDeps) int {
 		Server:        asConcreteServer(server),
 		HTTPServer:    httpServer,
 		WorkerManager: workerMgr,
+		Observability: telemetry,
 	})
 
 	sigCh := deps.newSignalChan()
@@ -289,10 +317,12 @@ func run(args []string, deps mainDeps) int {
 	defer shutdownCancel()
 
 	if err := lifecycle.Shutdown(shutdownCtx); err != nil {
+		telemetry = nil
 		log.Error().Err(err).Msg("Error during shutdown")
 		_, _ = fmt.Fprintf(deps.stderr, "Error during shutdown: %v\n", err)
 		return 1
 	}
+	telemetry = nil
 
 	log.Info().Msg("Shutdown complete")
 	return 0

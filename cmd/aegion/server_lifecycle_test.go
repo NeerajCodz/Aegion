@@ -54,6 +54,16 @@ func (s *stubModuleOrchestrator) RestartModule(ctx context.Context, moduleID str
 	return nil
 }
 
+type stubTelemetryProvider struct {
+	shutdownCalls int
+	shutdownErr   error
+}
+
+func (s *stubTelemetryProvider) Shutdown(ctx context.Context) error {
+	s.shutdownCalls++
+	return s.shutdownErr
+}
+
 func TestServerHealthAndLivenessHandlers(t *testing.T) {
 	s := newTestServer(t)
 
@@ -426,6 +436,30 @@ func TestLifecycleDrainHTTP_UnstartedServer(t *testing.T) {
 	err := lc.drainHTTP(context.Background())
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("expected nil or ErrServerClosed, got %v", err)
+	}
+}
+
+func TestLifecycleShutdown_ShutsDownObservabilityProvider(t *testing.T) {
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer httpSrv.Close()
+
+	provider := &stubTelemetryProvider{}
+	lc := NewLifecycle(&LifecycleConfig{
+		Log:           testLogger(),
+		Server:        newTestServer(t),
+		HTTPServer:    httpSrv.Config,
+		Observability: provider,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := lc.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("shutdown should succeed with observability provider, got %v", err)
+	}
+	if provider.shutdownCalls != 1 {
+		t.Fatalf("expected observability provider shutdown once, got %d", provider.shutdownCalls)
 	}
 }
 
