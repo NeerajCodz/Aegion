@@ -39,13 +39,15 @@ func (rw *responseWriter) WriteHeader(statusCode int) {
 
 // Proxy represents the main API gateway proxy.
 type Proxy struct {
-	config      *Config
-	transport   http.RoundTripper
-	rules       *RuleEngine
-	limiter     *RateLimiter
-	breakers    map[string]*CircuitBreaker
-	breakersMux sync.RWMutex
-	logger      zerolog.Logger
+	config          *Config
+	transport       http.RoundTripper
+	rules           *RuleEngine
+	limiter         *RateLimiter
+	ruleLimiters    map[string]*RateLimiter
+	ruleLimitersMux sync.RWMutex
+	breakers        map[string]*CircuitBreaker
+	breakersMux     sync.RWMutex
+	logger          zerolog.Logger
 
 	// Health checking
 	healthCheckers map[string]*HealthChecker
@@ -76,16 +78,15 @@ func NewProxy(config Config, rules *RuleEngine, logger zerolog.Logger) *Proxy {
 		config:         &config,
 		transport:      transport,
 		rules:          rules,
+		ruleLimiters:   make(map[string]*RateLimiter),
 		breakers:       make(map[string]*CircuitBreaker),
 		logger:         logger.With().Str("component", "proxy").Logger(),
 		healthCheckers: make(map[string]*HealthChecker),
 	}
 
-	// Initialize rate limiter if configured
-	if config.EnableHealthChecks {
-		globalRateLimit := DefaultRateLimitConfig()
-		proxy.limiter = NewRateLimiter(*globalRateLimit, NewMemoryStore())
-	}
+	// Initialize global rate limiter.
+	globalRateLimit := DefaultRateLimitConfig()
+	proxy.limiter = NewRateLimiter(*globalRateLimit, NewMemoryStore())
 
 	// Initialize circuit breakers for each upstream
 	for name, upstream := range config.Upstreams {
@@ -148,20 +149,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check rate limiting
-	if p.limiter != nil {
-		// Use rule-specific rate limit if available
-		if rule.RateLimit != nil {
-			limiter := NewRateLimiter(*rule.RateLimit, NewMemoryStore())
-			if allowed, waitTime, err := limiter.Allow(r); !allowed {
-				p.handleRateLimitExceeded(w, r, waitTime, err, start)
-				return
-			}
-		} else {
-			// Use global rate limiter
-			if allowed, waitTime, err := p.limiter.Allow(r); !allowed {
-				p.handleRateLimitExceeded(w, r, waitTime, err, start)
-				return
-			}
+	if rule.RateLimit != nil {
+		ruleLimiter := p.getRuleLimiter(rule)
+		if allowed, waitTime, err := ruleLimiter.Allow(r); !allowed {
+			p.handleRateLimitExceeded(w, r, waitTime, err, start)
+			return
+		}
+	} else if p.limiter != nil {
+		if allowed, waitTime, err := p.limiter.Allow(r); !allowed {
+			p.handleRateLimitExceeded(w, r, waitTime, err, start)
+			return
 		}
 	}
 
@@ -315,6 +312,36 @@ func (p *Proxy) getCircuitBreaker(upstreamName string) *CircuitBreaker {
 	return breaker
 }
 
+// getRuleLimiter gets or creates a stable limiter for a rule.
+func (p *Proxy) getRuleLimiter(rule *Rule) *RateLimiter {
+	if rule == nil || rule.RateLimit == nil {
+		return nil
+	}
+
+	key := rule.ID
+	if key == "" {
+		key = rule.Path + "|" + rule.Target + "|" + strconv.Itoa(rule.Priority)
+	}
+
+	p.ruleLimitersMux.RLock()
+	limiter, exists := p.ruleLimiters[key]
+	p.ruleLimitersMux.RUnlock()
+	if exists {
+		return limiter
+	}
+
+	p.ruleLimitersMux.Lock()
+	defer p.ruleLimitersMux.Unlock()
+
+	if limiter, exists = p.ruleLimiters[key]; exists {
+		return limiter
+	}
+
+	limiter = NewRateLimiter(*rule.RateLimit, NewMemoryStore())
+	p.ruleLimiters[key] = limiter
+	return limiter
+}
+
 // injectSessionHeaders adds session information to the request headers.
 func (p *Proxy) injectSessionHeaders(req *http.Request, sess *session.Session) {
 	req.Header.Set("X-Aegion-Session-ID", sess.ID.String())
@@ -377,6 +404,10 @@ func (p *Proxy) Close() {
 		delete(p.healthCheckers, name)
 		p.logger.Info().Str("upstream", name).Msg("stopped health checker")
 	}
+
+	p.ruleLimitersMux.Lock()
+	p.ruleLimiters = make(map[string]*RateLimiter)
+	p.ruleLimitersMux.Unlock()
 
 	if transport, ok := p.transport.(*http.Transport); ok {
 		transport.CloseIdleConnections()
