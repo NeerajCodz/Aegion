@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/core/flows"
 	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/router"
 	coresession "github.com/aegion/aegion/core/session"
@@ -324,7 +326,7 @@ func (s *Server) handleGetLoginFlow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSubmitLogin(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	s.handleFlowSubmit(w, r, flows.TypeLogin)
 }
 
 func (s *Server) handleInitRegistrationBrowser(w http.ResponseWriter, r *http.Request) {
@@ -369,7 +371,7 @@ func (s *Server) handleGetRegistrationFlow(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleSubmitRegistration(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	s.handleFlowSubmit(w, r, flows.TypeRegistration)
 }
 
 func (s *Server) handleInitRecoveryBrowser(w http.ResponseWriter, r *http.Request) {
@@ -414,7 +416,7 @@ func (s *Server) handleGetRecoveryFlow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSubmitRecovery(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	s.handleFlowSubmit(w, r, flows.TypeRecovery)
 }
 
 func (s *Server) handleInitSettingsBrowser(w http.ResponseWriter, r *http.Request) {
@@ -450,7 +452,7 @@ func (s *Server) handleGetSettingsFlow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSubmitSettings(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	s.handleFlowSubmit(w, r, flows.TypeSettings)
 }
 
 func (s *Server) handleInitVerificationBrowser(w http.ResponseWriter, r *http.Request) {
@@ -495,7 +497,109 @@ func (s *Server) handleGetVerificationFlow(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleSubmitVerification(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	s.handleFlowSubmit(w, r, flows.TypeVerification)
+}
+
+type flowSubmitPayload struct {
+	FlowID    string `json:"flow_id"`
+	Flow      string `json:"flow"`
+	ID        string `json:"id"`
+	CSRFToken string `json:"csrf_token"`
+}
+
+func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expectedType flows.FlowType) {
+	flowID, csrfToken, err := parseFlowSubmitPayload(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid flow submission payload", err)
+		return
+	}
+
+	flow, err := s.flowService.ValidateFlow(r.Context(), flowID, csrfToken)
+	if err != nil {
+		s.writeFlowValidationError(w, err)
+		return
+	}
+	if flow.Type != expectedType {
+		writeError(w, http.StatusBadRequest, "flow type mismatch for submission endpoint", nil)
+		return
+	}
+
+	if err := s.flowService.CompleteFlow(r.Context(), flowID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":    "completed",
+		"flow_id":   flowID.String(),
+		"flow_type": string(expectedType),
+	})
+}
+
+func (s *Server) writeFlowValidationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, flows.ErrFlowNotFound):
+		writeError(w, http.StatusNotFound, "flow not found", err)
+	case errors.Is(err, flows.ErrInvalidCSRF):
+		writeError(w, http.StatusForbidden, "invalid csrf token", err)
+	case errors.Is(err, flows.ErrFlowExpired):
+		writeError(w, http.StatusGone, "flow has expired", err)
+	case errors.Is(err, flows.ErrFlowCompleted), errors.Is(err, flows.ErrFlowFailed):
+		writeError(w, http.StatusConflict, "flow is no longer active", err)
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to validate flow", err)
+	}
+}
+
+func parseFlowSubmitPayload(r *http.Request) (uuid.UUID, string, error) {
+	var payload flowSubmitPayload
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
+
+	if contentType == "application/json" {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			return uuid.Nil, "", err
+		}
+	} else {
+		if err := r.ParseForm(); err != nil {
+			return uuid.Nil, "", err
+		}
+		payload.FlowID = r.Form.Get("flow_id")
+		payload.Flow = r.Form.Get("flow")
+		payload.ID = r.Form.Get("id")
+		payload.CSRFToken = r.Form.Get("csrf_token")
+	}
+
+	flowValue := strings.TrimSpace(payload.FlowID)
+	if flowValue == "" {
+		flowValue = strings.TrimSpace(payload.Flow)
+	}
+	if flowValue == "" {
+		flowValue = strings.TrimSpace(payload.ID)
+	}
+	if flowValue == "" {
+		flowValue = strings.TrimSpace(r.URL.Query().Get("flow"))
+	}
+	if flowValue == "" {
+		flowValue = strings.TrimSpace(r.URL.Query().Get("id"))
+	}
+	if flowValue == "" {
+		return uuid.Nil, "", errors.New("missing flow id")
+	}
+
+	flowID, err := uuid.Parse(flowValue)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+
+	csrfToken := strings.TrimSpace(payload.CSRFToken)
+	if csrfToken == "" {
+		csrfToken = strings.TrimSpace(r.Header.Get("X-CSRF-Token"))
+	}
+	if csrfToken == "" {
+		return uuid.Nil, "", errors.New("missing csrf token")
+	}
+
+	return flowID, csrfToken, nil
 }
 
 // Session handlers
@@ -820,7 +924,49 @@ func (s *Server) handleInternalFailFlow(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleInternalUpdateFlowUI(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	flowID := chi.URLParam(r, "id")
+	id, err := uuid.Parse(flowID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid flow id", err)
+		return
+	}
+
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	if len(strings.TrimSpace(string(rawBody))) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid request body", errors.New("empty body"))
+		return
+	}
+
+	var wrapped struct {
+		UI *flows.UIState `json:"ui"`
+	}
+	if err := json.Unmarshal(rawBody, &wrapped); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+
+	var ui flows.UIState
+	if wrapped.UI != nil {
+		ui = *wrapped.UI
+	} else if err := json.Unmarshal(rawBody, &ui); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+
+	if err := s.flowService.UpdateFlowUI(r.Context(), id, &ui); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, flows.ErrFlowNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, "failed to update flow ui", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func (s *Server) handleInternalHealth(w http.ResponseWriter, r *http.Request) {
