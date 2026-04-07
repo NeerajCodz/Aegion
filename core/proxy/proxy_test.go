@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -569,6 +570,24 @@ func TestProxy_WriteErrorResponse_WriteFailure(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadGateway, w.statusCode)
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+}
+
+func TestProxy_WriteErrorResponse_ProducesValidJSON(t *testing.T) {
+	proxy := newProxyForTest(t, DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
+	w := httptest.NewRecorder()
+
+	proxy.writeErrorResponse(w, http.StatusBadRequest, `bad \"input\"`, "req-json-1")
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var payload map[string]map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &payload)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(http.StatusBadRequest), payload["error"]["code"])
+	assert.Equal(t, `bad \"input\"`, payload["error"]["message"])
+	assert.Equal(t, "req-json-1", payload["error"]["request_id"])
 }
 
 // TestResponseWriter_WriteHeader tests status code capture
