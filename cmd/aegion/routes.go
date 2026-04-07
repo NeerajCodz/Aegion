@@ -500,14 +500,19 @@ func (s *Server) handleModuleHeartbeat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 	moduleID := chi.URLParam(r, "moduleId")
 	moduleProxy := router.NewModuleProxy(router.ModuleProxyConfig{
-		Registry:      s.registry,
-		ModuleID:      moduleID,
-		InternalToken: s.currentInternalTokenForProxy(),
-		SessionSecret: s.sessionSecretForProxy(),
-		Timeout:       s.cfg.Proxy.UpstreamTimeout.Duration(),
-		PolicyChecker: s.policyChecker,
-		PolicyModel:   s.cfg.Policy.DefaultModel,
-		Logger:        s.log.With().Str("component", "module_proxy").Logger(),
+		Registry:                    s.registry,
+		ModuleID:                    moduleID,
+		InternalToken:               s.currentInternalTokenForProxy(),
+		SessionSecret:               s.sessionSecretForProxy(),
+		Timeout:                     s.cfg.Proxy.UpstreamTimeout.Duration(),
+		PreserveHost:                s.cfg.Proxy.PreserveHost,
+		StripInboundIdentityHeaders: s.cfg.Proxy.StripInboundIdentityHeaders,
+		IdentitySigningSecret:       s.proxyIdentitySigningSecret(),
+		IdentitySignatureHeader:     s.cfg.Proxy.IdentitySignatureHeader,
+		SignedIdentityHeaders:       s.cfg.Proxy.SignedIdentityHeaders,
+		PolicyChecker:               s.policyChecker,
+		PolicyModel:                 s.cfg.Policy.DefaultModel,
+		Logger:                      s.log.With().Str("component", "module_proxy").Logger(),
 	})
 
 	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContext(r.Context(), r)))
@@ -534,6 +539,16 @@ func (s *Server) sessionSecretForProxy() []byte {
 	}
 	if len(s.cfg.Secrets.Cipher) > 0 {
 		return []byte(s.cfg.Secrets.Cipher[0])
+	}
+	return nil
+}
+
+func (s *Server) proxyIdentitySigningSecret() []byte {
+	if secret := strings.TrimSpace(s.cfg.Proxy.IdentitySigningSecret); secret != "" {
+		return []byte(secret)
+	}
+	if len(s.cfg.Secrets.Internal) > 0 {
+		return []byte(s.cfg.Secrets.Internal[0])
 	}
 	return nil
 }

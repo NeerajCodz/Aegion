@@ -17,6 +17,7 @@ import (
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/flows"
 	"github.com/aegion/aegion/core/registry"
+	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/logger"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
@@ -381,7 +382,17 @@ func TestModuleProxyHandler(t *testing.T) {
 	})
 
 	t.Run("proxy success", func(t *testing.T) {
+		s.cfg.Proxy.PreserveHost = true
+		s.cfg.Proxy.StripInboundIdentityHeaders = true
+		s.cfg.Proxy.IdentitySigningSecret = "proxy-signing-secret"
+
+		var upstreamHost string
+		var upstreamUserID string
+		var upstreamSignature string
 		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstreamHost = r.Host
+			upstreamUserID = r.Header.Get("X-User-ID")
+			upstreamSignature = r.Header.Get("X-Aegion-Signature")
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte("proxied"))
 		}))
@@ -390,6 +401,14 @@ func TestModuleProxyHandler(t *testing.T) {
 		registerTestModule(t, s, "proxy-ok", registry.EndpointHTTP, target.URL)
 
 		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/proxy-ok/path", nil)
+		req.Host = "gateway.example.test"
+		req.Header.Set("X-User-ID", "spoofed-user")
+		req = req.WithContext(session.WithSession(req.Context(), &session.Session{
+			ID:         uuid.New(),
+			IdentityID: uuid.New(),
+			AAL:        session.AAL1,
+			ExpiresAt:  time.Now().Add(10 * time.Minute),
+		}))
 		req = withURLParam(req, "moduleId", "proxy-ok")
 		rec := httptest.NewRecorder()
 		s.handleModuleProxy(rec, req)
@@ -399,6 +418,15 @@ func TestModuleProxyHandler(t *testing.T) {
 		}
 		if body := rec.Body.String(); body != "proxied" {
 			t.Fatalf("expected proxied response body, got %q", body)
+		}
+		if upstreamHost != "gateway.example.test" {
+			t.Fatalf("expected preserve_host to forward original host, got %q", upstreamHost)
+		}
+		if upstreamUserID == "" || upstreamUserID == "spoofed-user" {
+			t.Fatalf("expected canonical X-User-ID to be injected, got %q", upstreamUserID)
+		}
+		if upstreamSignature == "" {
+			t.Fatalf("expected signed identity header to be injected")
 		}
 	})
 

@@ -270,9 +270,13 @@ type PolicyReBACConfig struct {
 
 // ProxyConfig configures phase-3 identity-aware proxy defaults.
 type ProxyConfig struct {
-	Enabled         bool     `yaml:"enabled"`
-	UpstreamTimeout Duration `yaml:"upstream_timeout"`
-	PreserveHost    bool     `yaml:"preserve_host"`
+	Enabled                     bool     `yaml:"enabled"`
+	UpstreamTimeout             Duration `yaml:"upstream_timeout"`
+	PreserveHost                bool     `yaml:"preserve_host"`
+	StripInboundIdentityHeaders bool     `yaml:"strip_inbound_identity_headers"`
+	IdentitySigningSecret       string   `yaml:"identity_signing_secret"`
+	IdentitySignatureHeader     string   `yaml:"identity_signature_header"`
+	SignedIdentityHeaders       []string `yaml:"signed_identity_headers"`
 }
 
 // Duration wraps time.Duration for YAML unmarshaling.
@@ -451,6 +455,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Proxy.UpstreamTimeout == 0 {
 		cfg.Proxy.UpstreamTimeout = Duration(30 * time.Second)
+	}
+	if cfg.Proxy.IdentitySignatureHeader == "" {
+		cfg.Proxy.IdentitySignatureHeader = "X-Aegion-Signature"
+	}
+	if len(cfg.Proxy.SignedIdentityHeaders) == 0 {
+		cfg.Proxy.SignedIdentityHeaders = []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
 	}
 }
 

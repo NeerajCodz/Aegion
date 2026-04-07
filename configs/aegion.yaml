@@ -227,3 +227,10 @@ proxy:
   enabled: false
   upstream_timeout: ${AEGION_PROXY_UPSTREAM_TIMEOUT:-30s}
   preserve_host: ${AEGION_PROXY_PRESERVE_HOST:-true}
+  strip_inbound_identity_headers: ${AEGION_PROXY_STRIP_IDENTITY_HEADERS:-true}
+  identity_signing_secret: ${AEGION_PROXY_IDENTITY_SIGNING_SECRET:-}
+  identity_signature_header: ${AEGION_PROXY_IDENTITY_SIGNATURE_HEADER:-X-Aegion-Signature}
+  signed_identity_headers:
+    - X-User-ID
+    - X-User-Session-ID
+    - X-User-AAL
