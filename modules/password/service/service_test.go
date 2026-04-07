@@ -2,7 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -579,4 +584,82 @@ func TestDelete(t *testing.T) {
 	mem.deleteErr = errors.New("delete failed")
 	err = s.Delete(context.Background(), identityID)
 	assert.EqualError(t, err, "delete failed")
+}
+
+func TestHIBPBaseURLFromHost(t *testing.T) {
+	assert.Equal(t, "https://api.pwnedpasswords.com/range/", HIBPBaseURLFromHost(""))
+	assert.Equal(t, "https://hibp.example.com/range/", HIBPBaseURLFromHost("hibp.example.com/"))
+	assert.Equal(t, "https://hibp.example.com/api/range/", HIBPBaseURLFromHost("https://hibp.example.com/api"))
+	assert.Equal(t, "http://hibp.example.com/api/range/", HIBPBaseURLFromHost("http://hibp.example.com/api/"))
+}
+
+func TestCheckHIBPBranchCoverage(t *testing.T) {
+	password := "GoodPass1!"
+	hash := sha1.Sum([]byte(password))
+	hashStr := strings.ToUpper(hex.EncodeToString(hash[:]))
+	prefix := hashStr[:5]
+	suffix := hashStr[5:]
+
+	t.Run("returns breached when count meets threshold", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/range/"+prefix, r.URL.Path)
+			_, _ = w.Write([]byte(suffix + ":10\nOTHER:1"))
+		}))
+		defer srv.Close()
+
+		s := New(newMemoryStore(), &mockHasher{}, Config{
+			HIBPEnabled:             true,
+			HIBPIgnoreNetworkErrors: false,
+			HIBPBaseURL:             srv.URL + "/range/",
+			HIBPMinBreachCount:      1,
+		})
+
+		err := s.checkHIBP(context.Background(), password)
+		assert.ErrorIs(t, err, ErrPasswordBreached)
+	})
+
+	t.Run("ignores malformed and below-threshold counts", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(suffix + ":not-a-number\n" + suffix + ":1\n"))
+		}))
+		defer srv.Close()
+
+		s := New(newMemoryStore(), &mockHasher{}, Config{
+			HIBPEnabled:             true,
+			HIBPIgnoreNetworkErrors: false,
+			HIBPBaseURL:             srv.URL + "/range/",
+			HIBPMinBreachCount:      2,
+		})
+
+		err := s.checkHIBP(context.Background(), password)
+		assert.NoError(t, err)
+	})
+
+	t.Run("non-200 responses are tolerated", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		s := New(newMemoryStore(), &mockHasher{}, Config{
+			HIBPEnabled:             true,
+			HIBPIgnoreNetworkErrors: false,
+			HIBPBaseURL:             srv.URL + "/range/",
+		})
+
+		err := s.checkHIBP(context.Background(), password)
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns network errors when configured", func(t *testing.T) {
+		s := New(newMemoryStore(), &mockHasher{}, Config{
+			HIBPEnabled:             true,
+			HIBPIgnoreNetworkErrors: false,
+			HIBPBaseURL:             "http://127.0.0.1:1/range/",
+			HIBPTimeout:             100 * time.Millisecond,
+		})
+
+		err := s.checkHIBP(context.Background(), password)
+		assert.Error(t, err)
+	})
 }
