@@ -96,6 +96,18 @@ func (r *fakeRows) Scan(dest ...any) error {
 				return fmt.Errorf("expected string value, got %T", row[i])
 			}
 			*d = v
+		case *int:
+			v, ok := row[i].(int)
+			if !ok {
+				return fmt.Errorf("expected int value, got %T", row[i])
+			}
+			*d = v
+		case *bool:
+			v, ok := row[i].(bool)
+			if !ok {
+				return fmt.Errorf("expected bool value, got %T", row[i])
+			}
+			*d = v
 		default:
 			return fmt.Errorf("unsupported scan destination %T", dest[i])
 		}
@@ -175,5 +187,38 @@ func TestStore_GetRoleIDByName(t *testing.T) {
 
 		_, err := st.GetRoleIDByName(context.Background(), "missing")
 		assert.ErrorIs(t, err, ErrNotFound)
+	})
+}
+
+func TestStore_ListABACRules(t *testing.T) {
+	t.Run("returns enabled rules ordered by priority", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				assert.Contains(t, sql, "FROM pol_abac_rules")
+				assert.Contains(t, sql, "WHERE enabled = TRUE")
+				assert.Empty(t, args)
+				return &fakeRows{data: [][]any{
+					{"deny_external_writes", "ip == 10.0.0.1", 10, "deny", true},
+					{"allow_reader", "resource_type == documents", 20, "allow", true},
+				}}, nil
+			},
+		})
+
+		rules, err := st.ListABACRules(context.Background())
+		require.NoError(t, err)
+		require.Len(t, rules, 2)
+		assert.Equal(t, ABACRule{Name: "deny_external_writes", Expression: "ip == 10.0.0.1", Priority: 10, Effect: "deny", Enabled: true}, rules[0])
+		assert.Equal(t, ABACRule{Name: "allow_reader", Expression: "resource_type == documents", Priority: 20, Effect: "allow", Enabled: true}, rules[1])
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return nil, errors.New("db unavailable")
+			},
+		})
+
+		_, err := st.ListABACRules(context.Background())
+		assert.ErrorContains(t, err, "db unavailable")
 	})
 }
