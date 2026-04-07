@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package aegion.policy.v1;
+
+option go_package = "github.com/aegion/aegion/internal/proto/policy/v1;policypb";
+
+import "google/protobuf/timestamp.proto";
+
+// PolicyEngine evaluates authorization decisions across RBAC/ABAC/ReBAC models.
+service PolicyEngine {
+  // Check evaluates a single authorization decision.
+  rpc Check(CheckRequest) returns (CheckResponse);
+
+  // BatchCheck evaluates multiple authorization decisions in one call.
+  rpc BatchCheck(BatchCheckRequest) returns (BatchCheckResponse);
+}
+
+message CheckRequest {
+  // Subject identifier, for example: "user:alice".
+  string subject = 1;
+
+  // Resource identifier, for example: "document:spec-123".
+  string resource = 2;
+
+  // Resource type, for example: "documents".
+  string resource_type = 3;
+
+  // Action identifier, for example: "read".
+  string action = 4;
+
+  // Optional model override: rbac | abac | rebac.
+  string model = 5;
+
+  // Evaluation context passed by caller.
+  Context context = 6;
+}
+
+message CheckResponse {
+  bool allowed = 1;
+
+  // Which model produced the final decision.
+  string model_used = 2;
+
+  // Human-readable deny reason for diagnostics.
+  string deny_reason = 3;
+
+  // Ordered evaluation trace (low-cardinality step identifiers).
+  repeated string eval_path = 4;
+}
+
+message BatchCheckRequest {
+  repeated CheckRequest checks = 1;
+}
+
+message BatchCheckResponse {
+  repeated CheckResponse results = 1;
+}
+
+message Context {
+  // Client IP address.
+  string ip = 1;
+
+  // Request time.
+  google.protobuf.Timestamp time = 2;
+
+  // Optional tenant identifier.
+  string tenant_id = 3;
+
+  // Additional caller-defined context attributes.
+  map<string, string> extra = 4;
+}
