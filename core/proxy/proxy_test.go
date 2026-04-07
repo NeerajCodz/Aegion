@@ -1010,3 +1010,72 @@ func BenchmarkProxy_ServeHTTP(b *testing.B) {
 		}
 	})
 }
+
+func TestNewProxy_InitializesGlobalLimiterWithoutHealthChecks(t *testing.T) {
+	config := DefaultConfig()
+	config.EnableHealthChecks = false
+
+	proxy := newProxyForTest(t, config, NewRuleEngine([]Rule{}), zerolog.New(zerolog.NewTestWriter(t)))
+	if proxy.limiter == nil {
+		t.Fatalf("expected global rate limiter to be initialized")
+	}
+}
+
+func TestProxy_GetRuleLimiter_ReusesLimiterPerRule(t *testing.T) {
+	proxy := newProxyForTest(t, DefaultConfig(), NewRuleEngine([]Rule{}), zerolog.New(zerolog.NewTestWriter(t)))
+	rule := &Rule{
+		ID: "rule-1",
+		RateLimit: &RateLimitConfig{
+			RequestsPerSecond: 1,
+			ByIP:              true,
+		},
+	}
+
+	first := proxy.getRuleLimiter(rule)
+	second := proxy.getRuleLimiter(rule)
+
+	require.NotNil(t, first)
+	require.NotNil(t, second)
+	assert.Same(t, first, second)
+}
+
+func TestProxy_ServeHTTP_RuleLimiterPersistsAcrossRequests(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	config := DefaultConfig()
+	config.EnableHealthChecks = false
+	config.Upstreams = map[string]Upstream{
+		"limited-upstream": {URL: upstream.URL},
+	}
+
+	engine := NewRuleEngine([]Rule{
+		{
+			ID:       "limited-rule",
+			Path:     "/limited",
+			Target:   "limited-upstream",
+			Enabled:  true,
+			Priority: 100,
+			RateLimit: &RateLimitConfig{
+				RequestsPerSecond: 1,
+				ByIP:              true,
+			},
+		},
+	})
+
+	proxy := newProxyForTest(t, config, engine, zerolog.New(zerolog.NewTestWriter(t)))
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/limited", nil)
+	firstReq.RemoteAddr = "192.0.2.50:12345"
+	firstResp := httptest.NewRecorder()
+	proxy.ServeHTTP(firstResp, firstReq)
+	assert.Equal(t, http.StatusOK, firstResp.Code)
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/limited", nil)
+	secondReq.RemoteAddr = "192.0.2.50:12345"
+	secondResp := httptest.NewRecorder()
+	proxy.ServeHTTP(secondResp, secondReq)
+	assert.Equal(t, http.StatusTooManyRequests, secondResp.Code)
+}
