@@ -301,6 +301,17 @@ func TestApplyDefaults(t *testing.T) {
 	assert.Equal(t, 20, cfg.Admin.SCIM.DefaultPageSize)
 	assert.Equal(t, 1000, cfg.Admin.SCIM.MaxPageSize)
 	assert.Equal(t, Duration(2*time.Second), cfg.Admin.SCIM.TokenLastUsedUpdateTimeout)
+
+	// Policy defaults
+	assert.Equal(t, "rbac", cfg.Policy.DefaultModel)
+	assert.False(t, cfg.Policy.Enabled)
+	assert.False(t, cfg.Policy.RBAC.Enabled)
+	assert.False(t, cfg.Policy.ABAC.Enabled)
+	assert.False(t, cfg.Policy.ReBAC.Enabled)
+
+	// Proxy defaults
+	assert.False(t, cfg.Proxy.Enabled)
+	assert.Equal(t, Duration(30*time.Second), cfg.Proxy.UpstreamTimeout)
 }
 
 func TestApplyDefaults_DoesNotOverrideExisting(t *testing.T) {
@@ -618,6 +629,40 @@ security:
 	assert.Equal(t, "test-cookie-secret-32-characters-long", cfg.Secrets.Cookie[0])
 	assert.Equal(t, 10, cfg.Security.RateLimits.Login.Requests)
 	assert.Equal(t, Duration(5*time.Minute), cfg.Security.RateLimits.Login.Period)
+}
+
+func TestConfigYAMLTags_Phase3PolicyProxy(t *testing.T) {
+	yamlContent := `
+policy:
+  enabled: true
+  default_model: rebac
+  rbac:
+    enabled: true
+  abac:
+    enabled: true
+  rebac:
+    enabled: true
+
+proxy:
+  enabled: true
+  upstream_timeout: 45s
+  preserve_host: true
+`
+
+	var cfg Config
+	err := yaml.Unmarshal([]byte(yamlContent), &cfg)
+	require.NoError(t, err)
+	applyDefaults(&cfg)
+
+	assert.True(t, cfg.Policy.Enabled)
+	assert.Equal(t, "rebac", cfg.Policy.DefaultModel)
+	assert.True(t, cfg.Policy.RBAC.Enabled)
+	assert.True(t, cfg.Policy.ABAC.Enabled)
+	assert.True(t, cfg.Policy.ReBAC.Enabled)
+
+	assert.True(t, cfg.Proxy.Enabled)
+	assert.Equal(t, Duration(45*time.Second), cfg.Proxy.UpstreamTimeout)
+	assert.True(t, cfg.Proxy.PreserveHost)
 }
 
 func TestLoad_Integration(t *testing.T) {

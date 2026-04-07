@@ -10,6 +10,8 @@ module_versions:
   password:   "latest"
   magic_link: "latest"
   admin:      "latest"
+  policy:     "latest"
+  proxy:      "latest"
 
 # Module registry (use local Docker for development)
 module_registry:
@@ -210,3 +212,18 @@ admin:
     default_page_size: ${AEGION_ADMIN_SCIM_DEFAULT_PAGE_SIZE:-20}
     max_page_size: ${AEGION_ADMIN_SCIM_MAX_PAGE_SIZE:-1000}
     token_last_used_update_timeout: ${AEGION_ADMIN_SCIM_TOKEN_LAST_USED_UPDATE_TIMEOUT:-2s}
+
+policy:
+  enabled: false
+  default_model: ${AEGION_POLICY_DEFAULT_MODEL:-rbac}
+  rbac:
+    enabled: true
+  abac:
+    enabled: false
+  rebac:
+    enabled: false
+
+proxy:
+  enabled: false
+  upstream_timeout: ${AEGION_PROXY_UPSTREAM_TIMEOUT:-30s}
+  preserve_host: ${AEGION_PROXY_PRESERVE_HOST:-true}

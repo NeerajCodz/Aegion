@@ -32,6 +32,8 @@ module_versions:
   password:   "${AEGION_MODULE_PASSWORD_VERSION:-v1.0.0}"
   magic_link: "${AEGION_MODULE_MAGIC_LINK_VERSION:-v1.0.0}"
   admin:      "${AEGION_MODULE_ADMIN_VERSION:-v1.0.0}"
+  policy:     "${AEGION_MODULE_POLICY_VERSION:-v1.0.0}"
+  proxy:      "${AEGION_MODULE_PROXY_VERSION:-v1.0.0}"
 
 module_registry:
   base_url: "${AEGION_MODULE_REGISTRY:-ghcr.io/aegion}"
@@ -286,6 +288,21 @@ admin:
     default_page_size: ${AEGION_ADMIN_SCIM_DEFAULT_PAGE_SIZE:-20}
     max_page_size: ${AEGION_ADMIN_SCIM_MAX_PAGE_SIZE:-1000}
     token_last_used_update_timeout: ${AEGION_ADMIN_SCIM_TOKEN_LAST_USED_UPDATE_TIMEOUT:-2s}
+
+policy:
+  enabled: ${AEGION_POLICY_ENABLED:-false}
+  default_model: ${AEGION_POLICY_DEFAULT_MODEL:-rbac}
+  rbac:
+    enabled: ${AEGION_POLICY_RBAC_ENABLED:-true}
+  abac:
+    enabled: ${AEGION_POLICY_ABAC_ENABLED:-false}
+  rebac:
+    enabled: ${AEGION_POLICY_REBAC_ENABLED:-false}
+
+proxy:
+  enabled: ${AEGION_PROXY_ENABLED:-false}
+  upstream_timeout: ${AEGION_PROXY_UPSTREAM_TIMEOUT:-30s}
+  preserve_host: ${AEGION_PROXY_PRESERVE_HOST:-true}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Observability
