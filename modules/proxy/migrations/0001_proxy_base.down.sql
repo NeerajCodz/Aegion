@@ -1,0 +1,1 @@
+-- Initial proxy module scaffold rollback (no-op).

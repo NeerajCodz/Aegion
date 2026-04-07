@@ -1,0 +1,1 @@
+-- Initial CLI module scaffold rollback (no-op).
