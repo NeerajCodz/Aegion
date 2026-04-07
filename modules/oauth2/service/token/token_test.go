@@ -885,6 +885,194 @@ func TestParseScopes(t *testing.T) {
 	}
 }
 
+func TestTokenService_AdditionalCoverageBranches(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("nil token requests return invalid request", func(t *testing.T) {
+		svc := NewTokenService(&mockTokenStore{}, &MockJWTSigner{}, "https://issuer")
+
+		_, err := svc.ExchangeAuthorizationCode(ctx, nil)
+		assert.ErrorIs(t, err, ErrInvalidRequest)
+
+		_, err = svc.RefreshAccessToken(ctx, nil)
+		assert.ErrorIs(t, err, ErrInvalidRequest)
+	})
+
+	t.Run("refresh token accepts subset scope request with offline access", func(t *testing.T) {
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:                 "client-subset",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
+				AllowOfflineAccess: true,
+				GrantTypes:         []string{"refresh_token"},
+			},
+			refreshToken: &store.RefreshToken{
+				ID:         "rt-subset",
+				FamilyID:   "family-subset",
+				ClientID:   "client-subset",
+				IdentityID: "identity-subset",
+				SessionID:  "session-subset",
+				Scopes:     []string{"openid", "profile", "offline_access"},
+				Active:     true,
+				ExpiresAt:  time.Now().UTC().Add(time.Hour),
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+
+		resp, err := svc.RefreshAccessToken(ctx, &TokenRequest{
+			ClientID:     "client-subset",
+			RefreshToken: "rt-subset",
+			Scope:        "openid offline_access",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Equal(t, "openid offline_access", resp.Scope)
+	})
+
+	t.Run("refresh token without offline_access returns invalid scope", func(t *testing.T) {
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:                 "client-no-offline",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
+				AllowOfflineAccess: true,
+				GrantTypes:         []string{"refresh_token"},
+			},
+			refreshToken: &store.RefreshToken{
+				ID:         "rt-no-offline",
+				FamilyID:   "family-no-offline",
+				ClientID:   "client-no-offline",
+				IdentityID: "identity-no-offline",
+				SessionID:  "session-no-offline",
+				Scopes:     []string{"openid", "offline_access"},
+				Active:     true,
+				ExpiresAt:  time.Now().UTC().Add(time.Hour),
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+
+		_, err := svc.RefreshAccessToken(ctx, &TokenRequest{
+			ClientID:     "client-no-offline",
+			RefreshToken: "rt-no-offline",
+			Scope:        "openid",
+		})
+		assert.ErrorIs(t, err, ErrInvalidScope)
+	})
+
+	t.Run("refresh token propagates issueTokens error", func(t *testing.T) {
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:                 "client-fail",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
+				AllowOfflineAccess: true,
+				GrantTypes:         []string{"refresh_token"},
+			},
+			refreshToken: &store.RefreshToken{
+				ID:         "rt-fail",
+				FamilyID:   "family-fail",
+				ClientID:   "client-fail",
+				IdentityID: "identity-fail",
+				SessionID:  "session-fail",
+				Scopes:     []string{"openid"},
+				Active:     true,
+				ExpiresAt:  time.Now().UTC().Add(time.Hour),
+			},
+		}
+		svc := NewTokenService(st, &failingJWTSigner{accessErr: errors.New("access-sign-fail")}, "https://issuer")
+
+		_, err := svc.RefreshAccessToken(ctx, &TokenRequest{
+			ClientID:     "client-fail",
+			RefreshToken: "rt-fail",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to sign access token")
+	})
+
+	t.Run("device exchange uses fallback auth time when zero", func(t *testing.T) {
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:             "device-client",
+				GrantTypes:     []string{"device_code"},
+				Scopes:         []string{"openid"},
+				AccessTokenTTL: 900,
+				IDTokenTTL:     3600,
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+
+		resp, err := svc.ExchangeDeviceCode(ctx, &DeviceCodeTokenRequest{
+			ClientID:   "device-client",
+			IdentityID: "identity-device",
+			Scopes:     []string{"openid"},
+			AuthTime:   time.Time{},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.NotEmpty(t, resp.AccessToken)
+	})
+
+	t.Run("authorization exchange includes nonce and returns id signing error", func(t *testing.T) {
+		nonce := "nonce-value"
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:                 "client-nonce",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
+				AllowOfflineAccess: true,
+				GrantTypes:         []string{"authorization_code"},
+			},
+			authCode: &store.AuthCode{
+				Code:        "ac-nonce",
+				ClientID:    "client-nonce",
+				IdentityID:  "identity-nonce",
+				SessionID:   "session-nonce",
+				RedirectURI: "https://app.example.com/callback",
+				Scopes:      []string{"openid"},
+				Nonce:       &nonce,
+				ACR:         "aal1",
+				AMR:         []string{"pwd"},
+				AuthTime:    time.Now().UTC().Add(-time.Minute),
+				ExpiresAt:   time.Now().UTC().Add(time.Minute),
+			},
+		}
+		svc := NewTokenService(st, &failingJWTSigner{idErr: errors.New("id-sign-fail")}, "https://issuer")
+
+		_, err := svc.ExchangeAuthorizationCode(ctx, &TokenRequest{
+			ClientID:    "client-nonce",
+			Code:        "ac-nonce",
+			RedirectURI: "https://app.example.com/callback",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to sign ID token")
+	})
+
+	t.Run("authenticateClient helper edge branches", func(t *testing.T) {
+		assert.ErrorIs(t, authenticateClient(nil, "secret"), ErrInvalidClient)
+
+		err := authenticateClient(&store.Client{
+			ID:                      "confidential-nohash",
+			TokenEndpointAuthMethod: "client_secret_post",
+			SecretHash:              nil,
+		}, "secret")
+		assert.ErrorIs(t, err, ErrInvalidClient)
+
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte("valid-secret"), bcrypt.DefaultCost)
+		require.NoError(t, hashErr)
+		err = authenticateClient(&store.Client{
+			ID:                      "confidential-valid",
+			TokenEndpointAuthMethod: "client_secret_post",
+			SecretHash:              ptrString(string(hash)),
+		}, "valid-secret")
+		assert.NoError(t, err)
+	})
+}
+
 func ptrString(v string) *string {
 	return &v
 }

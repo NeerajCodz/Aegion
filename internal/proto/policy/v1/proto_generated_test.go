@@ -15,11 +15,12 @@ import (
 
 type policyTestClientConn struct {
 	invokeCount int
+	invokeErr   error
 }
 
 func (c *policyTestClientConn) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
 	c.invokeCount++
-	return nil
+	return c.invokeErr
 }
 
 func (c *policyTestClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
@@ -149,4 +150,43 @@ func TestPolicyGeneratedGRPCPaths(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestPolicyGeneratedAdditionalBranches(t *testing.T) {
+	t.Run("client invoke errors", func(t *testing.T) {
+		invokeErr := errors.New("invoke failed")
+		conn := &policyTestClientConn{invokeErr: invokeErr}
+		client := NewPolicyEngineClient(conn)
+
+		if _, err := client.Check(context.Background(), &CheckRequest{}); !errors.Is(err, invokeErr) {
+			t.Fatalf("expected check invoke error, got %v", err)
+		}
+		if _, err := client.BatchCheck(context.Background(), &BatchCheckRequest{}); !errors.Is(err, invokeErr) {
+			t.Fatalf("expected batch-check invoke error, got %v", err)
+		}
+	})
+
+	t.Run("all method decode errors", func(t *testing.T) {
+		srv := policyProtoServer{}
+		for _, method := range PolicyEngine_ServiceDesc.Methods {
+			if _, err := method.Handler(srv, context.Background(), func(interface{}) error { return errors.New("decode failed") }, nil); err == nil {
+				t.Fatalf("expected decode error for method %s", method.MethodName)
+			}
+		}
+	})
+
+	t.Run("nil proto reflect and init guard", func(t *testing.T) {
+		var checkReqNil *CheckRequest
+		_ = checkReqNil.ProtoReflect()
+		var checkRespNil *CheckResponse
+		_ = checkRespNil.ProtoReflect()
+		var batchReqNil *BatchCheckRequest
+		_ = batchReqNil.ProtoReflect()
+		var batchRespNil *BatchCheckResponse
+		_ = batchRespNil.ProtoReflect()
+		var ctxNil *Context
+		_ = ctxNil.ProtoReflect()
+
+		file_policy_policy_proto_init()
+	})
 }

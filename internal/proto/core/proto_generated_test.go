@@ -18,13 +18,14 @@ import (
 type coreTestClientConn struct {
 	invokeCount    int
 	newStreamCount int
+	invokeErr      error
 	newStreamErr   error
 	stream         grpc.ClientStream
 }
 
 func (c *coreTestClientConn) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
 	c.invokeCount++
-	return nil
+	return c.invokeErr
 }
 
 func (c *coreTestClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
@@ -433,6 +434,112 @@ func TestCoreGeneratedClients(t *testing.T) {
 	if _, err := eventClient.Subscribe(context.Background(), &SubscribeRequest{}); err == nil {
 		t.Fatal("expected Subscribe close send error")
 	}
+}
+
+func TestCoreGeneratedClientInvokeErrors(t *testing.T) {
+	invokeErr := errors.New("invoke failed")
+	conn := &coreTestClientConn{invokeErr: invokeErr}
+
+	sessionClient := NewSessionServiceClient(conn)
+	if _, err := sessionClient.Resolve(context.Background(), &ResolveRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected resolve invoke error, got %v", err)
+	}
+	if _, err := sessionClient.Create(context.Background(), &CreateSessionRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected create invoke error, got %v", err)
+	}
+	if _, err := sessionClient.Update(context.Background(), &UpdateSessionRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected update invoke error, got %v", err)
+	}
+	if _, err := sessionClient.Revoke(context.Background(), &RevokeSessionRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected revoke invoke error, got %v", err)
+	}
+	if _, err := sessionClient.RevokeAll(context.Background(), &RevokeAllRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected revoke-all invoke error, got %v", err)
+	}
+	if _, err := sessionClient.List(context.Background(), &ListSessionsRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected list invoke error, got %v", err)
+	}
+
+	registryClient := NewModuleRegistryClient(conn)
+	if _, err := registryClient.Register(context.Background(), &RegisterRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected register invoke error, got %v", err)
+	}
+	if _, err := registryClient.Deregister(context.Background(), &DeregisterRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected deregister invoke error, got %v", err)
+	}
+	if _, err := registryClient.Heartbeat(context.Background(), &HeartbeatRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected heartbeat invoke error, got %v", err)
+	}
+	if _, err := registryClient.GetModules(context.Background(), &GetModulesRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected get-modules invoke error, got %v", err)
+	}
+
+	internalTokenClient := NewInternalTokenServiceClient(conn)
+	if _, err := internalTokenClient.Validate(context.Background(), &ValidateRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected validate invoke error, got %v", err)
+	}
+	if _, err := internalTokenClient.GetCurrent(context.Background(), &GetCurrentRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected get-current invoke error, got %v", err)
+	}
+
+	eventClient := NewEventBusServiceClient(conn)
+	if _, err := eventClient.Publish(context.Background(), &PublishRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected publish invoke error, got %v", err)
+	}
+	if _, err := eventClient.Acknowledge(context.Background(), &AcknowledgeRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected acknowledge invoke error, got %v", err)
+	}
+
+	courierClient := NewCourierServiceClient(conn)
+	if _, err := courierClient.Enqueue(context.Background(), &EnqueueRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected enqueue invoke error, got %v", err)
+	}
+	if _, err := courierClient.GetStatus(context.Background(), &GetStatusRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected get-status invoke error, got %v", err)
+	}
+	if _, err := courierClient.Cancel(context.Background(), &CancelRequest{}); !errors.Is(err, invokeErr) {
+		t.Fatalf("expected cancel invoke error, got %v", err)
+	}
+}
+
+func TestCoreGeneratedHandlerDecodeErrorsAllMethods(t *testing.T) {
+	descriptors := []struct {
+		desc *grpc.ServiceDesc
+		srv  interface{}
+	}{
+		{desc: &SessionService_ServiceDesc, srv: sessionProtoServer{}},
+		{desc: &ModuleRegistry_ServiceDesc, srv: moduleRegistryProtoServer{}},
+		{desc: &InternalTokenService_ServiceDesc, srv: internalTokenProtoServer{}},
+		{desc: &EventBusService_ServiceDesc, srv: eventBusProtoServer{}},
+		{desc: &CourierService_ServiceDesc, srv: courierProtoServer{}},
+	}
+
+	for _, tc := range descriptors {
+		for _, method := range tc.desc.Methods {
+			if _, err := method.Handler(tc.srv, context.Background(), func(interface{}) error { return errors.New("decode failed") }, nil); err == nil {
+				t.Fatalf("%s method %s expected decode error", tc.desc.ServiceName, method.MethodName)
+			}
+		}
+	}
+}
+
+func TestCoreGeneratedInitGuardsAndNilProtoReflect(t *testing.T) {
+	var eventNil *Event
+	_ = eventNil.ProtoReflect()
+	var sessionNil *ResolveRequest
+	_ = sessionNil.ProtoReflect()
+	var courierNil *EnqueueRequest
+	_ = courierNil.ProtoReflect()
+	var registryNil *RegisterRequest
+	_ = registryNil.ProtoReflect()
+	var internalTokenNil *ValidateRequest
+	_ = internalTokenNil.ProtoReflect()
+
+	file_core_events_proto_init()
+	file_core_session_proto_init()
+	file_core_courier_proto_init()
+	file_core_registry_proto_init()
+	file_core_internal_token_proto_init()
 }
 
 func TestCoreGeneratedUnimplementedServers(t *testing.T) {

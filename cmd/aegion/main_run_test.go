@@ -293,6 +293,19 @@ func TestRunHealthCommand(t *testing.T) {
 			t.Fatalf("expected status failure output, got %q", got)
 		}
 	})
+
+	t.Run("health command fails on invalid port env", func(t *testing.T) {
+		t.Setenv("AEGION_PORT", "invalid-port")
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+
+		if code := runHealthCommand(&stdout, &stderr); code != 1 {
+			t.Fatalf("expected exit code 1 for invalid port, got %d", code)
+		}
+		if got := stderr.String(); !strings.Contains(got, "invalid AEGION_PORT") {
+			t.Fatalf("expected invalid port error output, got %q", got)
+		}
+	})
 }
 
 func TestRunUnknownSubcommand(t *testing.T) {

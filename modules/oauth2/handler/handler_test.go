@@ -347,6 +347,7 @@ type handlerDeviceStore struct {
 	deviceByUser *store.DeviceCode
 	lastUsedCode string
 	markUsedErr  error
+	createErr    error
 }
 
 func (s *handlerDeviceStore) GetClient(ctx context.Context, id string) (*store.Client, error) {
@@ -357,7 +358,7 @@ func (s *handlerDeviceStore) GetClient(ctx context.Context, id string) (*store.C
 }
 func (s *handlerDeviceStore) CreateDeviceCode(ctx context.Context, dc *store.DeviceCode) error {
 	s.deviceCode = dc
-	return nil
+	return s.createErr
 }
 func (s *handlerDeviceStore) GetDeviceCode(ctx context.Context, deviceCode string) (*store.DeviceCode, error) {
 	if s.deviceCode != nil {
@@ -868,6 +869,135 @@ func TestOAuth2Handler_AdditionalErrorBranches(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer x")
 		h.HandleUserInfo(rec, req)
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+}
+
+func TestOAuth2Handler_TargetedUncoveredBranches(t *testing.T) {
+	t.Run("authorize service error path", func(t *testing.T) {
+		h := &OAuth2Handler{
+			authzSvc: authorization.NewAuthorizationService(&handlerAuthzStore{}),
+		}
+		req := httptest.NewRequest(http.MethodGet, "/oauth2/authorize?response_type=code&client_id=missing&redirect_uri=https://app.example.com/callback", nil)
+		rec := httptest.NewRecorder()
+		h.HandleAuthorize(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("token parse form failure", func(t *testing.T) {
+		h := &OAuth2Handler{}
+		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader("%"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.HandleToken(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to parse form")
+	})
+
+	t.Run("device grant default error mapping", func(t *testing.T) {
+		deviceStore := &handlerDeviceStore{
+			client: &store.Client{ID: "client-1", TokenEndpointAuthMethod: "none"},
+			deviceCode: &store.DeviceCode{
+				DeviceCode: "dc-default",
+				ClientID:   "other-client",
+				Status:     "approved",
+				IdentityID: ptrString("identity-1"),
+				ExpiresAt:  time.Now().UTC().Add(time.Hour),
+			},
+		}
+		h := &OAuth2Handler{
+			deviceSvc: device.NewDeviceService(deviceStore, 10*time.Minute, 5, "https://issuer/device"),
+		}
+
+		form := url.Values{}
+		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+		form.Set("device_code", "dc-default")
+		form.Set("client_id", "client-1")
+		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.HandleToken(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "\"error\":\"invalid_grant\"")
+	})
+
+	t.Run("device grant session id branch and token issuance error", func(t *testing.T) {
+		deviceStore := &handlerDeviceStore{
+			client: &store.Client{ID: "client-1", TokenEndpointAuthMethod: "none"},
+			deviceCode: &store.DeviceCode{
+				DeviceCode: "dc-issue",
+				ClientID:   "client-1",
+				Status:     "approved",
+				IdentityID: ptrString("identity-1"),
+				SessionID:  ptrString("session-1"),
+				ExpiresAt:  time.Now().UTC().Add(time.Hour),
+			},
+		}
+		tokenClient := &store.Client{
+			ID:                      "client-1",
+			TokenEndpointAuthMethod: "none",
+			GrantTypes:              []string{"authorization_code"},
+		}
+		h := &OAuth2Handler{
+			deviceSvc: device.NewDeviceService(deviceStore, 10*time.Minute, 5, "https://issuer/device"),
+			tokenSvc:  tokenSvc.NewTokenService(&handlerTokenStore{client: tokenClient}, &tokenSvc.MockJWTSigner{}, "https://issuer"),
+		}
+
+		form := url.Values{}
+		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+		form.Set("device_code", "dc-issue")
+		form.Set("client_id", "client-1")
+		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.HandleToken(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, "dc-issue", deviceStore.lastUsedCode)
+		assert.Contains(t, rec.Body.String(), "\"error\":\"unauthorized_client\"")
+	})
+
+	t.Run("revoke parse form and missing token", func(t *testing.T) {
+		h := &OAuth2Handler{}
+
+		req := httptest.NewRequest(http.MethodPost, "/oauth2/revoke", strings.NewReader("%"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.HandleRevoke(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to parse form")
+
+		form := url.Values{}
+		form.Set("client_id", "client-1")
+		req = httptest.NewRequest(http.MethodPost, "/oauth2/revoke", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec = httptest.NewRecorder()
+		h.HandleRevoke(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "token is required")
+	})
+
+	t.Run("device authorization parse form and generic error", func(t *testing.T) {
+		h := &OAuth2Handler{}
+		req := httptest.NewRequest(http.MethodPost, "/oauth2/device/authorize", strings.NewReader("%"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		h.HandleDeviceAuthorization(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to parse form")
+
+		deviceStore := &handlerDeviceStore{
+			client:    &store.Client{ID: "client-1", TokenEndpointAuthMethod: "none"},
+			createErr: errors.New("device create failed"),
+		}
+		h.deviceSvc = device.NewDeviceService(deviceStore, 10*time.Minute, 5, "https://issuer/device")
+
+		form := url.Values{}
+		form.Set("client_id", "client-1")
+		req = httptest.NewRequest(http.MethodPost, "/oauth2/device/authorize", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec = httptest.NewRecorder()
+		h.HandleDeviceAuthorization(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Invalid device authorization request")
 	})
 }
 
