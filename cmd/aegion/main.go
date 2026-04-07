@@ -252,6 +252,7 @@ func run(args []string, deps mainDeps) int {
 
 	server, err := deps.newServer(ctx, &ServerConfig{
 		Config:         cfg,
+		ConfigPath:     f.configPath,
 		DB:             db,
 		Log:            log,
 		WorkerManager:  workerMgr,

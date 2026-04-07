@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/router"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -837,7 +838,33 @@ func (s *Server) handleAdminGetModule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminRestartModule(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	moduleID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if moduleID == "" {
+		writeError(w, http.StatusBadRequest, "module id is required", nil)
+		return
+	}
+	if s.orchestrator == nil {
+		writeError(w, http.StatusServiceUnavailable, "module orchestrator unavailable", nil)
+		return
+	}
+
+	err := s.orchestrator.RestartModule(r.Context(), moduleID)
+	if err != nil {
+		switch {
+		case errors.Is(err, orchestrator.ErrModuleNotFound):
+			writeError(w, http.StatusNotFound, "module not found", err)
+		case errors.Is(err, orchestrator.ErrOrchestratorClosed):
+			writeError(w, http.StatusServiceUnavailable, "module orchestrator unavailable", err)
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to restart module", err)
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":    "restarted",
+		"module_id": moduleID,
+	})
 }
 
 func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {
