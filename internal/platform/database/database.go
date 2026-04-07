@@ -3,8 +3,8 @@ package database
 
 import (
 	"context"
-	"embed"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"sort"
 	"strings"
@@ -20,6 +20,11 @@ var (
 	newPoolWithConfig = pgxpool.NewWithConfig
 	pingPool          = func(ctx context.Context, pool *pgxpool.Pool) error { return pool.Ping(ctx) }
 	closePool         = func(pool *pgxpool.Pool) { pool.Close() }
+)
+
+const (
+	defaultMigrationLockID = int64(6832918273645123)
+	defaultMigrationTable  = "schema_migrations"
 )
 
 // DB wraps a pgxpool.Pool with additional utilities.
@@ -73,8 +78,10 @@ func (db *DB) Close() {
 // Migrator handles database migrations.
 type Migrator struct {
 	db          *DB
-	migrations  embed.FS
+	migrations  fs.FS
 	basePath    string
+	tableName   string
+	lockID      int64
 	acquireConn func(ctx context.Context) (pooledMigrationConn, error)
 	beginTx     func(ctx context.Context, conn migrationBeginner) (migrationTx, error)
 }
@@ -109,11 +116,13 @@ type Migration struct {
 }
 
 // NewMigrator creates a new migrator instance.
-func NewMigrator(db *DB, migrations embed.FS, basePath string) *Migrator {
+func NewMigrator(db *DB, migrations fs.FS, basePath string) *Migrator {
 	migrator := &Migrator{
 		db:         db,
 		migrations: migrations,
 		basePath:   basePath,
+		tableName:  defaultMigrationTable,
+		lockID:     defaultMigrationLockID,
 	}
 	migrator.acquireConn = func(ctx context.Context) (pooledMigrationConn, error) {
 		return migrator.db.Pool.Acquire(ctx)
@@ -128,10 +137,48 @@ func NewMigrator(db *DB, migrations embed.FS, basePath string) *Migrator {
 	return migrator
 }
 
+// NewModuleMigrator creates a migrator that tracks migrations for a specific module.
+func NewModuleMigrator(db *DB, migrations fs.FS, basePath, moduleID string) *Migrator {
+	migrator := NewMigrator(db, migrations, basePath)
+	safeID := sanitizeIdentifier(moduleID)
+	migrator.tableName = fmt.Sprintf("%s_%s", defaultMigrationTable, safeID)
+	migrator.lockID = moduleMigrationLockID(safeID)
+	return migrator
+}
+
+func sanitizeIdentifier(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return "module"
+	}
+
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+
+	sanitized := strings.Trim(b.String(), "_")
+	if sanitized == "" {
+		return "module"
+	}
+	return sanitized
+}
+
+func moduleMigrationLockID(moduleID string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("aegion_migrations_" + moduleID))
+	return int64(h.Sum64() & 0x7fffffffffffffff)
+}
+
 // Migrate runs all pending migrations.
 func (m *Migrator) Migrate(ctx context.Context) error {
 	// Acquire advisory lock to prevent concurrent migrations
-	lockID := int64(6832918273645123) // Unique lock ID for Aegion migrations
+	lockID := m.lockID
 
 	conn, err := m.acquireConn(ctx)
 	if err != nil {
@@ -187,20 +234,22 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 
 // ensureMigrationsTable creates the migrations tracking table.
 func (m *Migrator) ensureMigrationsTable(ctx context.Context, conn migrationExecutor) error {
-	_, err := conn.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS schema_migrations (
+	stmt := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s (
 			version     INT PRIMARY KEY,
 			name        TEXT NOT NULL,
 			applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
-	`)
+	`, m.tableName)
+	_, err := conn.Exec(ctx, stmt)
 	return err
 }
 
 // getCurrentVersion returns the highest applied migration version.
 func (m *Migrator) getCurrentVersion(ctx context.Context, conn migrationExecutor) (int, error) {
 	var version int
-	err := conn.QueryRow(ctx, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
+	query := fmt.Sprintf("SELECT COALESCE(MAX(version), 0) FROM %s", m.tableName)
+	err := conn.QueryRow(ctx, query).Scan(&version)
 	return version, err
 }
 
@@ -247,7 +296,7 @@ func (m *Migrator) loadMigrations() ([]Migration, error) {
 			return nil
 		}
 
-		content, err := m.migrations.ReadFile(path)
+		content, err := fs.ReadFile(m.migrations, path)
 		if err != nil {
 			return fmt.Errorf("failed to read %s: %w", path, err)
 		}
@@ -300,8 +349,9 @@ func (m *Migrator) applyMigration(ctx context.Context, conn migrationBeginner, m
 	}
 
 	// Record migration
+	insertStmt := fmt.Sprintf("INSERT INTO %s (version, name) VALUES ($1, $2)", m.tableName)
 	_, err = tx.Exec(ctx,
-		"INSERT INTO schema_migrations (version, name) VALUES ($1, $2)",
+		insertStmt,
 		mig.Version, mig.Name,
 	)
 	if err != nil {
@@ -323,7 +373,7 @@ func (m *Migrator) Rollback(ctx context.Context) error {
 	var version int
 	var name string
 	err = conn.QueryRow(ctx,
-		"SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1",
+		fmt.Sprintf("SELECT version, name FROM %s ORDER BY version DESC LIMIT 1", m.tableName),
 	).Scan(&version, &name)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -365,7 +415,8 @@ func (m *Migrator) Rollback(ctx context.Context) error {
 		return fmt.Errorf("rollback SQL failed: %w", err)
 	}
 
-	if _, err := tx.Exec(ctx, "DELETE FROM schema_migrations WHERE version = $1", version); err != nil {
+	deleteStmt := fmt.Sprintf("DELETE FROM %s WHERE version = $1", m.tableName)
+	if _, err := tx.Exec(ctx, deleteStmt, version); err != nil {
 		return fmt.Errorf("failed to remove migration record: %w", err)
 	}
 

@@ -148,3 +148,158 @@ func TestConfigLoader_GettersPropagateLoadErrors(t *testing.T) {
 		t.Fatalf("expected ErrConfigNotFound from GetNetworkConfig, got %v", err)
 	}
 }
+
+func TestValidateModuleDependencies(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *AegionConfig
+		err  error
+		msg  string
+	}{
+		{
+			name: "nil config is valid",
+			cfg:  nil,
+		},
+		{
+			name: "introspection requires oauth2",
+			cfg: &AegionConfig{
+				ModuleVersions: map[string]string{
+					"introspection": "latest",
+				},
+			},
+			err: ErrMissingDependency,
+			msg: `module "introspection" requires "oauth2"`,
+		},
+		{
+			name: "mfa requires password",
+			cfg: &AegionConfig{
+				ModuleVersions: map[string]string{
+					"mfa": "latest",
+				},
+			},
+			err: ErrMissingDependency,
+			msg: `module "mfa" requires "password"`,
+		},
+		{
+			name: "disabled module does not enforce deps",
+			cfg: &AegionConfig{
+				ModuleVersions: map[string]string{
+					"introspection": "off",
+				},
+			},
+		},
+		{
+			name: "admin with policy is valid",
+			cfg: &AegionConfig{
+				ModuleVersions: map[string]string{
+					"admin":  "latest",
+					"policy": "latest",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateModuleDependencies(tt.cfg)
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("expected error %v, got %v", tt.err, err)
+			}
+			if tt.msg != "" && !strings.Contains(err.Error(), tt.msg) {
+				t.Fatalf("expected error to contain %q, got %v", tt.msg, err)
+			}
+		})
+	}
+}
+
+func TestConfigLoader_Load_ValidatesModuleDependencies(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "aegion.yaml")
+	content := `
+module_versions:
+  introspection: "latest"
+module_registry:
+  base_url: ""
+server:
+  internal_network:
+    name: aegion_modules
+    subnet: 10.10.0.0/16
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	loader := NewConfigLoader(configPath)
+	_, err := loader.Load()
+	if !errors.Is(err, ErrMissingDependency) {
+		t.Fatalf("expected ErrMissingDependency, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `module "introspection" requires "oauth2"`) {
+		t.Fatalf("expected dependency detail, got %v", err)
+	}
+}
+
+func TestEnabledModuleOrder(t *testing.T) {
+	t.Run("orders enabled modules by dependency", func(t *testing.T) {
+		order, err := EnabledModuleOrder(map[string]string{
+			"admin":         "latest",
+			"introspection": "latest",
+			"oauth2":        "latest",
+			"policy":        "latest",
+			"password":      "latest",
+		})
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		mustAppearAfter(t, order, "admin", "policy")
+		mustAppearAfter(t, order, "introspection", "oauth2")
+	})
+
+	t.Run("disabled modules are omitted", func(t *testing.T) {
+		order, err := EnabledModuleOrder(map[string]string{
+			"oauth2":        "latest",
+			"introspection": "off",
+		})
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if len(order) != 1 || order[0] != "oauth2" {
+			t.Fatalf("expected only oauth2 in order, got %v", order)
+		}
+	})
+
+	t.Run("returns missing dependency error", func(t *testing.T) {
+		_, err := EnabledModuleOrder(map[string]string{
+			"admin": "latest",
+		})
+		if !errors.Is(err, ErrMissingDependency) {
+			t.Fatalf("expected ErrMissingDependency, got %v", err)
+		}
+	})
+}
+
+func mustAppearAfter(t *testing.T, order []string, module, dependency string) {
+	t.Helper()
+
+	moduleIdx := -1
+	dependencyIdx := -1
+	for i, item := range order {
+		if item == module {
+			moduleIdx = i
+		}
+		if item == dependency {
+			dependencyIdx = i
+		}
+	}
+
+	if moduleIdx == -1 {
+		t.Fatalf("expected module %q in order %v", module, order)
+	}
+	if dependencyIdx == -1 {
+		t.Fatalf("expected dependency %q in order %v", dependency, order)
+	}
+	if moduleIdx <= dependencyIdx {
+		t.Fatalf("expected %q after %q, got %v", module, dependency, order)
+	}
+}
