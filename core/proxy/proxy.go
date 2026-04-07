@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,7 +13,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -227,6 +231,10 @@ func (p *Proxy) Forward(target *url.URL, w http.ResponseWriter, r *http.Request,
 			req.URL.Host = target.Host
 			req.Host = target.Host
 
+			if p.config.StripInboundIdentityHeaders {
+				p.stripInboundIdentityHeaders(req)
+			}
+
 			// Preserve query parameters
 			req.URL.RawQuery = r.URL.RawQuery
 
@@ -243,6 +251,7 @@ func (p *Proxy) Forward(target *url.URL, w http.ResponseWriter, r *http.Request,
 			// Inject session headers for authenticated requests
 			if sess := session.FromContext(req.Context()); sess != nil {
 				p.injectSessionHeaders(req, sess)
+				p.signIdentityHeaders(req)
 			}
 
 			// Add forwarded headers
@@ -353,6 +362,60 @@ func (p *Proxy) injectSessionHeaders(req *http.Request, sess *session.Session) {
 	if sess.IsImpersonation && sess.ImpersonatorID != nil {
 		req.Header.Set("X-Aegion-Impersonation", "true")
 		req.Header.Set("X-Aegion-Impersonator-ID", sess.ImpersonatorID.String())
+	}
+}
+
+func (p *Proxy) stripInboundIdentityHeaders(req *http.Request) {
+	for _, header := range p.identityHeaders() {
+		req.Header.Del(header)
+	}
+	if p.config.IdentitySignatureHeader != "" {
+		req.Header.Del(p.config.IdentitySignatureHeader)
+	}
+}
+
+func (p *Proxy) signIdentityHeaders(req *http.Request) {
+	secret := strings.TrimSpace(p.config.IdentitySigningSecret)
+	if secret == "" {
+		return
+	}
+
+	var canonicalHeaders []string
+	for _, header := range p.identityHeaders() {
+		value := strings.TrimSpace(req.Header.Get(header))
+		if value == "" {
+			continue
+		}
+		canonicalHeaders = append(canonicalHeaders, strings.ToLower(header)+":"+value)
+	}
+	if len(canonicalHeaders) == 0 {
+		return
+	}
+	sort.Strings(canonicalHeaders)
+
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	payload := timestamp + "." + strings.Join(canonicalHeaders, "\n")
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(payload))
+
+	signatureHeader := p.config.IdentitySignatureHeader
+	if signatureHeader == "" {
+		signatureHeader = "X-Aegion-Signature"
+	}
+	req.Header.Set(signatureHeader, "t="+timestamp+",v1="+hex.EncodeToString(mac.Sum(nil)))
+}
+
+func (p *Proxy) identityHeaders() []string {
+	if len(p.config.SignedIdentityHeaders) > 0 {
+		return p.config.SignedIdentityHeaders
+	}
+	return []string{
+		"X-Aegion-Session-ID",
+		"X-Aegion-Identity-ID",
+		"X-Aegion-AAL",
+		"X-Aegion-Authenticated-At",
+		"X-Aegion-Impersonation",
+		"X-Aegion-Impersonator-ID",
 	}
 }
 
