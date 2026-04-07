@@ -16,6 +16,7 @@ import (
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/internal/platform/config"
@@ -39,6 +40,24 @@ func (s *stubCmdPolicyChecker) Check(ctx context.Context, req *policypb.CheckReq
 		return s.resp, nil
 	}
 	return &policypb.CheckResponse{Allowed: true, ModelUsed: "rbac", EvalPath: []string{"rbac:allow"}}, nil
+}
+
+type stubRouteOrchestrator struct {
+	restartErr   error
+	restartCalls []string
+}
+
+func (s *stubRouteOrchestrator) Start(ctx context.Context) error {
+	return nil
+}
+
+func (s *stubRouteOrchestrator) Stop(ctx context.Context) error {
+	return nil
+}
+
+func (s *stubRouteOrchestrator) RestartModule(ctx context.Context, moduleID string) error {
+	s.restartCalls = append(s.restartCalls, moduleID)
+	return s.restartErr
 }
 
 func newTestServer(t *testing.T) *Server {
@@ -1039,7 +1058,6 @@ func TestNotImplementedHandlers(t *testing.T) {
 		{"admin list sessions", s.handleAdminListSessions},
 		{"admin delete session", s.handleAdminDeleteSession},
 		{"admin delete identity sessions", s.handleAdminDeleteIdentitySessions},
-		{"admin restart module", s.handleAdminRestartModule},
 		{"admin metrics", s.handleAdminMetrics},
 	}
 
@@ -1056,6 +1074,90 @@ func TestNotImplementedHandlers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleAdminRestartModule(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("module id required", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules//restart", nil)
+		s.handleAdminRestartModule(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("orchestrator unavailable", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		s.handleAdminRestartModule(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	t.Run("module not found", func(t *testing.T) {
+		stub := &stubRouteOrchestrator{restartErr: orchestrator.ErrModuleNotFound}
+		s.orchestrator = stub
+
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/missing/restart", nil), "id", "missing")
+		s.handleAdminRestartModule(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+	})
+
+	t.Run("orchestrator closed", func(t *testing.T) {
+		stub := &stubRouteOrchestrator{restartErr: orchestrator.ErrOrchestratorClosed}
+		s.orchestrator = stub
+
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		s.handleAdminRestartModule(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	t.Run("restart error", func(t *testing.T) {
+		stub := &stubRouteOrchestrator{restartErr: errors.New("restart failed")}
+		s.orchestrator = stub
+
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		s.handleAdminRestartModule(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+
+	t.Run("success", func(t *testing.T) {
+		stub := &stubRouteOrchestrator{}
+		s.orchestrator = stub
+
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		s.handleAdminRestartModule(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+		if len(stub.restartCalls) != 1 || stub.restartCalls[0] != "password" {
+			t.Fatalf("expected restart to be called for password, got %+v", stub.restartCalls)
+		}
+
+		var resp map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse response: %v", err)
+		}
+		if resp["status"] != "restarted" {
+			t.Fatalf("expected status restarted, got %q", resp["status"])
+		}
+		if resp["module_id"] != "password" {
+			t.Fatalf("expected module_id=password, got %q", resp["module_id"])
+		}
+	})
 }
 
 func TestHandleAdminGetConfig_DefaultsWithoutDB(t *testing.T) {

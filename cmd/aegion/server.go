@@ -11,6 +11,7 @@ import (
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
@@ -24,6 +25,7 @@ import (
 // ServerConfig holds the server configuration.
 type ServerConfig struct {
 	Config         *config.Config
+	ConfigPath     string
 	DB             *database.DB
 	Log            *logger.Logger
 	WorkerManager  *workers.Manager
@@ -37,6 +39,7 @@ type Server struct {
 	log           *logger.Logger
 	router        chi.Router
 	registry      *registry.Registry
+	orchestrator  moduleOrchestrator
 	tokenGen      *authtoken.Generator
 	flowService   *flows.Service
 	policyChecker policyChecker
@@ -45,6 +48,16 @@ type Server struct {
 
 type policyChecker interface {
 	Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error)
+}
+
+type moduleOrchestrator interface {
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+	RestartModule(ctx context.Context, moduleID string) error
+}
+
+var newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
+	return orchestrator.New(cfg)
 }
 
 var pingDatabase = func(ctx context.Context, db *database.DB) error {
@@ -106,6 +119,24 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	reg.Start()
 	s.log.Info().Msg("Service registry started")
 
+	if cfg.ConfigPath != "" {
+		moduleOrchestrator, err := newModuleOrchestrator(orchestrator.Config{
+			ConfigPath:  cfg.ConfigPath,
+			Registry:    reg,
+			TokenSecret: []byte(internalSecret),
+		})
+		if err != nil {
+			reg.Stop()
+			return nil, err
+		}
+		if err := moduleOrchestrator.Start(ctx); err != nil {
+			reg.Stop()
+			return nil, err
+		}
+		s.orchestrator = moduleOrchestrator
+		s.log.Info().Str("config_path", cfg.ConfigPath).Msg("Module orchestrator started")
+	}
+
 	// Bootstrap admin if requested
 	if cfg.AdminBootstrap {
 		if err := s.bootstrapAdmin(ctx); err != nil {
@@ -164,18 +195,34 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info().Msg("Shutting down server components")
 
+	var shutdownErr error
+
+	if s.orchestrator != nil {
+		if err := s.orchestrator.Stop(ctx); err != nil {
+			s.log.Error().Err(err).Msg("Failed to stop module orchestrator")
+			shutdownErr = err
+		} else {
+			s.log.Info().Msg("Module orchestrator stopped")
+		}
+	}
+
 	// Stop registry
 	if s.registry != nil {
 		s.registry.Stop()
 		s.log.Info().Msg("Service registry stopped")
 	}
 
-	return nil
+	return shutdownErr
 }
 
 // Registry returns the service registry.
 func (s *Server) Registry() *registry.Registry {
 	return s.registry
+}
+
+// Orchestrator returns the module orchestrator.
+func (s *Server) Orchestrator() moduleOrchestrator {
+	return s.orchestrator
 }
 
 // FlowService returns the flow service.
@@ -276,6 +323,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"status":        "ready",
 		"database":      "ok",
 		"registry":      registryOK,
+		"orchestrator":  s.orchestrator != nil,
 		"module_count":  s.registry.ModuleCount(),
 		"healthy_count": s.registry.HealthyCount(),
 	}
