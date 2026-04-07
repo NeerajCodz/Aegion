@@ -2,21 +2,28 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
+	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
@@ -457,11 +464,171 @@ func setupLogger(logConfig LogConfig) {
 }
 
 func runMigrations(ctx context.Context, db *pgxpool.Pool) error {
-	// TODO: Implement migration runner for admin module
-	// This should read from the embedded migrations filesystem
-	// and apply SQL migrations in order
-	log.Info().Msg("Migration runner not yet implemented")
+	if db == nil {
+		return errors.New("database pool is nil")
+	}
+
+	migrations, err := loadAdminMigrations(adminmodule.GetMigrationFiles())
+	if err != nil {
+		return fmt.Errorf("failed to load admin migrations: %w", err)
+	}
+	if len(migrations) == 0 {
+		log.Info().Msg("No admin migrations found")
+		return nil
+	}
+
+	const advisoryLockID int64 = 9021045311782301
+	var lockAcquired bool
+	if err := db.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", advisoryLockID).Scan(&lockAcquired); err != nil {
+		return fmt.Errorf("failed to acquire admin migration lock: %w", err)
+	}
+	if !lockAcquired {
+		return errors.New("another admin migration is in progress")
+	}
+	defer func() {
+		_, _ = db.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", advisoryLockID)
+	}()
+
+	if err := ensureAdminMigrationsTable(ctx, db); err != nil {
+		return fmt.Errorf("failed to ensure admin migration table: %w", err)
+	}
+
+	applied, err := loadAppliedAdminMigrations(ctx, db)
+	if err != nil {
+		return fmt.Errorf("failed to load applied admin migrations: %w", err)
+	}
+
+	for _, migration := range migrations {
+		if _, exists := applied[migration.Version]; exists {
+			continue
+		}
+		if err := applyAdminMigration(ctx, db, migration); err != nil {
+			return err
+		}
+		log.Info().
+			Int("version", migration.Version).
+			Str("name", migration.Name).
+			Msg("Applied admin migration")
+	}
+
 	return nil
+}
+
+type adminMigration struct {
+	Version int
+	Name    string
+	UpSQL   string
+}
+
+func loadAdminMigrations(fsys fs.FS) ([]adminMigration, error) {
+	entries, err := fs.ReadDir(fsys, "migrations")
+	if err != nil {
+		return nil, err
+	}
+
+	migrations := make([]adminMigration, 0, len(entries))
+	seen := make(map[int]struct{})
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		filename := entry.Name()
+		if !strings.HasSuffix(filename, ".up.sql") {
+			continue
+		}
+
+		parts := strings.SplitN(filename, "_", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid migration filename: %s", filename)
+		}
+
+		version, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid migration version in %s: %w", filename, err)
+		}
+		if _, exists := seen[version]; exists {
+			return nil, fmt.Errorf("duplicate migration version: %d", version)
+		}
+		seen[version] = struct{}{}
+
+		content, err := fs.ReadFile(fsys, "migrations/"+filename)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read migration %s: %w", filename, err)
+		}
+
+		migrations = append(migrations, adminMigration{
+			Version: version,
+			Name:    strings.TrimSuffix(parts[1], ".up.sql"),
+			UpSQL:   string(content),
+		})
+	}
+
+	sort.Slice(migrations, func(i, j int) bool {
+		return migrations[i].Version < migrations[j].Version
+	})
+
+	return migrations, nil
+}
+
+func ensureAdminMigrationsTable(ctx context.Context, db *pgxpool.Pool) error {
+	_, err := db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS adm_schema_migrations (
+			version    INT PRIMARY KEY,
+			name       TEXT NOT NULL,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
+	return err
+}
+
+func loadAppliedAdminMigrations(ctx context.Context, db *pgxpool.Pool) (map[int]struct{}, error) {
+	rows, err := db.Query(ctx, `SELECT version FROM adm_schema_migrations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	applied := make(map[int]struct{})
+	for rows.Next() {
+		var version int
+		if scanErr := rows.Scan(&version); scanErr != nil {
+			return nil, scanErr
+		}
+		applied[version] = struct{}{}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return applied, nil
+}
+
+func applyAdminMigration(ctx context.Context, db *pgxpool.Pool, migration adminMigration) error {
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			_ = rollbackErr
+		}
+	}()
+
+	if _, err := tx.Exec(ctx, migration.UpSQL); err != nil {
+		return fmt.Errorf("failed to apply admin migration %04d_%s: %w", migration.Version, migration.Name, err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO adm_schema_migrations (version, name)
+		VALUES ($1, $2)
+	`, migration.Version, migration.Name); err != nil {
+		return fmt.Errorf("failed to record admin migration %04d_%s: %w", migration.Version, migration.Name, err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 func getEnv(key, defaultValue string) string {

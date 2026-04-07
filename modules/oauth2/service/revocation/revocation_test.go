@@ -9,6 +9,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type mockRevocationStore struct {
@@ -170,6 +171,11 @@ func TestRevocationService_RevokeToken(t *testing.T) {
 func TestRevocationHelpers(t *testing.T) {
 	assert.True(t, authenticateClientSecret("secret", "secret"))
 	assert.False(t, authenticateClientSecret("secret", "nope"))
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("super-secret"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	assert.True(t, authenticateClientSecret(string(hash), "super-secret"))
+	assert.False(t, authenticateClientSecret(string(hash), "invalid"))
 
 	token, err := ExtractTokenFromHeader("Bearer abc.def")
 	require.NoError(t, err)

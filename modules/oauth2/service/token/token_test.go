@@ -10,6 +10,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Mock store for testing
@@ -235,9 +236,10 @@ func TestExchangeAuthorizationCode(t *testing.T) {
 		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://auth.example.com")
 
 		req := &TokenRequest{
-			GrantType: "authorization_code",
-			Code:      "ac_test123",
-			ClientID:  "client-456",
+			GrantType:   "authorization_code",
+			Code:        "ac_test123",
+			ClientID:    "client-456",
+			RedirectURI: "https://app.example.com/callback",
 		}
 
 		_, err := svc.ExchangeAuthorizationCode(ctx, req)
@@ -324,7 +326,11 @@ func TestExchangeAuthorizationCode_ErrorPaths(t *testing.T) {
 	t.Run("invalid client and invalid grant", func(t *testing.T) {
 		st := &mockTokenStore{getClientErr: errors.New("missing")}
 		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
-		_, err := svc.ExchangeAuthorizationCode(ctx, &TokenRequest{ClientID: "client-123", Code: "ac_ok"})
+		_, err := svc.ExchangeAuthorizationCode(ctx, &TokenRequest{
+			ClientID:    "client-123",
+			Code:        "ac_ok",
+			RedirectURI: "https://app.example.com/callback",
+		})
 		assert.ErrorIs(t, err, ErrInvalidClient)
 
 		st = &mockTokenStore{
@@ -332,8 +338,64 @@ func TestExchangeAuthorizationCode_ErrorPaths(t *testing.T) {
 			getAuthCodeErr: errors.New("missing code"),
 		}
 		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
-		_, err = svc.ExchangeAuthorizationCode(ctx, &TokenRequest{ClientID: "client-123", Code: "ac_ok"})
+		_, err = svc.ExchangeAuthorizationCode(ctx, &TokenRequest{
+			ClientID:    "client-123",
+			Code:        "ac_ok",
+			RedirectURI: "https://app.example.com/callback",
+		})
 		assert.ErrorIs(t, err, ErrInvalidGrant)
+	})
+
+	t.Run("invalid request and unauthorized grant", func(t *testing.T) {
+		svc := NewTokenService(&mockTokenStore{client: baseClient}, &MockJWTSigner{}, "https://issuer")
+		_, err := svc.ExchangeAuthorizationCode(ctx, &TokenRequest{
+			ClientID: "client-123",
+			Code:     "ac_ok",
+		})
+		assert.ErrorIs(t, err, ErrInvalidRequest)
+
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:         "client-123",
+				GrantTypes: []string{"client_credentials"},
+			},
+		}
+		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err = svc.ExchangeAuthorizationCode(ctx, &TokenRequest{
+			ClientID:    "client-123",
+			Code:        "ac_ok",
+			RedirectURI: "https://app.example.com/callback",
+		})
+		assert.ErrorIs(t, err, ErrUnauthorizedClient)
+	})
+
+	t.Run("confidential client secret validation", func(t *testing.T) {
+		hash, err := bcrypt.GenerateFromPassword([]byte("top-secret"), bcrypt.DefaultCost)
+		require.NoError(t, err)
+
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:                      "client-123",
+				TokenEndpointAuthMethod: "client_secret_post",
+				SecretHash:              ptrString(string(hash)),
+				GrantTypes:              []string{"authorization_code"},
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err = svc.ExchangeAuthorizationCode(ctx, &TokenRequest{
+			ClientID:    "client-123",
+			Code:        "ac_ok",
+			RedirectURI: "https://app.example.com/callback",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
+
+		_, err = svc.ExchangeAuthorizationCode(ctx, &TokenRequest{
+			ClientID:     "client-123",
+			ClientSecret: "wrong",
+			Code:         "ac_ok",
+			RedirectURI:  "https://app.example.com/callback",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 
 	t.Run("validation failures", func(t *testing.T) {
@@ -509,6 +571,52 @@ func TestRefreshAccessToken_ErrorPaths(t *testing.T) {
 		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
 		_, err = svc.RefreshAccessToken(ctx, &TokenRequest{ClientID: "client-123", RefreshToken: "rt"})
 		assert.ErrorIs(t, err, ErrInvalidGrant)
+	})
+
+	t.Run("invalid request and unauthorized grant", func(t *testing.T) {
+		svc := NewTokenService(&mockTokenStore{client: baseClient}, &MockJWTSigner{}, "https://issuer")
+		_, err := svc.RefreshAccessToken(ctx, &TokenRequest{
+			ClientID: "client-123",
+		})
+		assert.ErrorIs(t, err, ErrInvalidRequest)
+
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:         "client-123",
+				GrantTypes: []string{"authorization_code"},
+			},
+		}
+		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err = svc.RefreshAccessToken(ctx, &TokenRequest{
+			ClientID:     "client-123",
+			RefreshToken: "rt",
+		})
+		assert.ErrorIs(t, err, ErrUnauthorizedClient)
+	})
+
+	t.Run("confidential refresh requires secret", func(t *testing.T) {
+		hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+		require.NoError(t, err)
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:                      "client-123",
+				TokenEndpointAuthMethod: "client_secret_post",
+				SecretHash:              ptrString(string(hash)),
+				GrantTypes:              []string{"refresh_token"},
+			},
+			refreshToken: &store.RefreshToken{
+				ID:        "rt-1",
+				ClientID:  "client-123",
+				Active:    true,
+				ExpiresAt: time.Now().UTC().Add(time.Minute),
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err = svc.RefreshAccessToken(ctx, &TokenRequest{
+			ClientID:     "client-123",
+			RefreshToken: "rt-1",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 
 	t.Run("invalid refresh token state and client mismatch", func(t *testing.T) {
@@ -696,4 +804,8 @@ func TestParseScopes(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func ptrString(v string) *string {
+	return &v
 }

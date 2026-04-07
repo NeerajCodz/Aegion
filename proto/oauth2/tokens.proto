@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package aegion.oauth2.v1;
+
+option go_package = "github.com/aegion/aegion/internal/proto/oauth2/v1;oauth2pb";
+
+// TokenStore exposes token lifecycle operations for other modules.
+service TokenStore {
+  // Introspect checks whether a token is active and returns token metadata.
+  rpc Introspect(IntrospectRequest) returns (IntrospectResponse);
+
+  // Revoke revokes a token by identifier.
+  rpc Revoke(RevokeRequest) returns (RevokeResponse);
+
+  // InvalidateFamily revokes all refresh tokens in a family.
+  rpc InvalidateFamily(InvalidateFamilyRequest) returns (InvalidateFamilyResponse);
+}
+
+message IntrospectRequest {
+  // Token identifier or opaque token string.
+  string token = 1;
+}
+
+message IntrospectResponse {
+  bool active = 1;
+  string client_id = 2;
+  string identity_id = 3;
+  repeated string scopes = 4;
+  repeated string audience = 5;
+
+  // Expiry timestamp (unix seconds), 0 when inactive/unknown.
+  int64 expires_at = 6;
+}
+
+message RevokeRequest {
+  // Token identifier or opaque token string.
+  string token = 1;
+
+  // Optional operator/system reason for audit trails.
+  string reason = 2;
+}
+
+message RevokeResponse {
+  // True when the token existed and was revoked.
+  bool revoked = 1;
+}
+
+message InvalidateFamilyRequest {
+  // Refresh token family identifier.
+  string family_id = 1;
+}
+
+message InvalidateFamilyResponse {
+  // Number of refresh tokens invalidated.
+  int64 invalidated = 1;
+}

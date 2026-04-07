@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
@@ -349,4 +350,87 @@ func TestServer_BatchCheck(t *testing.T) {
 	require.Len(t, resp.GetResults(), 2)
 	assert.True(t, resp.GetResults()[0].GetAllowed())
 	assert.False(t, resp.GetResults()[1].GetAllowed())
+}
+
+func TestServer_Check_NilStoreFailsSafe(t *testing.T) {
+	s := NewServer(nil)
+
+	_, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+	})
+	assert.ErrorContains(t, err, "policy store is required")
+}
+
+func TestServer_Check_RBACAnonymousSubjectDeniedWithoutStoreLookup(t *testing.T) {
+	st := &mockRBACStore{rolesErr: errors.New("unexpected lookup")}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "anonymous",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "rbac",
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetAllowed())
+	assert.Equal(t, "rbac", resp.GetModelUsed())
+	assert.Equal(t, []string{"rbac:miss"}, resp.GetEvalPath())
+	assert.Empty(t, st.lastIdentity)
+}
+
+func TestServer_Check_ReBACSubjectSetWithPrefixedObject(t *testing.T) {
+	st := &mockRBACStore{
+		rebacTuples: []policystore.ReBACTuple{
+			{Namespace: "documents", ObjectID: "spec-1", Relation: "viewer", SubjectID: "group:eng#member"},
+			{Namespace: "documents", ObjectID: "group:eng", Relation: "member", SubjectID: "user:alice"},
+		},
+	}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		Resource:     "documents:spec-1",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "rebac",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, "rebac", resp.GetModelUsed())
+}
+
+func TestServer_Check_ReBACMaxDepthExceeded(t *testing.T) {
+	tuples := make([]policystore.ReBACTuple, 0, 22)
+	for i := 0; i < 21; i++ {
+		tuples = append(tuples, policystore.ReBACTuple{
+			Namespace: "documents",
+			ObjectID:  fmt.Sprintf("group:node-%d", i),
+			Relation:  "viewer",
+			SubjectID: fmt.Sprintf("group:node-%d#viewer", i+1),
+		})
+	}
+	tuples = append(tuples, policystore.ReBACTuple{
+		Namespace: "documents",
+		ObjectID:  "group:node-21",
+		Relation:  "viewer",
+		SubjectID: "user:alice",
+	})
+
+	st := &mockRBACStore{rebacTuples: tuples}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		Resource:     "documents:group:node-0",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "rebac",
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetAllowed())
+	assert.Equal(t, "rebac", resp.GetModelUsed())
+	assert.Equal(t, "max_depth_exceeded", resp.GetDenyReason())
+	assert.Equal(t, []string{"rebac:max_depth_exceeded"}, resp.GetEvalPath())
 }

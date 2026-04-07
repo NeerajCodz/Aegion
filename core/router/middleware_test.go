@@ -6,12 +6,18 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/aegion/aegion/internal/platform/observability"
 )
 
 func TestRequestIDMiddleware(t *testing.T) {
 	handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if GetRequestID(r.Context()) == "" {
+		requestID := GetRequestID(r.Context())
+		if requestID == "" {
 			t.Fatalf("expected request ID in context")
+		}
+		if obsRequestID := observability.GetRequestIDForLogger(r.Context()); obsRequestID != requestID {
+			t.Fatalf("expected observability request ID %q, got %q", requestID, obsRequestID)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))

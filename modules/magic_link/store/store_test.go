@@ -793,6 +793,19 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, optionsAndArgs ...int
 	return &fakeRow{err: pgx.ErrNoRows}
 }
 
+type fakeQueryObserver struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeQueryObserver) WrapQuery(ctx context.Context, operation, table string, fn func(context.Context) error) error {
+	f.calls = append(f.calls, fmt.Sprintf("%s:%s", operation, table))
+	if f.err != nil {
+		return f.err
+	}
+	return fn(ctx)
+}
+
 func TestStore_New(t *testing.T) {
 	// Test NewWithDB constructor
 	db := &fakeDB{}
@@ -811,6 +824,36 @@ func TestStore_SetCodeConfig(t *testing.T) {
 
 	assert.Equal(t, 8, store.codeLength)
 	assert.Equal(t, "0123456789ABCDEF", store.codeCharset)
+}
+
+func TestStore_withObservedQuery_UsesObserver(t *testing.T) {
+	observer := &fakeQueryObserver{}
+	store := newStore(&fakeDB{}, observer)
+
+	called := false
+	err := store.withObservedQuery(context.Background(), "SELECT", dbTableCodes, func(context.Context) error {
+		called = true
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.True(t, called)
+	assert.Equal(t, []string{"SELECT:" + dbTableCodes}, observer.calls)
+}
+
+func TestStore_Create_RecordsObservabilityOperation(t *testing.T) {
+	observer := &fakeQueryObserver{}
+	db := &fakeDB{
+		execFn: func(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+			return mockCommandTag(1), nil
+		},
+	}
+
+	store := newStore(db, observer)
+	_, err := store.Create(context.Background(), "user@example.com", CodeTypeLogin, nil, 15*time.Minute)
+
+	require.NoError(t, err)
+	assert.Contains(t, observer.calls, "INSERT:"+dbTableCodes)
 }
 
 func TestStore_Create_Success(t *testing.T) {

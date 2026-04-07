@@ -91,12 +91,158 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   # ---------------------------------------------------------------------------
+  # Determine Module Scope for Per-Module Checks
+  # ---------------------------------------------------------------------------
+  detect-modules:
+    name: Detect Changed Modules
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.detect.outputs.modules }}
+      has_modules: ${{ steps.detect.outputs.has_modules }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect affected modules
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          to_json() {
+            python3 -c "import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))"
+          }
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          else
+            base_sha="${{ github.event.before }}"
+            if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+              base_sha="$(git rev-list --max-parents=0 HEAD)"
+            fi
+          fi
+          head_sha="${{ github.sha }}"
+
+          changed_files="$(git diff --name-only "$base_sha" "$head_sha" || true)"
+          echo "Changed files between $base_sha and $head_sha:"
+          echo "${changed_files:-<none>}"
+
+          mapfile -t all_modules < <(find modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+          if [[ "${#all_modules[@]}" -eq 0 ]]; then
+            echo "modules=[]" >> "$GITHUB_OUTPUT"
+            echo "has_modules=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          shared_change_regex='^(internal/|proto/|core/|cmd/|configs/|go\.mod$|go\.sum$|scripts/|build/|\.github/workflows/(ci|release)\.yml$)'
+          if [[ -n "$changed_files" ]] && grep -Eq "$shared_change_regex" <<<"$changed_files"; then
+            modules_json="$(printf '%s\n' "${all_modules[@]}" | to_json)"
+          else
+            changed_modules="$(sed -nE 's#^modules/([^/]+)(/.*)?$#\1#p' <<<"$changed_files" | sort -u)"
+            modules_json="$(printf '%s\n' "$changed_modules" | to_json)"
+          fi
+
+          if [[ "$modules_json" == "[]" ]]; then
+            echo "has_modules=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_modules=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "modules=$modules_json" >> "$GITHUB_OUTPUT"
+          echo "Module matrix: $modules_json"
+
+  # ---------------------------------------------------------------------------
+  # Per-Module Verification (path-scoped, shared changes fan out)
+  # ---------------------------------------------------------------------------
+  module-check:
+    name: Module Check (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    needs: detect-modules
+    if: needs.detect-modules.outputs.has_modules == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.detect-modules.outputs.modules) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Check module boundaries
+        run: bash ./scripts/check-module-boundaries.sh "${{ matrix.module }}"
+
+      - name: Vet module
+        run: go vet ./modules/${{ matrix.module }}/...
+
+      - name: Test module
+        run: go test -count=1 ./modules/${{ matrix.module }}/...
+
+      - name: Build module image
+        if: hashFiles(format('modules/{0}/Dockerfile', matrix.module)) != ''
+        run: |
+          docker build \
+            -f modules/${{ matrix.module }}/Dockerfile \
+            -t aegion-${{ matrix.module }}:ci-${{ github.sha }} \
+            --build-arg VERSION=ci-${{ github.sha }} \
+            .
+
+  # ---------------------------------------------------------------------------
+  # Proto Generation Consistency
+  # ---------------------------------------------------------------------------
+  proto-consistency:
+    name: Proto Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install protoc compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify generated protobuf stubs are current
+        run: bash ./scripts/check-proto-consistency.sh
+
+  # ---------------------------------------------------------------------------
+  # Release Manifest Discipline
+  # ---------------------------------------------------------------------------
+  release-manifest:
+    name: Release Manifest Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Validate release manifest schema and coverage
+        run: bash ./scripts/check-release-manifest.sh
+
+  # ---------------------------------------------------------------------------
   # Go Tests with Coverage
   # ---------------------------------------------------------------------------
   go-test:
     name: Go Test
     runs-on: ubuntu-latest
-    needs: go-lint
+    needs: [go-lint, proto-consistency]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -165,6 +311,26 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ---------------------------------------------------------------------------
+  # Integration Smoke Checks
+  # ---------------------------------------------------------------------------
+  integration-smoke:
+    name: Integration Smoke
+    runs-on: ubuntu-latest
+    needs: go-test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run critical smoke tests
+        run: bash ./scripts/run-integration-smoke.sh
+
+  # ---------------------------------------------------------------------------
   # Rust Tests with Coverage
   # ---------------------------------------------------------------------------
   rust-test:
@@ -210,16 +376,39 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [go-lint, rust-lint, go-test, rust-test]
+    needs:
+      - go-lint
+      - rust-lint
+      - detect-modules
+      - module-check
+      - proto-consistency
+      - release-manifest
+      - go-test
+      - integration-smoke
+      - rust-test
     if: always()
     steps:
       - name: Check all jobs passed
+        shell: bash
         run: |
-          if [[ "${{ needs.go-lint.result }}" != "success" ]] || \
-             [[ "${{ needs.rust-lint.result }}" != "success" ]] || \
-             [[ "${{ needs.go-test.result }}" != "success" ]] || \
-             [[ "${{ needs.rust-test.result }}" != "success" ]]; then
-            echo "One or more CI jobs failed"
-            exit 1
-          fi
+          check_result() {
+            local job="$1"
+            local result="$2"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::Job '$job' finished with status '$result'"
+              return 1
+            fi
+            return 0
+          }
+
+          check_result "go-lint" "${{ needs.go-lint.result }}"
+          check_result "rust-lint" "${{ needs.rust-lint.result }}"
+          check_result "detect-modules" "${{ needs.detect-modules.result }}"
+          check_result "module-check" "${{ needs.module-check.result }}"
+          check_result "proto-consistency" "${{ needs.proto-consistency.result }}"
+          check_result "release-manifest" "${{ needs.release-manifest.result }}"
+          check_result "go-test" "${{ needs.go-test.result }}"
+          check_result "integration-smoke" "${{ needs.integration-smoke.result }}"
+          check_result "rust-test" "${{ needs.rust-test.result }}"
+
           echo "All CI checks passed!"

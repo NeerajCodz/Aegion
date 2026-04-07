@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/modules/oauth2/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -60,10 +61,17 @@ type ClientCredentialsResponse struct {
 
 // IssueClientCredentials issues an access token for client credentials grant.
 func (s *ClientCredentialsService) IssueClientCredentials(ctx context.Context, req *ClientCredentialsRequest) (*ClientCredentialsResponse, error) {
+	if req == nil || strings.TrimSpace(req.ClientID) == "" {
+		return nil, ErrInvalidClient
+	}
+
 	// Validate client
 	client, err := s.store.GetClient(ctx, req.ClientID)
 	if err != nil {
 		return nil, ErrInvalidClient
+	}
+	if err := authenticateClient(client, req.ClientSecret); err != nil {
+		return nil, err
 	}
 
 	// Verify grant is allowed
@@ -167,18 +175,26 @@ func NewJWTBearerService(store GrantStore, signer JWTSigner, issuer string, vali
 
 // JWTBearerRequest represents a JWT bearer grant request.
 type JWTBearerRequest struct {
-	GrantType string
-	Assertion string
-	Scope     string
-	ClientID  string
+	GrantType    string
+	Assertion    string
+	Scope        string
+	ClientID     string
+	ClientSecret string
 }
 
 // IssueJWTBearer issues an access token for JWT bearer grant.
 func (s *JWTBearerService) IssueJWTBearer(ctx context.Context, req *JWTBearerRequest) (*ClientCredentialsResponse, error) {
+	if req == nil || strings.TrimSpace(req.ClientID) == "" || strings.TrimSpace(req.Assertion) == "" {
+		return nil, ErrInvalidClient
+	}
+
 	// Validate client
 	client, err := s.store.GetClient(ctx, req.ClientID)
 	if err != nil {
 		return nil, ErrInvalidClient
+	}
+	if err := authenticateClient(client, req.ClientSecret); err != nil {
+		return nil, err
 	}
 
 	// Verify grant is allowed
@@ -196,6 +212,9 @@ func (s *JWTBearerService) IssueJWTBearer(ctx context.Context, req *JWTBearerReq
 	scopes := claims.Scopes
 	if req.Scope != "" {
 		scopes = parseScopes(req.Scope)
+	}
+	if !scopesAllowed(scopes, client.Scopes) {
+		return nil, ErrInvalidScope
 	}
 
 	// Issue access token
@@ -266,6 +285,44 @@ func parseScopes(scope string) []string {
 		}
 	}
 	return scopes
+}
+
+func authenticateClient(client *store.Client, clientSecret string) error {
+	if client == nil {
+		return ErrInvalidClient
+	}
+	if client.TokenEndpointAuthMethod != "client_secret_basic" && client.TokenEndpointAuthMethod != "client_secret_post" {
+		return nil
+	}
+	if client.SecretHash == nil || strings.TrimSpace(*client.SecretHash) == "" {
+		return ErrInvalidClient
+	}
+	if strings.TrimSpace(clientSecret) == "" {
+		return ErrInvalidClient
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(*client.SecretHash), []byte(clientSecret)); err != nil {
+		return ErrInvalidClient
+	}
+	return nil
+}
+
+func scopesAllowed(scopes []string, allowed []string) bool {
+	if len(scopes) == 0 {
+		return true
+	}
+	if len(allowed) == 0 {
+		return false
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, scope := range allowed {
+		allowedSet[scope] = struct{}{}
+	}
+	for _, scope := range scopes {
+		if _, ok := allowedSet[scope]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // MockJWTValidator is a mock JWT validator for testing.

@@ -21,6 +21,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestOAuth2Handler_MethodGuards(t *testing.T) {
@@ -155,6 +156,52 @@ func TestExtractClientCredentials(t *testing.T) {
 	clientID, secret = extractClientCredentials(req)
 	assert.Equal(t, "form-client", clientID)
 	assert.Equal(t, "form-secret", secret)
+}
+
+func TestOAuth2Handler_TokenEndpointSecurityHeaders(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+
+	client := &store.Client{
+		ID:                      "client-1",
+		RedirectURIs:            []string{"https://app.example.com/callback"},
+		ResponseTypes:           []string{"code"},
+		Scopes:                  []string{"openid"},
+		GrantTypes:              []string{"authorization_code"},
+		TokenEndpointAuthMethod: "client_secret_post",
+		SecretHash:              ptrString(string(hash)),
+	}
+	h := &OAuth2Handler{
+		tokenSvc: tokenSvc.NewTokenService(&handlerTokenStore{
+			client: client,
+			authCode: &store.AuthCode{
+				Code:        "ac-1",
+				ClientID:    "client-1",
+				IdentityID:  "identity-1",
+				SessionID:   "session-1",
+				RedirectURI: "https://app.example.com/callback",
+				Scopes:      []string{"openid"},
+				ExpiresAt:   time.Now().UTC().Add(time.Minute),
+			},
+		}, &tokenSvc.MockJWTSigner{}, "https://issuer"),
+	}
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", "ac-1")
+	form.Set("redirect_uri", "https://app.example.com/callback")
+	form.Set("client_id", "client-1")
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.HandleToken(rec, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "no-cache", rec.Header().Get("Pragma"))
+	assert.Contains(t, rec.Header().Get("WWW-Authenticate"), "invalid_client")
+	assert.Contains(t, rec.Body.String(), "\"error\":\"invalid_client\"")
+	assert.NotContains(t, rec.Body.String(), "crypto/bcrypt")
 }
 
 type handlerAuthzStore struct {
@@ -357,13 +404,15 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		ID:                      "client-1",
 		RedirectURIs:            []string{"https://app.example.com/callback"},
 		ResponseTypes:           []string{"code"},
-		Scopes:                  []string{"openid", "offline_access"},
+		Scopes:                  []string{"openid", "offline_access", "read", "write"},
 		AccessTokenTTL:          900,
 		RefreshTokenTTL:         2592000,
 		IDTokenTTL:              3600,
 		AllowOfflineAccess:      true,
 		TokenEndpointAuthMethod: "none",
 		GrantTypes: []string{
+			"authorization_code",
+			"refresh_token",
 			"client_credentials",
 			"urn:ietf:params:oauth:grant-type:jwt-bearer",
 		},
@@ -622,7 +671,7 @@ func TestOAuth2Handler_AdditionalErrorBranches(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec = httptest.NewRecorder()
 		h.HandleToken(rec, req)
-		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
 
 		form = url.Values{}
 		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
@@ -701,7 +750,7 @@ func TestOAuth2Handler_AdditionalErrorBranches(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec = httptest.NewRecorder()
 		h.HandleDeviceAuthorization(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 
 	t.Run("jwks and userinfo error mapping", func(t *testing.T) {

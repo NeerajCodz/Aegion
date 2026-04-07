@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/aegion/aegion/modules/oauth2/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -95,9 +96,11 @@ func (s *RevocationService) RevokeToken(ctx context.Context, req *RevocationRequ
 
 // authenticateClientSecret verifies a client secret using constant-time comparison.
 func authenticateClientSecret(hashedSecret, plainSecret string) bool {
-	// For bcrypt hashed secrets, we'd use bcrypt.CompareHashAndPassword
-	// For now, we'll use a simple constant-time comparison as placeholder
-	// TODO: Integrate with actual bcrypt implementation from client service
+	if strings.HasPrefix(hashedSecret, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(hashedSecret), []byte(plainSecret)) == nil
+	}
+
+	// Fallback for legacy plaintext secrets.
 	return subtle.ConstantTimeCompare([]byte(hashedSecret), []byte(plainSecret)) == 1
 }
 

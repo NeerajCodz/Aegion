@@ -5,11 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
+	"strings"
 
+	coresession "github.com/aegion/aegion/core/session"
 	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/modules/magic_link/service"
+	"github.com/aegion/aegion/modules/magic_link/store"
 )
 
 // Service defines the magic link service behavior needed by handlers.
@@ -17,16 +21,58 @@ type Service interface {
 	SendLoginCode(ctx context.Context, email string) error
 	VerifyCode(ctx context.Context, email, otpCode string) (string, *uuid.UUID, error)
 	VerifyMagicLink(ctx context.Context, token string) (string, *uuid.UUID, error)
+	VerifyMagicLinkForType(ctx context.Context, token string, expectedType store.CodeType) (string, *uuid.UUID, error)
+	SendVerificationCode(ctx context.Context, email string, identityID uuid.UUID) error
+	VerifyVerificationCode(ctx context.Context, email, otpCode string) (*uuid.UUID, error)
+	SendRecoveryCodeIfIdentityExists(ctx context.Context, email string, identityID *uuid.UUID) error
+	VerifyRecoveryCode(ctx context.Context, email, otpCode string) (*uuid.UUID, error)
+}
+
+// IdentityStore resolves identities from core identity data.
+type IdentityStore interface {
+	GetIdentityByEmail(ctx context.Context, email string) (*uuid.UUID, error)
+	MarkEmailVerified(ctx context.Context, identityID uuid.UUID, email string) error
+}
+
+// SessionManager creates and manages core sessions.
+type SessionManager interface {
+	Create(ctx context.Context, identityID uuid.UUID, method coresession.AuthMethod, device coresession.DeviceInfo) (*coresession.Session, error)
+	SetCookie(w http.ResponseWriter, session *coresession.Session)
+}
+
+// Option configures handler integrations.
+type Option func(*Handler)
+
+// WithIdentityStore configures identity resolution/verification integration.
+func WithIdentityStore(identityStore IdentityStore) Option {
+	return func(h *Handler) {
+		h.identityStore = identityStore
+	}
+}
+
+// WithSessionManager configures core session integration.
+func WithSessionManager(sessionManager SessionManager) Option {
+	return func(h *Handler) {
+		h.sessionManager = sessionManager
+	}
 }
 
 // Handler handles magic link HTTP requests.
 type Handler struct {
-	service Service
+	service        Service
+	identityStore  IdentityStore
+	sessionManager SessionManager
 }
 
 // New creates a new magic link handler.
-func New(svc Service) *Handler {
-	return &Handler{service: svc}
+func New(svc Service, opts ...Option) *Handler {
+	h := &Handler{service: svc}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(h)
+		}
+	}
+	return h
 }
 
 // SendCodeRequest is the request body for sending a magic link/code.
@@ -95,25 +141,29 @@ func (h *Handler) HandleVerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recipient, identityID, err := h.service.VerifyCode(r.Context(), req.Email, req.Code)
-	if err != nil {
-		h.handleServiceError(w, err)
-		return
+	switch h.codeTypeFromRequest(r) {
+	case store.CodeTypeVerification:
+		identityID, err := h.service.VerifyVerificationCode(r.Context(), req.Email, req.Code)
+		if err != nil {
+			h.handleServiceError(w, err)
+			return
+		}
+		h.handleVerificationSuccess(r.Context(), w, req.Email, identityID)
+	case store.CodeTypeRecovery:
+		identityID, err := h.service.VerifyRecoveryCode(r.Context(), req.Email, req.Code)
+		if err != nil {
+			h.handleServiceError(w, err)
+			return
+		}
+		h.handleSessionVerificationSuccess(w, r, req.Email, identityID)
+	default:
+		recipient, identityID, err := h.service.VerifyCode(r.Context(), req.Email, req.Code)
+		if err != nil {
+			h.handleServiceError(w, err)
+			return
+		}
+		h.handleSessionVerificationSuccess(w, r, recipient, identityID)
 	}
-
-	// TODO: Create session via core session manager
-	resp := SuccessResponse{}
-	if identityID != nil {
-		resp.Session.IdentityID = identityID.String()
-	} else {
-		// New user - would need to create identity
-		resp.Message = "Code verified for: " + recipient
-	}
-	resp.Session.AAL = "aal1"
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleVerifyMagicLink handles verification of a magic link token.
@@ -124,31 +174,57 @@ func (h *Handler) HandleVerifyMagicLink(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	recipient, identityID, err := h.service.VerifyMagicLink(r.Context(), token)
+	codeType := h.codeTypeFromRequest(r)
+	var (
+		recipient  string
+		identityID *uuid.UUID
+		err        error
+	)
+	if codeType == store.CodeTypeLogin {
+		recipient, identityID, err = h.service.VerifyMagicLink(r.Context(), token)
+	} else {
+		recipient, identityID, err = h.service.VerifyMagicLinkForType(r.Context(), token, codeType)
+	}
 	if err != nil {
 		h.handleServiceError(w, err)
 		return
 	}
 
-	// TODO: Create session and redirect
-	resp := SuccessResponse{}
-	if identityID != nil {
-		resp.Session.IdentityID = identityID.String()
-	} else {
-		resp.Message = "Link verified for: " + recipient
+	switch codeType {
+	case store.CodeTypeVerification:
+		h.handleVerificationSuccess(r.Context(), w, recipient, identityID)
+	case store.CodeTypeRecovery:
+		h.handleSessionVerificationSuccess(w, r, recipient, identityID)
+	default:
+		h.handleSessionVerificationSuccess(w, r, recipient, identityID)
 	}
-	resp.Session.AAL = "aal1"
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleSendVerificationCode handles requests to send a verification code.
 func (h *Handler) HandleSendVerificationCode(w http.ResponseWriter, r *http.Request) {
-	// Get identity from session
-	// TODO: Extract from session context
-	h.writeError(w, http.StatusNotImplemented, "not_implemented", "Verification flow not implemented")
+	var req SendCodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	if req.Email == "" {
+		h.writeError(w, http.StatusBadRequest, "missing_email", "Email is required")
+		return
+	}
+
+	identityID, err := identityIDFromRequest(r)
+	if err != nil {
+		h.writeError(w, http.StatusUnauthorized, "unauthorized", "Active session required")
+		return
+	}
+
+	if err := h.service.SendVerificationCode(r.Context(), req.Email, identityID); err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	h.writeSuccess(w, http.StatusOK, "If verification is required for this address, you will receive a verification link.")
 }
 
 // HandleSendRecoveryCode handles requests to send a recovery code.
@@ -164,10 +240,141 @@ func (h *Handler) HandleSendRecoveryCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// TODO: Look up identity by email, then send recovery code
-	// For now, this is a placeholder
+	var identityID *uuid.UUID
+	if h.identityStore != nil {
+		resolved, err := h.identityStore.GetIdentityByEmail(r.Context(), req.Email)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+			return
+		}
+		identityID = resolved
+	}
+
+	if err := h.service.SendRecoveryCodeIfIdentityExists(r.Context(), req.Email, identityID); err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
 
 	h.writeSuccess(w, http.StatusOK, "If an account exists with this email, you will receive a recovery link.")
+}
+
+func (h *Handler) codeTypeFromRequest(r *http.Request) store.CodeType {
+	path := strings.ToLower(r.URL.Path)
+	switch {
+	case strings.Contains(path, "/verification/"):
+		return store.CodeTypeVerification
+	case strings.Contains(path, "/recovery/"):
+		return store.CodeTypeRecovery
+	default:
+		return store.CodeTypeLogin
+	}
+}
+
+func (h *Handler) handleSessionVerificationSuccess(w http.ResponseWriter, r *http.Request, recipient string, directIdentityID *uuid.UUID) {
+	identityID, err := h.resolveIdentityID(r.Context(), recipient, directIdentityID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		return
+	}
+
+	resp := SuccessResponse{}
+	if identityID == nil {
+		resp.Message = "Link verified for: " + recipient
+		h.writeJSONSuccess(w, resp)
+		return
+	}
+
+	resp.Session.IdentityID = identityID.String()
+	resp.Session.AAL = string(coresession.AAL1)
+
+	if h.sessionManager != nil {
+		session, createErr := h.sessionManager.Create(
+			r.Context(),
+			*identityID,
+			coresession.AuthMethodMagicLink,
+			coresession.DeviceInfo{
+				UserAgent: r.UserAgent(),
+				IPAddress: requestIP(r),
+			},
+		)
+		if createErr != nil {
+			h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+			return
+		}
+
+		if session != nil {
+			h.sessionManager.SetCookie(w, session)
+			resp.Session.ID = session.ID.String()
+			resp.Session.IdentityID = session.IdentityID.String()
+			resp.Session.AAL = string(session.AAL)
+		}
+	}
+
+	h.writeJSONSuccess(w, resp)
+}
+
+func (h *Handler) handleVerificationSuccess(ctx context.Context, w http.ResponseWriter, email string, identityID *uuid.UUID) {
+	if identityID == nil {
+		h.writeError(w, http.StatusBadRequest, "invalid_code", "The code is invalid or has expired")
+		return
+	}
+
+	if h.identityStore != nil {
+		if err := h.identityStore.MarkEmailVerified(ctx, *identityID, email); err != nil {
+			h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+			return
+		}
+	}
+
+	h.writeSuccess(w, http.StatusOK, "Verification complete.")
+}
+
+func (h *Handler) resolveIdentityID(ctx context.Context, recipient string, directIdentityID *uuid.UUID) (*uuid.UUID, error) {
+	if directIdentityID != nil {
+		return directIdentityID, nil
+	}
+	if h.identityStore == nil || recipient == "" {
+		return nil, nil
+	}
+	return h.identityStore.GetIdentityByEmail(ctx, recipient)
+}
+
+func (h *Handler) writeJSONSuccess(w http.ResponseWriter, resp SuccessResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
+	for _, header := range []string{"X-User-ID", "X-Aegion-Session-Identity-ID"} {
+		raw := strings.TrimSpace(r.Header.Get(header))
+		if raw == "" {
+			continue
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return id, nil
+	}
+	return uuid.Nil, errors.New("identity header missing")
+}
+
+func requestIP(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return strings.Trim(host, "[]")
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 // handleServiceError converts service errors to HTTP responses.

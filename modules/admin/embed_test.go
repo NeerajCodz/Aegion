@@ -36,3 +36,15 @@ func TestGetSPAFiles_SubFailureFallback(t *testing.T) {
 		t.Fatalf("expected no entries in fallback filesystem, got %d", len(entries))
 	}
 }
+
+func TestGetMigrationFiles_ReturnsReadableFS(t *testing.T) {
+	migrationFS := GetMigrationFiles()
+
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		t.Fatalf("expected embedded migration filesystem to be readable: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected embedded admin migrations to contain files")
+	}
+}

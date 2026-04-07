@@ -13,11 +13,14 @@ import (
 
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
 	ErrInvalidGrant         = errors.New("invalid_grant")
 	ErrInvalidClient        = errors.New("invalid_client")
+	ErrInvalidRequest       = errors.New("invalid_request")
+	ErrUnauthorizedClient   = errors.New("unauthorized_client")
 	ErrUnsupportedGrantType = errors.New("unsupported_grant_type")
 	ErrInvalidScope         = errors.New("invalid_scope")
 )
@@ -84,10 +87,23 @@ type TokenResponse struct {
 
 // ExchangeAuthorizationCode exchanges an authorization code for tokens.
 func (s *TokenService) ExchangeAuthorizationCode(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
+	if req == nil {
+		return nil, ErrInvalidRequest
+	}
+	if strings.TrimSpace(req.ClientID) == "" || strings.TrimSpace(req.Code) == "" || strings.TrimSpace(req.RedirectURI) == "" {
+		return nil, ErrInvalidRequest
+	}
+
 	// Validate client
 	client, err := s.store.GetClient(ctx, req.ClientID)
 	if err != nil {
 		return nil, ErrInvalidClient
+	}
+	if err := authenticateClient(client, req.ClientSecret); err != nil {
+		return nil, err
+	}
+	if len(client.GrantTypes) > 0 && !client.HasGrantType("authorization_code") {
+		return nil, ErrUnauthorizedClient
 	}
 
 	// Retrieve authorization code
@@ -136,10 +152,23 @@ func (s *TokenService) ExchangeAuthorizationCode(ctx context.Context, req *Token
 
 // RefreshAccessToken refreshes an access token using a refresh token.
 func (s *TokenService) RefreshAccessToken(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
+	if req == nil {
+		return nil, ErrInvalidRequest
+	}
+	if strings.TrimSpace(req.ClientID) == "" || strings.TrimSpace(req.RefreshToken) == "" {
+		return nil, ErrInvalidRequest
+	}
+
 	// Validate client
 	client, err := s.store.GetClient(ctx, req.ClientID)
 	if err != nil {
 		return nil, ErrInvalidClient
+	}
+	if err := authenticateClient(client, req.ClientSecret); err != nil {
+		return nil, err
+	}
+	if len(client.GrantTypes) > 0 && !client.HasGrantType("refresh_token") {
+		return nil, ErrUnauthorizedClient
 	}
 
 	// Retrieve refresh token
@@ -398,6 +427,27 @@ func parseScopes(scope string) []string {
 		}
 	}
 	return scopes
+}
+
+func authenticateClient(client *store.Client, clientSecret string) error {
+	if client == nil {
+		return ErrInvalidClient
+	}
+
+	if client.TokenEndpointAuthMethod != "client_secret_basic" && client.TokenEndpointAuthMethod != "client_secret_post" {
+		return nil
+	}
+
+	if client.SecretHash == nil || strings.TrimSpace(*client.SecretHash) == "" {
+		return ErrInvalidClient
+	}
+	if strings.TrimSpace(clientSecret) == "" {
+		return ErrInvalidClient
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(*client.SecretHash), []byte(clientSecret)); err != nil {
+		return ErrInvalidClient
+	}
+	return nil
 }
 
 // MockJWTSigner is a mock JWT signer for testing.

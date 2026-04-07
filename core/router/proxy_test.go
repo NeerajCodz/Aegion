@@ -25,8 +25,9 @@ import (
 )
 
 type stubPolicyChecker struct {
-	resp *policypb.CheckResponse
-	err  error
+	resp      *policypb.CheckResponse
+	err       error
+	returnNil bool
 
 	lastReq *policypb.CheckRequest
 }
@@ -35,6 +36,9 @@ func (s *stubPolicyChecker) Check(ctx context.Context, req *policypb.CheckReques
 	s.lastReq = req
 	if s.err != nil {
 		return nil, s.err
+	}
+	if s.returnNil {
+		return nil, nil
 	}
 	if s.resp != nil {
 		return s.resp, nil
@@ -436,6 +440,82 @@ func TestModuleProxyServeHTTP_PolicyError(t *testing.T) {
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected %d, got %d", http.StatusBadGateway, rec.Code)
+	}
+}
+
+func TestModuleProxyServeHTTP_PolicyRequiredWithoutChecker(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig())
+	defer reg.Stop()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "policy-required",
+		Name:    "policy-required",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: upstream.URL},
+		},
+		HealthURL: upstream.URL + "/health",
+	})
+
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry:      reg,
+		ModuleID:      "policy-required",
+		RequirePolicy: true,
+		Logger:        zerolog.Nop(),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/module/private", nil)
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "policy_unavailable") {
+		t.Fatalf("expected policy_unavailable deny reason, got %q", rec.Body.String())
+	}
+}
+
+func TestModuleProxyServeHTTP_PolicyNilDecision(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig())
+	defer reg.Stop()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "policy-nil",
+		Name:    "policy-nil",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: upstream.URL},
+		},
+		HealthURL: upstream.URL + "/health",
+	})
+
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry:      reg,
+		ModuleID:      "policy-nil",
+		PolicyChecker: &stubPolicyChecker{returnNil: true},
+		Logger:        zerolog.Nop(),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/module/private", nil)
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "policy_no_decision") {
+		t.Fatalf("expected policy_no_decision deny reason, got %q", rec.Body.String())
 	}
 }
 

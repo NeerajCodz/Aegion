@@ -6,7 +6,10 @@ import (
 	"strings"
 	"time"
 
+	oauth2pb "github.com/aegion/aegion/internal/proto/oauth2/v1"
 	"github.com/aegion/aegion/modules/oauth2/store"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TokenStore defines storage operations required by the gRPC adapter layer.
@@ -19,104 +22,72 @@ type TokenStore interface {
 // Server provides OAuth2 token operations used by downstream services.
 // It is designed to be wrapped by generated gRPC transport handlers.
 type Server struct {
+	oauth2pb.UnimplementedTokenStoreServer
 	store TokenStore
 }
+
+var _ oauth2pb.TokenStoreServer = (*Server)(nil)
 
 // NewServer creates a new OAuth2 gRPC server adapter.
 func NewServer(store TokenStore) *Server {
 	return &Server{store: store}
 }
 
-// IntrospectTokenRequest contains a token identifier (JTI).
-type IntrospectTokenRequest struct {
-	Token string `json:"token"`
-}
-
-// IntrospectTokenResponse contains active state and token metadata.
-type IntrospectTokenResponse struct {
-	Active     bool      `json:"active"`
-	ClientID   string    `json:"client_id,omitempty"`
-	IdentityID string    `json:"identity_id,omitempty"`
-	Scopes     []string  `json:"scopes,omitempty"`
-	Audience   []string  `json:"audience,omitempty"`
-	ExpiresAt  time.Time `json:"expires_at,omitempty"`
-}
-
-// RevokeTokenRequest revokes a token by JTI.
-type RevokeTokenRequest struct {
-	Token string `json:"token"`
-}
-
-// RevokeTokenResponse indicates whether the token existed and was revoked.
-type RevokeTokenResponse struct {
-	Revoked bool `json:"revoked"`
-}
-
-// InvalidateFamilyRequest invalidates all refresh tokens in a family.
-type InvalidateFamilyRequest struct {
-	FamilyID string `json:"family_id"`
-}
-
-// InvalidateFamilyResponse includes the number of tokens invalidated.
-type InvalidateFamilyResponse struct {
-	Invalidated int64 `json:"invalidated"`
-}
-
 // Introspect checks whether a token is active and returns metadata for active tokens.
-func (s *Server) Introspect(ctx context.Context, req *IntrospectTokenRequest) (*IntrospectTokenResponse, error) {
-	if req == nil || strings.TrimSpace(req.Token) == "" {
-		return nil, errors.New("token is required")
+func (s *Server) Introspect(ctx context.Context, req *oauth2pb.IntrospectRequest) (*oauth2pb.IntrospectResponse, error) {
+	if req == nil || strings.TrimSpace(req.GetToken()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "token is required")
 	}
 
-	token, err := s.store.GetAccessToken(ctx, req.Token)
+	token, err := s.store.GetAccessToken(ctx, req.GetToken())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return &IntrospectTokenResponse{Active: false}, nil
+			return &oauth2pb.IntrospectResponse{Active: false}, nil
 		}
-		return nil, err
+		return nil, status.Error(codes.Internal, "failed to introspect token")
 	}
 
 	if token.Revoked || time.Now().UTC().After(token.ExpiresAt) {
-		return &IntrospectTokenResponse{Active: false}, nil
+		return &oauth2pb.IntrospectResponse{Active: false}, nil
 	}
 
-	return &IntrospectTokenResponse{
+	return &oauth2pb.IntrospectResponse{
 		Active:     true,
-		ClientID:   token.ClientID,
-		IdentityID: token.IdentityID,
+		ClientId:   token.ClientID,
+		IdentityId: token.IdentityID,
 		Scopes:     token.Scopes,
 		Audience:   token.Audience,
-		ExpiresAt:  token.ExpiresAt,
+		ExpiresAt:  token.ExpiresAt.Unix(),
 	}, nil
 }
 
 // Revoke revokes a token. Per RFC behavior, unknown tokens are not treated as errors.
-func (s *Server) Revoke(ctx context.Context, req *RevokeTokenRequest) (*RevokeTokenResponse, error) {
-	if req == nil || strings.TrimSpace(req.Token) == "" {
-		return nil, errors.New("token is required")
+func (s *Server) Revoke(ctx context.Context, req *oauth2pb.RevokeRequest) (*oauth2pb.RevokeResponse, error) {
+	if req == nil || strings.TrimSpace(req.GetToken()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "token is required")
 	}
 
-	err := s.store.RevokeAccessToken(ctx, req.Token)
+	err := s.store.RevokeAccessToken(ctx, req.GetToken())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return &RevokeTokenResponse{Revoked: false}, nil
+			return &oauth2pb.RevokeResponse{Revoked: false}, nil
 		}
-		return nil, err
+		return nil, status.Error(codes.Internal, "failed to revoke token")
 	}
 
-	return &RevokeTokenResponse{Revoked: true}, nil
+	return &oauth2pb.RevokeResponse{Revoked: true}, nil
 }
 
 // InvalidateFamily invalidates all active refresh tokens in a token family.
-func (s *Server) InvalidateFamily(ctx context.Context, req *InvalidateFamilyRequest) (*InvalidateFamilyResponse, error) {
-	if req == nil || strings.TrimSpace(req.FamilyID) == "" {
-		return nil, errors.New("family_id is required")
+func (s *Server) InvalidateFamily(ctx context.Context, req *oauth2pb.InvalidateFamilyRequest) (*oauth2pb.InvalidateFamilyResponse, error) {
+	if req == nil || strings.TrimSpace(req.GetFamilyId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "family_id is required")
 	}
 
-	count, err := s.store.InvalidateRefreshTokenFamily(ctx, req.FamilyID)
+	count, err := s.store.InvalidateRefreshTokenFamily(ctx, req.GetFamilyId())
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, "failed to invalidate token family")
 	}
 
-	return &InvalidateFamilyResponse{Invalidated: count}, nil
+	return &oauth2pb.InvalidateFamilyResponse{Invalidated: count}, nil
 }

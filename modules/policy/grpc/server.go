@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -29,6 +30,8 @@ type Server struct {
 	cache sync.Map
 }
 
+var errReBACMaxDepthExceeded = errors.New("rebac max depth exceeded")
+
 // NewServer creates a new policy server adapter.
 func NewServer(store PolicyStore) *Server {
 	env, err := cel.NewEnv(
@@ -48,6 +51,9 @@ func NewServer(store PolicyStore) *Server {
 
 // Check evaluates a single authorization decision.
 func (s *Server) Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error) {
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("policy store is required")
+	}
 	if req == nil {
 		return nil, fmt.Errorf("check request is required")
 	}
@@ -127,6 +133,14 @@ func (s *Server) Check(ctx context.Context, req *policypb.CheckRequest) (*policy
 	if err != nil {
 		return nil, err
 	}
+	if rebacRes.GetDenyReason() == "max_depth_exceeded" {
+		return &policypb.CheckResponse{
+			Allowed:    false,
+			ModelUsed:  "rebac",
+			DenyReason: "max_depth_exceeded",
+			EvalPath:   []string{"abac:deny_miss", "rbac:miss", "abac:allow_miss", "rebac:max_depth_exceeded"},
+		}, nil
+	}
 	if rebacRes.GetAllowed() {
 		return &policypb.CheckResponse{
 			Allowed:   true,
@@ -163,6 +177,15 @@ func (s *Server) BatchCheck(ctx context.Context, req *policypb.BatchCheckRequest
 
 func (s *Server) evaluateRBAC(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error) {
 	identityID := normalizeSubject(req.GetSubject())
+	if !isRBACIdentity(identityID) {
+		return &policypb.CheckResponse{
+			Allowed:    false,
+			ModelUsed:  "rbac",
+			DenyReason: "rbac_no_matching_permission",
+			EvalPath:   []string{"rbac:miss"},
+		}, nil
+	}
+
 	roleIDs, err := s.store.ListRoleIDsByIdentity(ctx, identityID)
 	if err != nil {
 		return nil, err
@@ -393,6 +416,14 @@ func (s *Server) evaluateReBAC(ctx context.Context, req *policypb.CheckRequest) 
 	}
 
 	if allowed, err := s.expandReBAC(ctx, namespace, objectID, relation, normalizeSubject(req.GetSubject()), 20); err != nil {
+		if errors.Is(err, errReBACMaxDepthExceeded) {
+			return &policypb.CheckResponse{
+				Allowed:    false,
+				ModelUsed:  "rebac",
+				DenyReason: "max_depth_exceeded",
+				EvalPath:   []string{"rebac:max_depth_exceeded"},
+			}, nil
+		}
 		return nil, err
 	} else if allowed {
 		return &policypb.CheckResponse{
@@ -455,7 +486,7 @@ func (s *Server) expandReBAC(ctx context.Context, namespace, objectID, relation,
 		queue = queue[1:]
 
 		if current.depth > maxDepth {
-			return false, nil
+			return false, errReBACMaxDepthExceeded
 		}
 
 		key := namespace + "|" + current.objectID + "|" + current.relation
@@ -498,10 +529,7 @@ func parseSubjectSet(subjectID string) (string, string, bool) {
 	if left == "" || rel == "" {
 		return "", "", false
 	}
-	if idx := strings.Index(left, ":"); idx > 0 && idx < len(left)-1 {
-		return strings.TrimSpace(left[idx+1:]), rel, true
-	}
-	return "", "", false
+	return left, rel, true
 }
 
 func normalizeSubject(subject string) string {
@@ -513,31 +541,40 @@ func normalizeSubject(subject string) string {
 }
 
 func hasPermission(perms []policystore.Permission, resourceType, action string) bool {
-	resourceType = strings.TrimSpace(resourceType)
-	action = strings.TrimSpace(action)
+	resourceType = normalizePermissionToken(resourceType)
+	action = normalizePermissionToken(action)
 
 	for _, p := range perms {
-		if p.ResourceType == resourceType && p.Action == action {
+		if normalizePermissionToken(p.ResourceType) == resourceType && normalizePermissionToken(p.Action) == action {
 			return true
 		}
 	}
 	for _, p := range perms {
-		if p.ResourceType == resourceType && p.Action == "*" {
+		if normalizePermissionToken(p.ResourceType) == resourceType && normalizePermissionToken(p.Action) == "*" {
 			return true
 		}
 	}
 	for _, p := range perms {
-		if p.ResourceType == "*" && p.Action == action {
+		if normalizePermissionToken(p.ResourceType) == "*" && normalizePermissionToken(p.Action) == action {
 			return true
 		}
 	}
 	for _, p := range perms {
-		if p.ResourceType == "*" && p.Action == "*" {
+		if normalizePermissionToken(p.ResourceType) == "*" && normalizePermissionToken(p.Action) == "*" {
 			return true
 		}
 	}
 
 	return false
+}
+
+func isRBACIdentity(identityID string) bool {
+	identityID = strings.TrimSpace(identityID)
+	return identityID != "" && !strings.EqualFold(identityID, "anonymous")
+}
+
+func normalizePermissionToken(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func normalizeModel(model string) string {

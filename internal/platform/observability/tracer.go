@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -32,24 +33,25 @@ func (t *TracerWrapper) StartSpan(ctx context.Context, name string, opts ...trac
 
 // StartHTTPSpan starts a span for an HTTP request
 func (t *TracerWrapper) StartHTTPSpan(ctx context.Context, r *http.Request) (context.Context, trace.Span) {
-	spanName := fmt.Sprintf("%s %s", r.Method, r.URL.Path)
+	method := NormalizeHTTPMethod(r.Method)
+	route := HTTPRouteLabel(RoutePattern(r), r.URL.Path)
+	spanName := fmt.Sprintf("%s %s", method, route)
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
-			attribute.String("http.method", r.Method),
-			attribute.String("http.url", r.URL.String()),
+			attribute.String("http.method", method),
 			attribute.String("http.scheme", r.URL.Scheme),
-			attribute.String("http.target", r.URL.Path),
+			attribute.String("http.target", route),
+			attribute.String("http.route", route),
 			attribute.String("http.user_agent", r.UserAgent()),
 			attribute.String("http.client_ip", getClientIP(r)),
 		),
 	}
 
-	// Add query parameters as attributes (be careful with sensitive data)
 	if r.URL.RawQuery != "" {
 		opts = append(opts, trace.WithAttributes(
-			attribute.String("http.url", r.URL.RequestURI()),
+			attribute.Bool("http.query.present", true),
 		))
 	}
 
@@ -65,13 +67,15 @@ func (t *TracerWrapper) StartHTTPSpan(ctx context.Context, r *http.Request) (con
 
 // StartDatabaseSpan starts a span for a database operation
 func (t *TracerWrapper) StartDatabaseSpan(ctx context.Context, operation, table string) (context.Context, trace.Span) {
-	spanName := fmt.Sprintf("db.%s %s", operation, table)
+	normalizedOperation := NormalizeDBOperation(operation)
+	normalizedTable := NormalizeDBResource(table)
+	spanName := fmt.Sprintf("db.%s %s", strings.ToLower(normalizedOperation), normalizedTable)
 
 	opts := []trace.SpanStartOption{
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(
-			attribute.String("db.operation", operation),
-			attribute.String("db.collection.name", table),
+			attribute.String("db.operation", normalizedOperation),
+			attribute.String("db.collection.name", normalizedTable),
 			attribute.String("db.system", "postgresql"),
 		),
 	}

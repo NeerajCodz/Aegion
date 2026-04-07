@@ -194,9 +194,12 @@ func (m *MeterWrapper) initMetrics() error {
 
 // RecordHTTPRequest records metrics for an HTTP request
 func (m *MeterWrapper) RecordHTTPRequest(ctx context.Context, method, path string, statusCode int, duration time.Duration, requestSize, responseSize int64) {
+	normalizedMethod := NormalizeHTTPMethod(method)
+	route := HTTPRouteLabel(path, path)
+
 	attrs := []attribute.KeyValue{
-		attribute.String("method", method),
-		attribute.String("path", path),
+		attribute.String("method", normalizedMethod),
+		attribute.String("path", route),
 		attribute.Int("status_code", statusCode),
 	}
 
@@ -214,9 +217,12 @@ func (m *MeterWrapper) RecordHTTPRequest(ctx context.Context, method, path strin
 
 // RecordDatabaseQuery records metrics for a database query
 func (m *MeterWrapper) RecordDatabaseQuery(ctx context.Context, operation, table string, duration time.Duration, success bool) {
+	normalizedOperation := NormalizeDBOperation(operation)
+	normalizedTable := NormalizeDBResource(table)
+
 	attrs := []attribute.KeyValue{
-		attribute.String("operation", operation),
-		attribute.String("table", table),
+		attribute.String("operation", normalizedOperation),
+		attribute.String("table", normalizedTable),
 		attribute.Bool("success", success),
 	}
 

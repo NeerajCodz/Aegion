@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -35,6 +36,9 @@ const (
 	CodeTypeLogin        CodeType = "login"
 	CodeTypeVerification CodeType = "verification"
 	CodeTypeRecovery     CodeType = "recovery"
+
+	dbTableCodes      = "ml_codes"
+	dbTableRateLimits = "ml_rate_limits"
 )
 
 // Code represents a magic link/OTP code.
@@ -51,29 +55,51 @@ type Code struct {
 	CreatedAt  time.Time
 }
 
+type queryObserver interface {
+	WrapQuery(ctx context.Context, operation, table string, fn func(context.Context) error) error
+}
+
 // Store handles magic link/OTP persistence.
 type Store struct {
-	db          DB
-	codeLength  int
-	codeCharset string
+	db            DB
+	codeLength    int
+	codeCharset   string
+	queryObserver queryObserver
 }
 
 // New creates a new magic link store.
 func New(db *pgxpool.Pool) *Store {
-	return &Store{
-		db:          db,
-		codeLength:  6,
-		codeCharset: "0123456789",
-	}
+	return newStore(db, newQueryObserver())
 }
 
 // NewWithDB creates a new magic link store with a custom DB interface (primarily for testing).
 func NewWithDB(db DB) *Store {
+	return newStore(db, newQueryObserver())
+}
+
+func newStore(db DB, observer queryObserver) *Store {
 	return &Store{
-		db:          db,
-		codeLength:  6,
-		codeCharset: "0123456789",
+		db:            db,
+		codeLength:    6,
+		codeCharset:   "0123456789",
+		queryObserver: observer,
 	}
+}
+
+func newQueryObserver() queryObserver {
+	tracer := observability.NewTracerWrapper("aegion.magic_link.store")
+	meter, err := observability.NewMeterWrapper("aegion.magic_link.store")
+	if err != nil {
+		return nil
+	}
+	return observability.NewDatabaseMiddleware(tracer, meter)
+}
+
+func (s *Store) withObservedQuery(ctx context.Context, operation, table string, fn func(context.Context) error) error {
+	if s.queryObserver == nil {
+		return fn(ctx)
+	}
+	return s.queryObserver.WrapQuery(ctx, operation, table, fn)
 }
 
 // SetCodeConfig sets the OTP code configuration.
@@ -106,10 +132,13 @@ func (s *Store) Create(ctx context.Context, recipient string, codeType CodeType,
 		CreatedAt:  time.Now().UTC(),
 	}
 
-	_, err = s.db.Exec(ctx, `
+	err = s.withObservedQuery(ctx, "INSERT", dbTableCodes, func(queryCtx context.Context) error {
+		_, execErr := s.db.Exec(queryCtx, `
 		INSERT INTO ml_codes (id, identity_id, recipient, type, code, token, used, expires_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	`, code.ID, code.IdentityID, code.Recipient, code.Type, code.Code, code.Token, code.Used, code.ExpiresAt, code.CreatedAt)
+		return execErr
+	})
 
 	if err != nil {
 		return nil, err
@@ -122,17 +151,19 @@ func (s *Store) Create(ctx context.Context, recipient string, codeType CodeType,
 func (s *Store) GetByCode(ctx context.Context, recipient string, otpCode string, codeType CodeType) (*Code, error) {
 	code := &Code{}
 
-	err := s.db.QueryRow(ctx, `
+	err := s.withObservedQuery(ctx, "SELECT", dbTableCodes, func(queryCtx context.Context) error {
+		return s.db.QueryRow(queryCtx, `
 		SELECT id, identity_id, recipient, type, code, token, used, used_at, expires_at, created_at
 		FROM ml_codes
 		WHERE recipient = $1 AND code = $2 AND type = $3 AND used = FALSE
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, recipient, otpCode, codeType).Scan(
-		&code.ID, &code.IdentityID, &code.Recipient, &code.Type,
-		&code.Code, &code.Token, &code.Used, &code.UsedAt,
-		&code.ExpiresAt, &code.CreatedAt,
-	)
+			&code.ID, &code.IdentityID, &code.Recipient, &code.Type,
+			&code.Code, &code.Token, &code.Used, &code.UsedAt,
+			&code.ExpiresAt, &code.CreatedAt,
+		)
+	})
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -152,15 +183,17 @@ func (s *Store) GetByCode(ctx context.Context, recipient string, otpCode string,
 func (s *Store) GetByToken(ctx context.Context, token string) (*Code, error) {
 	code := &Code{}
 
-	err := s.db.QueryRow(ctx, `
+	err := s.withObservedQuery(ctx, "SELECT", dbTableCodes, func(queryCtx context.Context) error {
+		return s.db.QueryRow(queryCtx, `
 		SELECT id, identity_id, recipient, type, code, token, used, used_at, expires_at, created_at
 		FROM ml_codes
 		WHERE token = $1 AND used = FALSE
 	`, token).Scan(
-		&code.ID, &code.IdentityID, &code.Recipient, &code.Type,
-		&code.Code, &code.Token, &code.Used, &code.UsedAt,
-		&code.ExpiresAt, &code.CreatedAt,
-	)
+			&code.ID, &code.IdentityID, &code.Recipient, &code.Type,
+			&code.Code, &code.Token, &code.Used, &code.UsedAt,
+			&code.ExpiresAt, &code.CreatedAt,
+		)
+	})
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -179,11 +212,16 @@ func (s *Store) GetByToken(ctx context.Context, token string) (*Code, error) {
 // MarkUsed marks a code as used.
 func (s *Store) MarkUsed(ctx context.Context, codeID uuid.UUID) error {
 	now := time.Now().UTC()
-	result, err := s.db.Exec(ctx, `
+	var result pgconn.CommandTag
+	err := s.withObservedQuery(ctx, "UPDATE", dbTableCodes, func(queryCtx context.Context) error {
+		var execErr error
+		result, execErr = s.db.Exec(queryCtx, `
 		UPDATE ml_codes
 		SET used = TRUE, used_at = $1
 		WHERE id = $2 AND used = FALSE
 	`, now, codeID)
+		return execErr
+	})
 
 	if err != nil {
 		return err
@@ -198,12 +236,14 @@ func (s *Store) MarkUsed(ctx context.Context, codeID uuid.UUID) error {
 
 // InvalidatePrevious invalidates all previous codes for a recipient and type.
 func (s *Store) InvalidatePrevious(ctx context.Context, recipient string, codeType CodeType) error {
-	_, err := s.db.Exec(ctx, `
+	return s.withObservedQuery(ctx, "UPDATE", dbTableCodes, func(queryCtx context.Context) error {
+		_, err := s.db.Exec(queryCtx, `
 		UPDATE ml_codes
 		SET used = TRUE, used_at = NOW()
 		WHERE recipient = $1 AND type = $2 AND used = FALSE
 	`, recipient, codeType)
-	return err
+		return err
+	})
 }
 
 // CheckRateLimit checks if a request is rate limited.
@@ -213,7 +253,8 @@ func (s *Store) CheckRateLimit(ctx context.Context, key string, limit int, windo
 
 	// Try to increment existing counter or insert new one
 	var count int
-	err := s.db.QueryRow(ctx, `
+	err := s.withObservedQuery(ctx, "UPSERT", dbTableRateLimits, func(queryCtx context.Context) error {
+		return s.db.QueryRow(queryCtx, `
 		INSERT INTO ml_rate_limits (key, count, window_end)
 		VALUES ($1, 1, $2)
 		ON CONFLICT (key) DO UPDATE
@@ -227,6 +268,7 @@ func (s *Store) CheckRateLimit(ctx context.Context, key string, limit int, windo
 		END
 		RETURNING count
 	`, key, windowEnd, now).Scan(&count)
+	})
 
 	if err != nil {
 		return err
@@ -244,20 +286,28 @@ func (s *Store) Cleanup(ctx context.Context) (int64, error) {
 	now := time.Now().UTC()
 
 	// Clean up expired codes
-	result, err := s.db.Exec(ctx, `
+	var result pgconn.CommandTag
+	err := s.withObservedQuery(ctx, "DELETE", dbTableCodes, func(queryCtx context.Context) error {
+		var execErr error
+		result, execErr = s.db.Exec(queryCtx, `
 		DELETE FROM ml_codes
 		WHERE expires_at < $1 OR (used = TRUE AND used_at < $2)
 	`, now, now.Add(-24*time.Hour))
+		return execErr
+	})
 	if err != nil {
 		return 0, err
 	}
 	codesDeleted := result.RowsAffected()
 
 	// Clean up old rate limit entries
-	_, err = s.db.Exec(ctx, `
+	err = s.withObservedQuery(ctx, "DELETE", dbTableRateLimits, func(queryCtx context.Context) error {
+		_, execErr := s.db.Exec(queryCtx, `
 		DELETE FROM ml_rate_limits
 		WHERE window_end < $1
 	`, now)
+		return execErr
+	})
 	if err != nil {
 		return codesDeleted, err
 	}

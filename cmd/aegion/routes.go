@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -789,6 +790,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 	proxySettings, policySettings := s.moduleProxyRuntimeSettings(r.Context())
 
 	checker := s.policyChecker
+	requirePolicy := policySettings.Enabled
 	if !policySettings.Enabled {
 		checker = nil
 	}
@@ -813,6 +815,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		IdentitySignatureHeader:     proxySettings.IdentitySignatureHeader,
 		SignedIdentityHeaders:       proxySettings.SignedIdentityHeaders,
 		PolicyChecker:               checker,
+		RequirePolicy:               requirePolicy,
 		PolicyModel:                 policySettings.DefaultModel,
 		Logger:                      s.log.With().Str("component", "module_proxy").Logger(),
 	})
@@ -1022,38 +1025,814 @@ func (s *Server) handleInternalHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Admin handlers (stubs)
+// Admin handlers
+
+type adminCreateIdentityRequest struct {
+	SchemaID string                 `json:"schema_id"`
+	Traits   map[string]interface{} `json:"traits"`
+	State    string                 `json:"state"`
+}
+
+type adminUpdateIdentityRequest struct {
+	Traits map[string]interface{} `json:"traits"`
+	State  *string                `json:"state"`
+}
+
+type adminIdentityView struct {
+	ID        string                 `json:"id"`
+	SchemaID  string                 `json:"schema_id"`
+	Traits    map[string]interface{} `json:"traits"`
+	State     string                 `json:"state"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
+}
+
+type adminSessionView struct {
+	ID              string    `json:"id"`
+	IdentityID      string    `json:"identity_id"`
+	AAL             string    `json:"aal"`
+	Active          bool      `json:"active"`
+	CreatedAt       time.Time `json:"created_at"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	AuthenticatedAt time.Time `json:"authenticated_at"`
+	IPAddress       string    `json:"ip_address,omitempty"`
+	UserAgent       string    `json:"user_agent,omitempty"`
+}
 
 func (s *Server) handleAdminListIdentities(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	page, perPage, offset := s.parseAdminPagination(r)
+	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	sortExpr := adminIdentitySortExpr(r.URL.Query().Get("sort"))
+
+	where := "WHERE ci.deleted_at IS NULL"
+	args := []interface{}{}
+	argPos := 1
+
+	if filter != "" {
+		where += `
+		 AND (
+			LOWER(COALESCE(
+				(SELECT value FROM core_identity_addresses a
+				 WHERE a.identity_id = ci.id AND a.type = 'email'
+				 ORDER BY a.is_primary DESC, a.created_at ASC LIMIT 1),
+				ci.traits->>'email',
+				''
+			)) LIKE LOWER($` + strconv.Itoa(argPos) + `)
+			OR LOWER(COALESCE(ci.traits->>'display_name', ci.traits->>'name', '')) LIKE LOWER($` + strconv.Itoa(argPos) + `)
+		 )`
+		args = append(args, "%"+filter+"%")
+		argPos++
+	}
+
+	var total int64
+	if err := s.db.Pool.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM core_identities ci
+	`+where, args...).Scan(&total); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list identities", err)
+		return
+	}
+
+	query := `
+		SELECT ci.id, ci.schema_id, ci.traits, ci.state, ci.created_at, ci.updated_at
+		FROM core_identities ci
+	` + where + `
+		ORDER BY ` + sortExpr + `
+		LIMIT $` + strconv.Itoa(argPos) + ` OFFSET $` + strconv.Itoa(argPos+1)
+	args = append(args, perPage, offset)
+
+	rows, err := s.db.Pool.Query(r.Context(), query, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list identities", err)
+		return
+	}
+	defer rows.Close()
+
+	identities := make([]adminIdentityView, 0, perPage)
+	for rows.Next() {
+		var (
+			identityID uuid.UUID
+			schemaID   uuid.UUID
+			traitsRaw  []byte
+			state      string
+			item       adminIdentityView
+		)
+		if scanErr := rows.Scan(&identityID, &schemaID, &traitsRaw, &state, &item.CreatedAt, &item.UpdatedAt); scanErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read identities", scanErr)
+			return
+		}
+
+		item.ID = identityID.String()
+		item.SchemaID = schemaID.String()
+		item.State = mapAdminIdentityStateFromDB(state)
+		item.Traits = map[string]interface{}{}
+		if unmarshalErr := json.Unmarshal(traitsRaw, &item.Traits); unmarshalErr != nil {
+			item.Traits = map[string]interface{}{}
+		}
+
+		identities = append(identities, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list identities", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"identities": identities,
+		"pagination": adminPaginationMeta(total, page, perPage),
+	})
 }
 
 func (s *Server) handleAdminCreateIdentity(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	var req adminCreateIdentityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	if req.Traits == nil {
+		req.Traits = map[string]interface{}{}
+	}
+
+	state, err := normalizeAdminIdentityState(req.State)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity state", err)
+		return
+	}
+
+	schemaID, err := s.resolveAdminSchemaID(r.Context(), req.SchemaID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity schema", err)
+		return
+	}
+
+	traitsJSON, err := json.Marshal(req.Traits)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity traits", err)
+		return
+	}
+
+	tx, err := s.db.Pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create identity", err)
+		return
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(r.Context()); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			_ = rollbackErr
+		}
+	}()
+
+	identityID := uuid.New()
+	_, err = tx.Exec(r.Context(), `
+		INSERT INTO core_identities (id, schema_id, traits, state, created_at, updated_at)
+		VALUES ($1, $2, $3::jsonb, $4, NOW(), NOW())
+	`, identityID, schemaID, string(traitsJSON), state)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create identity", err)
+		return
+	}
+
+	if email, ok := adminEmailFromTraits(req.Traits); ok {
+		if upsertErr := upsertPrimaryIdentityEmail(r.Context(), tx, identityID, email); upsertErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to persist identity email", upsertErr)
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create identity", err)
+		return
+	}
+
+	identity, found, err := s.getAdminIdentityByID(r.Context(), identityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load created identity", err)
+		return
+	}
+	if !found {
+		writeError(w, http.StatusInternalServerError, "created identity not found", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, identity)
 }
 
 func (s *Server) handleAdminGetIdentity(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	identityID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity id", err)
+		return
+	}
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	identity, found, err := s.getAdminIdentityByID(r.Context(), identityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load identity", err)
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "identity not found", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, identity)
 }
 
 func (s *Server) handleAdminUpdateIdentity(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	identityID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity id", err)
+		return
+	}
+
+	var req adminUpdateIdentityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	if req.Traits == nil && req.State == nil {
+		writeError(w, http.StatusBadRequest, "empty update payload", nil)
+		return
+	}
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	setClauses := []string{"updated_at = NOW()"}
+	args := []interface{}{}
+	argPos := 1
+
+	emailToUpsert := ""
+	if req.Traits != nil {
+		traitsJSON, marshalErr := json.Marshal(req.Traits)
+		if marshalErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid identity traits", marshalErr)
+			return
+		}
+		setClauses = append(setClauses, "traits = COALESCE(traits, '{}'::jsonb) || $"+strconv.Itoa(argPos)+"::jsonb")
+		args = append(args, string(traitsJSON))
+		argPos++
+
+		if email, ok := adminEmailFromTraits(req.Traits); ok {
+			emailToUpsert = email
+		}
+	}
+
+	if req.State != nil {
+		stateValue := strings.TrimSpace(*req.State)
+		if stateValue == "" {
+			writeError(w, http.StatusBadRequest, "invalid identity state", errors.New("state cannot be empty"))
+			return
+		}
+		normalizedState, stateErr := normalizeAdminIdentityState(stateValue)
+		if stateErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid identity state", stateErr)
+			return
+		}
+		setClauses = append(setClauses, "state = $"+strconv.Itoa(argPos))
+		args = append(args, normalizedState)
+		argPos++
+	}
+
+	tx, err := s.db.Pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update identity", err)
+		return
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(r.Context()); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			_ = rollbackErr
+		}
+	}()
+
+	query := `
+		UPDATE core_identities
+		SET ` + strings.Join(setClauses, ", ") + `
+		WHERE id = $` + strconv.Itoa(argPos) + `
+		  AND deleted_at IS NULL
+	`
+	args = append(args, identityID)
+
+	result, err := tx.Exec(r.Context(), query, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update identity", err)
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "identity not found", nil)
+		return
+	}
+
+	if emailToUpsert != "" {
+		if upsertErr := upsertPrimaryIdentityEmail(r.Context(), tx, identityID, emailToUpsert); upsertErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to persist identity email", upsertErr)
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update identity", err)
+		return
+	}
+
+	identity, found, err := s.getAdminIdentityByID(r.Context(), identityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load updated identity", err)
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "identity not found", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, identity)
 }
 
 func (s *Server) handleAdminDeleteIdentity(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	identityID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity id", err)
+		return
+	}
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	tx, err := s.db.Pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete identity", err)
+		return
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(r.Context()); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			_ = rollbackErr
+		}
+	}()
+
+	result, err := tx.Exec(r.Context(), `
+		UPDATE core_identities
+		SET state = 'inactive', deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $1
+		  AND deleted_at IS NULL
+	`, identityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete identity", err)
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "identity not found", nil)
+		return
+	}
+
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE core_sessions
+		SET active = FALSE, updated_at = NOW()
+		WHERE identity_id = $1
+		  AND active = TRUE
+	`, identityID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke identity sessions", err)
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete identity", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminListSessions(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	page, perPage, offset := s.parseAdminPagination(r)
+	identityFilter := strings.TrimSpace(r.URL.Query().Get("identity_id"))
+
+	where := "WHERE cs.active = TRUE AND cs.expires_at > NOW()"
+	args := []interface{}{}
+	argPos := 1
+
+	if identityFilter != "" {
+		identityID, parseErr := uuid.Parse(identityFilter)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid identity id filter", parseErr)
+			return
+		}
+		where += " AND cs.identity_id = $" + strconv.Itoa(argPos)
+		args = append(args, identityID)
+		argPos++
+	}
+
+	var total int64
+	countQuery := "SELECT COUNT(*) FROM core_sessions cs " + where
+	if err := s.db.Pool.QueryRow(r.Context(), countQuery, args...).Scan(&total); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list sessions", err)
+		return
+	}
+
+	query := `
+		SELECT
+			cs.id,
+			cs.identity_id,
+			cs.aal,
+			cs.active,
+			cs.created_at,
+			cs.expires_at,
+			cs.authenticated_at,
+			COALESCE(NULLIF((cs.devices->0->>'ip_address'), ''), '') AS ip_address,
+			COALESCE(NULLIF((cs.devices->0->>'user_agent'), ''), '') AS user_agent
+		FROM core_sessions cs
+	` + where + `
+		ORDER BY cs.created_at DESC
+		LIMIT $` + strconv.Itoa(argPos) + ` OFFSET $` + strconv.Itoa(argPos+1)
+	args = append(args, perPage, offset)
+
+	rows, err := s.db.Pool.Query(r.Context(), query, args...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list sessions", err)
+		return
+	}
+	defer rows.Close()
+
+	sessions := make([]adminSessionView, 0, perPage)
+	for rows.Next() {
+		var (
+			sessionID  uuid.UUID
+			identityID uuid.UUID
+			item       adminSessionView
+		)
+		if scanErr := rows.Scan(
+			&sessionID,
+			&identityID,
+			&item.AAL,
+			&item.Active,
+			&item.CreatedAt,
+			&item.ExpiresAt,
+			&item.AuthenticatedAt,
+			&item.IPAddress,
+			&item.UserAgent,
+		); scanErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read sessions", scanErr)
+			return
+		}
+		item.ID = sessionID.String()
+		item.IdentityID = identityID.String()
+		sessions = append(sessions, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list sessions", err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessions":   sessions,
+		"pagination": adminPaginationMeta(total, page, perPage),
+	})
 }
 
 func (s *Server) handleAdminDeleteSession(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	sessionID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid session id", err)
+		return
+	}
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	result, err := s.db.Pool.Exec(r.Context(), `
+		UPDATE core_sessions
+		SET active = FALSE, updated_at = NOW()
+		WHERE id = $1
+		  AND active = TRUE
+	`, sessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke session", err)
+		return
+	}
+
+	if result.RowsAffected() == 0 {
+		var exists bool
+		if err := s.db.Pool.QueryRow(r.Context(), `
+			SELECT EXISTS(SELECT 1 FROM core_sessions WHERE id = $1)
+		`, sessionID).Scan(&exists); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke session", err)
+			return
+		}
+		if !exists {
+			writeError(w, http.StatusNotFound, "session not found", nil)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":     "already_revoked",
+			"session_id": sessionID.String(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":     "revoked",
+		"session_id": sessionID.String(),
+	})
 }
 
 func (s *Server) handleAdminDeleteIdentitySessions(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	identityID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "identityId")))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity id", err)
+		return
+	}
+	if !s.requireAdminDatabase(w) {
+		return
+	}
+
+	result, err := s.db.Pool.Exec(r.Context(), `
+		UPDATE core_sessions
+		SET active = FALSE, updated_at = NOW()
+		WHERE identity_id = $1
+		  AND active = TRUE
+	`, identityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke identity sessions", err)
+		return
+	}
+
+	if result.RowsAffected() == 0 {
+		var exists bool
+		if err := s.db.Pool.QueryRow(r.Context(), `
+			SELECT EXISTS(
+				SELECT 1
+				FROM core_identities
+				WHERE id = $1
+				  AND deleted_at IS NULL
+			)
+		`, identityID).Scan(&exists); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke identity sessions", err)
+			return
+		}
+		if !exists {
+			writeError(w, http.StatusNotFound, "identity not found", nil)
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      "revoked",
+		"identity_id": identityID.String(),
+		"revoked":     result.RowsAffected(),
+	})
+}
+
+func (s *Server) requireAdminDatabase(w http.ResponseWriter) bool {
+	if s.db == nil || s.db.Pool == nil {
+		writeError(w, http.StatusServiceUnavailable, "database unavailable", nil)
+		return false
+	}
+	return true
+}
+
+func (s *Server) parseAdminPagination(r *http.Request) (page, perPage, offset int) {
+	defaultPageSize, maxPageSize := s.adminPageSettings()
+
+	page = parsePositiveInt(r.URL.Query().Get("page"), 1)
+	perPage = parsePositiveInt(r.URL.Query().Get("per_page"), defaultPageSize)
+
+	if perPage > maxPageSize {
+		perPage = maxPageSize
+	}
+	if perPage < 1 {
+		perPage = defaultPageSize
+	}
+
+	offset = (page - 1) * perPage
+	return
+}
+
+func (s *Server) adminPageSettings() (defaultPageSize, maxPageSize int) {
+	defaultPageSize = 20
+	maxPageSize = 100
+
+	if s.cfg != nil {
+		if s.cfg.Admin.DefaultPageSize > 0 {
+			defaultPageSize = s.cfg.Admin.DefaultPageSize
+		}
+		if s.cfg.Admin.MaxPageSize > 0 {
+			maxPageSize = s.cfg.Admin.MaxPageSize
+		}
+	}
+
+	if maxPageSize < 1 {
+		maxPageSize = 100
+	}
+	if defaultPageSize > maxPageSize {
+		defaultPageSize = maxPageSize
+	}
+
+	return
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return fallback
+	}
+	return value
+}
+
+func adminPaginationMeta(total int64, page, perPage int) map[string]interface{} {
+	totalPages := 1
+	if perPage > 0 && total > 0 {
+		totalPages = int(total) / perPage
+		if int(total)%perPage != 0 {
+			totalPages++
+		}
+	}
+
+	return map[string]interface{}{
+		"page":        page,
+		"per_page":    perPage,
+		"total":       total,
+		"total_pages": totalPages,
+	}
+}
+
+func adminIdentitySortExpr(sort string) string {
+	switch strings.TrimSpace(sort) {
+	case "created_at":
+		return "ci.created_at ASC"
+	case "-created_at":
+		return "ci.created_at DESC"
+	case "updated_at":
+		return "ci.updated_at ASC"
+	case "-updated_at":
+		return "ci.updated_at DESC"
+	case "state":
+		return "ci.state ASC, ci.created_at DESC"
+	case "-state":
+		return "ci.state DESC, ci.created_at DESC"
+	default:
+		return "ci.created_at DESC"
+	}
+}
+
+func mapAdminIdentityStateFromDB(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "inactive":
+		return "inactive"
+	case "banned":
+		return "blocked"
+	default:
+		return "active"
+	}
+}
+
+func normalizeAdminIdentityState(state string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(state))
+	switch normalized {
+	case "":
+		return "active", nil
+	case "active", "inactive", "banned":
+		return normalized, nil
+	case "blocked":
+		return "banned", nil
+	default:
+		return "", errors.New("state must be one of: active, inactive, blocked")
+	}
+}
+
+func adminEmailFromTraits(traits map[string]interface{}) (string, bool) {
+	if traits == nil {
+		return "", false
+	}
+	raw, ok := traits["email"]
+	if !ok {
+		return "", false
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", false
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "", false
+	}
+	return value, true
+}
+
+func upsertPrimaryIdentityEmail(ctx context.Context, tx pgx.Tx, identityID uuid.UUID, email string) error {
+	result, err := tx.Exec(ctx, `
+		UPDATE core_identity_addresses
+		SET value = $1, verified = FALSE, verified_at = NULL, updated_at = NOW()
+		WHERE identity_id = $2
+		  AND type = 'email'
+		  AND is_primary = TRUE
+	`, email, identityID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() > 0 {
+		return nil
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO core_identity_addresses (id, identity_id, type, value, is_primary, verified, created_at, updated_at)
+		VALUES ($1, $2, 'email', $3, TRUE, FALSE, NOW(), NOW())
+	`, uuid.New(), identityID, email)
+	return err
+}
+
+func (s *Server) resolveAdminSchemaID(ctx context.Context, schemaRef string) (uuid.UUID, error) {
+	var (
+		schemaID uuid.UUID
+		err      error
+	)
+
+	schemaRef = strings.TrimSpace(schemaRef)
+	switch {
+	case schemaRef == "":
+		err = s.db.Pool.QueryRow(ctx, `
+			SELECT id
+			FROM core_identity_schemas
+			ORDER BY is_default DESC, created_at ASC
+			LIMIT 1
+		`).Scan(&schemaID)
+	case isUUID(schemaRef):
+		parsed := uuid.MustParse(schemaRef)
+		err = s.db.Pool.QueryRow(ctx, `
+			SELECT id
+			FROM core_identity_schemas
+			WHERE id = $1
+		`, parsed).Scan(&schemaID)
+	default:
+		err = s.db.Pool.QueryRow(ctx, `
+			SELECT id
+			FROM core_identity_schemas
+			WHERE name = $1
+			LIMIT 1
+		`, schemaRef).Scan(&schemaID)
+	}
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, errors.New("identity schema not found")
+		}
+		return uuid.Nil, err
+	}
+	return schemaID, nil
+}
+
+func (s *Server) getAdminIdentityByID(ctx context.Context, identityID uuid.UUID) (*adminIdentityView, bool, error) {
+	var (
+		id        uuid.UUID
+		schemaID  uuid.UUID
+		traitsRaw []byte
+		state     string
+		item      adminIdentityView
+	)
+
+	err := s.db.Pool.QueryRow(ctx, `
+		SELECT id, schema_id, traits, state, created_at, updated_at
+		FROM core_identities
+		WHERE id = $1
+		  AND deleted_at IS NULL
+	`, identityID).Scan(&id, &schemaID, &traitsRaw, &state, &item.CreatedAt, &item.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	item.ID = id.String()
+	item.SchemaID = schemaID.String()
+	item.State = mapAdminIdentityStateFromDB(state)
+	item.Traits = map[string]interface{}{}
+	if err := json.Unmarshal(traitsRaw, &item.Traits); err != nil {
+		item.Traits = map[string]interface{}{}
+	}
+
+	return &item, true, nil
+}
+
+func isUUID(value string) bool {
+	_, err := uuid.Parse(strings.TrimSpace(value))
+	return err == nil
 }
 
 func (s *Server) handleAdminListModules(w http.ResponseWriter, r *http.Request) {
@@ -1136,8 +1915,14 @@ func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	var req runtimeConfigPatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body", errors.New("request body must contain a single JSON object"))
 		return
 	}
 	if req.Policy == nil && req.Proxy == nil {
@@ -1207,9 +1992,9 @@ func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySe
 		return runtimePolicySettings{}, unmarshalErr
 	}
 
-	settings.DefaultModel = strings.ToLower(strings.TrimSpace(settings.DefaultModel))
-	if settings.DefaultModel == "" {
-		settings.DefaultModel = "rbac"
+	settings.DefaultModel = normalizeRuntimePolicyModel(settings.DefaultModel)
+	if err := validateRuntimePolicySettings(settings); err != nil {
+		return runtimePolicySettings{}, err
 	}
 
 	return settings, nil
@@ -1262,13 +2047,23 @@ func defaultRuntimePolicySettings(cfg *platformconfig.Config) runtimePolicySetti
 	}
 
 	settings.Enabled = cfg.Policy.Enabled
-	settings.DefaultModel = strings.TrimSpace(cfg.Policy.DefaultModel)
+	settings.DefaultModel = normalizeRuntimePolicyModel(cfg.Policy.DefaultModel)
 	settings.RBAC.Enabled = cfg.Policy.RBAC.Enabled
 	settings.ABAC.Enabled = cfg.Policy.ABAC.Enabled
 	settings.ReBAC.Enabled = cfg.Policy.ReBAC.Enabled
-
-	if settings.DefaultModel == "" {
+	switch settings.DefaultModel {
+	case "rbac", "abac", "rebac":
+	default:
 		settings.DefaultModel = "rbac"
+	}
+
+	if settings.Enabled {
+		if !settings.RBAC.Enabled && !settings.ABAC.Enabled && !settings.ReBAC.Enabled {
+			settings.RBAC.Enabled = true
+		}
+		if !runtimePolicyModelEnabled(settings, settings.DefaultModel) {
+			settings.DefaultModel = firstEnabledRuntimePolicyModel(settings)
+		}
 	}
 
 	return settings
@@ -1380,7 +2175,7 @@ func (s *Server) saveRuntimeConfig(ctx context.Context, key string, value interf
 }
 
 func validateRuntimePolicySettings(settings runtimePolicySettings) error {
-	settings.DefaultModel = strings.ToLower(strings.TrimSpace(settings.DefaultModel))
+	settings.DefaultModel = normalizeRuntimePolicyModel(settings.DefaultModel)
 	switch settings.DefaultModel {
 	case "rbac", "abac", "rebac":
 	default:
@@ -1397,11 +2192,48 @@ func validateRuntimePolicySettings(settings runtimePolicySettings) error {
 	if settings.ReBAC.Enabled {
 		enabledModels++
 	}
-	if enabledModels == 0 {
+	if settings.Enabled && enabledModels == 0 {
 		return errors.New("at least one policy model must be enabled")
+	}
+	if settings.Enabled && !runtimePolicyModelEnabled(settings, settings.DefaultModel) {
+		return errors.New("default_model must reference an enabled policy model")
 	}
 
 	return nil
+}
+
+func normalizeRuntimePolicyModel(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return "rbac"
+	}
+	return model
+}
+
+func runtimePolicyModelEnabled(settings runtimePolicySettings, model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "rbac":
+		return settings.RBAC.Enabled
+	case "abac":
+		return settings.ABAC.Enabled
+	case "rebac":
+		return settings.ReBAC.Enabled
+	default:
+		return false
+	}
+}
+
+func firstEnabledRuntimePolicyModel(settings runtimePolicySettings) string {
+	switch {
+	case settings.RBAC.Enabled:
+		return "rbac"
+	case settings.ABAC.Enabled:
+		return "abac"
+	case settings.ReBAC.Enabled:
+		return "rebac"
+	default:
+		return "rbac"
+	}
 }
 
 func validateRuntimeProxySettings(settings runtimeProxySettings) error {
@@ -1442,15 +2274,64 @@ func validateRuntimeProxySettings(settings runtimeProxySettings) error {
 }
 
 func (s *Server) handleAdminSystemHealth(w http.ResponseWriter, r *http.Request) {
+	moduleCount := 0
+	healthyCount := 0
+	if s.registry != nil {
+		moduleCount = s.registry.ModuleCount()
+		healthyCount = s.registry.HealthyCount()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":        "healthy",
-		"module_count":  s.registry.ModuleCount(),
-		"healthy_count": s.registry.HealthyCount(),
+		"module_count":  moduleCount,
+		"healthy_count": healthyCount,
 	})
 }
 
 func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	moduleCount := 0
+	healthyCount := 0
+	if s.registry != nil {
+		moduleCount = s.registry.ModuleCount()
+		healthyCount = s.registry.HealthyCount()
+	}
+
+	resp := map[string]interface{}{
+		"module_count":  moduleCount,
+		"healthy_count": healthyCount,
+	}
+
+	if s.db == nil || s.db.Pool == nil {
+		resp["database"] = "unavailable"
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	var identityCount int64
+	if err := s.db.Pool.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM core_identities
+		WHERE deleted_at IS NULL
+	`).Scan(&identityCount); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load identity metrics", err)
+		return
+	}
+
+	var activeSessionCount int64
+	if err := s.db.Pool.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM core_sessions
+		WHERE active = TRUE
+		  AND expires_at > NOW()
+	`).Scan(&activeSessionCount); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load session metrics", err)
+		return
+	}
+
+	resp["database"] = "connected"
+	resp["identities_total"] = identityCount
+	resp["sessions_active"] = activeSessionCount
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Helper functions

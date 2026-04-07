@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package aegion.mfa.v1;
+
+option go_package = "github.com/aegion/aegion/internal/proto/mfa/v1;mfapb";
+
+// MFAEngine provides cross-module MFA status and enrollment reads.
+service MFAEngine {
+  // GetStatus returns aggregate MFA status for an identity.
+  rpc GetStatus(MFAStatusRequest) returns (MFAStatusResponse);
+
+  // GetEnrolledFactors returns enrolled factors for an identity.
+  rpc GetEnrolledFactors(FactorListRequest) returns (FactorListResponse);
+}
+
+message MFAStatusRequest {
+  // Identity ID to query.
+  string identity_id = 1;
+
+  // Optional session ID when evaluating step-up requirements.
+  string session_id = 2;
+}
+
+message MFAStatusResponse {
+  // True when at least one second-factor method is enrolled.
+  bool mfa_enrolled = 1;
+
+  // Highest achievable AAL from enrolled factors ("aal1" | "aal2").
+  string highest_aal = 2;
+
+  // Enrolled method identifiers ("totp", "webauthn", "sms", ...).
+  repeated string enrolled_methods = 3;
+}
+
+message FactorListRequest {
+  // Identity ID to query.
+  string identity_id = 1;
+}
+
+message FactorListResponse {
+  repeated Factor factors = 1;
+}
+
+message Factor {
+  // Factor record ID.
+  string id = 1;
+
+  // Factor method identifier.
+  string method = 2;
+
+  // Whether the factor was verified during enrollment.
+  bool verified = 3;
+
+  // Enrollment timestamp (unix seconds).
+  int64 enrolled_at = 4;
+
+  // Last use timestamp (unix seconds), 0 if never used.
+  int64 last_used_at = 5;
+}

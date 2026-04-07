@@ -533,6 +533,62 @@ func TestVerificationAndRecoveryErrorPaths(t *testing.T) {
 	})
 }
 
+func TestSendRecoveryCodeIfIdentityExists(t *testing.T) {
+	t.Run("unknown identity only applies rate limits", func(t *testing.T) {
+		st := newMemoryStore()
+		svc := makeService(st, nil)
+
+		err := svc.SendRecoveryCodeIfIdentityExists(context.Background(), "missing@example.com", nil)
+		require.NoError(t, err)
+		assert.Equal(t, 1, st.rateCounts["recover:missing@example.com"])
+		assert.Empty(t, st.codesByID)
+		assert.Empty(t, st.invalidated)
+	})
+
+	t.Run("known identity sends recovery code", func(t *testing.T) {
+		st := newMemoryStore()
+		svc := makeService(st, nil)
+		identityID := uuid.New()
+
+		err := svc.SendRecoveryCodeIfIdentityExists(context.Background(), "user@example.com", &identityID)
+		require.NoError(t, err)
+		assert.Contains(t, st.invalidated, "recovery|user@example.com")
+
+		var found bool
+		for _, code := range st.codesByID {
+			if code.Type == store.CodeTypeRecovery && code.IdentityID != nil && *code.IdentityID == identityID {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found)
+	})
+}
+
+func TestVerifyMagicLinkForType(t *testing.T) {
+	st := newMemoryStore()
+	svc := makeService(st, nil)
+
+	identityID := uuid.New()
+	loginCode, err := st.Create(context.Background(), "user@example.com", store.CodeTypeLogin, &identityID, 15*time.Minute)
+	require.NoError(t, err)
+	recoveryCode, err := st.Create(context.Background(), "recover@example.com", store.CodeTypeRecovery, &identityID, 15*time.Minute)
+	require.NoError(t, err)
+
+	t.Run("rejects mismatched flow type", func(t *testing.T) {
+		_, _, err := svc.VerifyMagicLinkForType(context.Background(), recoveryCode.Token, store.CodeTypeLogin)
+		assert.ErrorIs(t, err, ErrInvalidCode)
+	})
+
+	t.Run("accepts matching flow type", func(t *testing.T) {
+		recipient, gotIdentityID, err := svc.VerifyMagicLinkForType(context.Background(), loginCode.Token, store.CodeTypeLogin)
+		require.NoError(t, err)
+		assert.Equal(t, "user@example.com", recipient)
+		require.NotNil(t, gotIdentityID)
+		assert.Equal(t, identityID, *gotIdentityID)
+	})
+}
+
 func TestCleanupAndBuildMagicLink(t *testing.T) {
 	st := newMemoryStore()
 	svc := makeService(st, nil)

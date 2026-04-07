@@ -226,3 +226,24 @@ It defines:
 - how admin bootstrap and governance work
 - how security features are covered modularly
 - where every deep detail lives in the focused docs
+
+---
+
+## Appendix A) Docs-to-code gap matrix (current repo snapshot)
+
+This matrix maps major requirements from `modules.md`, `inter-module-communication.md`, `observability.md`, `policy.md`, `timeline.md`, `project-structure.md`, and this product spec to concrete code.
+
+| Capability area | Primary code evidence | Status | Notes |
+|---|---|---|---|
+| Module process contract (`/health`, `/ready`, `/meta`) | `internal/platform/moduleserver/server.go`, `modules/*/cmd/server/main.go` (scaffolded modules) | **Partial** | Contract runner exists and is used by new scaffold modules; legacy modules still use mixed server patterns. |
+| Core module lifecycle orchestration | `core/orchestrator/*`, `cmd/aegion/server.go` (start/stop wiring), `cmd/aegion/routes.go` (admin restart) | **Partial** | Orchestrator lifecycle is wired and restart endpoint exists; full dependency-driven runtime composition is still incomplete. |
+| Service registry and module health authority | `core/registry/*`, `cmd/aegion/routes.go` (`/internal/registry/*`) | **Implemented** | Register/deregister/list/heartbeat paths are active with tests. |
+| Self-service flow lifecycle and session endpoints | `core/flows/*`, `core/session/*`, `cmd/aegion/routes.go` (init/get/submit/logout/whoami/jwks) | **Partial** | Core flow/session paths are implemented, but deeper method-specific UX/business logic remains uneven across flows. |
+| Admin control plane + bootstrap operator | `cmd/aegion/routes.go` (admin handlers), `cmd/aegion/server.go` (`bootstrapAdmin`), `modules/admin/cmd/admin/main.go` | **Implemented** | CRUD-style admin/system surfaces and bootstrap/migration wiring are now concrete. |
+| OAuth2/OIDC server hardening | `modules/oauth2/handler/*`, `modules/oauth2/service/*`, `modules/oauth2/grpc/*` | **Implemented** | Validation, grant/consent/scope checks, token/revocation hardening, and tests are in place. |
+| Policy + proxy fail-safe enforcement | `modules/policy/grpc/server.go`, `core/router/proxy.go`, `cmd/aegion/routes.go` (runtime policy config) | **Implemented** | Default-deny/fail-closed behavior and strict runtime config validation are enforced and tested. |
+| Observability standards rollout | `internal/platform/observability/*`, `internal/platform/logger/logger.go`, `core/router/middleware.go`, `modules/admin/security/middleware.go`, `modules/magic_link/store/store.go` | **Implemented** | Route/method/db low-cardinality standards and trace/request-id correlation are applied across core/module paths. |
+| Inter-module protobuf contracts | `proto/policy/v1/policy.proto`, `proto/mfa/mfa.proto`, `proto/oauth2/tokens.proto`, `internal/proto/*` | **Partial** | Contract coverage has expanded beyond policy, but many module-to-module APIs are still undocumented in proto form. |
+| CI/release discipline and consistency gates | `.github/workflows/ci.yml`, `.github/workflows/release.yml`, `scripts/check-proto-consistency.sh`, `scripts/check-release-manifest.sh`, `scripts/run-integration-smoke.sh`, `build/release-manifest.json` | **Implemented** | CI now enforces proto/release-manifest consistency and module/integration quality gates. |
+| Enterprise SSO + SCIM completeness | `modules/sso/*` (scaffold), `modules/admin/scim/*` | **Partial** | SCIM groundwork exists, but end-to-end SSO/enterprise lifecycle completeness is not yet fully realized. |
+| Newly scaffolded roadmap modules (`passkeys`, `social`, `introspection`, `proxy`, `cli`) | `modules/passkeys/*`, `modules/social/*`, `modules/introspection/*`, `modules/proxy/*`, `modules/cli/*` | **Missing** | Runtime skeletons and migrations exist, but production business logic/integration depth is still pending. |

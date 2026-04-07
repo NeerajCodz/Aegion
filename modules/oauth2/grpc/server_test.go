@@ -6,9 +6,12 @@ import (
 	"testing"
 	"time"
 
+	oauth2pb "github.com/aegion/aegion/internal/proto/oauth2/v1"
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type mockTokenStore struct {
@@ -58,18 +61,20 @@ func TestServer_Introspect(t *testing.T) {
 	t.Run("validation and not found", func(t *testing.T) {
 		s := NewServer(&mockTokenStore{})
 		_, err := s.Introspect(ctx, nil)
-		assert.ErrorContains(t, err, "token is required")
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
 
-		resp, err := s.Introspect(ctx, &IntrospectTokenRequest{Token: "missing"})
+		resp, err := s.Introspect(ctx, &oauth2pb.IntrospectRequest{Token: "missing"})
 		require.NoError(t, err)
-		assert.False(t, resp.Active)
+		assert.False(t, resp.GetActive())
 	})
 
 	t.Run("store error", func(t *testing.T) {
 		st := &mockTokenStore{getErr: errors.New("db down")}
 		s := NewServer(st)
-		_, err := s.Introspect(ctx, &IntrospectTokenRequest{Token: "at-1"})
-		assert.ErrorContains(t, err, "db down")
+		_, err := s.Introspect(ctx, &oauth2pb.IntrospectRequest{Token: "at-1"})
+		require.Error(t, err)
+		assert.Equal(t, codes.Internal, status.Code(err))
 	})
 
 	t.Run("revoked expired and active", func(t *testing.T) {
@@ -84,22 +89,22 @@ func TestServer_Introspect(t *testing.T) {
 			},
 		}
 		s := NewServer(st)
-		resp, err := s.Introspect(ctx, &IntrospectTokenRequest{Token: "at-1"})
+		resp, err := s.Introspect(ctx, &oauth2pb.IntrospectRequest{Token: "at-1"})
 		require.NoError(t, err)
-		assert.True(t, resp.Active)
-		assert.Equal(t, "client-1", resp.ClientID)
-		assert.Equal(t, "identity-1", resp.IdentityID)
+		assert.True(t, resp.GetActive())
+		assert.Equal(t, "client-1", resp.GetClientId())
+		assert.Equal(t, "identity-1", resp.GetIdentityId())
 
 		st.token.Revoked = true
-		resp, err = s.Introspect(ctx, &IntrospectTokenRequest{Token: "at-1"})
+		resp, err = s.Introspect(ctx, &oauth2pb.IntrospectRequest{Token: "at-1"})
 		require.NoError(t, err)
-		assert.False(t, resp.Active)
+		assert.False(t, resp.GetActive())
 
 		st.token.Revoked = false
 		st.token.ExpiresAt = time.Now().UTC().Add(-time.Second)
-		resp, err = s.Introspect(ctx, &IntrospectTokenRequest{Token: "at-1"})
+		resp, err = s.Introspect(ctx, &oauth2pb.IntrospectRequest{Token: "at-1"})
 		require.NoError(t, err)
-		assert.False(t, resp.Active)
+		assert.False(t, resp.GetActive())
 	})
 }
 
@@ -109,26 +114,28 @@ func TestServer_Revoke(t *testing.T) {
 	t.Run("validation and not found", func(t *testing.T) {
 		s := NewServer(&mockTokenStore{})
 		_, err := s.Revoke(ctx, nil)
-		assert.ErrorContains(t, err, "token is required")
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
 
 		st := &mockTokenStore{revokeErr: store.ErrNotFound}
 		s = NewServer(st)
-		resp, err := s.Revoke(ctx, &RevokeTokenRequest{Token: "missing"})
+		resp, err := s.Revoke(ctx, &oauth2pb.RevokeRequest{Token: "missing"})
 		require.NoError(t, err)
-		assert.False(t, resp.Revoked)
+		assert.False(t, resp.GetRevoked())
 	})
 
 	t.Run("success and error", func(t *testing.T) {
 		st := &mockTokenStore{}
 		s := NewServer(st)
-		resp, err := s.Revoke(ctx, &RevokeTokenRequest{Token: "at-1"})
+		resp, err := s.Revoke(ctx, &oauth2pb.RevokeRequest{Token: "at-1"})
 		require.NoError(t, err)
-		assert.True(t, resp.Revoked)
+		assert.True(t, resp.GetRevoked())
 		assert.Equal(t, "at-1", st.lastRevoke)
 
 		st.revokeErr = errors.New("write failed")
-		_, err = s.Revoke(ctx, &RevokeTokenRequest{Token: "at-1"})
-		assert.ErrorContains(t, err, "write failed")
+		_, err = s.Revoke(ctx, &oauth2pb.RevokeRequest{Token: "at-1"})
+		require.Error(t, err)
+		assert.Equal(t, codes.Internal, status.Code(err))
 	})
 }
 
@@ -138,19 +145,21 @@ func TestServer_InvalidateFamily(t *testing.T) {
 	t.Run("validation", func(t *testing.T) {
 		s := NewServer(&mockTokenStore{})
 		_, err := s.InvalidateFamily(ctx, nil)
-		assert.ErrorContains(t, err, "family_id is required")
+		require.Error(t, err)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	})
 
 	t.Run("success and store error", func(t *testing.T) {
 		st := &mockTokenStore{invalidated: 3}
 		s := NewServer(st)
-		resp, err := s.InvalidateFamily(ctx, &InvalidateFamilyRequest{FamilyID: "fam-1"})
+		resp, err := s.InvalidateFamily(ctx, &oauth2pb.InvalidateFamilyRequest{FamilyId: "fam-1"})
 		require.NoError(t, err)
-		assert.Equal(t, int64(3), resp.Invalidated)
+		assert.Equal(t, int64(3), resp.GetInvalidated())
 		assert.Equal(t, "fam-1", st.lastFamily)
 
 		st.invalidateErr = errors.New("db unavailable")
-		_, err = s.InvalidateFamily(ctx, &InvalidateFamilyRequest{FamilyID: "fam-1"})
-		assert.ErrorContains(t, err, "db unavailable")
+		_, err = s.InvalidateFamily(ctx, &oauth2pb.InvalidateFamilyRequest{FamilyId: "fam-1"})
+		require.Error(t, err)
+		assert.Equal(t, codes.Internal, status.Code(err))
 	})
 }
