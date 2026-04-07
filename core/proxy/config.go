@@ -29,6 +29,18 @@ type Config struct {
 
 	// Transport settings for HTTP client
 	Transport TransportConfig `json:"transport" yaml:"transport"`
+
+	// StripInboundIdentityHeaders removes client-supplied identity headers before proxy injection.
+	StripInboundIdentityHeaders bool `json:"strip_inbound_identity_headers" yaml:"strip_inbound_identity_headers"`
+
+	// IdentitySigningSecret enables HMAC signatures for injected identity headers when set.
+	IdentitySigningSecret string `json:"identity_signing_secret" yaml:"identity_signing_secret"`
+
+	// IdentitySignatureHeader is the header name used to carry identity header signatures.
+	IdentitySignatureHeader string `json:"identity_signature_header" yaml:"identity_signature_header"`
+
+	// SignedIdentityHeaders lists identity headers included in signature canonicalization.
+	SignedIdentityHeaders []string `json:"signed_identity_headers" yaml:"signed_identity_headers"`
 }
 
 // Upstream defines a backend service configuration.
@@ -112,12 +124,22 @@ type RateLimitConfig struct {
 // DefaultConfig returns sensible proxy defaults.
 func DefaultConfig() Config {
 	return Config{
-		Upstreams:           make(map[string]Upstream),
-		Timeout:             30 * time.Second,
-		MaxRetries:          3,
-		RetryBackoff:        time.Second,
-		EnableHealthChecks:  true,
-		HealthCheckInterval: 30 * time.Second,
+		Upstreams:                   make(map[string]Upstream),
+		Timeout:                     30 * time.Second,
+		MaxRetries:                  3,
+		RetryBackoff:                time.Second,
+		EnableHealthChecks:          true,
+		HealthCheckInterval:         30 * time.Second,
+		StripInboundIdentityHeaders: true,
+		IdentitySignatureHeader:     "X-Aegion-Signature",
+		SignedIdentityHeaders: []string{
+			"X-Aegion-Session-ID",
+			"X-Aegion-Identity-ID",
+			"X-Aegion-AAL",
+			"X-Aegion-Authenticated-At",
+			"X-Aegion-Impersonation",
+			"X-Aegion-Impersonator-ID",
+		},
 		Transport: TransportConfig{
 			MaxIdleConns:          100,
 			MaxIdleConnsPerHost:   10,

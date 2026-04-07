@@ -1,12 +1,18 @@
 package proxy
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,6 +230,114 @@ func TestProxy_ForwardWithSessionHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestProxy_Forward_StripsInboundIdentityHeaders(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("X-Aegion-Identity-ID"))
+		assert.Empty(t, r.Header.Get("X-Aegion-Impersonator-ID"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	targetURL, err := url.Parse(upstream.URL)
+	require.NoError(t, err)
+
+	config := DefaultConfig()
+	config.StripInboundIdentityHeaders = true
+	proxy := newProxyForTest(t, config, nil, zerolog.New(zerolog.NewTestWriter(t)))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Aegion-Identity-ID", "attacker-id")
+	req.Header.Set("X-Aegion-Impersonator-ID", "attacker-impersonator")
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
+	w := httptest.NewRecorder()
+
+	err = proxy.Forward(targetURL, w, req, &Rule{ID: "strip-test"}, Upstream{})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestProxy_Forward_SignsIdentityHeaders(t *testing.T) {
+	signingSecret := "proxy-signing-secret"
+	signedHeaders := []string{"X-Aegion-Session-ID", "X-Aegion-Identity-ID", "X-Aegion-AAL"}
+
+	sessionID := uuid.New()
+	identityID := uuid.New()
+	sess := &session.Session{
+		ID:              sessionID,
+		IdentityID:      identityID,
+		AAL:             session.AAL2,
+		AuthenticatedAt: time.Now(),
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sigHeader := r.Header.Get("X-Aegion-Signature")
+		require.NotEmpty(t, sigHeader)
+		assert.True(t, verifyProxySignature(sigHeader, signingSecret, signedHeaders, r.Header))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	targetURL, err := url.Parse(upstream.URL)
+	require.NoError(t, err)
+
+	config := DefaultConfig()
+	config.IdentitySigningSecret = signingSecret
+	config.SignedIdentityHeaders = signedHeaders
+	proxy := newProxyForTest(t, config, nil, zerolog.New(zerolog.NewTestWriter(t)))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req = req.WithContext(session.WithSession(req.Context(), sess))
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
+	w := httptest.NewRecorder()
+
+	err = proxy.Forward(targetURL, w, req, &Rule{ID: "sign-test"}, Upstream{})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func verifyProxySignature(signatureHeader, secret string, signedHeaders []string, headers http.Header) bool {
+	parts := strings.Split(signatureHeader, ",")
+	if len(parts) != 2 {
+		return false
+	}
+
+	var timestamp, signature string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "t=") {
+			timestamp = strings.TrimPrefix(part, "t=")
+		}
+		if strings.HasPrefix(part, "v1=") {
+			signature = strings.TrimPrefix(part, "v1=")
+		}
+	}
+	if timestamp == "" || signature == "" {
+		return false
+	}
+	if _, err := strconv.ParseInt(timestamp, 10, 64); err != nil {
+		return false
+	}
+
+	canonicalHeaders := make([]string, 0, len(signedHeaders))
+	for _, header := range signedHeaders {
+		value := strings.TrimSpace(headers.Get(header))
+		if value == "" {
+			continue
+		}
+		canonicalHeaders = append(canonicalHeaders, strings.ToLower(header)+":"+value)
+	}
+	if len(canonicalHeaders) == 0 {
+		return false
+	}
+	sort.Strings(canonicalHeaders)
+
+	payload := timestamp + "." + strings.Join(canonicalHeaders, "\n")
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(payload))
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(signature), []byte(expected))
 }
 
 func TestProxy_ForwardWithPathRewrite(t *testing.T) {
