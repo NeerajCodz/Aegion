@@ -11,6 +11,7 @@ import (
 
 	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/router"
+	coresession "github.com/aegion/aegion/core/session"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -500,15 +501,60 @@ func (s *Server) handleSubmitVerification(w http.ResponseWriter, r *http.Request
 // Session handlers
 
 func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	if s.sessionManager == nil {
+		writeError(w, http.StatusInternalServerError, "session manager unavailable", nil)
+		return
+	}
+
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		switch {
+		case errors.Is(err, coresession.ErrSessionNotFound),
+			errors.Is(err, coresession.ErrSessionExpired),
+			errors.Is(err, coresession.ErrSessionInvalid):
+			writeError(w, http.StatusUnauthorized, "active session required", nil)
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to resolve session", err)
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, currentSession)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	if s.sessionManager == nil {
+		writeError(w, http.StatusInternalServerError, "session manager unavailable", nil)
+		return
+	}
+
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		switch {
+		case errors.Is(err, coresession.ErrSessionNotFound),
+			errors.Is(err, coresession.ErrSessionExpired),
+			errors.Is(err, coresession.ErrSessionInvalid):
+			s.sessionManager.ClearCookie(w)
+			writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to resolve session", err)
+		}
+		return
+	}
+
+	if err := s.sessionManager.Revoke(r.Context(), currentSession.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke session", err)
+		return
+	}
+
+	s.sessionManager.ClearCookie(w)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
 func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"keys": []map[string]interface{}{},
+	})
 }
 
 // Module registration handlers

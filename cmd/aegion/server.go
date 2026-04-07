@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/flows"
 	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
+	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
@@ -34,16 +37,17 @@ type ServerConfig struct {
 
 // Server represents the main Aegion server.
 type Server struct {
-	cfg           *config.Config
-	db            *database.DB
-	log           *logger.Logger
-	router        chi.Router
-	registry      *registry.Registry
-	orchestrator  moduleOrchestrator
-	tokenGen      *authtoken.Generator
-	flowService   *flows.Service
-	policyChecker policyChecker
-	workerManager *workers.Manager
+	cfg            *config.Config
+	db             *database.DB
+	log            *logger.Logger
+	router         chi.Router
+	registry       *registry.Registry
+	orchestrator   moduleOrchestrator
+	sessionManager sessionManager
+	tokenGen       *authtoken.Generator
+	flowService    *flows.Service
+	policyChecker  policyChecker
+	workerManager  *workers.Manager
 }
 
 type policyChecker interface {
@@ -56,8 +60,18 @@ type moduleOrchestrator interface {
 	RestartModule(ctx context.Context, moduleID string) error
 }
 
+type sessionManager interface {
+	GetFromRequest(ctx context.Context, r *http.Request) (*session.Session, error)
+	Revoke(ctx context.Context, sessionID uuid.UUID) error
+	ClearCookie(w http.ResponseWriter)
+}
+
 var newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
 	return orchestrator.New(cfg)
+}
+
+var newSessionManager = func(cfg session.ManagerConfig) sessionManager {
+	return session.NewManager(cfg)
 }
 
 var pingDatabase = func(ctx context.Context, db *database.DB) error {
@@ -96,20 +110,39 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	flowStore := flows.NewPostgresFlowStore(cfg.DB.Pool)
 	flowService := flows.NewService(flowStore, flows.DefaultConfig())
 
+	sessionSecret := []byte(internalSecret)
+	if len(cfg.Config.Secrets.Cookie) > 0 {
+		sessionSecret = []byte(cfg.Config.Secrets.Cookie[0])
+	}
+	sessionMgr := newSessionManager(session.ManagerConfig{
+		DB:           cfg.DB.Pool,
+		CookieSecret: sessionSecret,
+		CookieConfig: session.CookieConfig{
+			Name:     cfg.Config.Sessions.Cookie.Name,
+			Path:     cfg.Config.Sessions.Cookie.Path,
+			SameSite: parseSameSite(cfg.Config.Sessions.Cookie.SameSite),
+			Secure:   cfg.Config.Sessions.Cookie.Secure,
+			HTTPOnly: cfg.Config.Sessions.Cookie.HTTPOnly,
+		},
+		Lifespan:    cfg.Config.Sessions.Lifespan.Duration(),
+		IdleTimeout: cfg.Config.Sessions.IdleTimeout.Duration(),
+	})
+
 	var checker policyChecker
 	if cfg.Config.Policy.Enabled {
 		checker = policygrpc.NewServer(policystore.New(cfg.DB.Pool))
 	}
 
 	s := &Server{
-		cfg:           cfg.Config,
-		db:            cfg.DB,
-		log:           cfg.Log,
-		registry:      reg,
-		tokenGen:      tokenGen,
-		flowService:   flowService,
-		policyChecker: checker,
-		workerManager: cfg.WorkerManager,
+		cfg:            cfg.Config,
+		db:             cfg.DB,
+		log:            cfg.Log,
+		registry:       reg,
+		tokenGen:       tokenGen,
+		sessionManager: sessionMgr,
+		flowService:    flowService,
+		policyChecker:  checker,
+		workerManager:  cfg.WorkerManager,
 	}
 
 	// Setup routes
@@ -297,6 +330,17 @@ func joinStrings(ss []string) string {
 		result += s
 	}
 	return result
+}
+
+func parseSameSite(value string) http.SameSite {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
+	}
 }
 
 // Handlers

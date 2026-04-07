@@ -60,6 +60,34 @@ func (s *stubRouteOrchestrator) RestartModule(ctx context.Context, moduleID stri
 	return s.restartErr
 }
 
+type stubRouteSessionManager struct {
+	session *session.Session
+	getErr  error
+
+	revokeErr   error
+	revokedIDs  []uuid.UUID
+	clearCookie int
+}
+
+func (s *stubRouteSessionManager) GetFromRequest(ctx context.Context, r *http.Request) (*session.Session, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.session != nil {
+		return s.session, nil
+	}
+	return nil, session.ErrSessionNotFound
+}
+
+func (s *stubRouteSessionManager) Revoke(ctx context.Context, sessionID uuid.UUID) error {
+	s.revokedIDs = append(s.revokedIDs, sessionID)
+	return s.revokeErr
+}
+
+func (s *stubRouteSessionManager) ClearCookie(w http.ResponseWriter) {
+	s.clearCookie++
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 
@@ -1046,9 +1074,6 @@ func TestNotImplementedHandlers(t *testing.T) {
 		{"init settings api", s.handleInitSettingsAPI},
 		{"submit settings", s.handleSubmitSettings},
 		{"submit verification", s.handleSubmitVerification},
-		{"whoami", s.handleWhoAmI},
-		{"logout", s.handleLogout},
-		{"jwks", s.handleJWKS},
 		{"internal update flow ui", s.handleInternalUpdateFlowUI},
 		{"admin list identities", s.handleAdminListIdentities},
 		{"admin create identity", s.handleAdminCreateIdentity},
@@ -1074,6 +1099,137 @@ func TestNotImplementedHandlers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSessionHandlers(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("whoami returns unauthorized without session", func(t *testing.T) {
+		sm := &stubRouteSessionManager{getErr: session.ErrSessionNotFound}
+		s.sessionManager = sm
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/whoami", nil)
+		s.handleWhoAmI(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	t.Run("whoami returns session payload", func(t *testing.T) {
+		sm := &stubRouteSessionManager{
+			session: &session.Session{
+				ID:         uuid.New(),
+				IdentityID: uuid.New(),
+				AAL:        session.AAL1,
+				Active:     true,
+			},
+		}
+		s.sessionManager = sm
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sessions/whoami", nil)
+		s.handleWhoAmI(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("failed to parse response: %v", err)
+		}
+		if body["id"] == "" {
+			t.Fatalf("expected non-empty session id in response")
+		}
+	})
+
+	t.Run("logout is idempotent for missing session", func(t *testing.T) {
+		sm := &stubRouteSessionManager{getErr: session.ErrSessionNotFound}
+		s.sessionManager = sm
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions", nil)
+		s.handleLogout(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+		if sm.clearCookie != 1 {
+			t.Fatalf("expected clear cookie to be called once, got %d", sm.clearCookie)
+		}
+	})
+
+	t.Run("logout revokes active session", func(t *testing.T) {
+		sessionID := uuid.New()
+		sm := &stubRouteSessionManager{
+			session: &session.Session{
+				ID:         sessionID,
+				IdentityID: uuid.New(),
+				AAL:        session.AAL1,
+				Active:     true,
+			},
+		}
+		s.sessionManager = sm
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions", nil)
+		s.handleLogout(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+		if len(sm.revokedIDs) != 1 || sm.revokedIDs[0] != sessionID {
+			t.Fatalf("expected revoked session id %s, got %+v", sessionID, sm.revokedIDs)
+		}
+		if sm.clearCookie != 1 {
+			t.Fatalf("expected clear cookie to be called once, got %d", sm.clearCookie)
+		}
+	})
+
+	t.Run("logout returns error when revoke fails", func(t *testing.T) {
+		sm := &stubRouteSessionManager{
+			session: &session.Session{
+				ID:         uuid.New(),
+				IdentityID: uuid.New(),
+				AAL:        session.AAL1,
+				Active:     true,
+			},
+			revokeErr: errors.New("revoke failed"),
+		}
+		s.sessionManager = sm
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions", nil)
+		s.handleLogout(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+
+	t.Run("jwks returns keyset response", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+		s.handleJWKS(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("failed to parse response: %v", err)
+		}
+		keys, ok := body["keys"].([]any)
+		if !ok {
+			t.Fatalf("expected keys array in response")
+		}
+		if len(keys) != 0 {
+			t.Fatalf("expected empty keyset, got %v", keys)
+		}
+	})
 }
 
 func TestHandleAdminRestartModule(t *testing.T) {
