@@ -17,6 +17,7 @@ import (
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
+	platformconfig "github.com/aegion/aegion/internal/platform/config"
 )
 
 const (
@@ -589,23 +590,54 @@ func (s *Server) handleModuleHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 	moduleID := chi.URLParam(r, "moduleId")
+	proxySettings, policySettings := s.moduleProxyRuntimeSettings(r.Context())
+
+	checker := s.policyChecker
+	if !policySettings.Enabled {
+		checker = nil
+	}
+
+	timeout := s.cfg.Proxy.UpstreamTimeout.Duration()
+	if parsed, err := time.ParseDuration(strings.TrimSpace(proxySettings.UpstreamTimeout)); err == nil && parsed > 0 {
+		timeout = parsed
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
 	moduleProxy := router.NewModuleProxy(router.ModuleProxyConfig{
 		Registry:                    s.registry,
 		ModuleID:                    moduleID,
 		InternalToken:               s.currentInternalTokenForProxy(),
 		SessionSecret:               s.sessionSecretForProxy(),
-		Timeout:                     s.cfg.Proxy.UpstreamTimeout.Duration(),
-		PreserveHost:                s.cfg.Proxy.PreserveHost,
-		StripInboundIdentityHeaders: s.cfg.Proxy.StripInboundIdentityHeaders,
-		IdentitySigningSecret:       s.proxyIdentitySigningSecret(),
-		IdentitySignatureHeader:     s.cfg.Proxy.IdentitySignatureHeader,
-		SignedIdentityHeaders:       s.cfg.Proxy.SignedIdentityHeaders,
-		PolicyChecker:               s.policyChecker,
-		PolicyModel:                 s.cfg.Policy.DefaultModel,
+		Timeout:                     timeout,
+		PreserveHost:                proxySettings.PreserveHost,
+		StripInboundIdentityHeaders: proxySettings.StripInboundIdentityHeaders,
+		IdentitySigningSecret:       s.proxyIdentitySigningSecret(proxySettings.IdentitySigningSecret),
+		IdentitySignatureHeader:     proxySettings.IdentitySignatureHeader,
+		SignedIdentityHeaders:       proxySettings.SignedIdentityHeaders,
+		PolicyChecker:               checker,
+		PolicyModel:                 policySettings.DefaultModel,
 		Logger:                      s.log.With().Str("component", "module_proxy").Logger(),
 	})
 
 	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContext(r.Context(), r)))
+}
+
+func (s *Server) moduleProxyRuntimeSettings(ctx context.Context) (runtimeProxySettings, runtimePolicySettings) {
+	proxySettings, err := s.loadRuntimeProxySettings(ctx)
+	if err != nil {
+		s.log.Warn().Err(err).Msg("failed to load runtime proxy config, using bootstrap defaults")
+		proxySettings = defaultRuntimeProxySettings(s.cfg)
+	}
+
+	policySettings, err := s.loadRuntimePolicySettings(ctx)
+	if err != nil {
+		s.log.Warn().Err(err).Msg("failed to load runtime policy config, using bootstrap defaults")
+		policySettings = defaultRuntimePolicySettings(s.cfg)
+	}
+
+	return proxySettings, policySettings
 }
 
 func (s *Server) currentInternalTokenForProxy() string {
@@ -633,7 +665,10 @@ func (s *Server) sessionSecretForProxy() []byte {
 	return nil
 }
 
-func (s *Server) proxyIdentitySigningSecret() []byte {
+func (s *Server) proxyIdentitySigningSecret(override string) []byte {
+	if secret := strings.TrimSpace(override); secret != "" {
+		return []byte(secret)
+	}
 	if secret := strings.TrimSpace(s.cfg.Proxy.IdentitySigningSecret); secret != "" {
 		return []byte(secret)
 	}
@@ -886,17 +921,7 @@ func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySettings, error) {
-	settings := runtimePolicySettings{
-		Enabled:      s.cfg.Policy.Enabled,
-		DefaultModel: strings.TrimSpace(s.cfg.Policy.DefaultModel),
-	}
-	settings.RBAC.Enabled = s.cfg.Policy.RBAC.Enabled
-	settings.ABAC.Enabled = s.cfg.Policy.ABAC.Enabled
-	settings.ReBAC.Enabled = s.cfg.Policy.ReBAC.Enabled
-
-	if settings.DefaultModel == "" {
-		settings.DefaultModel = "rbac"
-	}
+	settings := defaultRuntimePolicySettings(s.cfg)
 	if s.db == nil || s.db.Pool == nil {
 		return settings, nil
 	}
@@ -927,24 +952,7 @@ func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySe
 }
 
 func (s *Server) loadRuntimeProxySettings(ctx context.Context) (runtimeProxySettings, error) {
-	settings := runtimeProxySettings{
-		Enabled:                     s.cfg.Proxy.Enabled,
-		UpstreamTimeout:             s.cfg.Proxy.UpstreamTimeout.Duration().String(),
-		PreserveHost:                s.cfg.Proxy.PreserveHost,
-		StripInboundIdentityHeaders: s.cfg.Proxy.StripInboundIdentityHeaders,
-		IdentitySigningSecret:       strings.TrimSpace(s.cfg.Proxy.IdentitySigningSecret),
-		IdentitySignatureHeader:     strings.TrimSpace(s.cfg.Proxy.IdentitySignatureHeader),
-		SignedIdentityHeaders:       append([]string(nil), s.cfg.Proxy.SignedIdentityHeaders...),
-	}
-	if settings.UpstreamTimeout == "" || settings.UpstreamTimeout == "0s" {
-		settings.UpstreamTimeout = (30 * time.Second).String()
-	}
-	if settings.IdentitySignatureHeader == "" {
-		settings.IdentitySignatureHeader = "X-Aegion-Signature"
-	}
-	if len(settings.SignedIdentityHeaders) == 0 {
-		settings.SignedIdentityHeaders = []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
-	}
+	settings := defaultRuntimeProxySettings(s.cfg)
 	if s.db == nil || s.db.Pool == nil {
 		return settings, nil
 	}
@@ -979,6 +987,55 @@ func (s *Server) loadRuntimeProxySettings(ctx context.Context) (runtimeProxySett
 	}
 
 	return settings, nil
+}
+
+func defaultRuntimePolicySettings(cfg *platformconfig.Config) runtimePolicySettings {
+	settings := runtimePolicySettings{}
+	if cfg == nil {
+		settings.DefaultModel = "rbac"
+		settings.RBAC.Enabled = true
+		return settings
+	}
+
+	settings.Enabled = cfg.Policy.Enabled
+	settings.DefaultModel = strings.TrimSpace(cfg.Policy.DefaultModel)
+	settings.RBAC.Enabled = cfg.Policy.RBAC.Enabled
+	settings.ABAC.Enabled = cfg.Policy.ABAC.Enabled
+	settings.ReBAC.Enabled = cfg.Policy.ReBAC.Enabled
+
+	if settings.DefaultModel == "" {
+		settings.DefaultModel = "rbac"
+	}
+
+	return settings
+}
+
+func defaultRuntimeProxySettings(cfg *platformconfig.Config) runtimeProxySettings {
+	settings := runtimeProxySettings{
+		UpstreamTimeout:         (30 * time.Second).String(),
+		IdentitySignatureHeader: "X-Aegion-Signature",
+		SignedIdentityHeaders:   []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"},
+	}
+	if cfg == nil {
+		return settings
+	}
+
+	settings.Enabled = cfg.Proxy.Enabled
+	settings.PreserveHost = cfg.Proxy.PreserveHost
+	settings.StripInboundIdentityHeaders = cfg.Proxy.StripInboundIdentityHeaders
+	settings.IdentitySigningSecret = strings.TrimSpace(cfg.Proxy.IdentitySigningSecret)
+
+	if timeout := cfg.Proxy.UpstreamTimeout.Duration().String(); timeout != "" && timeout != "0s" {
+		settings.UpstreamTimeout = timeout
+	}
+	if sigHeader := strings.TrimSpace(cfg.Proxy.IdentitySignatureHeader); sigHeader != "" {
+		settings.IdentitySignatureHeader = sigHeader
+	}
+	if len(cfg.Proxy.SignedIdentityHeaders) > 0 {
+		settings.SignedIdentityHeaders = append([]string(nil), cfg.Proxy.SignedIdentityHeaders...)
+	}
+
+	return settings
 }
 
 func applyRuntimePolicyPatch(current runtimePolicySettings, patch *runtimePolicySettingsPatch) (runtimePolicySettings, error) {
