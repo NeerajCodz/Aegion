@@ -508,6 +508,32 @@ func TestModuleProxyHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("policy enabled without checker denies by default", func(t *testing.T) {
+		s.cfg.Policy.Enabled = true
+		s.cfg.Policy.DefaultModel = "rbac"
+
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("proxied"))
+		}))
+		defer target.Close()
+
+		registerTestModule(t, s, "policy-required", registry.EndpointHTTP, target.URL)
+		s.policyChecker = nil
+
+		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/policy-required/private", nil)
+		req = withURLParam(req, "moduleId", "policy-required")
+		rec := httptest.NewRecorder()
+
+		s.handleModuleProxy(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "policy_unavailable") {
+			t.Fatalf("expected policy_unavailable deny reason, got %q", rec.Body.String())
+		}
+	})
+
 	t.Run("policy allow forwards and maps request context", func(t *testing.T) {
 		s.cfg.Policy.Enabled = true
 		s.cfg.Policy.DefaultModel = "rbac"
@@ -1288,37 +1314,132 @@ func TestInternalFlowHandlers(t *testing.T) {
 	})
 }
 
-func TestNotImplementedHandlers(t *testing.T) {
+func TestHandleNotImplemented(t *testing.T) {
 	s := newTestServer(t)
 
-	handlers := []struct {
-		name    string
-		handler func(http.ResponseWriter, *http.Request)
-	}{
-		{"admin list identities", s.handleAdminListIdentities},
-		{"admin create identity", s.handleAdminCreateIdentity},
-		{"admin get identity", s.handleAdminGetIdentity},
-		{"admin update identity", s.handleAdminUpdateIdentity},
-		{"admin delete identity", s.handleAdminDeleteIdentity},
-		{"admin list sessions", s.handleAdminListSessions},
-		{"admin delete session", s.handleAdminDeleteSession},
-		{"admin delete identity sessions", s.handleAdminDeleteIdentitySessions},
-		{"admin metrics", s.handleAdminMetrics},
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	s.handleNotImplemented(rec, req)
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected %d, got %d", http.StatusNotImplemented, rec.Code)
 	}
+	if !strings.Contains(rec.Body.String(), "not implemented") {
+		t.Fatalf("expected not implemented response body, got %q", rec.Body.String())
+	}
+}
 
-	for _, tc := range handlers {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/", nil)
-			tc.handler(rec, req)
-			if rec.Code != http.StatusNotImplemented {
-				t.Fatalf("expected %d, got %d", http.StatusNotImplemented, rec.Code)
-			}
-			if !strings.Contains(rec.Body.String(), "not implemented") {
-				t.Fatalf("expected not implemented response body, got %q", rec.Body.String())
-			}
-		})
-	}
+func TestAdminHandlersValidationAndDatabaseGuards(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("list identities requires database", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/aegion/api/v1/identities", nil)
+		s.handleAdminListIdentities(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	t.Run("create identity validates request body", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/aegion/api/v1/identities", bytes.NewBufferString("{"))
+		s.handleAdminCreateIdentity(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("create identity requires database", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/aegion/api/v1/identities", bytes.NewBufferString(`{"traits":{"email":"user@example.com"}}`))
+		s.handleAdminCreateIdentity(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	t.Run("get identity validates id format", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodGet, "/aegion/api/v1/identities/invalid", nil), "id", "invalid")
+		s.handleAdminGetIdentity(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("update identity validates body and payload", func(t *testing.T) {
+		identityID := uuid.New().String()
+
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/identities/"+identityID, bytes.NewBufferString("{")), "id", identityID)
+		s.handleAdminUpdateIdentity(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = withURLParam(httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/identities/"+identityID, bytes.NewBufferString(`{}`)), "id", identityID)
+		s.handleAdminUpdateIdentity(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("delete identity validates id format", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodDelete, "/aegion/api/v1/identities/invalid", nil), "id", "invalid")
+		s.handleAdminDeleteIdentity(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("list sessions requires database", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/aegion/api/v1/sessions", nil)
+		s.handleAdminListSessions(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	t.Run("delete session validates id format", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodDelete, "/aegion/api/v1/sessions/invalid", nil), "id", "invalid")
+		s.handleAdminDeleteSession(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("delete identity sessions validates id format", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodDelete, "/aegion/api/v1/sessions/identity/invalid", nil), "identityId", "invalid")
+		s.handleAdminDeleteIdentitySessions(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("metrics returns module metrics without database", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/aegion/api/v1/system/metrics", nil)
+		s.handleAdminMetrics(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var body map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("failed to decode metrics response: %v", err)
+		}
+		if body["database"] != "unavailable" {
+			t.Fatalf("expected database=unavailable, got %v", body["database"])
+		}
+		if _, ok := body["module_count"]; !ok {
+			t.Fatalf("expected module_count in metrics response")
+		}
+	})
 }
 
 func TestSessionHandlers(t *testing.T) {
@@ -1593,6 +1714,36 @@ func TestHandleAdminUpdateConfig_ValidationAndDBErrors(t *testing.T) {
 		s.handleAdminUpdateConfig(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("unknown top-level field", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"unknown":true}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("default model must be enabled when policy enabled", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"policy":{"enabled":true,"default_model":"abac","rbac":{"enabled":true},"abac":{"enabled":false},"rebac":{"enabled":false}}}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("policy disabled allows all model toggles off", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"policy":{"enabled":false,"rbac":{"enabled":false},"abac":{"enabled":false},"rebac":{"enabled":false}}}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "database unavailable") {
+			t.Fatalf("expected database unavailable error, got %q", rec.Body.String())
 		}
 	})
 

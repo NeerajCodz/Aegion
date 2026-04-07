@@ -231,10 +231,13 @@ aegion/
 ├── scripts/
 │   ├── build-all.sh               ← build all module images
 │   ├── build-module.sh            ← build a single module image: ./scripts/build-module.sh mfa
+│   ├── check-module-boundaries.sh ← enforce no cross-module imports in modules/<n>
+│   ├── check-proto-consistency.sh ← fail CI if internal/proto stubs are stale
+│   ├── check-release-manifest.sh  ← validate build/release-manifest.json schema + coverage
 │   ├── gen-proto.sh               ← regenerate internal/proto/ stubs from proto/ sources
 │   ├── gen-rust-bindings.sh       ← regenerate CGo bindings from rust/ crates
-│   ├── resolve-tags.sh            ← legacy: resolve Go build tags (kept for compatibility)
-│   └── lint.sh                    ← run golangci-lint + cargo clippy across the whole repo
+│   ├── lint.sh                    ← run golangci-lint + cargo clippy across the whole repo
+│   └── run-integration-smoke.sh   ← targeted e2e smoke suite used by CI
 │
 ├── configs/
 │   ├── aegion.yaml                ← development default config (safe defaults, local URLs)
@@ -433,4 +436,12 @@ steps:
 
 A separate platform integration pipeline runs on every PR and on merges to main. It composes core + all modules at the current SHA and runs the full integration test suite.
 
-A release pipeline tags all images at the same semantic version, validates the full compatibility matrix, and publishes `build/release-manifest.json`.
+In this repository, module scope is computed from the Git diff:
+- direct `modules/<name>/` changes run per-module boundary checks (`scripts/check-module-boundaries.sh`), `go vet`, `go test`, and module image build (when a Dockerfile exists),
+- shared changes under `internal/`, `proto/`, `core/`, `cmd/`, `configs/`, `scripts/`, or `build/` fan out the same checks across all modules.
+
+CI additionally enforces:
+- proto generation consistency via `scripts/check-proto-consistency.sh`,
+- critical integration smoke checks via `scripts/run-integration-smoke.sh`.
+
+A release pipeline tags all images at the same semantic version, validates the full compatibility matrix, enforces strict release-manifest validation (`scripts/check-release-manifest.sh`), and publishes `build/release-manifest.json`.

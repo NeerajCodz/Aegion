@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/rs/zerolog"
 )
 
@@ -168,6 +169,13 @@ const (
 // Helper functions to extract trace information from context
 // These use the same context keys as the observability package
 func getTraceInfoFromContext(ctx context.Context) TraceInfo {
+	if traceInfo := observability.GetTraceInfoForLogger(ctx); traceInfo.TraceID != "" || traceInfo.SpanID != "" {
+		return TraceInfo{
+			TraceID: traceInfo.TraceID,
+			SpanID:  traceInfo.SpanID,
+		}
+	}
+
 	info := ctx.Value(traceInfoContextKey)
 	if info == nil {
 		// Keep compatibility with contexts using historical string keys.
@@ -189,6 +197,10 @@ func getTraceInfoFromContext(ctx context.Context) TraceInfo {
 }
 
 func getRequestIDFromContext(ctx context.Context) string {
+	if requestID := observability.GetRequestIDForLogger(ctx); requestID != "" {
+		return requestID
+	}
+
 	if requestID, ok := ctx.Value(requestIDContextKey).(string); ok {
 		return requestID
 	}

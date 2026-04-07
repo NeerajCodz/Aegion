@@ -17,6 +17,14 @@
     "admin": {
       "tag": "aegion/aegion-admin:1.0.0",
       "digest": "sha256:placeholder"
+    },
+    "policy": {
+      "tag": "aegion/aegion-policy:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "proxy": {
+      "tag": "aegion/aegion-proxy:1.0.0",
+      "digest": "sha256:placeholder"
     }
   },
   "compatibility": {

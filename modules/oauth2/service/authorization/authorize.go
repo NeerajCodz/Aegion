@@ -4,6 +4,7 @@ package authorization
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -87,10 +88,27 @@ type AuthorizationResponse struct {
 
 // StartAuthorization initiates the authorization flow.
 func (s *AuthorizationService) StartAuthorization(ctx context.Context, req *AuthorizeRequest) (*LoginChallengeResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("%w: request is required", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.ClientID) == "" {
+		return nil, fmt.Errorf("%w: client_id is required", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.RedirectURI) == "" {
+		return nil, fmt.Errorf("%w: redirect_uri is required", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.ResponseType) == "" {
+		return nil, fmt.Errorf("%w: response_type is required", ErrInvalidRequest)
+	}
+
 	// Validate client
 	client, err := s.store.GetClient(ctx, req.ClientID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: client not found", ErrUnauthorizedClient)
+	}
+
+	if len(client.GrantTypes) > 0 && !client.HasGrantType("authorization_code") {
+		return nil, fmt.Errorf("%w: client does not allow authorization_code", ErrUnauthorizedClient)
 	}
 
 	// Validate redirect URI
@@ -101,6 +119,9 @@ func (s *AuthorizationService) StartAuthorization(ctx context.Context, req *Auth
 	// Validate response type
 	if req.ResponseType != "code" {
 		return nil, fmt.Errorf("%w: only 'code' is supported", ErrUnsupportedResponseType)
+	}
+	if len(client.ResponseTypes) > 0 && !supportsValue(client.ResponseTypes, req.ResponseType) {
+		return nil, fmt.Errorf("%w: response_type '%s' not allowed", ErrUnauthorizedClient, req.ResponseType)
 	}
 
 	// Parse and validate scopes
@@ -233,6 +254,10 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 		return nil, fmt.Errorf("%w: consent already handled", ErrInvalidRequest)
 	}
 
+	if !isSubset(grantedScopes, challenge.RequestedScopes) {
+		return nil, fmt.Errorf("%w: granted scopes exceed requested scopes", ErrInvalidScope)
+	}
+
 	// Mark consent as accepted
 	if err := s.store.AcceptConsentChallenge(ctx, challengeID, grantedScopes, challenge.RequestedAudience, remember, rememberFor); err != nil {
 		return nil, err
@@ -320,7 +345,7 @@ func VerifyPKCE(codeVerifier, codeChallenge, method string) error {
 		return fmt.Errorf("unsupported code_challenge_method: %s", method)
 	}
 
-	if computed != codeChallenge {
+	if subtle.ConstantTimeCompare([]byte(computed), []byte(codeChallenge)) != 1 {
 		return store.ErrPKCEMismatch
 	}
 
@@ -341,4 +366,26 @@ func parseScopes(scope string) []string {
 		}
 	}
 	return scopes
+}
+
+func supportsValue(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func isSubset(values []string, allowed []string) bool {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, value := range allowed {
+		allowedSet[value] = struct{}{}
+	}
+	for _, value := range values {
+		if _, ok := allowedSet[value]; !ok {
+			return false
+		}
+	}
+	return true
 }

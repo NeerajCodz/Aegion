@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/flows"
@@ -77,6 +80,15 @@ var newSessionManager = func(cfg session.ManagerConfig) sessionManager {
 var pingDatabase = func(ctx context.Context, db *database.DB) error {
 	return db.Pool.Ping(ctx)
 }
+
+type bootstrapAdminOutcome struct {
+	IdentityID      uuid.UUID
+	OperatorID      uuid.UUID
+	CreatedIdentity bool
+	CreatedOperator bool
+}
+
+var ensureBootstrapAdminOperator = bootstrapAdminOperator
 
 // NewServer creates and initializes a new server instance.
 func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
@@ -187,17 +199,205 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 
 // bootstrapAdmin creates the initial admin user if not exists.
 func (s *Server) bootstrapAdmin(ctx context.Context) error {
-	if s.cfg.Operator.Email == "" || s.cfg.Operator.Password == "" {
+	email := strings.ToLower(strings.TrimSpace(s.cfg.Operator.Email))
+	password := strings.TrimSpace(s.cfg.Operator.Password)
+	if email == "" || password == "" {
 		s.log.Info().Msg("Admin bootstrap skipped: no operator credentials configured")
 		return nil
 	}
 
 	s.log.Info().
-		Str("email", s.cfg.Operator.Email).
+		Str("email", email).
 		Msg("Admin bootstrap requested")
 
-	// TODO: Implement actual admin user creation
+	outcome, err := ensureBootstrapAdminOperator(ctx, s.db, email, password)
+	if err != nil {
+		return err
+	}
+
+	if !outcome.CreatedIdentity && !outcome.CreatedOperator {
+		s.log.Info().
+			Str("email", email).
+			Msg("Admin bootstrap skipped: operator already exists")
+		return nil
+	}
+
+	logEvent := s.log.Info().
+		Str("email", email).
+		Str("identity_id", outcome.IdentityID.String()).
+		Bool("created_identity", outcome.CreatedIdentity).
+		Bool("created_operator", outcome.CreatedOperator)
+	if outcome.OperatorID != uuid.Nil {
+		logEvent = logEvent.Str("operator_id", outcome.OperatorID.String())
+	}
+	logEvent.Msg("Admin bootstrap completed")
+
 	return nil
+}
+
+func bootstrapAdminOperator(ctx context.Context, db *database.DB, email, password string) (bootstrapAdminOutcome, error) {
+	outcome := bootstrapAdminOutcome{}
+	if db == nil || db.Pool == nil {
+		return outcome, errors.New("database unavailable")
+	}
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return outcome, err
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			_ = rollbackErr
+		}
+	}()
+
+	var operatorCount int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM adm_operators`).Scan(&operatorCount); err != nil {
+		return outcome, err
+	}
+	if operatorCount > 0 {
+		return outcome, nil
+	}
+
+	var identityID uuid.UUID
+	err = tx.QueryRow(ctx, `
+		SELECT ci.id
+		FROM core_identities ci
+		LEFT JOIN LATERAL (
+			SELECT value
+			FROM core_identity_addresses
+			WHERE identity_id = ci.id
+			  AND type = 'email'
+			ORDER BY is_primary DESC, created_at ASC
+			LIMIT 1
+		) addr ON TRUE
+		WHERE ci.deleted_at IS NULL
+		  AND LOWER(COALESCE(addr.value, ci.traits->>'email', '')) = $1
+		LIMIT 1
+	`, email).Scan(&identityID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return outcome, err
+		}
+
+		schemaID, schemaErr := resolveBootstrapSchemaID(ctx, tx)
+		if schemaErr != nil {
+			return outcome, schemaErr
+		}
+
+		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return outcome, hashErr
+		}
+
+		identityID = uuid.New()
+		traits := map[string]interface{}{
+			"email":        email,
+			"display_name": bootstrapDisplayName(email),
+			"name":         bootstrapDisplayName(email),
+		}
+		traitsJSON, marshalErr := json.Marshal(traits)
+		if marshalErr != nil {
+			return outcome, marshalErr
+		}
+
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO core_identities (id, schema_id, traits, state, created_at, updated_at)
+			VALUES ($1, $2, $3::jsonb, 'active', NOW(), NOW())
+		`, identityID, schemaID, string(traitsJSON)); execErr != nil {
+			return outcome, execErr
+		}
+
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO core_identity_addresses (id, identity_id, type, value, is_primary, verified, created_at, updated_at)
+			VALUES ($1, $2, 'email', $3, TRUE, FALSE, NOW(), NOW())
+		`, uuid.New(), identityID, email); execErr != nil {
+			return outcome, execErr
+		}
+
+		if _, execErr := tx.Exec(ctx, `
+			INSERT INTO pwd_credentials (id, identity_id, identifier, hash, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, NOW(), NOW())
+		`, uuid.New(), identityID, email, string(hashedPassword)); execErr != nil {
+			return outcome, execErr
+		}
+
+		outcome.CreatedIdentity = true
+	}
+
+	if !outcome.CreatedIdentity {
+		var credentialCount int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM pwd_credentials WHERE identity_id = $1`, identityID).Scan(&credentialCount); err != nil {
+			return outcome, err
+		}
+		if credentialCount == 0 {
+			hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+			if hashErr != nil {
+				return outcome, hashErr
+			}
+			if _, execErr := tx.Exec(ctx, `
+				INSERT INTO pwd_credentials (id, identity_id, identifier, hash, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, NOW(), NOW())
+			`, uuid.New(), identityID, email, string(hashedPassword)); execErr != nil {
+				return outcome, execErr
+			}
+		}
+	}
+
+	operatorID := uuid.New()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO adm_operators (id, identity_id, role, permissions, created_at, updated_at)
+		VALUES ($1, $2, 'super_admin', '{}'::jsonb, NOW(), NOW())
+	`, operatorID, identityID); err != nil {
+		return outcome, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return outcome, err
+	}
+
+	outcome.IdentityID = identityID
+	outcome.OperatorID = operatorID
+	outcome.CreatedOperator = true
+	return outcome, nil
+}
+
+func resolveBootstrapSchemaID(ctx context.Context, tx pgx.Tx) (uuid.UUID, error) {
+	var schemaID uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM core_identity_schemas
+		ORDER BY is_default DESC, created_at ASC
+		LIMIT 1
+	`).Scan(&schemaID)
+	if err == nil {
+		return schemaID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, err
+	}
+
+	schemaID = uuid.New()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO core_identity_schemas (id, name, is_default, schema, created_at, updated_at)
+		VALUES ($1, 'default', TRUE, '{}'::jsonb, NOW(), NOW())
+	`, schemaID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return schemaID, nil
+}
+
+func bootstrapDisplayName(email string) string {
+	localPart := strings.TrimSpace(email)
+	if idx := strings.Index(localPart, "@"); idx > 0 {
+		localPart = localPart[:idx]
+	}
+	if localPart == "" {
+		return email
+	}
+	return localPart
 }
 
 // registerWorkers registers background workers with the manager.

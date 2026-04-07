@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -173,6 +174,7 @@ func RequestID(next http.Handler) http.Handler {
 
 		// Add to context for logging
 		ctx := setRequestIDInContext(r.Context(), requestID)
+		ctx = observability.WithRequestIDForLogger(ctx, requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -259,14 +261,32 @@ func setRequestIDInContext(ctx context.Context, requestID string) context.Contex
 
 // logSecurityEvent logs security-relevant events.
 func logSecurityEvent(r *http.Request, statusCode int) {
+	ctx := observability.AddTraceToContext(r.Context())
+	traceInfo := observability.GetTraceInfoForLogger(ctx)
+	requestID := observability.GetRequestIDForLogger(ctx)
+	if requestID == "" {
+		requestID = r.Header.Get("X-Request-ID")
+	}
+	route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
+
 	event := log.Info()
 	if statusCode >= http.StatusBadRequest {
 		event = log.Warn()
 	}
 
+	if requestID != "" {
+		event = event.Str("request_id", requestID)
+	}
+	if traceInfo.TraceID != "" {
+		event = event.Str("trace_id", traceInfo.TraceID)
+	}
+	if traceInfo.SpanID != "" {
+		event = event.Str("span_id", traceInfo.SpanID)
+	}
+
 	event.
-		Str("request_id", r.Header.Get("X-Request-ID")).
 		Str("method", r.Method).
+		Str("route", route).
 		Str("path", r.URL.Path).
 		Str("ip", getClientIP(r)).
 		Str("user_agent", r.UserAgent()).

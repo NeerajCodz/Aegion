@@ -209,6 +209,32 @@ func TestStartAuthorization(t *testing.T) {
 		assert.ErrorIs(t, err, ErrUnsupportedResponseType)
 	})
 
+	t.Run("ClientNotAllowedGrantOrResponseType", func(t *testing.T) {
+		mockStore := &mockAuthzStore{
+			client: &store.Client{
+				ID:            "client-123",
+				RedirectURIs:  []string{"https://app.example.com/callback"},
+				GrantTypes:    []string{"client_credentials"},
+				ResponseTypes: []string{"token"},
+				Scopes:        []string{"openid"},
+			},
+		}
+		svc := NewAuthorizationService(mockStore)
+
+		_, err := svc.StartAuthorization(ctx, &AuthorizeRequest{
+			ClientID:     "client-123",
+			RedirectURI:  "https://app.example.com/callback",
+			ResponseType: "code",
+		})
+		assert.ErrorIs(t, err, ErrUnauthorizedClient)
+	})
+
+	t.Run("MissingRequiredFields", func(t *testing.T) {
+		svc := NewAuthorizationService(&mockAuthzStore{})
+		_, err := svc.StartAuthorization(ctx, &AuthorizeRequest{})
+		assert.ErrorIs(t, err, ErrInvalidRequest)
+	})
+
 	t.Run("PKCERequired", func(t *testing.T) {
 		mockStore := &mockAuthzStore{
 			client: &store.Client{
@@ -449,6 +475,17 @@ func TestAuthorizationService_ErrorPaths(t *testing.T) {
 		svc = NewAuthorizationService(st)
 		_, err = svc.AcceptConsent(ctx, "cc-handled", []string{"openid"}, false, nil)
 		assert.ErrorIs(t, err, ErrInvalidRequest)
+
+		st = &mockAuthzStore{
+			consentChallenge: &store.ConsentChallenge{
+				ID:              "cc-scope",
+				RequestedScopes: []string{"openid"},
+				ExpiresAt:       time.Now().UTC().Add(time.Minute),
+			},
+		}
+		svc = NewAuthorizationService(st)
+		_, err = svc.AcceptConsent(ctx, "cc-scope", []string{"openid", "admin"}, false, nil)
+		assert.ErrorIs(t, err, ErrInvalidScope)
 
 		st = &mockAuthzStore{
 			consentChallenge: &store.ConsentChallenge{

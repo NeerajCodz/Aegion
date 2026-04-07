@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	coresession "github.com/aegion/aegion/core/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -60,6 +61,31 @@ func (m *MockService) ResetPassword(ctx context.Context, identityID, newPassword
 	return args.Error(0)
 }
 
+type MockIdentityStore struct {
+	mock.Mock
+}
+
+func (m *MockIdentityStore) CreateIdentity(ctx context.Context, traits map[string]interface{}) (uuid.UUID, error) {
+	args := m.Called(ctx, traits)
+	return args.Get(0).(uuid.UUID), args.Error(1)
+}
+
+type MockSessionManager struct {
+	mock.Mock
+}
+
+func (m *MockSessionManager) Create(ctx context.Context, identityID uuid.UUID, method coresession.AuthMethod, device coresession.DeviceInfo) (*coresession.Session, error) {
+	args := m.Called(ctx, identityID, method, device)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*coresession.Session), args.Error(1)
+}
+
+func (m *MockSessionManager) SetCookie(w http.ResponseWriter, session *coresession.Session) {
+	m.Called(w, session)
+}
+
 // Service errors for testing
 var (
 	ErrPasswordTooShort   = service.ErrPasswordTooShort
@@ -72,47 +98,67 @@ var (
 )
 
 func TestHandler_HandleRegistration(t *testing.T) {
+	identityID := uuid.New()
+	sessionID := uuid.New()
+
 	tests := []struct {
 		name           string
 		body           interface{}
-		setupMocks     func(*MockService)
+		setupMocks     func(*MockService, *MockIdentityStore, *MockSessionManager)
 		expectedStatus int
 		expectedError  string
 	}{
 		{
 			name: "successful registration",
 			body: registerRequest("user@example.com", "SecurePass123!"),
-			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "SecurePass123!").Return(nil)
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "SecurePass123!", "user@example.com").Return(nil).Once()
+				identityStore.On("CreateIdentity", mock.Anything, map[string]interface{}{"email": "user@example.com"}).
+					Return(identityID, nil).Once()
+				service.On("Register", mock.Anything, identityID, "user@example.com", "SecurePass123!").Return(nil).Once()
+				sessionManager.On(
+					"Create",
+					mock.Anything,
+					identityID,
+					coresession.AuthMethodPassword,
+					mock.AnythingOfType("session.DeviceInfo"),
+				).Return(&coresession.Session{
+					ID:         sessionID,
+					IdentityID: identityID,
+					AAL:        coresession.AAL1,
+				}, nil).Once()
+				sessionManager.On("SetCookie", mock.Anything, mock.MatchedBy(func(session *coresession.Session) bool {
+					return session != nil && session.ID == sessionID
+				})).Return().Once()
 			},
 			expectedStatus: http.StatusCreated,
 		},
 		{
 			name:           "invalid JSON",
 			body:           "invalid json",
-			setupMocks:     func(service *MockService) {},
+			setupMocks:     func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "invalid_request",
 		},
 		{
 			name:           "missing email",
 			body:           registerRequest("", "SecurePass123!"),
-			setupMocks:     func(service *MockService) {},
+			setupMocks:     func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_email",
 		},
 		{
 			name:           "missing password",
 			body:           registerRequest("user@example.com", ""),
-			setupMocks:     func(service *MockService) {},
+			setupMocks:     func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_password",
 		},
 		{
 			name: "password too short",
 			body: registerRequest("user@example.com", "weak"),
-			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "weak").Return(ErrPasswordTooShort)
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "weak", "user@example.com").Return(ErrPasswordTooShort).Once()
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_too_short",
@@ -120,8 +166,8 @@ func TestHandler_HandleRegistration(t *testing.T) {
 		{
 			name: "password too weak",
 			body: registerRequest("user@example.com", "weakpassword"),
-			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "weakpassword").Return(ErrPasswordTooWeak)
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "weakpassword", "user@example.com").Return(ErrPasswordTooWeak).Once()
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_too_weak",
@@ -129,8 +175,8 @@ func TestHandler_HandleRegistration(t *testing.T) {
 		{
 			name: "password breached",
 			body: registerRequest("user@example.com", "password123"),
-			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "password123").Return(ErrPasswordBreached)
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "password123", "user@example.com").Return(ErrPasswordBreached).Once()
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_breached",
@@ -138,8 +184,8 @@ func TestHandler_HandleRegistration(t *testing.T) {
 		{
 			name: "password similar",
 			body: registerRequest("user@example.com", "user123"),
-			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "user123").Return(ErrPasswordSimilar)
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "user123", "user@example.com").Return(ErrPasswordSimilar).Once()
 			},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "password_similar",
@@ -147,8 +193,42 @@ func TestHandler_HandleRegistration(t *testing.T) {
 		{
 			name: "internal server error",
 			body: registerRequest("user@example.com", "SecurePass123!"),
-			setupMocks: func(service *MockService) {
-				service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "SecurePass123!").Return(errors.New("database error"))
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "SecurePass123!", "user@example.com").Return(nil).Once()
+				identityStore.On("CreateIdentity", mock.Anything, map[string]interface{}{"email": "user@example.com"}).
+					Return(identityID, nil).Once()
+				service.On("Register", mock.Anything, identityID, "user@example.com", "SecurePass123!").
+					Return(errors.New("database error")).Once()
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedError:  "internal_error",
+		},
+		{
+			name: "identity store failure",
+			body: registerRequest("user@example.com", "SecurePass123!"),
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "SecurePass123!", "user@example.com").Return(nil).Once()
+				identityStore.On("CreateIdentity", mock.Anything, map[string]interface{}{"email": "user@example.com"}).
+					Return(uuid.Nil, errors.New("identity unavailable")).Once()
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedError:  "internal_error",
+		},
+		{
+			name: "session creation failure",
+			body: registerRequest("user@example.com", "SecurePass123!"),
+			setupMocks: func(service *MockService, identityStore *MockIdentityStore, sessionManager *MockSessionManager) {
+				service.On("ValidatePassword", mock.Anything, "SecurePass123!", "user@example.com").Return(nil).Once()
+				identityStore.On("CreateIdentity", mock.Anything, map[string]interface{}{"email": "user@example.com"}).
+					Return(identityID, nil).Once()
+				service.On("Register", mock.Anything, identityID, "user@example.com", "SecurePass123!").Return(nil).Once()
+				sessionManager.On(
+					"Create",
+					mock.Anything,
+					identityID,
+					coresession.AuthMethodPassword,
+					mock.AnythingOfType("session.DeviceInfo"),
+				).Return((*coresession.Session)(nil), errors.New("session unavailable")).Once()
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "internal_error",
@@ -158,9 +238,11 @@ func TestHandler_HandleRegistration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := &MockService{}
-			handler := &Handler{service: service}
+			identityStore := &MockIdentityStore{}
+			sessionManager := &MockSessionManager{}
+			handler := New(service, WithIdentityStore(identityStore), WithSessionManager(sessionManager))
 
-			tt.setupMocks(service)
+			tt.setupMocks(service, identityStore, sessionManager)
 
 			var body []byte
 			var err error
@@ -184,20 +266,31 @@ func TestHandler_HandleRegistration(t *testing.T) {
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedError, response.Error.Status)
+			} else if recorder.Code == http.StatusCreated {
+				var response SuccessResponse
+				err := json.NewDecoder(recorder.Body).Decode(&response)
+				require.NoError(t, err)
+				assert.Equal(t, identityID.String(), response.Identity.ID)
+				assert.Equal(t, sessionID.String(), response.Session.ID)
+				assert.Equal(t, identityID.String(), response.Session.IdentityID)
+				assert.Equal(t, string(coresession.AAL1), response.Session.AAL)
 			}
 
 			service.AssertExpectations(t)
+			identityStore.AssertExpectations(t)
+			sessionManager.AssertExpectations(t)
 		})
 	}
 }
 
 func TestHandler_HandleLogin(t *testing.T) {
 	identityID := uuid.New()
+	sessionID := uuid.New()
 
 	tests := []struct {
 		name           string
 		body           interface{}
-		setupMocks     func(*MockService)
+		setupMocks     func(*MockService, *MockSessionManager)
 		expectedStatus int
 		expectedError  string
 	}{
@@ -207,15 +300,29 @@ func TestHandler_HandleLogin(t *testing.T) {
 				Identifier: "user@example.com",
 				Password:   "correctpassword",
 			},
-			setupMocks: func(service *MockService) {
-				service.On("Verify", mock.Anything, "user@example.com", "correctpassword").Return(identityID, nil)
+			setupMocks: func(service *MockService, sessionManager *MockSessionManager) {
+				service.On("Verify", mock.Anything, "user@example.com", "correctpassword").Return(identityID, nil).Once()
+				sessionManager.On(
+					"Create",
+					mock.Anything,
+					identityID,
+					coresession.AuthMethodPassword,
+					mock.AnythingOfType("session.DeviceInfo"),
+				).Return(&coresession.Session{
+					ID:         sessionID,
+					IdentityID: identityID,
+					AAL:        coresession.AAL1,
+				}, nil).Once()
+				sessionManager.On("SetCookie", mock.Anything, mock.MatchedBy(func(session *coresession.Session) bool {
+					return session != nil && session.ID == sessionID
+				})).Return().Once()
 			},
 			expectedStatus: http.StatusOK,
 		},
 		{
 			name:           "invalid JSON",
 			body:           "invalid json",
-			setupMocks:     func(service *MockService) {},
+			setupMocks:     func(service *MockService, sessionManager *MockSessionManager) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "invalid_request",
 		},
@@ -224,7 +331,7 @@ func TestHandler_HandleLogin(t *testing.T) {
 			body: LoginRequest{
 				Password: "password",
 			},
-			setupMocks:     func(service *MockService) {},
+			setupMocks:     func(service *MockService, sessionManager *MockSessionManager) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_credentials",
 		},
@@ -233,7 +340,7 @@ func TestHandler_HandleLogin(t *testing.T) {
 			body: LoginRequest{
 				Identifier: "user@example.com",
 			},
-			setupMocks:     func(service *MockService) {},
+			setupMocks:     func(service *MockService, sessionManager *MockSessionManager) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedError:  "missing_credentials",
 		},
@@ -243,8 +350,8 @@ func TestHandler_HandleLogin(t *testing.T) {
 				Identifier: "user@example.com",
 				Password:   "wrongpassword",
 			},
-			setupMocks: func(service *MockService) {
-				service.On("Verify", mock.Anything, "user@example.com", "wrongpassword").Return(uuid.Nil, ErrInvalidCredentials)
+			setupMocks: func(service *MockService, sessionManager *MockSessionManager) {
+				service.On("Verify", mock.Anything, "user@example.com", "wrongpassword").Return(uuid.Nil, ErrInvalidCredentials).Once()
 			},
 			expectedStatus: http.StatusUnauthorized,
 			expectedError:  "invalid_credentials",
@@ -255,8 +362,27 @@ func TestHandler_HandleLogin(t *testing.T) {
 				Identifier: "user@example.com",
 				Password:   "password",
 			},
-			setupMocks: func(service *MockService) {
-				service.On("Verify", mock.Anything, "user@example.com", "password").Return(uuid.Nil, errors.New("database error"))
+			setupMocks: func(service *MockService, sessionManager *MockSessionManager) {
+				service.On("Verify", mock.Anything, "user@example.com", "password").Return(uuid.Nil, errors.New("database error")).Once()
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedError:  "internal_error",
+		},
+		{
+			name: "session creation failure",
+			body: LoginRequest{
+				Identifier: "user@example.com",
+				Password:   "correctpassword",
+			},
+			setupMocks: func(service *MockService, sessionManager *MockSessionManager) {
+				service.On("Verify", mock.Anything, "user@example.com", "correctpassword").Return(identityID, nil).Once()
+				sessionManager.On(
+					"Create",
+					mock.Anything,
+					identityID,
+					coresession.AuthMethodPassword,
+					mock.AnythingOfType("session.DeviceInfo"),
+				).Return((*coresession.Session)(nil), errors.New("session unavailable")).Once()
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedError:  "internal_error",
@@ -266,9 +392,10 @@ func TestHandler_HandleLogin(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := &MockService{}
-			handler := &Handler{service: service}
+			sessionManager := &MockSessionManager{}
+			handler := New(service, WithSessionManager(sessionManager))
 
-			tt.setupMocks(service)
+			tt.setupMocks(service, sessionManager)
 
 			var body []byte
 			var err error
@@ -296,13 +423,61 @@ func TestHandler_HandleLogin(t *testing.T) {
 				var response SuccessResponse
 				err := json.NewDecoder(recorder.Body).Decode(&response)
 				require.NoError(t, err)
-				assert.NotNil(t, response.Session)
+				assert.Equal(t, sessionID.String(), response.Session.ID)
 				assert.Equal(t, identityID.String(), response.Session.IdentityID)
+				assert.Equal(t, string(coresession.AAL1), response.Session.AAL)
 			}
 
 			service.AssertExpectations(t)
+			sessionManager.AssertExpectations(t)
 		})
 	}
+}
+
+func TestHandler_HandleRegistration_IntegrationUnavailable(t *testing.T) {
+	service := &MockService{}
+	service.On("ValidatePassword", mock.Anything, "SecurePass123!", "user@example.com").Return(nil).Once()
+	handler := New(service)
+
+	reqBody, err := json.Marshal(registerRequest("user@example.com", "SecurePass123!"))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.HandleRegistration(recorder, req)
+
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	var response ErrorResponse
+	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
+	assert.Equal(t, "internal_error", response.Error.Status)
+	service.AssertExpectations(t)
+}
+
+func TestHandler_HandleLogin_IntegrationUnavailable(t *testing.T) {
+	service := &MockService{}
+	identityID := uuid.New()
+	service.On("Verify", mock.Anything, "user@example.com", "correctpassword").Return(identityID, nil).Once()
+	handler := New(service)
+
+	reqBody, err := json.Marshal(LoginRequest{
+		Identifier: "user@example.com",
+		Password:   "correctpassword",
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.HandleLogin(recorder, req)
+
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	var response ErrorResponse
+	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
+	assert.Equal(t, "internal_error", response.Error.Status)
+	service.AssertExpectations(t)
 }
 
 func TestHandler_HandleChangePassword(t *testing.T) {
@@ -585,8 +760,28 @@ func TestHandler_EdgeCases(t *testing.T) {
 
 	t.Run("missing content type", func(t *testing.T) {
 		service := &MockService{}
-		handler := &Handler{service: service}
-		service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), "user@example.com", "SecurePass123!").Return(nil)
+		identityStore := &MockIdentityStore{}
+		sessionManager := &MockSessionManager{}
+		handler := New(service, WithIdentityStore(identityStore), WithSessionManager(sessionManager))
+
+		identityID := uuid.New()
+		sessionID := uuid.New()
+		service.On("ValidatePassword", mock.Anything, "SecurePass123!", "user@example.com").Return(nil).Once()
+		identityStore.On("CreateIdentity", mock.Anything, map[string]interface{}{"email": "user@example.com"}).
+			Return(identityID, nil).Once()
+		service.On("Register", mock.Anything, identityID, "user@example.com", "SecurePass123!").Return(nil).Once()
+		sessionManager.On(
+			"Create",
+			mock.Anything,
+			identityID,
+			coresession.AuthMethodPassword,
+			mock.AnythingOfType("session.DeviceInfo"),
+		).Return(&coresession.Session{
+			ID:         sessionID,
+			IdentityID: identityID,
+			AAL:        coresession.AAL1,
+		}, nil).Once()
+		sessionManager.On("SetCookie", mock.Anything, mock.AnythingOfType("*session.Session")).Return().Once()
 
 		body := registerRequest("user@example.com", "SecurePass123!")
 		bodyBytes, _ := json.Marshal(body)
@@ -597,19 +792,85 @@ func TestHandler_EdgeCases(t *testing.T) {
 
 		handler.HandleRegistration(recorder, req)
 
-		// Should still work, JSON decoding doesn't strictly require Content-Type
-		// but let's verify the behavior
-		assert.True(t, recorder.Code == http.StatusBadRequest || recorder.Code == http.StatusCreated)
+		assert.Equal(t, http.StatusCreated, recorder.Code)
+		service.AssertExpectations(t)
+		identityStore.AssertExpectations(t)
+		sessionManager.AssertExpectations(t)
+	})
+
+	t.Run("change password accepts X-User-ID header", func(t *testing.T) {
+		service := &MockService{}
+		handler := &Handler{service: service}
+		identityID := uuid.New()
+
+		body := ChangePasswordRequest{
+			OldPassword: "oldpassword",
+			NewPassword: "newpassword",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		service.On("ChangePassword", mock.Anything, identityID, "oldpassword", "newpassword").Return(nil).Once()
+
+		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", identityID.String())
+		recorder := httptest.NewRecorder()
+
+		handler.HandleChangePassword(recorder, req)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		service.AssertExpectations(t)
+	})
+
+	t.Run("change password resolves identity from session context", func(t *testing.T) {
+		service := &MockService{}
+		handler := &Handler{service: service}
+		identityID := uuid.New()
+
+		body := ChangePasswordRequest{
+			OldPassword: "oldpassword",
+			NewPassword: "newpassword",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		service.On("ChangePassword", mock.Anything, identityID, "oldpassword", "newpassword").Return(nil).Once()
+
+		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(coresession.WithContext(req.Context(), &coresession.Context{IdentityID: identityID}))
+		recorder := httptest.NewRecorder()
+
+		handler.HandleChangePassword(recorder, req)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		service.AssertExpectations(t)
 	})
 }
 
 // Test concurrent request handling
 func TestHandler_Concurrency(t *testing.T) {
 	service := &MockService{}
-	handler := &Handler{service: service}
+	identityStore := &MockIdentityStore{}
+	sessionManager := &MockSessionManager{}
+	handler := New(service, WithIdentityStore(identityStore), WithSessionManager(sessionManager))
+
+	identityID := uuid.New()
+	sessionID := uuid.New()
 
 	// Setup mock for multiple concurrent calls
-	service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil).Times(10)
+	identityStore.On("CreateIdentity", mock.Anything, mock.Anything).Return(identityID, nil).Times(10)
+	service.On("ValidatePassword", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil).Times(10)
+	service.On("Register", mock.Anything, identityID, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil).Times(10)
+	sessionManager.On(
+		"Create",
+		mock.Anything,
+		identityID,
+		coresession.AuthMethodPassword,
+		mock.AnythingOfType("session.DeviceInfo"),
+	).Return(&coresession.Session{
+		ID:         sessionID,
+		IdentityID: identityID,
+		AAL:        coresession.AAL1,
+	}, nil).Times(10)
+	sessionManager.On("SetCookie", mock.Anything, mock.AnythingOfType("*session.Session")).Return().Times(10)
 
 	// Run 10 concurrent registration requests
 	done := make(chan bool, 10)
@@ -636,14 +897,34 @@ func TestHandler_Concurrency(t *testing.T) {
 	}
 
 	service.AssertExpectations(t)
+	identityStore.AssertExpectations(t)
+	sessionManager.AssertExpectations(t)
 }
 
 // Benchmark handler performance
 func BenchmarkHandleRegistration(b *testing.B) {
 	service := &MockService{}
-	handler := &Handler{service: service}
+	identityStore := &MockIdentityStore{}
+	sessionManager := &MockSessionManager{}
+	handler := New(service, WithIdentityStore(identityStore), WithSessionManager(sessionManager))
 
-	service.On("Register", mock.Anything, mock.AnythingOfType("uuid.UUID"), mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	identityID := uuid.New()
+	sessionID := uuid.New()
+	identityStore.On("CreateIdentity", mock.Anything, mock.Anything).Return(identityID, nil)
+	service.On("ValidatePassword", mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	service.On("Register", mock.Anything, identityID, mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
+	sessionManager.On(
+		"Create",
+		mock.Anything,
+		identityID,
+		coresession.AuthMethodPassword,
+		mock.AnythingOfType("session.DeviceInfo"),
+	).Return(&coresession.Session{
+		ID:         sessionID,
+		IdentityID: identityID,
+		AAL:        coresession.AAL1,
+	}, nil)
+	sessionManager.On("SetCookie", mock.Anything, mock.AnythingOfType("*session.Session")).Return()
 
 	body := registerRequest("user@example.com", "SecurePass123!")
 	bodyBytes, _ := json.Marshal(body)

@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/aegion/aegion/internal/platform/observability"
 )
 
 func TestCSRFProtectionSetsCookie(t *testing.T) {
@@ -171,7 +173,9 @@ func TestDevHeaders(t *testing.T) {
 }
 
 func TestRequestID(t *testing.T) {
+	var contextRequestID string
 	handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contextRequestID = observability.GetRequestIDForLogger(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -183,6 +187,9 @@ func TestRequestID(t *testing.T) {
 	responseID := rec.Header().Get("X-Request-ID")
 	if responseID == "" {
 		t.Error("Request ID not set in response header")
+	}
+	if contextRequestID != responseID {
+		t.Errorf("Expected observability request ID %s, got %s", responseID, contextRequestID)
 	}
 }
 

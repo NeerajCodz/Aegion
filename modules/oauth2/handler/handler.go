@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
@@ -11,6 +12,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/service/oidc"
 	"github.com/aegion/aegion/modules/oauth2/service/revocation"
 	"github.com/aegion/aegion/modules/oauth2/service/token"
+	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
 // OAuth2Handler handles all OAuth2 HTTP endpoints.
@@ -71,7 +73,8 @@ func (h *OAuth2Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) 
 
 	challenge, err := h.authzSvc.StartAuthorization(r.Context(), req)
 	if err != nil {
-		writeError(w, "invalid_request", err.Error(), http.StatusBadRequest)
+		code, description, status := mapAuthorizationError(err)
+		writeError(w, code, description, status)
 		return
 	}
 
@@ -89,6 +92,7 @@ func (h *OAuth2Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_request", "Failed to parse form", http.StatusBadRequest)
 		return
 	}
+	setNoStoreHeaders(w)
 
 	grantType := r.FormValue("grant_type")
 
@@ -122,7 +126,8 @@ func (h *OAuth2Handler) handleAuthorizationCodeGrant(w http.ResponseWriter, r *h
 
 	resp, err := h.tokenSvc.ExchangeAuthorizationCode(r.Context(), req)
 	if err != nil {
-		writeError(w, "invalid_grant", err.Error(), http.StatusBadRequest)
+		code, description, status := mapTokenGrantError(err)
+		writeTokenError(w, code, description, status)
 		return
 	}
 
@@ -142,7 +147,8 @@ func (h *OAuth2Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.R
 
 	resp, err := h.tokenSvc.RefreshAccessToken(r.Context(), req)
 	if err != nil {
-		writeError(w, "invalid_grant", err.Error(), http.StatusBadRequest)
+		code, description, status := mapTokenGrantError(err)
+		writeTokenError(w, code, description, status)
 		return
 	}
 
@@ -160,7 +166,8 @@ func (h *OAuth2Handler) handleClientCredentialsGrant(w http.ResponseWriter, r *h
 
 	resp, err := h.clientCredsSvc.IssueClientCredentials(r.Context(), req)
 	if err != nil {
-		writeError(w, "invalid_client", err.Error(), http.StatusUnauthorized)
+		code, description, status := mapClientCredentialsError(err)
+		writeTokenError(w, code, description, status)
 		return
 	}
 
@@ -199,18 +206,20 @@ func (h *OAuth2Handler) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Req
 }
 
 func (h *OAuth2Handler) handleJWTBearerGrant(w http.ResponseWriter, r *http.Request) {
-	clientID, _ := extractClientCredentials(r)
+	clientID, clientSecret := extractClientCredentials(r)
 
 	req := &grants.JWTBearerRequest{
-		GrantType: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-		Assertion: r.FormValue("assertion"),
-		Scope:     r.FormValue("scope"),
-		ClientID:  clientID,
+		GrantType:    "urn:ietf:params:oauth:grant-type:jwt-bearer",
+		Assertion:    r.FormValue("assertion"),
+		Scope:        r.FormValue("scope"),
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
 	}
 
 	resp, err := h.jwtBearerSvc.IssueJWTBearer(r.Context(), req)
 	if err != nil {
-		writeError(w, "invalid_grant", err.Error(), http.StatusBadRequest)
+		code, description, status := mapJWTBearerError(err)
+		writeTokenError(w, code, description, status)
 		return
 	}
 
@@ -228,6 +237,12 @@ func (h *OAuth2Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_request", "Failed to parse form", http.StatusBadRequest)
 		return
 	}
+	setNoStoreHeaders(w)
+
+	if r.FormValue("token") == "" {
+		writeError(w, "invalid_request", "token is required", http.StatusBadRequest)
+		return
+	}
 
 	clientID, clientSecret := extractClientCredentials(r)
 
@@ -239,7 +254,12 @@ func (h *OAuth2Handler) HandleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.revocationSvc.RevokeToken(r.Context(), req); err != nil {
-		writeError(w, "invalid_client", err.Error(), http.StatusUnauthorized)
+		if errors.Is(err, revocation.ErrInvalidClient) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="oauth2", error="invalid_client"`)
+			writeError(w, "invalid_client", "Client authentication failed", http.StatusUnauthorized)
+			return
+		}
+		writeError(w, "server_error", "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -265,7 +285,11 @@ func (h *OAuth2Handler) HandleDeviceAuthorization(w http.ResponseWriter, r *http
 
 	resp, err := h.deviceSvc.RequestDeviceAuthorization(r.Context(), req)
 	if err != nil {
-		writeError(w, "invalid_client", err.Error(), http.StatusBadRequest)
+		if errors.Is(err, device.ErrInvalidClient) {
+			writeError(w, "invalid_client", "Client authentication failed", http.StatusUnauthorized)
+			return
+		}
+		writeError(w, "invalid_request", "Invalid device authorization request", http.StatusBadRequest)
 		return
 	}
 
@@ -281,7 +305,7 @@ func (h *OAuth2Handler) HandleDiscovery(w http.ResponseWriter, r *http.Request) 
 
 	data, err := h.discoverySvc.MarshalDiscoveryDocument(r.Context())
 	if err != nil {
-		writeError(w, "server_error", err.Error(), http.StatusInternalServerError)
+		writeError(w, "server_error", "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -299,7 +323,7 @@ func (h *OAuth2Handler) HandleJWKS(w http.ResponseWriter, r *http.Request) {
 
 	data, err := h.jwksSvc.MarshalJWKS(r.Context())
 	if err != nil {
-		writeError(w, "server_error", err.Error(), http.StatusInternalServerError)
+		writeError(w, "server_error", "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -331,7 +355,7 @@ func (h *OAuth2Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 		case oidc.ErrInsufficientScope:
 			writeError(w, "insufficient_scope", "openid scope required", http.StatusForbidden)
 		default:
-			writeError(w, "server_error", err.Error(), http.StatusInternalServerError)
+			writeError(w, "server_error", "Internal server error", http.StatusInternalServerError)
 		}
 		return
 	}
@@ -356,6 +380,19 @@ func writeError(w http.ResponseWriter, code, description string, status int) {
 	})
 }
 
+func writeTokenError(w http.ResponseWriter, code, description string, status int) {
+	setNoStoreHeaders(w)
+	if code == "invalid_client" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="oauth2", error="invalid_client"`)
+	}
+	writeError(w, code, description, status)
+}
+
+func setNoStoreHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+}
+
 func ptrIfNotEmpty(s string) *string {
 	if s == "" {
 		return nil
@@ -375,4 +412,64 @@ func extractClientCredentials(r *http.Request) (clientID, clientSecret string) {
 
 	// Fall back to form parameters
 	return r.FormValue("client_id"), r.FormValue("client_secret")
+}
+
+func mapAuthorizationError(err error) (code, description string, status int) {
+	switch {
+	case errors.Is(err, authorization.ErrUnauthorizedClient):
+		return "unauthorized_client", "Client is not authorized for this flow", http.StatusBadRequest
+	case errors.Is(err, authorization.ErrUnsupportedResponseType):
+		return "unsupported_response_type", "Response type is not supported", http.StatusBadRequest
+	case errors.Is(err, authorization.ErrInvalidScope):
+		return "invalid_scope", "Requested scope is invalid", http.StatusBadRequest
+	case errors.Is(err, authorization.ErrInvalidRequest), errors.Is(err, authorization.ErrInvalidPKCE), errors.Is(err, authorization.ErrPKCERequired):
+		return "invalid_request", "Invalid authorization request", http.StatusBadRequest
+	default:
+		return "server_error", "Internal server error", http.StatusInternalServerError
+	}
+}
+
+func mapTokenGrantError(err error) (code, description string, status int) {
+	switch {
+	case errors.Is(err, token.ErrInvalidClient):
+		return "invalid_client", "Client authentication failed", http.StatusUnauthorized
+	case errors.Is(err, token.ErrUnauthorizedClient):
+		return "unauthorized_client", "Client is not authorized for this grant type", http.StatusBadRequest
+	case errors.Is(err, token.ErrInvalidScope):
+		return "invalid_scope", "Requested scope is invalid", http.StatusBadRequest
+	case errors.Is(err, token.ErrInvalidRequest):
+		return "invalid_request", "Invalid token request", http.StatusBadRequest
+	case errors.Is(err, token.ErrUnsupportedGrantType):
+		return "unsupported_grant_type", "Grant type not supported", http.StatusBadRequest
+	case errors.Is(err, token.ErrInvalidGrant), errors.Is(err, store.ErrPKCERequired), errors.Is(err, store.ErrPKCEMismatch), errors.Is(err, store.ErrFamilyInvalidated):
+		return "invalid_grant", "Invalid grant", http.StatusBadRequest
+	default:
+		return "server_error", "Internal server error", http.StatusInternalServerError
+	}
+}
+
+func mapClientCredentialsError(err error) (code, description string, status int) {
+	switch {
+	case errors.Is(err, grants.ErrInvalidClient):
+		return "invalid_client", "Client authentication failed", http.StatusUnauthorized
+	case errors.Is(err, grants.ErrUnauthorizedClient):
+		return "unauthorized_client", "Client is not authorized for this grant type", http.StatusBadRequest
+	case errors.Is(err, grants.ErrInvalidScope):
+		return "invalid_scope", "Requested scope is invalid", http.StatusBadRequest
+	default:
+		return "server_error", "Internal server error", http.StatusInternalServerError
+	}
+}
+
+func mapJWTBearerError(err error) (code, description string, status int) {
+	switch {
+	case errors.Is(err, grants.ErrInvalidClient):
+		return "invalid_client", "Client authentication failed", http.StatusUnauthorized
+	case errors.Is(err, grants.ErrUnauthorizedClient):
+		return "unauthorized_client", "Client is not authorized for this grant type", http.StatusBadRequest
+	case errors.Is(err, grants.ErrInvalidScope):
+		return "invalid_scope", "Requested scope is invalid", http.StatusBadRequest
+	default:
+		return "invalid_grant", "Invalid JWT bearer assertion", http.StatusBadRequest
+	}
 }

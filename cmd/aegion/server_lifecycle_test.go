@@ -12,6 +12,7 @@ import (
 
 	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aegion/aegion/core/flows"
@@ -127,14 +128,48 @@ func TestServerBootstrapGettersAndShutdown(t *testing.T) {
 	s.flowService = flows.NewService(newRouteFlowStore(), flows.DefaultConfig())
 	s.router = SetupRoutes(s)
 
+	origBootstrap := ensureBootstrapAdminOperator
+	t.Cleanup(func() {
+		ensureBootstrapAdminOperator = origBootstrap
+	})
+
+	var (
+		bootstrapCalls   int
+		capturedEmail    string
+		capturedPassword string
+	)
+	ensureBootstrapAdminOperator = func(ctx context.Context, db *database.DB, email, password string) (bootstrapAdminOutcome, error) {
+		bootstrapCalls++
+		capturedEmail = email
+		capturedPassword = password
+		return bootstrapAdminOutcome{
+			IdentityID:      uuid.New(),
+			OperatorID:      uuid.New(),
+			CreatedIdentity: true,
+			CreatedOperator: true,
+		}, nil
+	}
+
 	if err := s.bootstrapAdmin(context.Background()); err != nil {
 		t.Fatalf("bootstrapAdmin without credentials should not fail: %v", err)
 	}
+	if bootstrapCalls != 0 {
+		t.Fatalf("bootstrap should not run without configured credentials")
+	}
 
-	s.cfg.Operator.Email = "admin@example.com"
-	s.cfg.Operator.Password = "test-password"
+	s.cfg.Operator.Email = "Admin@Example.com "
+	s.cfg.Operator.Password = " test-password "
 	if err := s.bootstrapAdmin(context.Background()); err != nil {
 		t.Fatalf("bootstrapAdmin with credentials should not fail: %v", err)
+	}
+	if bootstrapCalls != 1 {
+		t.Fatalf("expected bootstrap handler call, got %d", bootstrapCalls)
+	}
+	if capturedEmail != "admin@example.com" {
+		t.Fatalf("expected normalized email admin@example.com, got %q", capturedEmail)
+	}
+	if capturedPassword != "test-password" {
+		t.Fatalf("expected trimmed password, got %q", capturedPassword)
 	}
 
 	if s.Handler() == nil {
@@ -152,6 +187,26 @@ func TestServerBootstrapGettersAndShutdown(t *testing.T) {
 
 	if err := s.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutdown should not fail: %v", err)
+	}
+}
+
+func TestBootstrapAdmin_PropagatesProvisioningError(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.Operator.Email = "admin@example.com"
+	s.cfg.Operator.Password = "password"
+
+	origBootstrap := ensureBootstrapAdminOperator
+	t.Cleanup(func() {
+		ensureBootstrapAdminOperator = origBootstrap
+	})
+
+	ensureBootstrapAdminOperator = func(ctx context.Context, db *database.DB, email, password string) (bootstrapAdminOutcome, error) {
+		return bootstrapAdminOutcome{}, errors.New("bootstrap failed")
+	}
+
+	err := s.bootstrapAdmin(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "bootstrap failed") {
+		t.Fatalf("expected bootstrap error to be returned, got %v", err)
 	}
 }
 

@@ -304,9 +304,10 @@ func TestSetupLogger(t *testing.T) {
 	}
 }
 
-func TestRunMigrations_NoOp(t *testing.T) {
-	if err := runMigrations(t.Context(), nil); err != nil {
-		t.Fatalf("runMigrations should currently be no-op, got error: %v", err)
+func TestRunMigrations_RequiresDatabasePool(t *testing.T) {
+	err := runMigrations(t.Context(), nil)
+	if err == nil || !strings.Contains(err.Error(), "database pool is nil") {
+		t.Fatalf("expected nil-db error, got %v", err)
 	}
 }
 

@@ -8,18 +8,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 
+	coresession "github.com/aegion/aegion/core/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/aegion/aegion/modules/magic_link/service"
+	"github.com/aegion/aegion/modules/magic_link/store"
 )
 
-// MockService implements the service interface for testing
+// MockService implements the handler service interface for testing.
 type MockService struct {
 	mock.Mock
 }
@@ -47,690 +48,494 @@ func (m *MockService) VerifyMagicLink(ctx context.Context, token string) (string
 	return args.String(0), id, args.Error(2)
 }
 
-func (m *MockService) SendVerificationCode(ctx context.Context, email, identityID string) error {
+func (m *MockService) VerifyMagicLinkForType(ctx context.Context, token string, expectedType store.CodeType) (string, *uuid.UUID, error) {
+	args := m.Called(ctx, token, expectedType)
+	var id *uuid.UUID
+	if args.Get(1) != nil {
+		id = args.Get(1).(*uuid.UUID)
+	}
+	return args.String(0), id, args.Error(2)
+}
+
+func (m *MockService) SendVerificationCode(ctx context.Context, email string, identityID uuid.UUID) error {
 	args := m.Called(ctx, email, identityID)
 	return args.Error(0)
 }
 
-func (m *MockService) VerifyVerificationCode(ctx context.Context, email, otpCode string) (string, string, error) {
+func (m *MockService) VerifyVerificationCode(ctx context.Context, email, otpCode string) (*uuid.UUID, error) {
 	args := m.Called(ctx, email, otpCode)
-	return args.String(0), args.String(1), args.Error(2)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*uuid.UUID), args.Error(1)
 }
 
-func (m *MockService) SendRecoveryCode(ctx context.Context, email, identityID string) error {
+func (m *MockService) SendRecoveryCodeIfIdentityExists(ctx context.Context, email string, identityID *uuid.UUID) error {
 	args := m.Called(ctx, email, identityID)
 	return args.Error(0)
 }
 
-func (m *MockService) VerifyRecoveryCode(ctx context.Context, email, otpCode string) (string, string, error) {
+func (m *MockService) VerifyRecoveryCode(ctx context.Context, email, otpCode string) (*uuid.UUID, error) {
 	args := m.Called(ctx, email, otpCode)
-	return args.String(0), args.String(1), args.Error(2)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*uuid.UUID), args.Error(1)
 }
 
-func (m *MockService) Cleanup(ctx context.Context) error {
-	args := m.Called(ctx)
+type mockIdentityStore struct {
+	mock.Mock
+}
+
+func (m *mockIdentityStore) GetIdentityByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
+	args := m.Called(ctx, email)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*uuid.UUID), args.Error(1)
+}
+
+func (m *mockIdentityStore) MarkEmailVerified(ctx context.Context, identityID uuid.UUID, email string) error {
+	args := m.Called(ctx, identityID, email)
 	return args.Error(0)
 }
 
-// Service errors for testing
+type mockSessionManager struct {
+	mock.Mock
+}
+
+func (m *mockSessionManager) Create(ctx context.Context, identityID uuid.UUID, method coresession.AuthMethod, device coresession.DeviceInfo) (*coresession.Session, error) {
+	args := m.Called(ctx, identityID, method, device)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*coresession.Session), args.Error(1)
+}
+
+func (m *mockSessionManager) SetCookie(w http.ResponseWriter, session *coresession.Session) {
+	m.Called(w, session)
+}
+
+// Service errors for testing.
 var (
 	ErrInvalidCode    = service.ErrInvalidCode
 	ErrRateLimited    = service.ErrRateLimited
 	ErrRecipientEmpty = service.ErrRecipientEmpty
 )
 
-func TestHandler_HandleSendLoginCode(t *testing.T) {
-	tests := []struct {
-		name           string
-		body           interface{}
-		setupMocks     func(*MockService)
-		expectedStatus int
-		expectedError  string
-	}{
-		{
-			name: "successful send",
-			body: SendCodeRequest{
-				Email: "user@example.com",
-			},
-			setupMocks: func(service *MockService) {
-				service.On("SendLoginCode", mock.Anything, "user@example.com").Return(nil)
-			},
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name:           "missing email",
-			body:           SendCodeRequest{},
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_email",
-		},
-		{
-			name:           "invalid JSON",
-			body:           "invalid json",
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "invalid_request",
-		},
-		{
-			name: "rate limited",
-			body: SendCodeRequest{
-				Email: "spammer@example.com",
-			},
-			setupMocks: func(service *MockService) {
-				service.On("SendLoginCode", mock.Anything, "spammer@example.com").Return(ErrRateLimited)
-			},
-			expectedStatus: http.StatusTooManyRequests,
-			expectedError:  "rate_limited",
-		},
-		{
-			name: "internal server error",
-			body: SendCodeRequest{
-				Email: "user@example.com",
-			},
-			setupMocks: func(service *MockService) {
-				service.On("SendLoginCode", mock.Anything, "user@example.com").Return(errors.New("database error"))
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedError:  "internal_error",
-		},
-		{
-			name: "empty email is rejected",
-			body: SendCodeRequest{
-				Email: "",
-			},
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_email",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service := &MockService{}
-			handler := &Handler{service: service}
-
-			tt.setupMocks(service)
-
-			var body []byte
-			var err error
-			if str, ok := tt.body.(string); ok {
-				body = []byte(str)
-			} else {
-				body, err = json.Marshal(tt.body)
-				require.NoError(t, err)
-			}
-
-			req := httptest.NewRequest(http.MethodPost, "/send-login-code", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-
-			handler.HandleSendLoginCode(recorder, req)
-
-			assert.Equal(t, tt.expectedStatus, recorder.Code)
-
-			if tt.expectedError != "" {
-				var response ErrorResponse
-				err := json.NewDecoder(recorder.Body).Decode(&response)
-				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Status)
-			}
-
-			service.AssertExpectations(t)
-		})
-	}
+func mustJSON(t *testing.T, v interface{}) *bytes.Reader {
+	t.Helper()
+	body, err := json.Marshal(v)
+	require.NoError(t, err)
+	return bytes.NewReader(body)
 }
 
-func TestHandler_HandleVerifyCode(t *testing.T) {
-	identityID := uuid.New()
+func decodeError(t *testing.T, rec *httptest.ResponseRecorder) ErrorResponse {
+	t.Helper()
+	var resp ErrorResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	return resp
+}
 
-	tests := []struct {
-		name           string
-		body           interface{}
-		setupMocks     func(*MockService)
-		expectedStatus int
-		expectedError  string
-		expectSession  bool
-	}{
-		{
-			name: "successful verification",
-			body: VerifyCodeRequest{
-				Email: "user@example.com",
-				Code:  "123456",
-			},
-			setupMocks: func(service *MockService) {
-				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("user@example.com", &identityID, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectSession:  true,
-		},
-		{
-			name: "invalid code",
-			body: VerifyCodeRequest{
-				Email: "user@example.com",
-				Code:  "wrong123",
-			},
-			setupMocks: func(service *MockService) {
-				service.On("VerifyCode", mock.Anything, "user@example.com", "wrong123").Return("", nil, ErrInvalidCode)
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "invalid_code",
-		},
-		{
-			name:           "invalid JSON",
-			body:           "invalid json",
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "invalid_request",
-		},
-		{
-			name: "missing email",
-			body: VerifyCodeRequest{
-				Code: "123456",
-			},
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_fields",
-		},
-		{
-			name: "missing code",
-			body: VerifyCodeRequest{
-				Email: "user@example.com",
-			},
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_fields",
-		},
-		{
-			name: "verification returns empty identity",
-			body: VerifyCodeRequest{
-				Email: "user@example.com",
-				Code:  "123456",
-			},
-			setupMocks: func(service *MockService) {
-				// No identity associated with code (new registration flow)
-				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("user@example.com", nil, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectSession:  false,
-		},
-		{
-			name: "internal server error",
-			body: VerifyCodeRequest{
-				Email: "user@example.com",
-				Code:  "123456",
-			},
-			setupMocks: func(service *MockService) {
-				service.On("VerifyCode", mock.Anything, "user@example.com", "123456").Return("", nil, errors.New("database error"))
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedError:  "internal_error",
-		},
-	}
+func decodeSuccess(t *testing.T, rec *httptest.ResponseRecorder) SuccessResponse {
+	t.Helper()
+	var resp SuccessResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	return resp
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service := &MockService{}
-			handler := &Handler{service: service}
+func TestHandler_HandleSendLoginCode(t *testing.T) {
+	t.Run("success returns enumeration-safe response", func(t *testing.T) {
+		svc := &MockService{}
+		svc.On("SendLoginCode", mock.Anything, "user@example.com").Return(nil).Once()
 
-			tt.setupMocks(service)
+		h := New(svc)
+		req := httptest.NewRequest(http.MethodPost, "/login", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		rec := httptest.NewRecorder()
 
-			var body []byte
-			var err error
-			if str, ok := tt.body.(string); ok {
-				body = []byte(str)
-			} else {
-				body, err = json.Marshal(tt.body)
-				require.NoError(t, err)
-			}
+		h.HandleSendLoginCode(rec, req)
 
-			req := httptest.NewRequest(http.MethodPost, "/verify-code", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Contains(t, resp.Message, "If an account exists")
+		svc.AssertExpectations(t)
+	})
 
-			handler.HandleVerifyCode(recorder, req)
+	t.Run("rate limited", func(t *testing.T) {
+		svc := &MockService{}
+		svc.On("SendLoginCode", mock.Anything, "user@example.com").Return(ErrRateLimited).Once()
 
-			assert.Equal(t, tt.expectedStatus, recorder.Code)
+		h := New(svc)
+		req := httptest.NewRequest(http.MethodPost, "/login", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		rec := httptest.NewRecorder()
 
-			if tt.expectedError != "" {
-				var response ErrorResponse
-				err := json.NewDecoder(recorder.Body).Decode(&response)
-				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Status)
-			} else if recorder.Code == http.StatusOK {
-				var response SuccessResponse
-				err := json.NewDecoder(recorder.Body).Decode(&response)
-				require.NoError(t, err)
+		h.HandleSendLoginCode(rec, req)
 
-				if tt.expectSession {
-					assert.NotNil(t, response.Session)
-					assert.Equal(t, identityID.String(), response.Session.IdentityID)
-				} else {
-					assert.Contains(t, response.Message, "Code verified for")
-				}
-			}
+		assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+		errResp := decodeError(t, rec)
+		assert.Equal(t, "rate_limited", errResp.Error.Status)
+		svc.AssertExpectations(t)
+	})
 
-			service.AssertExpectations(t)
-		})
-	}
+	t.Run("missing email", func(t *testing.T) {
+		h := New(&MockService{})
+		req := httptest.NewRequest(http.MethodPost, "/login", mustJSON(t, SendCodeRequest{}))
+		rec := httptest.NewRecorder()
+
+		h.HandleSendLoginCode(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		errResp := decodeError(t, rec)
+		assert.Equal(t, "missing_email", errResp.Error.Status)
+	})
+}
+
+func TestHandler_HandleVerifyCode_LoginFlow(t *testing.T) {
+	t.Run("creates session when identity is available", func(t *testing.T) {
+		identityID := uuid.New()
+		sessionID := uuid.New()
+		svc := &MockService{}
+		sessions := &mockSessionManager{}
+
+		svc.On("VerifyCode", mock.Anything, "user@example.com", "123456").
+			Return("user@example.com", &identityID, nil).Once()
+		sessions.On(
+			"Create",
+			mock.Anything,
+			identityID,
+			coresession.AuthMethodMagicLink,
+			mock.MatchedBy(func(device coresession.DeviceInfo) bool {
+				return device.UserAgent == "test-agent" && device.IPAddress == "203.0.113.50"
+			}),
+		).Return(&coresession.Session{
+			ID:         sessionID,
+			IdentityID: identityID,
+			AAL:        coresession.AAL1,
+		}, nil).Once()
+		sessions.On("SetCookie", mock.Anything, mock.MatchedBy(func(session *coresession.Session) bool {
+			return session != nil && session.ID == sessionID
+		})).Return().Once()
+
+		h := New(svc, WithSessionManager(sessions))
+		req := httptest.NewRequest(http.MethodPost, "/self-service/login/methods/link/verify", mustJSON(t, VerifyCodeRequest{
+			Email: "user@example.com",
+			Code:  "123456",
+		}))
+		req.Header.Set("User-Agent", "test-agent")
+		req.Header.Set("X-Forwarded-For", "203.0.113.50, 10.0.0.2")
+		rec := httptest.NewRecorder()
+
+		h.HandleVerifyCode(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Equal(t, identityID.String(), resp.Session.IdentityID)
+		assert.Equal(t, sessionID.String(), resp.Session.ID)
+		assert.Equal(t, string(coresession.AAL1), resp.Session.AAL)
+		svc.AssertExpectations(t)
+		sessions.AssertExpectations(t)
+	})
+
+	t.Run("resolves identity via core integration when code has no identity", func(t *testing.T) {
+		resolvedID := uuid.New()
+		svc := &MockService{}
+		identityStore := &mockIdentityStore{}
+
+		svc.On("VerifyCode", mock.Anything, "user@example.com", "654321").
+			Return("user@example.com", (*uuid.UUID)(nil), nil).Once()
+		identityStore.On("GetIdentityByEmail", mock.Anything, "user@example.com").
+			Return(&resolvedID, nil).Once()
+
+		h := New(svc, WithIdentityStore(identityStore))
+		req := httptest.NewRequest(http.MethodPost, "/self-service/login/methods/link/verify", mustJSON(t, VerifyCodeRequest{
+			Email: "user@example.com",
+			Code:  "654321",
+		}))
+		rec := httptest.NewRecorder()
+
+		h.HandleVerifyCode(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Equal(t, resolvedID.String(), resp.Session.IdentityID)
+		assert.Equal(t, string(coresession.AAL1), resp.Session.AAL)
+		svc.AssertExpectations(t)
+		identityStore.AssertExpectations(t)
+	})
+
+	t.Run("unknown identity remains enumeration-safe", func(t *testing.T) {
+		svc := &MockService{}
+		identityStore := &mockIdentityStore{}
+
+		svc.On("VerifyCode", mock.Anything, "missing@example.com", "222222").
+			Return("missing@example.com", (*uuid.UUID)(nil), nil).Once()
+		identityStore.On("GetIdentityByEmail", mock.Anything, "missing@example.com").
+			Return((*uuid.UUID)(nil), nil).Once()
+
+		h := New(svc, WithIdentityStore(identityStore))
+		req := httptest.NewRequest(http.MethodPost, "/self-service/login/methods/link/verify", mustJSON(t, VerifyCodeRequest{
+			Email: "missing@example.com",
+			Code:  "222222",
+		}))
+		rec := httptest.NewRecorder()
+
+		h.HandleVerifyCode(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Empty(t, resp.Session.IdentityID)
+		assert.Contains(t, resp.Message, "verified")
+		svc.AssertExpectations(t)
+		identityStore.AssertExpectations(t)
+	})
+}
+
+func TestHandler_HandleVerifyCode_FlowSpecificPaths(t *testing.T) {
+	t.Run("verification path marks email verified", func(t *testing.T) {
+		identityID := uuid.New()
+		svc := &MockService{}
+		identityStore := &mockIdentityStore{}
+
+		svc.On("VerifyVerificationCode", mock.Anything, "user@example.com", "111111").
+			Return(&identityID, nil).Once()
+		identityStore.On("MarkEmailVerified", mock.Anything, identityID, "user@example.com").
+			Return(nil).Once()
+
+		h := New(svc, WithIdentityStore(identityStore))
+		req := httptest.NewRequest(http.MethodPost, "/self-service/verification/methods/link/verify", mustJSON(t, VerifyCodeRequest{
+			Email: "user@example.com",
+			Code:  "111111",
+		}))
+		rec := httptest.NewRecorder()
+
+		h.HandleVerifyCode(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Equal(t, "Verification complete.", resp.Message)
+		svc.AssertExpectations(t)
+		identityStore.AssertExpectations(t)
+	})
+
+	t.Run("recovery path creates session", func(t *testing.T) {
+		identityID := uuid.New()
+		sessionID := uuid.New()
+		svc := &MockService{}
+		sessions := &mockSessionManager{}
+
+		svc.On("VerifyRecoveryCode", mock.Anything, "recover@example.com", "333333").
+			Return(&identityID, nil).Once()
+		sessions.On("Create", mock.Anything, identityID, coresession.AuthMethodMagicLink, mock.Anything).
+			Return(&coresession.Session{
+				ID:         sessionID,
+				IdentityID: identityID,
+				AAL:        coresession.AAL1,
+			}, nil).Once()
+		sessions.On("SetCookie", mock.Anything, mock.Anything).Return().Once()
+
+		h := New(svc, WithSessionManager(sessions))
+		req := httptest.NewRequest(http.MethodPost, "/self-service/recovery/methods/link/verify", mustJSON(t, VerifyCodeRequest{
+			Email: "recover@example.com",
+			Code:  "333333",
+		}))
+		rec := httptest.NewRecorder()
+
+		h.HandleVerifyCode(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Equal(t, sessionID.String(), resp.Session.ID)
+		assert.Equal(t, identityID.String(), resp.Session.IdentityID)
+		svc.AssertExpectations(t)
+		sessions.AssertExpectations(t)
+	})
 }
 
 func TestHandler_HandleVerifyMagicLink(t *testing.T) {
-	identityID := uuid.New()
+	t.Run("login token verification uses login verifier", func(t *testing.T) {
+		identityID := uuid.New()
+		svc := &MockService{}
+		svc.On("VerifyMagicLink", mock.Anything, "login-token").Return("user@example.com", &identityID, nil).Once()
 
-	tests := []struct {
-		name           string
-		token          string
-		setupMocks     func(*MockService)
-		expectedStatus int
-		expectedError  string
-		expectSession  bool
-	}{
-		{
-			name:  "successful verification",
-			token: "valid-token-123",
-			setupMocks: func(service *MockService) {
-				service.On("VerifyMagicLink", mock.Anything, "valid-token-123").Return("user@example.com", &identityID, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectSession:  true,
-		},
-		{
-			name:  "invalid token",
-			token: "invalid-token",
-			setupMocks: func(service *MockService) {
-				service.On("VerifyMagicLink", mock.Anything, "invalid-token").Return("", nil, ErrInvalidCode)
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "invalid_code",
-		},
-		{
-			name:           "missing token",
-			token:          "",
-			setupMocks:     func(service *MockService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "missing_token",
-		},
-		{
-			name:  "internal server error",
-			token: "valid-token-123",
-			setupMocks: func(service *MockService) {
-				service.On("VerifyMagicLink", mock.Anything, "valid-token-123").Return("", nil, errors.New("database error"))
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedError:  "internal_error",
-		},
-	}
+		h := New(svc)
+		req := httptest.NewRequest(http.MethodGet, "/self-service/login/methods/link/verify?token=login-token", nil)
+		rec := httptest.NewRecorder()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service := &MockService{}
-			handler := &Handler{service: service}
+		h.HandleVerifyMagicLink(rec, req)
 
-			tt.setupMocks(service)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Equal(t, identityID.String(), resp.Session.IdentityID)
+		svc.AssertExpectations(t)
+	})
 
-			// Build URL with query parameter
-			requestURL := "/verify-magic-link"
-			if tt.token != "" {
-				requestURL += "?token=" + url.QueryEscape(tt.token)
-			}
+	t.Run("verification token enforces verification flow type", func(t *testing.T) {
+		identityID := uuid.New()
+		svc := &MockService{}
+		identityStore := &mockIdentityStore{}
+		svc.On("VerifyMagicLinkForType", mock.Anything, "verify-token", store.CodeTypeVerification).
+			Return("user@example.com", &identityID, nil).Once()
+		identityStore.On("MarkEmailVerified", mock.Anything, identityID, "user@example.com").
+			Return(nil).Once()
 
-			req := httptest.NewRequest(http.MethodGet, requestURL, nil)
-			recorder := httptest.NewRecorder()
+		h := New(svc, WithIdentityStore(identityStore))
+		req := httptest.NewRequest(http.MethodGet, "/self-service/verification/methods/link/verify?token=verify-token", nil)
+		rec := httptest.NewRecorder()
 
-			handler.HandleVerifyMagicLink(recorder, req)
+		h.HandleVerifyMagicLink(rec, req)
 
-			assert.Equal(t, tt.expectedStatus, recorder.Code)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Equal(t, "Verification complete.", resp.Message)
+		svc.AssertExpectations(t)
+		identityStore.AssertExpectations(t)
+	})
 
-			if tt.expectedError != "" {
-				var response ErrorResponse
-				err := json.NewDecoder(recorder.Body).Decode(&response)
-				require.NoError(t, err)
-				assert.Equal(t, tt.expectedError, response.Error.Status)
-			} else if recorder.Code == http.StatusOK {
-				var response SuccessResponse
-				err := json.NewDecoder(recorder.Body).Decode(&response)
-				require.NoError(t, err)
+	t.Run("missing token", func(t *testing.T) {
+		h := New(&MockService{})
+		req := httptest.NewRequest(http.MethodGet, "/verify", nil)
+		rec := httptest.NewRecorder()
 
-				if tt.expectSession {
-					assert.NotNil(t, response.Session)
-					assert.Equal(t, identityID.String(), response.Session.IdentityID)
-				}
-			}
+		h.HandleVerifyMagicLink(rec, req)
 
-			service.AssertExpectations(t)
-		})
-	}
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		errResp := decodeError(t, rec)
+		assert.Equal(t, "missing_token", errResp.Error.Status)
+	})
 }
 
 func TestHandler_HandleSendVerificationCode(t *testing.T) {
-	// Note: Based on the original analysis, this handler is not implemented (placeholder)
-	// This test verifies that it returns an appropriate not implemented response
+	t.Run("requires active session identity header", func(t *testing.T) {
+		h := New(&MockService{})
+		req := httptest.NewRequest(http.MethodPost, "/verification/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		rec := httptest.NewRecorder()
 
-	service := &MockService{}
-	handler := &Handler{service: service}
+		h.HandleSendVerificationCode(rec, req)
 
-	body := SendCodeRequest{
-		Email: "user@example.com",
-	}
-	bodyBytes, _ := json.Marshal(body)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		errResp := decodeError(t, rec)
+		assert.Equal(t, "unauthorized", errResp.Error.Status)
+	})
 
-	req := httptest.NewRequest(http.MethodPost, "/send-verification-code", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
+	t.Run("invalid identity header", func(t *testing.T) {
+		h := New(&MockService{})
+		req := httptest.NewRequest(http.MethodPost, "/verification/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		req.Header.Set("X-User-ID", "not-a-uuid")
+		rec := httptest.NewRecorder()
 
-	handler.HandleSendVerificationCode(recorder, req)
+		h.HandleSendVerificationCode(rec, req)
 
-	// Should return not implemented or similar status
-	// The exact implementation depends on the actual handler
-	assert.True(t, recorder.Code >= 400) // Some error status expected
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		identityID := uuid.New()
+		svc := &MockService{}
+		svc.On("SendVerificationCode", mock.Anything, "user@example.com", identityID).Return(nil).Once()
+
+		h := New(svc)
+		req := httptest.NewRequest(http.MethodPost, "/verification/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		req.Header.Set("X-User-ID", identityID.String())
+		rec := httptest.NewRecorder()
+
+		h.HandleSendVerificationCode(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Contains(t, resp.Message, "verification")
+		svc.AssertExpectations(t)
+	})
 }
 
 func TestHandler_HandleSendRecoveryCode(t *testing.T) {
-	// Note: Based on the original analysis, this is a placeholder implementation
-	// This test verifies basic structure
+	t.Run("unknown identity still returns success", func(t *testing.T) {
+		svc := &MockService{}
+		identityStore := &mockIdentityStore{}
 
-	service := &MockService{}
-	handler := &Handler{service: service}
+		identityStore.On("GetIdentityByEmail", mock.Anything, "missing@example.com").
+			Return((*uuid.UUID)(nil), nil).Once()
+		svc.On("SendRecoveryCodeIfIdentityExists", mock.Anything, "missing@example.com", (*uuid.UUID)(nil)).
+			Return(nil).Once()
 
-	body := SendCodeRequest{
-		Email: "user@example.com",
-	}
-	bodyBytes, _ := json.Marshal(body)
+		h := New(svc, WithIdentityStore(identityStore))
+		req := httptest.NewRequest(http.MethodPost, "/recovery/send", mustJSON(t, SendCodeRequest{Email: "missing@example.com"}))
+		rec := httptest.NewRecorder()
 
-	req := httptest.NewRequest(http.MethodPost, "/send-recovery-code", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
+		h.HandleSendRecoveryCode(rec, req)
 
-	handler.HandleSendRecoveryCode(recorder, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		resp := decodeSuccess(t, rec)
+		assert.Contains(t, resp.Message, "If an account exists")
+		svc.AssertExpectations(t)
+		identityStore.AssertExpectations(t)
+	})
 
-	// Should return appropriate status based on implementation
-	assert.True(t, recorder.Code > 0) // Some response expected
+	t.Run("rate limited identity recovery request", func(t *testing.T) {
+		identityID := uuid.New()
+		svc := &MockService{}
+		identityStore := &mockIdentityStore{}
+
+		identityStore.On("GetIdentityByEmail", mock.Anything, "user@example.com").
+			Return(&identityID, nil).Once()
+		svc.On("SendRecoveryCodeIfIdentityExists", mock.Anything, "user@example.com", &identityID).
+			Return(ErrRateLimited).Once()
+
+		h := New(svc, WithIdentityStore(identityStore))
+		req := httptest.NewRequest(http.MethodPost, "/recovery/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		rec := httptest.NewRecorder()
+
+		h.HandleSendRecoveryCode(rec, req)
+
+		assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+		errResp := decodeError(t, rec)
+		assert.Equal(t, "rate_limited", errResp.Error.Status)
+		svc.AssertExpectations(t)
+		identityStore.AssertExpectations(t)
+	})
 }
 
 func TestHandler_ErrorMapping(t *testing.T) {
-	tests := []struct {
-		name           string
-		err            error
-		expectedStatus int
-		expectedCode   string
-	}{
-		{
-			name:           "invalid code",
-			err:            ErrInvalidCode,
-			expectedStatus: http.StatusBadRequest,
-			expectedCode:   "invalid_code",
-		},
-		{
-			name:           "rate limited",
-			err:            ErrRateLimited,
-			expectedStatus: http.StatusTooManyRequests,
-			expectedCode:   "rate_limited",
-		},
-		{
-			name:           "recipient empty",
-			err:            ErrRecipientEmpty,
-			expectedStatus: http.StatusBadRequest,
-			expectedCode:   "missing_email",
-		},
-		{
-			name:           "unknown error",
-			err:            errors.New("unknown error"),
-			expectedStatus: http.StatusInternalServerError,
-			expectedCode:   "internal_error",
-		},
-	}
+	svc := &MockService{}
+	h := New(svc)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service := &MockService{}
-			handler := &Handler{service: service}
+	t.Run("recipient empty", func(t *testing.T) {
+		svc.On("SendLoginCode", mock.Anything, "user@example.com").Return(ErrRecipientEmpty).Once()
 
-			// Test error mapping through SendLoginCode which has comprehensive error handling
-			service.On("SendLoginCode", mock.Anything, "user@example.com").Return(tt.err)
+		req := httptest.NewRequest(http.MethodPost, "/login", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		rec := httptest.NewRecorder()
+		h.HandleSendLoginCode(rec, req)
 
-			body := SendCodeRequest{Email: "user@example.com"}
-			bodyBytes, _ := json.Marshal(body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		errResp := decodeError(t, rec)
+		assert.Equal(t, "missing_recipient", errResp.Error.Status)
+	})
 
-			req := httptest.NewRequest(http.MethodPost, "/send-login-code", bytes.NewReader(bodyBytes))
-			req.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
+	t.Run("unknown internal error", func(t *testing.T) {
+		svc.On("SendLoginCode", mock.Anything, "user2@example.com").Return(errors.New("db down")).Once()
 
-			handler.HandleSendLoginCode(recorder, req)
+		req := httptest.NewRequest(http.MethodPost, "/login", mustJSON(t, SendCodeRequest{Email: "user2@example.com"}))
+		rec := httptest.NewRecorder()
+		h.HandleSendLoginCode(rec, req)
 
-			if tt.expectedCode == "rate_limited" || tt.expectedCode == "internal_error" {
-				assert.Equal(t, tt.expectedStatus, recorder.Code)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		errResp := decodeError(t, rec)
+		assert.Equal(t, "internal_error", errResp.Error.Status)
+	})
 
-				if recorder.Code != http.StatusOK {
-					var response ErrorResponse
-					err := json.NewDecoder(recorder.Body).Decode(&response)
-					require.NoError(t, err)
-					assert.Equal(t, tt.expectedCode, response.Error.Status)
-				}
-			}
-
-			service.AssertExpectations(t)
-		})
-	}
+	svc.AssertExpectations(t)
 }
 
 func TestHandler_QueryParameterExtraction(t *testing.T) {
-	tests := []struct {
-		name     string
-		url      string
-		expected string
-	}{
-		{
-			name:     "valid token",
-			url:      "/verify?token=abc123",
-			expected: "abc123",
-		},
-		{
-			name:     "empty token",
-			url:      "/verify?token=",
-			expected: "",
-		},
-		{
-			name:     "no token parameter",
-			url:      "/verify",
-			expected: "",
-		},
-		{
-			name:     "token with special characters",
-			url:      "/verify?token=" + url.QueryEscape("token+with/special=chars"),
-			expected: "token+with/special=chars",
-		},
-		{
-			name:     "multiple parameters",
-			url:      "/verify?foo=bar&token=mytoken&baz=qux",
-			expected: "mytoken",
-		},
-	}
+	svc := &MockService{}
+	identityID := uuid.New()
+	svc.On("VerifyMagicLink", mock.Anything, "token+with/special=chars").Return("user@example.com", &identityID, nil).Once()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service := &MockService{}
-			handler := &Handler{service: service}
+	h := New(svc)
+	req := httptest.NewRequest(http.MethodGet, "/verify?token="+url.QueryEscape("token+with/special=chars"), nil)
+	rec := httptest.NewRecorder()
 
-			if tt.expected != "" {
-				identityID := uuid.New()
-				service.On("VerifyMagicLink", mock.Anything, tt.expected).Return("user@example.com", &identityID, nil)
-			}
+	h.HandleVerifyMagicLink(rec, req)
 
-			req := httptest.NewRequest(http.MethodGet, tt.url, nil)
-			recorder := httptest.NewRecorder()
-
-			handler.HandleVerifyMagicLink(recorder, req)
-
-			if tt.expected == "" {
-				// Should return error for missing token
-				assert.Equal(t, http.StatusBadRequest, recorder.Code)
-			} else {
-				// Should call service with extracted token
-				assert.Equal(t, http.StatusOK, recorder.Code)
-			}
-
-			service.AssertExpectations(t)
-		})
-	}
-}
-
-func TestHandler_ContentTypeHandling(t *testing.T) {
-	tests := []struct {
-		name        string
-		contentType string
-		expectError bool
-	}{
-		{
-			name:        "application/json",
-			contentType: "application/json",
-			expectError: false,
-		},
-		{
-			name:        "application/json with charset",
-			contentType: "application/json; charset=utf-8",
-			expectError: false,
-		},
-		{
-			name:        "no content type",
-			contentType: "",
-			expectError: false, // JSON parsing should still work
-		},
-		{
-			name:        "wrong content type",
-			contentType: "text/plain",
-			expectError: false, // JSON parsing attempts regardless
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service := &MockService{}
-			handler := &Handler{service: service}
-
-			service.On("SendLoginCode", mock.Anything, "user@example.com").Return(nil)
-
-			body := SendCodeRequest{Email: "user@example.com"}
-			bodyBytes, _ := json.Marshal(body)
-
-			req := httptest.NewRequest(http.MethodPost, "/send-login-code", bytes.NewReader(bodyBytes))
-			if tt.contentType != "" {
-				req.Header.Set("Content-Type", tt.contentType)
-			}
-			recorder := httptest.NewRecorder()
-
-			handler.HandleSendLoginCode(recorder, req)
-
-			if tt.expectError {
-				assert.NotEqual(t, http.StatusOK, recorder.Code)
-			} else {
-				assert.Equal(t, http.StatusOK, recorder.Code)
-			}
-
-			service.AssertExpectations(t)
-		})
-	}
-}
-
-func TestHandler_ConcurrentRequests(t *testing.T) {
-	service := &MockService{}
-	handler := &Handler{service: service}
-
-	// Setup mock for multiple concurrent calls
-	service.On("SendLoginCode", mock.Anything, mock.AnythingOfType("string")).Return(nil).Times(10)
-
-	// Run 10 concurrent send code requests
-	done := make(chan bool, 10)
-
-	for i := 0; i < 10; i++ {
-		go func(id int) {
-			body := SendCodeRequest{
-				Email: "user" + string(rune(id)) + "@example.com",
-			}
-			bodyBytes, _ := json.Marshal(body)
-
-			req := httptest.NewRequest(http.MethodPost, "/send-login-code", bytes.NewReader(bodyBytes))
-			req.Header.Set("Content-Type", "application/json")
-			recorder := httptest.NewRecorder()
-
-			handler.HandleSendLoginCode(recorder, req)
-
-			assert.Equal(t, http.StatusOK, recorder.Code)
-			done <- true
-		}(i)
-	}
-
-	// Wait for all goroutines to complete
-	for i := 0; i < 10; i++ {
-		<-done
-	}
-
-	service.AssertExpectations(t)
-}
-
-func TestHandler_EdgeCases(t *testing.T) {
-	t.Run("empty request body", func(t *testing.T) {
-		service := &MockService{}
-		handler := &Handler{service: service}
-
-		req := httptest.NewRequest(http.MethodPost, "/send-login-code", strings.NewReader(""))
-		req.Header.Set("Content-Type", "application/json")
-		recorder := httptest.NewRecorder()
-
-		handler.HandleSendLoginCode(recorder, req)
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	})
-
-	t.Run("malformed JSON", func(t *testing.T) {
-		service := &MockService{}
-		handler := &Handler{service: service}
-
-		req := httptest.NewRequest(http.MethodPost, "/send-login-code", strings.NewReader("{broken json"))
-		req.Header.Set("Content-Type", "application/json")
-		recorder := httptest.NewRecorder()
-
-		handler.HandleSendLoginCode(recorder, req)
-
-		assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	})
-
-	t.Run("very long email address", func(t *testing.T) {
-		service := &MockService{}
-		handler := &Handler{service: service}
-
-		longEmail := strings.Repeat("a", 500) + "@example.com"
-		service.On("SendLoginCode", mock.Anything, longEmail).Return(nil)
-
-		body := SendCodeRequest{Email: longEmail}
-		bodyBytes, _ := json.Marshal(body)
-
-		req := httptest.NewRequest(http.MethodPost, "/send-login-code", bytes.NewReader(bodyBytes))
-		req.Header.Set("Content-Type", "application/json")
-		recorder := httptest.NewRecorder()
-
-		handler.HandleSendLoginCode(recorder, req)
-
-		assert.Equal(t, http.StatusOK, recorder.Code)
-		service.AssertExpectations(t)
-	})
-}
-
-// Benchmark handler performance
-func BenchmarkHandleSendLoginCode(b *testing.B) {
-	service := &MockService{}
-	handler := &Handler{service: service}
-
-	service.On("SendLoginCode", mock.Anything, mock.AnythingOfType("string")).Return(nil)
-
-	body := SendCodeRequest{Email: "user@example.com"}
-	bodyBytes, _ := json.Marshal(body)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/send-login-code", bytes.NewReader(bodyBytes))
-		req.Header.Set("Content-Type", "application/json")
-		recorder := httptest.NewRecorder()
-
-		handler.HandleSendLoginCode(recorder, req)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
+	svc.AssertExpectations(t)
 }

@@ -50,6 +50,7 @@ type ModuleProxyConfig struct {
 	SignedIdentityHeaders       []string
 
 	PolicyChecker PolicyChecker
+	RequirePolicy bool
 	PolicyModel   string
 	Logger        zerolog.Logger
 }
@@ -160,6 +161,9 @@ func (p *ModuleProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (p *ModuleProxy) authorize(ctx context.Context, r *http.Request) (*policypb.CheckResponse, error) {
 	if p.config.PolicyChecker == nil {
+		if p.config.RequirePolicy {
+			return nil, &policyDenyError{response: requiredPolicyDenyResponse("policy_unavailable")}
+		}
 		return nil, nil
 	}
 
@@ -168,10 +172,27 @@ func (p *ModuleProxy) authorize(ctx context.Context, r *http.Request) (*policypb
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil {
+		return nil, &policyDenyError{response: requiredPolicyDenyResponse("policy_no_decision")}
+	}
 	if !resp.GetAllowed() {
 		return resp, &policyDenyError{response: resp}
 	}
 	return resp, nil
+}
+
+func requiredPolicyDenyResponse(reason string) *policypb.CheckResponse {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "policy_denied"
+	}
+
+	return &policypb.CheckResponse{
+		Allowed:    false,
+		ModelUsed:  "default",
+		DenyReason: reason,
+		EvalPath:   []string{"default:deny", "policy:" + reason},
+	}
 }
 
 func (p *ModuleProxy) buildPolicyCheckRequest(r *http.Request) *policypb.CheckRequest {

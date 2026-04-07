@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean proto rust help dev
+.PHONY: all build test lint clean proto rust help dev proto-check release-manifest-check test-smoke module-boundary
 
 # Default target
 all: build
@@ -62,6 +62,10 @@ test-cover:
 test-integration:
 	go test -v -tags=integration ./...
 
+# Run focused end-to-end smoke tests
+test-smoke:
+	./scripts/run-integration-smoke.sh
+
 # Run Rust tests
 test-rust:
 	cd rust && cargo test --workspace
@@ -94,12 +98,25 @@ fmt:
 proto:
 	./scripts/gen-proto.sh
 
+# Verify generated protobuf stubs are up-to-date
+proto-check:
+	./scripts/check-proto-consistency.sh
+
 # Generate Rust CGo bindings
 rust-bindings:
 	./scripts/gen-rust-bindings.sh
 
 # Generate all
 generate: proto rust-bindings
+
+# Validate release manifest schema and module coverage
+release-manifest-check:
+	./scripts/check-release-manifest.sh
+
+# Validate per-module import boundaries (MODULE=name)
+module-boundary:
+	@if [ -z "$(MODULE)" ]; then echo "Usage: make module-boundary MODULE=password"; exit 1; fi
+	./scripts/check-module-boundaries.sh $(MODULE)
 
 # ============================================================================
 # DATABASE
@@ -174,11 +191,15 @@ help:
 	@echo "Testing:"
 	@echo "  make test           - Run all tests"
 	@echo "  make test-cover     - Run tests with coverage"
+	@echo "  make test-smoke     - Run focused integration smoke tests"
 	@echo "  make test-rust      - Run Rust tests"
 	@echo ""
 	@echo "Code Generation:"
 	@echo "  make proto          - Generate protobuf stubs"
+	@echo "  make proto-check    - Verify protobuf stubs are up-to-date"
 	@echo "  make rust-bindings  - Generate Rust CGo bindings"
+	@echo "  make release-manifest-check - Validate build/release-manifest.json"
+	@echo "  make module-boundary MODULE=name - Check module import boundaries"
 	@echo ""
 	@echo "Database:"
 	@echo "  make migrate        - Run migrations"

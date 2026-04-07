@@ -9,6 +9,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type mockGrantStore struct {
@@ -128,6 +129,39 @@ func TestClientCredentialsService_IssueClientCredentials(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidScope)
 	})
 
+	t.Run("confidential client requires valid secret", func(t *testing.T) {
+		hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+		require.NoError(t, err)
+		st := &mockGrantStore{
+			client: &store.Client{
+				ID:                      "client-1",
+				GrantTypes:              []string{"client_credentials"},
+				Scopes:                  []string{"read"},
+				AccessTokenTTL:          900,
+				TokenEndpointAuthMethod: "client_secret_post",
+				SecretHash:              ptrString(string(hash)),
+			},
+		}
+		signer := &mockSigner{}
+		svc := NewClientCredentialsService(st, signer, "issuer")
+
+		_, err = svc.IssueClientCredentials(ctx, &ClientCredentialsRequest{ClientID: "client-1"})
+		assert.ErrorIs(t, err, ErrInvalidClient)
+
+		_, err = svc.IssueClientCredentials(ctx, &ClientCredentialsRequest{
+			ClientID:     "client-1",
+			ClientSecret: "wrong",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
+
+		_, err = svc.IssueClientCredentials(ctx, &ClientCredentialsRequest{
+			ClientID:     "client-1",
+			ClientSecret: "secret",
+			Scope:        "read",
+		})
+		require.NoError(t, err)
+	})
+
 	t.Run("sign and store errors", func(t *testing.T) {
 		st := &mockGrantStore{client: baseClient}
 		signer := &mockSigner{err: errors.New("sign failed")}
@@ -148,6 +182,7 @@ func TestJWTBearerService_IssueJWTBearer(t *testing.T) {
 	client := &store.Client{
 		ID:             "client-1",
 		GrantTypes:     []string{"urn:ietf:params:oauth:grant-type:jwt-bearer"},
+		Scopes:         []string{"s1", "s2", "custom", "one"},
 		AccessTokenTTL: 600,
 	}
 	claims := &JWTAssertionClaims{
@@ -197,7 +232,7 @@ func TestJWTBearerService_IssueJWTBearer(t *testing.T) {
 		signer := &mockSigner{}
 		validator := &mockValidator{}
 		svc := NewJWTBearerService(st, signer, "issuer", validator)
-		_, err := svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "x"})
+		_, err := svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "x", Assertion: "assertion"})
 		assert.ErrorIs(t, err, ErrInvalidClient)
 
 		st = &mockGrantStore{
@@ -208,13 +243,35 @@ func TestJWTBearerService_IssueJWTBearer(t *testing.T) {
 			},
 		}
 		svc = NewJWTBearerService(st, signer, "issuer", validator)
-		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "x"})
+		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "x", Assertion: "assertion"})
 		assert.ErrorIs(t, err, ErrUnauthorizedClient)
 
 		st.client.GrantTypes = []string{"urn:ietf:params:oauth:grant-type:jwt-bearer"}
 		validator.err = errors.New("bad assertion")
-		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "x"})
+		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "x", Assertion: "assertion"})
 		assert.ErrorIs(t, err, validator.err)
+	})
+
+	t.Run("scope must be allowed by client", func(t *testing.T) {
+		st := &mockGrantStore{client: client}
+		signer := &mockSigner{}
+		validator := &mockValidator{
+			claims: &JWTAssertionClaims{
+				Issuer:    "trusted",
+				Subject:   "service-account",
+				Audience:  []string{"api"},
+				ExpiresAt: time.Now().Add(time.Minute),
+				IssuedAt:  time.Now(),
+				Scopes:    []string{"admin"},
+			},
+		}
+		svc := NewJWTBearerService(st, signer, "issuer", validator)
+
+		_, err := svc.IssueJWTBearer(ctx, &JWTBearerRequest{
+			ClientID:  "client-1",
+			Assertion: "assertion",
+		})
+		assert.ErrorIs(t, err, ErrInvalidScope)
 	})
 
 	t.Run("sign and store errors", func(t *testing.T) {
@@ -222,13 +279,13 @@ func TestJWTBearerService_IssueJWTBearer(t *testing.T) {
 		signer := &mockSigner{err: errors.New("sign")}
 		validator := &mockValidator{claims: claims}
 		svc := NewJWTBearerService(st, signer, "issuer", validator)
-		_, err := svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "client-1"})
+		_, err := svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "client-1", Assertion: "assertion"})
 		assert.ErrorIs(t, err, signer.err)
 
 		st = &mockGrantStore{client: client, createTokenErr: errors.New("db")}
 		signer = &mockSigner{}
 		svc = NewJWTBearerService(st, signer, "issuer", validator)
-		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "client-1"})
+		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "client-1", Assertion: "assertion"})
 		assert.ErrorIs(t, err, st.createTokenErr)
 	})
 }
@@ -256,4 +313,8 @@ func TestMockJWTValidator_DefaultAndError(t *testing.T) {
 	claims, err = m.ValidateJWTAssertion(context.Background(), "assert", "client")
 	require.NoError(t, err)
 	assert.Equal(t, "custom", claims.Subject)
+}
+
+func ptrString(v string) *string {
+	return &v
 }

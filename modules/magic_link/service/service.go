@@ -147,12 +147,25 @@ func (s *Service) VerifyCode(ctx context.Context, email, otpCode string) (string
 
 // VerifyMagicLink verifies a magic link token and returns the recipient.
 func (s *Service) VerifyMagicLink(ctx context.Context, token string) (string, *uuid.UUID, error) {
+	return s.verifyMagicLink(ctx, token, nil)
+}
+
+// VerifyMagicLinkForType verifies a magic link token for a specific flow type.
+func (s *Service) VerifyMagicLinkForType(ctx context.Context, token string, expectedType store.CodeType) (string, *uuid.UUID, error) {
+	return s.verifyMagicLink(ctx, token, &expectedType)
+}
+
+func (s *Service) verifyMagicLink(ctx context.Context, token string, expectedType *store.CodeType) (string, *uuid.UUID, error) {
 	code, err := s.store.GetByToken(ctx, token)
 	if err != nil {
 		if errors.Is(err, store.ErrCodeNotFound) || errors.Is(err, store.ErrCodeExpired) {
 			return "", nil, ErrInvalidCode
 		}
 		return "", nil, err
+	}
+
+	if expectedType != nil && code.Type != *expectedType {
+		return "", nil, ErrInvalidCode
 	}
 
 	// Mark as used
@@ -230,6 +243,16 @@ func (s *Service) VerifyVerificationCode(ctx context.Context, email, otpCode str
 
 // SendRecoveryCode sends a recovery code for password reset.
 func (s *Service) SendRecoveryCode(ctx context.Context, email string, identityID uuid.UUID) error {
+	return s.sendRecoveryCode(ctx, email, &identityID)
+}
+
+// SendRecoveryCodeIfIdentityExists sends a recovery code only when identity exists.
+// Rate-limiting is always enforced, regardless of account existence.
+func (s *Service) SendRecoveryCodeIfIdentityExists(ctx context.Context, email string, identityID *uuid.UUID) error {
+	return s.sendRecoveryCode(ctx, email, identityID)
+}
+
+func (s *Service) sendRecoveryCode(ctx context.Context, email string, identityID *uuid.UUID) error {
 	if email == "" {
 		return ErrRecipientEmpty
 	}
@@ -243,13 +266,17 @@ func (s *Service) SendRecoveryCode(ctx context.Context, email string, identityID
 		return err
 	}
 
+	if identityID == nil {
+		return nil
+	}
+
 	// Invalidate previous codes
 	if err := s.store.InvalidatePrevious(ctx, email, store.CodeTypeRecovery); err != nil {
 		return err
 	}
 
 	// Create code
-	code, err := s.store.Create(ctx, email, store.CodeTypeRecovery, &identityID, s.config.CodeLifespan)
+	code, err := s.store.Create(ctx, email, store.CodeTypeRecovery, identityID, s.config.CodeLifespan)
 	if err != nil {
 		return err
 	}

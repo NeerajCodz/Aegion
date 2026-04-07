@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -35,6 +36,7 @@ func RequestID(next http.Handler) http.Handler {
 
 		// Store in context
 		ctx := context.WithValue(r.Context(), contextKeyRequestID, requestID)
+		ctx = observability.WithRequestIDForLogger(ctx, requestID)
 		ctx = context.WithValue(ctx, contextKeyRequestTime, time.Now())
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -89,6 +91,7 @@ func Logger(logger zerolog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(rr, r)
 
 			duration := time.Since(start)
+			route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
 
 			// Log level based on status code
 			var event *zerolog.Event
@@ -101,9 +104,10 @@ func Logger(logger zerolog.Logger) func(http.Handler) http.Handler {
 				event = logger.Info()
 			}
 
+			event = withCorrelationFields(event, r.Context(), requestID)
 			event.
-				Str("request_id", requestID).
 				Str("method", r.Method).
+				Str("route", route).
 				Str("path", r.URL.Path).
 				Str("remote_addr", getClientIP(r)).
 				Int("status", rr.statusCode).
@@ -123,10 +127,13 @@ func Recoverer(logger zerolog.Logger) func(http.Handler) http.Handler {
 				if rec := recover(); rec != nil {
 					requestID := GetRequestID(r.Context())
 					stack := string(debug.Stack())
+					route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
 
-					logger.Error().
-						Str("request_id", requestID).
+					event := logger.Error()
+					event = withCorrelationFields(event, r.Context(), requestID)
+					event.
 						Str("method", r.Method).
+						Str("route", route).
 						Str("path", r.URL.Path).
 						Interface("panic", rec).
 						Str("stack", stack).
@@ -382,4 +389,23 @@ func getClientIP(r *http.Request) string {
 
 func timeToSeconds(seconds int) string {
 	return fmt.Sprintf("%d", seconds)
+}
+
+func withCorrelationFields(event *zerolog.Event, ctx context.Context, requestID string) *zerolog.Event {
+	if requestID == "" {
+		requestID = observability.GetRequestIDForLogger(ctx)
+	}
+	if requestID != "" {
+		event = event.Str("request_id", requestID)
+	}
+
+	traceInfo := observability.GetTraceInfoForLogger(ctx)
+	if traceInfo.TraceID != "" {
+		event = event.Str("trace_id", traceInfo.TraceID)
+	}
+	if traceInfo.SpanID != "" {
+		event = event.Str("span_id", traceInfo.SpanID)
+	}
+
+	return event
 }

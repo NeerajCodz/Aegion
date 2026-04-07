@@ -22,11 +22,28 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Validate Release Manifest
+  # ---------------------------------------------------------------------------
+  validate-release-manifest:
+    name: Validate Release Manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Validate tagged manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          STRICT_DIGESTS: "true"
+        run: bash ./scripts/check-release-manifest.sh
+
+  # ---------------------------------------------------------------------------
   # Build Release Binaries
   # ---------------------------------------------------------------------------
   build-binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
+    needs: validate-release-manifest
     strategy:
       matrix:
         include:
@@ -126,6 +143,7 @@ jobs:
   build-docker:
     name: Build Docker Images
     runs-on: ubuntu-latest
+    needs: validate-release-manifest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -224,7 +242,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-binaries, build-docker, changelog]
+    needs: [validate-release-manifest, build-binaries, build-docker, changelog]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -242,6 +260,7 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -exec mv {} release/ \;
+          cp build/release-manifest.json "release/aegion-release-${{ steps.version.outputs.version }}.json"
           ls -la release/
 
       - name: Create release notes
@@ -323,3 +342,4 @@ jobs:
           echo "- aegion-darwin-amd64" >> $GITHUB_STEP_SUMMARY
           echo "- aegion-darwin-arm64" >> $GITHUB_STEP_SUMMARY
           echo "- aegion-windows-amd64.exe" >> $GITHUB_STEP_SUMMARY
+          echo "- aegion-release-${{ steps.version.outputs.version }}.json" >> $GITHUB_STEP_SUMMARY

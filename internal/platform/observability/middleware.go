@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -65,6 +64,8 @@ func (m *HTTPMiddleware) Handler(next http.Handler) http.Handler {
 		// Update request context
 		r = r.WithContext(ctx)
 
+		route := HTTPRouteLabel(RoutePattern(r), r.URL.Path)
+
 		// Capture request size
 		var requestSize int64
 		if r.ContentLength > 0 {
@@ -73,7 +74,7 @@ func (m *HTTPMiddleware) Handler(next http.Handler) http.Handler {
 
 		// Add request attributes to span
 		span.SetAttributes(
-			attribute.String("http.route", getRoutePattern(r)),
+			attribute.String("http.route", route),
 			attribute.Int64("http.request.size", requestSize),
 		)
 
@@ -89,15 +90,10 @@ func (m *HTTPMiddleware) Handler(next http.Handler) http.Handler {
 		m.tracer.FinishHTTPSpan(span, statusCode, responseSize)
 
 		// Record metrics
-		path := getRoutePattern(r)
-		if path == "" {
-			path = r.URL.Path
-		}
-
 		m.meter.RecordHTTPRequest(
 			ctx,
 			r.Method,
-			path,
+			route,
 			statusCode,
 			duration,
 			requestSize,
@@ -200,14 +196,6 @@ func getUserIDFromContext(ctx context.Context) string {
 	// if user, ok := ctx.Value("user").(*User); ok {
 	//     return user.ID
 	// }
-	return ""
-}
-
-func getRoutePattern(r *http.Request) string {
-	// Try to get the route pattern from chi router context
-	if routeCtx := chi.RouteContext(r.Context()); routeCtx != nil {
-		return routeCtx.RoutePattern()
-	}
 	return ""
 }
 

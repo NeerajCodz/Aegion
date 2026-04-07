@@ -10,6 +10,9 @@ import (
 //go:embed spa/dist/*
 var spaFiles embed.FS
 
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
+
 var subSPAFiles = fs.Sub
 
 // GetSPAFiles returns the embedded filesystem containing the SPA files
@@ -21,4 +24,9 @@ func GetSPAFiles() fs.FS {
 		return embed.FS{}
 	}
 	return distFS
+}
+
+// GetMigrationFiles returns the embedded filesystem containing admin SQL migrations.
+func GetMigrationFiles() fs.FS {
+	return migrationFiles
 }

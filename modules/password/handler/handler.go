@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
+	"strings"
 
+	coresession "github.com/aegion/aegion/core/session"
 	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/modules/password/service"
@@ -14,19 +17,56 @@ import (
 
 // Service defines the password service behavior needed by handlers.
 type Service interface {
+	ValidatePassword(ctx context.Context, password, identifier string) error
 	Register(ctx context.Context, identityID uuid.UUID, identifier, password string) error
 	Verify(ctx context.Context, identifier, password string) (uuid.UUID, error)
 	ChangePassword(ctx context.Context, identityID uuid.UUID, oldPassword, newPassword string) error
 }
 
+// IdentityStore provisions identities in core.
+type IdentityStore interface {
+	CreateIdentity(ctx context.Context, traits map[string]interface{}) (uuid.UUID, error)
+}
+
+// SessionManager creates and manages core sessions.
+type SessionManager interface {
+	Create(ctx context.Context, identityID uuid.UUID, method coresession.AuthMethod, device coresession.DeviceInfo) (*coresession.Session, error)
+	SetCookie(w http.ResponseWriter, session *coresession.Session)
+}
+
+// Option configures handler integrations.
+type Option func(*Handler)
+
+// WithIdentityStore configures identity provisioning integration.
+func WithIdentityStore(identityStore IdentityStore) Option {
+	return func(h *Handler) {
+		h.identityStore = identityStore
+	}
+}
+
+// WithSessionManager configures session creation integration.
+func WithSessionManager(sessionManager SessionManager) Option {
+	return func(h *Handler) {
+		h.sessionManager = sessionManager
+	}
+}
+
 // Handler handles password authentication HTTP requests.
 type Handler struct {
-	service Service
+	service        Service
+	identityStore  IdentityStore
+	sessionManager SessionManager
 }
 
 // New creates a new password handler.
-func New(svc Service) *Handler {
-	return &Handler{service: svc}
+func New(svc Service, opts ...Option) *Handler {
+	h := &Handler{service: svc}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(h)
+		}
+	}
+	return h
 }
 
 // RegisterRequest is the request body for registration.
@@ -79,7 +119,8 @@ func (h *Handler) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Traits.Email == "" {
+	email := strings.ToLower(strings.TrimSpace(req.Traits.Email))
+	if email == "" {
 		h.writeError(w, http.StatusBadRequest, "missing_email", "Email is required")
 		return
 	}
@@ -89,23 +130,32 @@ func (h *Handler) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Create identity first, then register password
-	// For now, this is a placeholder that would integrate with core identity creation
+	if err := h.service.ValidatePassword(r.Context(), req.Password, email); err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
 
-	// Generate identity ID (in real implementation, this comes from core)
-	identityID := uuid.New()
+	identityID, err := h.resolveRegistrationIdentityID(r.Context(), email)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		return
+	}
 
-	err := h.service.Register(r.Context(), identityID, req.Traits.Email, req.Password)
+	err = h.service.Register(r.Context(), identityID, email, req.Password)
 	if err != nil {
 		h.handleServiceError(w, err)
 		return
 	}
 
-	// Return success (in real implementation, would create session)
 	resp := SuccessResponse{}
 	resp.Identity.ID = identityID.String()
 	resp.Identity.Traits = map[string]interface{}{
-		"email": req.Traits.Email,
+		"email": email,
+	}
+
+	if err := h.createSession(r.Context(), w, r, identityID, &resp); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -138,11 +188,11 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Create session via core session manager
-	// For now, return identity ID
 	resp := SuccessResponse{}
-	resp.Session.IdentityID = identityID.String()
-	resp.Session.AAL = "aal1"
+	if err := h.createSession(r.Context(), w, r, identityID, &resp); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -151,17 +201,9 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 // HandleChangePassword handles password change.
 func (h *Handler) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
-	// Get identity from session context
-	// TODO: Extract from session context
-	identityIDStr := r.Header.Get("X-Aegion-Session-Identity-ID")
-	if identityIDStr == "" {
-		h.writeError(w, http.StatusUnauthorized, "unauthorized", "Session required")
-		return
-	}
-
-	identityID, err := uuid.Parse(identityIDStr)
+	identityID, err := identityIDFromRequest(r)
 	if err != nil {
-		h.writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid session")
+		h.writeError(w, http.StatusUnauthorized, "unauthorized", "Session required")
 		return
 	}
 
@@ -216,4 +258,79 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, message st
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) resolveRegistrationIdentityID(ctx context.Context, email string) (uuid.UUID, error) {
+	if h.identityStore == nil {
+		return uuid.Nil, errors.New("identity store unavailable")
+	}
+	return h.identityStore.CreateIdentity(ctx, map[string]interface{}{"email": email})
+}
+
+func (h *Handler) createSession(ctx context.Context, w http.ResponseWriter, r *http.Request, identityID uuid.UUID, resp *SuccessResponse) error {
+	if h.sessionManager == nil {
+		return errors.New("session manager unavailable")
+	}
+
+	session, err := h.sessionManager.Create(
+		ctx,
+		identityID,
+		coresession.AuthMethodPassword,
+		coresession.DeviceInfo{
+			UserAgent: r.UserAgent(),
+			IPAddress: requestIP(r),
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	if session != nil {
+		h.sessionManager.SetCookie(w, session)
+		resp.Session.ID = session.ID.String()
+		resp.Session.IdentityID = session.IdentityID.String()
+		resp.Session.AAL = string(session.AAL)
+		return nil
+	}
+
+	resp.Session.IdentityID = identityID.String()
+	resp.Session.AAL = string(coresession.AAL1)
+	return nil
+}
+
+func identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
+	if sessionCtx := coresession.GetContext(r.Context()); sessionCtx != nil && sessionCtx.IdentityID != uuid.Nil {
+		return sessionCtx.IdentityID, nil
+	}
+
+	for _, header := range []string{"X-Aegion-Session-Identity-ID", "X-Aegion-Identity-ID", "X-User-ID"} {
+		raw := strings.TrimSpace(r.Header.Get(header))
+		if raw == "" {
+			continue
+		}
+		identityID, err := uuid.Parse(raw)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return identityID, nil
+	}
+
+	return uuid.Nil, errors.New("identity header missing")
+}
+
+func requestIP(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return strings.Trim(host, "[]")
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
