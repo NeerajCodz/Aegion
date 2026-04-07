@@ -431,6 +431,9 @@ func TestModuleProxyHandler(t *testing.T) {
 	})
 
 	t.Run("policy deny returns forbidden with reason", func(t *testing.T) {
+		s.cfg.Policy.Enabled = true
+		s.cfg.Policy.DefaultModel = "rbac"
+
 		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte("proxied"))
@@ -459,6 +462,9 @@ func TestModuleProxyHandler(t *testing.T) {
 	})
 
 	t.Run("policy allow forwards and maps request context", func(t *testing.T) {
+		s.cfg.Policy.Enabled = true
+		s.cfg.Policy.DefaultModel = "rbac"
+
 		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte("proxied"))
@@ -487,6 +493,61 @@ func TestModuleProxyHandler(t *testing.T) {
 		}
 		if checker.lastReq.GetContext().GetExtra()["module_id"] != "policy-allow" {
 			t.Fatalf("expected module_id extra context")
+		}
+	})
+
+	t.Run("runtime policy disable bypasses policy checker", func(t *testing.T) {
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("proxied"))
+		}))
+		defer target.Close()
+
+		registerTestModule(t, s, "policy-runtime-off", registry.EndpointHTTP, target.URL)
+		checker := &stubCmdPolicyChecker{resp: &policypb.CheckResponse{Allowed: false, DenyReason: "should_not_apply"}}
+		s.policyChecker = checker
+
+		recSeed := httptest.NewRecorder()
+		reqSeed := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"policy":{"enabled":false,"rbac":{"enabled":true}}}`))
+		s.handleAdminUpdateConfig(recSeed, reqSeed)
+		if recSeed.Code != http.StatusInternalServerError {
+			t.Fatalf("expected runtime config persist to fail without db, got %d", recSeed.Code)
+		}
+
+		// Runtime load should gracefully fall back to bootstrap config when DB is unavailable.
+		s.cfg.Policy.Enabled = false
+
+		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/policy-runtime-off/resource", nil)
+		req = withURLParam(req, "moduleId", "policy-runtime-off")
+		rec := httptest.NewRecorder()
+
+		s.handleModuleProxy(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("expected %d, got %d", http.StatusAccepted, rec.Code)
+		}
+		if checker.lastReq != nil {
+			t.Fatalf("expected policy checker to be bypassed when runtime policy is disabled")
+		}
+	})
+
+	t.Run("runtime proxy timeout applies from config", func(t *testing.T) {
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(80 * time.Millisecond)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("slow proxied"))
+		}))
+		defer target.Close()
+
+		registerTestModule(t, s, "proxy-runtime-timeout", registry.EndpointHTTP, target.URL)
+		s.cfg.Proxy.UpstreamTimeout = config.Duration(20 * time.Millisecond)
+
+		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/proxy-runtime-timeout/resource", nil)
+		req = withURLParam(req, "moduleId", "proxy-runtime-timeout")
+		rec := httptest.NewRecorder()
+
+		s.handleModuleProxy(rec, req)
+		if rec.Code != http.StatusGatewayTimeout {
+			t.Fatalf("expected %d, got %d", http.StatusGatewayTimeout, rec.Code)
 		}
 	})
 }
