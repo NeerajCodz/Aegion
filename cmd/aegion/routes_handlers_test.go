@@ -19,7 +19,26 @@ import (
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/logger"
+	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
+
+type stubCmdPolicyChecker struct {
+	resp *policypb.CheckResponse
+	err  error
+
+	lastReq *policypb.CheckRequest
+}
+
+func (s *stubCmdPolicyChecker) Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error) {
+	s.lastReq = req
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.resp != nil {
+		return s.resp, nil
+	}
+	return &policypb.CheckResponse{Allowed: true, ModelUsed: "rbac", EvalPath: []string{"rbac:allow"}}, nil
+}
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
@@ -380,6 +399,66 @@ func TestModuleProxyHandler(t *testing.T) {
 		}
 		if body := rec.Body.String(); body != "proxied" {
 			t.Fatalf("expected proxied response body, got %q", body)
+		}
+	})
+
+	t.Run("policy deny returns forbidden with reason", func(t *testing.T) {
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("proxied"))
+		}))
+		defer target.Close()
+
+		registerTestModule(t, s, "policy-deny", registry.EndpointHTTP, target.URL)
+		s.policyChecker = &stubCmdPolicyChecker{resp: &policypb.CheckResponse{
+			Allowed:    false,
+			ModelUsed:  "abac",
+			DenyReason: "abac_deny_rule_matched",
+			EvalPath:   []string{"abac:deny:block"},
+		}}
+
+		req := httptest.NewRequest(http.MethodPost, "/internal/proxy/policy-deny/private", nil)
+		req = withURLParam(req, "moduleId", "policy-deny")
+		rec := httptest.NewRecorder()
+
+		s.handleModuleProxy(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "abac_deny_rule_matched") {
+			t.Fatalf("expected deny reason in response body, got %q", rec.Body.String())
+		}
+	})
+
+	t.Run("policy allow forwards and maps request context", func(t *testing.T) {
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("proxied"))
+		}))
+		defer target.Close()
+
+		registerTestModule(t, s, "policy-allow", registry.EndpointHTTP, target.URL)
+		checker := &stubCmdPolicyChecker{resp: &policypb.CheckResponse{Allowed: true, ModelUsed: "rbac", EvalPath: []string{"rbac:allow"}}}
+		s.policyChecker = checker
+
+		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/policy-allow/resource", nil)
+		req.RemoteAddr = "203.0.113.99:4321"
+		req.Header.Set("X-Request-ID", "rid-cmd-1")
+		req = withURLParam(req, "moduleId", "policy-allow")
+		rec := httptest.NewRecorder()
+
+		s.handleModuleProxy(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("expected %d, got %d", http.StatusAccepted, rec.Code)
+		}
+		if checker.lastReq == nil {
+			t.Fatalf("expected policy check request to be captured")
+		}
+		if checker.lastReq.GetContext().GetIp() != "203.0.113.99" {
+			t.Fatalf("expected mapped client ip, got %q", checker.lastReq.GetContext().GetIp())
+		}
+		if checker.lastReq.GetContext().GetExtra()["module_id"] != "policy-allow" {
+			t.Fatalf("expected module_id extra context")
 		}
 	})
 }

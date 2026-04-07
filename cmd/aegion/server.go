@@ -16,6 +16,9 @@ import (
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
 	"github.com/aegion/aegion/internal/platform/logger"
+	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	policygrpc "github.com/aegion/aegion/modules/policy/grpc"
+	policystore "github.com/aegion/aegion/modules/policy/store"
 )
 
 // ServerConfig holds the server configuration.
@@ -36,7 +39,12 @@ type Server struct {
 	registry      *registry.Registry
 	tokenGen      *authtoken.Generator
 	flowService   *flows.Service
+	policyChecker policyChecker
 	workerManager *workers.Manager
+}
+
+type policyChecker interface {
+	Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error)
 }
 
 var pingDatabase = func(ctx context.Context, db *database.DB) error {
@@ -75,6 +83,11 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	flowStore := flows.NewPostgresFlowStore(cfg.DB.Pool)
 	flowService := flows.NewService(flowStore, flows.DefaultConfig())
 
+	var checker policyChecker
+	if cfg.Config.Policy.Enabled {
+		checker = policygrpc.NewServer(policystore.New(cfg.DB.Pool))
+	}
+
 	s := &Server{
 		cfg:           cfg.Config,
 		db:            cfg.DB,
@@ -82,6 +95,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		registry:      reg,
 		tokenGen:      tokenGen,
 		flowService:   flowService,
+		policyChecker: checker,
 		workerManager: cfg.WorkerManager,
 	}
 

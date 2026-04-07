@@ -16,7 +16,26 @@ import (
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
+
+type stubPolicyChecker struct {
+	resp *policypb.CheckResponse
+	err  error
+
+	lastReq *policypb.CheckRequest
+}
+
+func (s *stubPolicyChecker) Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error) {
+	s.lastReq = req
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.resp != nil {
+		return s.resp, nil
+	}
+	return &policypb.CheckResponse{Allowed: true, ModelUsed: "rbac", EvalPath: []string{"rbac:allow"}}, nil
+}
 
 func mustRegisterModule(t *testing.T, reg *registry.Registry, req registry.RegistrationRequest) {
 	t.Helper()
@@ -254,5 +273,102 @@ func TestModuleProxyServeHTTP_ModuleUnavailable(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+}
+
+func TestModuleProxyServeHTTP_PolicyDeny(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig())
+	defer reg.Stop()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "policy-module",
+		Name:    "policy-module",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: upstream.URL},
+		},
+		HealthURL: upstream.URL + "/health",
+	})
+
+	checker := &stubPolicyChecker{resp: &policypb.CheckResponse{
+		Allowed:    false,
+		ModelUsed:  "abac",
+		DenyReason: "abac_deny_rule_matched",
+		EvalPath:   []string{"abac:deny:block"},
+	}}
+
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry:      reg,
+		ModuleID:      "policy-module",
+		InternalToken: "int-token",
+		Timeout:       2 * time.Second,
+		PolicyChecker: checker,
+		Logger:        zerolog.Nop(),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/module/private", nil)
+	req = req.WithContext(context.WithValue(req.Context(), contextKeyRequestID, "req-policy-deny"))
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+	}
+	if checker.lastReq == nil {
+		t.Fatalf("expected policy checker to be called")
+	}
+	if checker.lastReq.GetAction() != "write" {
+		t.Fatalf("expected write action, got %q", checker.lastReq.GetAction())
+	}
+	if checker.lastReq.GetResourceType() != "module:policy-module" {
+		t.Fatalf("unexpected resource type: %q", checker.lastReq.GetResourceType())
+	}
+}
+
+func TestModuleProxyServeHTTP_PolicyError(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig())
+	defer reg.Stop()
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "policy-module",
+		Name:    "policy-module",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: "http://127.0.0.1:18081"},
+		},
+		HealthURL: "http://127.0.0.1:18081/health",
+	})
+
+	checker := &stubPolicyChecker{err: errors.New("policy unavailable")}
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry:      reg,
+		ModuleID:      "policy-module",
+		Timeout:       2 * time.Second,
+		PolicyChecker: checker,
+		Logger:        zerolog.Nop(),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/module/private", nil)
+	req = req.WithContext(context.WithValue(req.Context(), contextKeyRequestID, "req-policy-error"))
+	proxy.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected %d, got %d", http.StatusBadGateway, rec.Code)
+	}
+}
+
+func TestWithRequestContextIPAndExtraction(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithRequestContextIP(ctx, "198.51.100.10:4444")
+
+	ip := requestContextIPFromContext(ctx)
+	if ip != "198.51.100.10" {
+		t.Fatalf("expected extracted host IP, got %q", ip)
 	}
 }

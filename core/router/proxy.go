@@ -16,13 +16,20 @@ import (
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
 
 var (
 	ErrModuleUnavailable = errors.New("module unavailable")
 	ErrModuleTimeout     = errors.New("module request timeout")
 	ErrNoHealthyEndpoint = errors.New("no healthy endpoint for module")
+	ErrPolicyDenied      = errors.New("policy denied request")
 )
+
+// PolicyChecker evaluates authorization decisions for proxied module requests.
+type PolicyChecker interface {
+	Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error)
+}
 
 // ModuleProxyConfig configures the module proxy.
 type ModuleProxyConfig struct {
@@ -31,6 +38,8 @@ type ModuleProxyConfig struct {
 	InternalToken string
 	SessionSecret []byte
 	Timeout       time.Duration
+	PolicyChecker PolicyChecker
+	PolicyModel   string
 	Logger        zerolog.Logger
 }
 
@@ -39,6 +48,21 @@ type ModuleProxy struct {
 	config    ModuleProxyConfig
 	logger    zerolog.Logger
 	transport *http.Transport
+}
+
+type policyDenyError struct {
+	response *policypb.CheckResponse
+}
+
+func (e *policyDenyError) Error() string {
+	if e == nil || e.response == nil {
+		return ErrPolicyDenied.Error()
+	}
+	reason := strings.TrimSpace(e.response.GetDenyReason())
+	if reason == "" {
+		reason = "policy_denied"
+	}
+	return reason
 }
 
 // NewModuleProxy creates a new module proxy.
@@ -80,6 +104,19 @@ func (p *ModuleProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	decision, err := p.authorize(ctx, r)
+	if err != nil {
+		p.handlePolicyError(w, r, err, requestID)
+		return
+	}
+	if decision != nil {
+		p.logger.Debug().
+			Str("request_id", requestID).
+			Str("policy_model", decision.GetModelUsed()).
+			Strs("policy_eval_path", decision.GetEvalPath()).
+			Msg("module proxy policy allow")
+	}
+
 	// Create reverse proxy
 	proxy := &httputil.ReverseProxy{
 		Director:  p.director(targetURL, r),
@@ -98,6 +135,107 @@ func (p *ModuleProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	proxy.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func (p *ModuleProxy) authorize(ctx context.Context, r *http.Request) (*policypb.CheckResponse, error) {
+	if p.config.PolicyChecker == nil {
+		return nil, nil
+	}
+
+	checkReq := p.buildPolicyCheckRequest(r)
+	resp, err := p.config.PolicyChecker.Check(ctx, checkReq)
+	if err != nil {
+		return nil, err
+	}
+	if !resp.GetAllowed() {
+		return resp, &policyDenyError{response: resp}
+	}
+	return resp, nil
+}
+
+func (p *ModuleProxy) buildPolicyCheckRequest(r *http.Request) *policypb.CheckRequest {
+	subject := "anonymous"
+	if sess := session.FromContext(r.Context()); sess != nil {
+		subject = "user:" + sess.IdentityID.String()
+	}
+
+	resourcePath := strings.TrimPrefix(r.URL.Path, "/")
+	if resourcePath == "" {
+		resourcePath = "_root"
+	}
+
+	extra := map[string]string{
+		"module_id":   p.config.ModuleID,
+		"path":        r.URL.Path,
+		"http_method": r.Method,
+	}
+	if requestID := GetRequestID(r.Context()); requestID != "" {
+		extra["request_id"] = requestID
+	}
+	if userAgent := strings.TrimSpace(r.UserAgent()); userAgent != "" {
+		extra["user_agent"] = userAgent
+	}
+
+	clientIP := requestContextIPFromContext(r.Context())
+	if clientIP == "" {
+		clientIP = getClientIP(r)
+	}
+
+	return &policypb.CheckRequest{
+		Subject:      subject,
+		Resource:     p.config.ModuleID + ":" + resourcePath,
+		ResourceType: "module:" + p.config.ModuleID,
+		Action:       policyActionFromMethod(r.Method),
+		Model:        normalizePolicyModel(p.config.PolicyModel),
+		Context: &policypb.Context{
+			Ip:       clientIP,
+			TenantId: strings.TrimSpace(r.Header.Get("X-Aegion-Tenant-ID")),
+			Extra:    extra,
+		},
+	}
+}
+
+func policyActionFromMethod(method string) string {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "read"
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return "write"
+	default:
+		return strings.ToLower(strings.TrimSpace(method))
+	}
+}
+
+func normalizePolicyModel(model string) string {
+	model = strings.ToLower(strings.TrimSpace(model))
+	switch model {
+	case "", "default", "rbac", "abac", "rebac":
+		return model
+	default:
+		return ""
+	}
+}
+
+type requestContextIPKey struct{}
+
+// WithRequestContextIP attaches a best-effort client IP for policy context evaluation.
+func WithRequestContextIP(ctx context.Context, ip string) context.Context {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, requestContextIPKey{}, ip)
+}
+
+func requestContextIPFromContext(ctx context.Context) string {
+	v := ctx.Value(requestContextIPKey{})
+	ip, _ := v.(string)
+	ip = strings.TrimSpace(ip)
+	host := ip
+	if parsedHost, _, err := net.SplitHostPort(ip); err == nil {
+		host = parsedHost
+	}
+	return strings.Trim(host, "[]")
 }
 
 // director returns a function that modifies the request before proxying.
@@ -188,7 +326,7 @@ func (p *ModuleProxy) getModuleEndpoint(ctx context.Context) (*url.URL, error) {
 
 	module, err := p.config.Registry.GetModule(p.config.ModuleID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrModuleUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrModuleUnavailable, err)
 	}
 
 	// Check module health
@@ -199,7 +337,11 @@ func (p *ModuleProxy) getModuleEndpoint(ctx context.Context) (*url.URL, error) {
 	// Find HTTP endpoint
 	for _, ep := range module.Endpoints {
 		if ep.Type == registry.EndpointHTTP {
-			return url.Parse(ep.URL)
+			target, parseErr := url.Parse(ep.URL)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			return target, nil
 		}
 	}
 
@@ -218,9 +360,22 @@ func (p *ModuleProxy) handleError(w http.ResponseWriter, r *http.Request, err er
 	status := http.StatusServiceUnavailable
 	message := "Module temporarily unavailable"
 
-	if errors.Is(err, ErrModuleTimeout) {
+	switch {
+	case errors.Is(err, ErrModuleTimeout):
 		status = http.StatusGatewayTimeout
 		message = "Module request timeout"
+	case errors.Is(err, registry.ErrModuleNotFound):
+		status = http.StatusNotFound
+		message = "module not found"
+	case errors.Is(err, ErrNoHealthyEndpoint):
+		status = http.StatusBadGateway
+		message = "no HTTP endpoint available"
+	default:
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			status = http.StatusBadGateway
+			message = "invalid module endpoint"
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -265,6 +420,43 @@ func (p *ModuleProxy) handleProxyError(w http.ResponseWriter, r *http.Request, e
 			"code":       status,
 			"message":    message,
 			"request_id": requestID,
+		},
+	})
+}
+
+func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, err error, requestID string) {
+	status := http.StatusBadGateway
+	message := "Policy evaluation failed"
+	modelUsed := ""
+	evalPath := []string{}
+
+	var denyErr *policyDenyError
+	if errors.As(err, &denyErr) && denyErr != nil && denyErr.response != nil {
+		status = http.StatusForbidden
+		message = denyErr.Error()
+		modelUsed = denyErr.response.GetModelUsed()
+		evalPath = denyErr.response.GetEvalPath()
+	}
+
+	p.logger.Warn().
+		Str("request_id", requestID).
+		Err(err).
+		Str("method", r.Method).
+		Str("path", r.URL.Path).
+		Str("policy_model", modelUsed).
+		Strs("policy_eval_path", evalPath).
+		Msg("module proxy policy decision")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"error": map[string]interface{}{
+			"code":        status,
+			"message":     message,
+			"request_id":  requestID,
+			"deny_reason": message,
+			"model_used":  modelUsed,
+			"eval_path":   evalPath,
 		},
 	})
 }
