@@ -1,0 +1,1 @@
+-- Initial passkeys module scaffold rollback (no-op).

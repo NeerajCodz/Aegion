@@ -2,8 +2,8 @@
 
 This document defines the canonical monorepo layout for Aegion. The structure mirrors the runtime model: `core` is the hub, `modules/` contains every capability as a separately deployable image, `rust/` contains all performance-critical engines, and `internal/` holds the shared platform contracts everything depends on.
 
-> **Implementation status (current repo):** currently implemented modules are `password`, `magic_link`, and `admin`.
-> Additional module trees shown below are the target structure for future phases.
+> **Implementation status (current repo):** currently integrated modules are `password`, `magic_link`, and `admin`.
+> Additional module trees now exist for `oauth2`, `policy`, `mfa`, `passkeys`, `social`, `sso`, `introspection`, `proxy`, and `cli`, with capability completion continuing by roadmap phase.
 
 ---
 

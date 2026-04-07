@@ -1,0 +1,2 @@
+-- Initial MFA module scaffold migration.
+-- Module-specific tables are added in follow-up migrations.

@@ -1,0 +1,1 @@
+-- Initial social module scaffold rollback (no-op).

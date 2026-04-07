@@ -1,0 +1,1 @@
+-- Initial MFA module scaffold rollback (no-op).

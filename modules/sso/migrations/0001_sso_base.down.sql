@@ -1,0 +1,1 @@
+-- Initial SSO module scaffold rollback (no-op).
