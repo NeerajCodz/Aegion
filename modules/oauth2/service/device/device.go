@@ -203,6 +203,11 @@ func (s *DeviceService) DenyDeviceAuthorization(ctx context.Context, userCode st
 	return s.store.MarkDeviceCodeDenied(ctx, dc.DeviceCode)
 }
 
+// ConsumeDeviceCode marks an approved device code as used.
+func (s *DeviceService) ConsumeDeviceCode(ctx context.Context, deviceCode string) error {
+	return s.store.MarkDeviceCodeUsed(ctx, deviceCode)
+}
+
 // generateUserCode generates an 8-character user code in format XXXX-XXXX.
 // Uses uppercase consonants only to avoid profanity and visual confusion.
 func generateUserCode() string {

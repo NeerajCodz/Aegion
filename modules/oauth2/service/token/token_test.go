@@ -729,6 +729,85 @@ func TestRefreshAccessToken_ErrorPaths(t *testing.T) {
 	})
 }
 
+func TestExchangeDeviceCode(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("success", func(t *testing.T) {
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:             "client-1",
+				GrantTypes:     []string{"urn:ietf:params:oauth:grant-type:device_code"},
+				Scopes:         []string{"openid", "profile"},
+				AccessTokenTTL: 900,
+				IDTokenTTL:     3600,
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		resp, err := svc.ExchangeDeviceCode(ctx, &DeviceCodeTokenRequest{
+			ClientID:   "client-1",
+			IdentityID: "identity-1",
+			SessionID:  "session-1",
+			Scopes:     []string{"openid"},
+			AuthTime:   time.Now().UTC().Add(-time.Minute),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.NotEmpty(t, resp.AccessToken)
+		assert.NotNil(t, resp.IDToken)
+	})
+
+	t.Run("invalid request and client lookup", func(t *testing.T) {
+		svc := NewTokenService(&mockTokenStore{}, &MockJWTSigner{}, "https://issuer")
+		_, err := svc.ExchangeDeviceCode(ctx, nil)
+		assert.ErrorIs(t, err, ErrInvalidRequest)
+
+		_, err = svc.ExchangeDeviceCode(ctx, &DeviceCodeTokenRequest{
+			ClientID: "client-1",
+		})
+		assert.ErrorIs(t, err, ErrInvalidRequest)
+
+		st := &mockTokenStore{getClientErr: errors.New("missing")}
+		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err = svc.ExchangeDeviceCode(ctx, &DeviceCodeTokenRequest{
+			ClientID:   "client-1",
+			IdentityID: "identity-1",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
+	})
+
+	t.Run("grant and client auth errors", func(t *testing.T) {
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:         "client-1",
+				GrantTypes: []string{"authorization_code"},
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err := svc.ExchangeDeviceCode(ctx, &DeviceCodeTokenRequest{
+			ClientID:   "client-1",
+			IdentityID: "identity-1",
+		})
+		assert.ErrorIs(t, err, ErrUnauthorizedClient)
+
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+		require.NoError(t, hashErr)
+		st = &mockTokenStore{
+			client: &store.Client{
+				ID:                      "client-1",
+				TokenEndpointAuthMethod: "client_secret_post",
+				SecretHash:              ptrString(string(hash)),
+				GrantTypes:              []string{"urn:ietf:params:oauth:grant-type:device_code"},
+			},
+		}
+		svc = NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err = svc.ExchangeDeviceCode(ctx, &DeviceCodeTokenRequest{
+			ClientID:   "client-1",
+			IdentityID: "identity-1",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
+	})
+}
+
 func TestRevokeToken(t *testing.T) {
 	ctx := context.Background()
 

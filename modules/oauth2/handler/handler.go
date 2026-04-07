@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/service/device"
@@ -175,7 +176,7 @@ func (h *OAuth2Handler) handleClientCredentialsGrant(w http.ResponseWriter, r *h
 }
 
 func (h *OAuth2Handler) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request) {
-	clientID, _ := extractClientCredentials(r)
+	clientID, clientSecret := extractClientCredentials(r)
 
 	req := &device.DeviceTokenRequest{
 		GrantType:  "urn:ietf:params:oauth:grant-type:device_code",
@@ -199,10 +200,36 @@ func (h *OAuth2Handler) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Req
 		}
 		return
 	}
+	if h.tokenSvc == nil {
+		writeError(w, "server_error", "Token service unavailable", http.StatusInternalServerError)
+		return
+	}
 
-	// Issue tokens (TODO: integrate with token service)
-	_ = dc
-	writeError(w, "server_error", "Token issuance not yet implemented", http.StatusInternalServerError)
+	if err := h.deviceSvc.ConsumeDeviceCode(r.Context(), dc.DeviceCode); err != nil {
+		writeError(w, "server_error", "Failed to finalize device code", http.StatusInternalServerError)
+		return
+	}
+
+	issueReq := &token.DeviceCodeTokenRequest{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		IdentityID:   *dc.IdentityID,
+		Scopes:       dc.Scopes,
+		Audience:     dc.Audience,
+		AuthTime:     ptrTimeValue(dc.ApprovedAt),
+	}
+	if dc.SessionID != nil {
+		issueReq.SessionID = *dc.SessionID
+	}
+
+	resp, err := h.tokenSvc.ExchangeDeviceCode(r.Context(), issueReq)
+	if err != nil {
+		code, description, status := mapTokenGrantError(err)
+		writeTokenError(w, code, description, status)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *OAuth2Handler) handleJWTBearerGrant(w http.ResponseWriter, r *http.Request) {
@@ -398,6 +425,13 @@ func ptrIfNotEmpty(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func ptrTimeValue(v *time.Time) time.Time {
+	if v == nil {
+		return time.Time{}
+	}
+	return *v
 }
 
 func extractClientCredentials(r *http.Request) (clientID, clientSecret string) {

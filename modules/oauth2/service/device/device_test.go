@@ -27,6 +27,8 @@ type mockDeviceStore struct {
 	lastApprovedUser   string
 	lastApprovedScopes []string
 	lastDeniedCode     string
+	lastUsedCode       string
+	usedErr            error
 }
 
 func (m *mockDeviceStore) GetClient(ctx context.Context, id string) (*store.Client, error) {
@@ -77,7 +79,8 @@ func (m *mockDeviceStore) MarkDeviceCodeDenied(ctx context.Context, deviceCode s
 }
 
 func (m *mockDeviceStore) MarkDeviceCodeUsed(ctx context.Context, deviceCode string) error {
-	return nil
+	m.lastUsedCode = deviceCode
+	return m.usedErr
 }
 
 func TestDeviceService_RequestDeviceAuthorization(t *testing.T) {
@@ -279,6 +282,18 @@ func TestDeviceService_ApproveAndDeny(t *testing.T) {
 		err := svc.DenyDeviceAuthorization(context.Background(), "UCODE")
 		require.NoError(t, err)
 		assert.Equal(t, "dc-2", st.lastDeniedCode)
+	})
+
+	t.Run("consume device code", func(t *testing.T) {
+		st := &mockDeviceStore{}
+		svc := NewDeviceService(st, time.Minute, 5, "https://issuer/device")
+		err := svc.ConsumeDeviceCode(context.Background(), "dc-3")
+		require.NoError(t, err)
+		assert.Equal(t, "dc-3", st.lastUsedCode)
+
+		st.usedErr = errors.New("mark used failed")
+		err = svc.ConsumeDeviceCode(context.Background(), "dc-4")
+		assert.ErrorIs(t, err, st.usedErr)
 	})
 }
 
