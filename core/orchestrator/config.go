@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ var (
 	ErrMissingImage      = errors.New("module image is required")
 	ErrMissingModuleID   = errors.New("module ID is required")
 	ErrMissingModuleName = errors.New("module name is required")
+	ErrMissingDependency = errors.New("module dependency not satisfied")
 )
 
 // ModuleConfig defines the configuration for a module container.
@@ -158,8 +160,130 @@ func (l *ConfigLoader) Load() (*AegionConfig, error) {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
+	if err := ValidateModuleDependencies(&cfg); err != nil {
+		return nil, err
+	}
+
 	l.config = &cfg
 	return &cfg, nil
+}
+
+var moduleDependencies = map[string][]string{
+	"password":      {"core"},
+	"mfa":           {"core", "password"},
+	"passkeys":      {"core"},
+	"magic_link":    {"core"},
+	"social":        {"core"},
+	"sso":           {"core"},
+	"oauth2":        {"core"},
+	"introspection": {"oauth2"},
+	"policy":        {"core"},
+	"proxy":         {"core"},
+	"admin":         {"core", "policy"},
+	"cli":           {"core"},
+}
+
+// ValidateModuleDependencies validates enabled module dependency constraints.
+func ValidateModuleDependencies(cfg *AegionConfig) error {
+	if cfg == nil {
+		return nil
+	}
+
+	for module, deps := range moduleDependencies {
+		if !isEnabledByVersion(cfg.ModuleVersions[module]) {
+			continue
+		}
+		for _, dep := range deps {
+			if dep == "core" || isEnabledByVersion(cfg.ModuleVersions[dep]) {
+				continue
+			}
+			return fmt.Errorf(
+				"%w: module %q requires %q",
+				ErrMissingDependency,
+				module,
+				dep,
+			)
+		}
+	}
+
+	return nil
+}
+
+// EnabledModuleOrder returns enabled modules in deterministic dependency order.
+func EnabledModuleOrder(moduleVersions map[string]string) ([]string, error) {
+	enabled := make(map[string]struct{})
+	for moduleID, version := range moduleVersions {
+		if !isEnabledByVersion(version) {
+			continue
+		}
+		enabled[moduleID] = struct{}{}
+	}
+	delete(enabled, "core")
+
+	indegree := make(map[string]int, len(enabled))
+	dependents := make(map[string][]string, len(enabled))
+	for moduleID := range enabled {
+		indegree[moduleID] = 0
+	}
+
+	for moduleID := range enabled {
+		for _, dep := range moduleDependencies[moduleID] {
+			if dep == "core" {
+				continue
+			}
+			if _, ok := enabled[dep]; !ok {
+				return nil, fmt.Errorf(
+					"%w: module %q requires %q",
+					ErrMissingDependency,
+					moduleID,
+					dep,
+				)
+			}
+			indegree[moduleID]++
+			dependents[dep] = append(dependents[dep], moduleID)
+		}
+	}
+
+	var ready []string
+	for moduleID, count := range indegree {
+		if count == 0 {
+			ready = append(ready, moduleID)
+		}
+	}
+	slices.Sort(ready)
+
+	order := make([]string, 0, len(enabled))
+	for len(ready) > 0 {
+		current := ready[0]
+		ready = ready[1:]
+		order = append(order, current)
+
+		nextModules := dependents[current]
+		slices.Sort(nextModules)
+		for _, next := range nextModules {
+			indegree[next]--
+			if indegree[next] == 0 {
+				ready = append(ready, next)
+			}
+		}
+		slices.Sort(ready)
+	}
+
+	if len(order) != len(enabled) {
+		return nil, fmt.Errorf("failed to resolve module dependency order: cyclic dependency detected")
+	}
+
+	return order, nil
+}
+
+func isEnabledByVersion(version string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(version))
+	switch normalized {
+	case "", "disabled", "disable", "off", "false", "0", "none":
+		return false
+	default:
+		return true
+	}
 }
 
 // LoadModuleConfig loads configuration for a specific module.

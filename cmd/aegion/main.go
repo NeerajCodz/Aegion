@@ -61,6 +61,7 @@ type mainDeps struct {
 	newLogger        func(cfg logger.Config) *logger.Logger
 	connectDB        func(ctx context.Context, cfg database.Config) (*database.DB, error)
 	newMigrator      func(db *database.DB) migrator
+	runModuleMigrate func(ctx context.Context, cfg *config.Config, db *database.DB, configPath string) error
 	newWorkerMgr     func(log *logger.Logger, db *database.DB) *workers.Manager
 	newObservability func(ctx context.Context, cfg *config.Config) (telemetryProvider, error)
 	newServer        func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error)
@@ -121,6 +122,7 @@ func defaultMainDeps() mainDeps {
 		newMigrator: func(db *database.DB) migrator {
 			return database.NewMigrator(db, migrations, "migrations")
 		},
+		runModuleMigrate: runEnabledModuleMigrations,
 		newWorkerMgr: func(log *logger.Logger, db *database.DB) *workers.Manager {
 			return workers.NewManager(workers.ManagerConfig{
 				DB:  db.Pool,
@@ -265,6 +267,14 @@ func run(args []string, deps mainDeps) int {
 		return 1
 	}
 	log.Info().Msg("Migrations complete")
+
+	if deps.runModuleMigrate != nil {
+		if err := deps.runModuleMigrate(ctx, cfg, db, f.configPath); err != nil {
+			_, _ = fmt.Fprintf(deps.stderr, "Failed to run module migrations: %v\n", err)
+			return 1
+		}
+		log.Info().Msg("Module migrations complete")
+	}
 
 	if f.migrateOnly || cfg.Database.MigrateOnly {
 		log.Info().Msg("Migrate-only mode, exiting")

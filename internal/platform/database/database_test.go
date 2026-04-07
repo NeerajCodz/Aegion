@@ -76,6 +76,45 @@ func TestNewMigrator(t *testing.T) {
 	if migrator.basePath != basePath {
 		t.Errorf("Migrator.basePath = %s, want %s", migrator.basePath, basePath)
 	}
+	if migrator.tableName != defaultMigrationTable {
+		t.Errorf("Migrator.tableName = %s, want %s", migrator.tableName, defaultMigrationTable)
+	}
+	if migrator.lockID != defaultMigrationLockID {
+		t.Errorf("Migrator.lockID = %d, want %d", migrator.lockID, defaultMigrationLockID)
+	}
+}
+
+func TestNewModuleMigrator(t *testing.T) {
+	db := &DB{Pool: nil}
+	basePath := "modules/admin/migrations"
+	var testFS embed.FS
+
+	migrator := NewModuleMigrator(db, testFS, basePath, "Admin-Service")
+	if migrator == nil {
+		t.Fatal("NewModuleMigrator() returned nil")
+	}
+	if migrator.tableName != "schema_migrations_admin_service" {
+		t.Fatalf("unexpected module table name: %s", migrator.tableName)
+	}
+	if migrator.lockID == defaultMigrationLockID {
+		t.Fatalf("expected module lock id to differ from default")
+	}
+}
+
+func TestSanitizeIdentifier(t *testing.T) {
+	tests := map[string]string{
+		"admin":           "admin",
+		"Admin-Service":   "admin_service",
+		"  mixed Value  ": "mixed_value",
+		"@@@":             "module",
+		"":                "module",
+	}
+
+	for input, expected := range tests {
+		if got := sanitizeIdentifier(input); got != expected {
+			t.Fatalf("sanitizeIdentifier(%q) = %q, want %q", input, got, expected)
+		}
+	}
 }
 
 // Test the migration filename parsing logic (extracted from loadMigrations)

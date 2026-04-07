@@ -393,6 +393,23 @@ func TestRunDBAndMigrationErrors(t *testing.T) {
 			t.Fatalf("expected migration error output, got %q", got)
 		}
 	})
+
+	t.Run("module migration error", func(t *testing.T) {
+		deps, _, stderr, migrator, _, _ := buildRunDeps(validMainConfig())
+		deps.runModuleMigrate = func(ctx context.Context, cfg *config.Config, db *database.DB, configPath string) error {
+			return errors.New("module migration failed")
+		}
+
+		if code := run(nil, deps); code != 1 {
+			t.Fatalf("expected exit code 1, got %d", code)
+		}
+		if migrator.calls != 1 {
+			t.Fatalf("expected core migrator to be called once, got %d", migrator.calls)
+		}
+		if got := stderr.String(); !strings.Contains(got, "Failed to run module migrations") {
+			t.Fatalf("expected module migration error output, got %q", got)
+		}
+	})
 }
 
 func TestRunObservabilityInitializationError(t *testing.T) {
@@ -638,7 +655,7 @@ func TestDefaultMainDeps(t *testing.T) {
 	if deps.loadConfig == nil || deps.validateConfig == nil || deps.newLogger == nil {
 		t.Fatalf("expected core dependency hooks to be initialized")
 	}
-	if deps.connectDB == nil || deps.newMigrator == nil || deps.newServer == nil || deps.newObservability == nil {
+	if deps.connectDB == nil || deps.newMigrator == nil || deps.runModuleMigrate == nil || deps.newServer == nil || deps.newObservability == nil {
 		t.Fatalf("expected runtime dependency hooks to be initialized")
 	}
 	if deps.newHTTPServer == nil || deps.newLifecycle == nil || deps.startHTTPServer == nil {
