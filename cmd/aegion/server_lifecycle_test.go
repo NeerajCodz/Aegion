@@ -172,6 +172,51 @@ func TestNewServerInitializesCoreComponents(t *testing.T) {
 	if server.TokenGenerator() == nil {
 		t.Fatalf("expected token generator to be initialized")
 	}
+	if server.policyChecker != nil {
+		t.Fatalf("expected policy checker to be nil when policy is disabled")
+	}
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown should not fail: %v", err)
+	}
+}
+
+func TestNewServerInitializesPolicyCheckerWhenEnabled(t *testing.T) {
+	log := testLogger()
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			RequestTimeout: config.Duration(10 * time.Second),
+			InternalNet: config.InternalNetConfig{
+				HealthCheckInt:     config.Duration(time.Second),
+				HealthCheckTimeout: config.Duration(time.Second),
+			},
+		},
+		Admin: config.AdminConfig{
+			Enabled: false,
+			Path:    "/aegion",
+		},
+		Policy: config.PolicyConfig{
+			Enabled:      true,
+			DefaultModel: "rbac",
+			RBAC:         config.PolicyRBACConfig{Enabled: true},
+		},
+	}
+
+	server, err := NewServer(context.Background(), &ServerConfig{
+		Config:         cfg,
+		DB:             &database.DB{Pool: nil},
+		Log:            log,
+		WorkerManager:  workers.NewManager(workers.ManagerConfig{Log: log}),
+		AdminBootstrap: true,
+	})
+	if err != nil {
+		t.Fatalf("NewServer returned error: %v", err)
+	}
+
+	if server.policyChecker == nil {
+		t.Fatalf("expected policy checker to be initialized when policy is enabled")
+	}
 
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutdown should not fail: %v", err)
