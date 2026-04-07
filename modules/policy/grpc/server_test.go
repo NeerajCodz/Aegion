@@ -434,3 +434,249 @@ func TestServer_Check_ReBACMaxDepthExceeded(t *testing.T) {
 	assert.Equal(t, "max_depth_exceeded", resp.GetDenyReason())
 	assert.Equal(t, []string{"rebac:max_depth_exceeded"}, resp.GetEvalPath())
 }
+
+func TestServer_HelperUtilities(t *testing.T) {
+	t.Run("splitCSV trims and skips empty segments", func(t *testing.T) {
+		assert.Equal(t, []string{}, splitCSV("   "))
+		assert.Equal(t, []string{"admin", "editor", "viewer"}, splitCSV(" admin, editor, ,viewer ,,"))
+	})
+
+	t.Run("request context IP round-trip", func(t *testing.T) {
+		base := context.Background()
+		assert.Equal(t, "", extractClientIP(base))
+
+		withEmpty := WithRequestContextIP(base, "   ")
+		assert.Equal(t, "", extractClientIP(withEmpty))
+
+		ctx := WithRequestContextIP(base, " [2001:db8::1]:443 ")
+		assert.Equal(t, "2001:db8::1", extractClientIP(ctx))
+	})
+
+	t.Run("namespace and relation helpers", func(t *testing.T) {
+		ns, obj := parseNamespaceAndObject("documents:spec-1", "")
+		assert.Equal(t, "documents", ns)
+		assert.Equal(t, "spec-1", obj)
+
+		ns, obj = parseNamespaceAndObject("spec-1", "documents")
+		assert.Equal(t, "documents", ns)
+		assert.Equal(t, "spec-1", obj)
+
+		ns, obj = parseNamespaceAndObject("", "documents")
+		assert.Equal(t, "", ns)
+		assert.Equal(t, "", obj)
+
+		assert.Equal(t, "viewer", actionToRelation(" READ "))
+		assert.Equal(t, "editor", actionToRelation("update"))
+		assert.Equal(t, "owner", actionToRelation("delete"))
+		assert.Equal(t, "owner", actionToRelation("owner"))
+		assert.Equal(t, "custom", actionToRelation("custom"))
+
+		setObj, setRel, ok := parseSubjectSet("group:eng#member")
+		assert.True(t, ok)
+		assert.Equal(t, "group:eng", setObj)
+		assert.Equal(t, "member", setRel)
+
+		_, _, ok = parseSubjectSet("group:eng# ")
+		assert.False(t, ok)
+		_, _, ok = parseSubjectSet(" #member")
+		assert.False(t, ok)
+
+		_, _, ok = parseSubjectSet("invalid-subject-set")
+		assert.False(t, ok)
+	})
+}
+
+func TestServer_ABACCompilerAndEvaluationHelpers(t *testing.T) {
+	s := NewServer(&mockRBACStore{})
+	req := &policypb.CheckRequest{
+		Subject:      "user:alice",
+		Resource:     "documents:spec-1",
+		ResourceType: "documents",
+		Action:       "read",
+		Context: &policypb.Context{
+			Extra: map[string]string{
+				"subject_roles": "admin, editor",
+			},
+		},
+	}
+
+	activation, err := buildABACActivation(WithRequestContextIP(context.Background(), "10.0.0.5:443"), req)
+	require.NoError(t, err)
+	requestMap, ok := activation["request"].(map[string]any)
+	require.True(t, ok)
+	contextMap, ok := requestMap["context"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "10.0.0.5", contextMap["ip"])
+
+	subjectMap, ok := activation["subject"].(map[string]any)
+	require.True(t, ok)
+	require.Contains(t, subjectMap, "roles")
+	assert.Equal(t, []string{"admin", "editor"}, subjectMap["roles"])
+
+	_, err = s.compileABACExpression(" ")
+	assert.ErrorContains(t, err, "empty ABAC expression")
+
+	_, err = s.compileABACExpression(`"nope"`)
+	assert.ErrorContains(t, err, "must return bool")
+
+	ast1, err := s.compileABACExpression(`action == "read"`)
+	require.NoError(t, err)
+	ast2, err := s.compileABACExpression(`action == "read"`)
+	require.NoError(t, err)
+	assert.Same(t, ast1, ast2)
+
+	matched, err := s.evaluateABACExpression(WithRequestContextIP(context.Background(), "10.0.0.5"), req, `request.context.ip.startsWith("10.")`)
+	require.NoError(t, err)
+	assert.True(t, matched)
+
+	_, err = s.evaluateABACExpression(context.Background(), req, `request.context.extra["missing"].startsWith("10.")`)
+	assert.Error(t, err)
+}
+
+func TestServer_EvaluateABACOnlyPaths(t *testing.T) {
+	s := NewServer(&mockRBACStore{})
+	req := &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+	}
+
+	resp, err := s.evaluateABACOnly(context.Background(), req, []policystore.ABACRule{
+		{Name: "deny_reads", Expression: `action == "read"`, Effect: "deny", Enabled: true},
+		{Name: "allow_reads", Expression: `action == "read"`, Effect: "allow", Enabled: true},
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetAllowed())
+	assert.Equal(t, "abac_deny_rule_matched", resp.GetDenyReason())
+	assert.Equal(t, []string{"abac:deny:deny_reads"}, resp.GetEvalPath())
+
+	resp, err = s.evaluateABACOnly(context.Background(), req, []policystore.ABACRule{
+		{Name: "allow_reads", Expression: `action == "read"`, Effect: "allow", Enabled: true},
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, []string{"abac:deny_miss", "abac:allow:allow_reads"}, resp.GetEvalPath())
+
+	resp, err = s.evaluateABACOnly(context.Background(), req, []policystore.ABACRule{})
+	require.NoError(t, err)
+	assert.False(t, resp.GetAllowed())
+	assert.Equal(t, "abac_no_matching_rule", resp.GetDenyReason())
+	assert.Equal(t, []string{"abac:deny_miss", "abac:allow_miss"}, resp.GetEvalPath())
+
+	_, err = s.evaluateABACOnly(context.Background(), req, []policystore.ABACRule{
+		{Name: "broken", Expression: `request.context.ip.startsWith(`, Effect: "allow", Enabled: true},
+	})
+	assert.ErrorContains(t, err, "evaluate ABAC rule")
+
+	_, err = s.evaluateABACOnly(context.Background(), req, []policystore.ABACRule{
+		{Name: "broken_deny", Expression: `request.context.ip.startsWith(`, Effect: "deny", Enabled: true},
+	})
+	assert.ErrorContains(t, err, "evaluate ABAC rule")
+}
+
+func TestServer_BatchCheck_Errors(t *testing.T) {
+	s := NewServer(&mockRBACStore{})
+
+	_, err := s.BatchCheck(context.Background(), nil)
+	assert.ErrorContains(t, err, "batch check request is required")
+
+	_, err = s.BatchCheck(context.Background(), &policypb.BatchCheckRequest{
+		Checks: []*policypb.CheckRequest{
+			{Subject: "user:alice", ResourceType: "documents", Action: "read"},
+			{},
+		},
+	})
+	assert.ErrorContains(t, err, "subject is required")
+}
+
+func TestServer_EvaluateReBAC_AdditionalBranches(t *testing.T) {
+	t.Run("invalid resource fails closed", func(t *testing.T) {
+		s := NewServer(&mockRBACStore{})
+		resp, err := s.evaluateReBAC(context.Background(), &policypb.CheckRequest{
+			Subject:      "user:alice",
+			ResourceType: "documents",
+			Action:       "read",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.GetAllowed())
+		assert.Equal(t, "rebac_invalid_resource", resp.GetDenyReason())
+	})
+
+	t.Run("store error propagates", func(t *testing.T) {
+		s := NewServer(&mockRBACStore{rebacErr: errors.New("rebac store failed")})
+		_, err := s.evaluateReBAC(context.Background(), &policypb.CheckRequest{
+			Subject:      "user:alice",
+			Resource:     "documents:spec-1",
+			ResourceType: "documents",
+			Action:       "read",
+		})
+		assert.ErrorContains(t, err, "rebac store failed")
+	})
+
+	t.Run("no matching tuple returns deterministic miss", func(t *testing.T) {
+		s := NewServer(&mockRBACStore{})
+		resp, err := s.evaluateReBAC(context.Background(), &policypb.CheckRequest{
+			Subject:      "user:alice",
+			Resource:     "documents:spec-404",
+			ResourceType: "documents",
+			Action:       "read",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.GetAllowed())
+		assert.Equal(t, "rebac_no_matching_tuple", resp.GetDenyReason())
+		assert.Equal(t, []string{"rebac:miss"}, resp.GetEvalPath())
+	})
+}
+
+func TestServer_Check_DefaultModelReBACTransitions(t *testing.T) {
+	t.Run("default model allows via ReBAC", func(t *testing.T) {
+		st := &mockRBACStore{
+			rebacTuples: []policystore.ReBACTuple{
+				{Namespace: "documents", ObjectID: "spec-1", Relation: "viewer", SubjectID: "user:alice"},
+			},
+		}
+		s := NewServer(st)
+
+		resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+			Subject:      "user:alice",
+			Resource:     "documents:spec-1",
+			ResourceType: "documents",
+			Action:       "read",
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetAllowed())
+		assert.Equal(t, "rebac", resp.GetModelUsed())
+		assert.Equal(t, []string{"abac:deny_miss", "rbac:miss", "abac:allow_miss", "rebac:allow"}, resp.GetEvalPath())
+	})
+
+	t.Run("default model maps ReBAC max depth to deterministic deny", func(t *testing.T) {
+		tuples := make([]policystore.ReBACTuple, 0, 22)
+		for i := 0; i < 21; i++ {
+			tuples = append(tuples, policystore.ReBACTuple{
+				Namespace: "documents",
+				ObjectID:  fmt.Sprintf("group:node-%d", i),
+				Relation:  "viewer",
+				SubjectID: fmt.Sprintf("group:node-%d#viewer", i+1),
+			})
+		}
+		tuples = append(tuples, policystore.ReBACTuple{
+			Namespace: "documents",
+			ObjectID:  "group:node-21",
+			Relation:  "viewer",
+			SubjectID: "user:alice",
+		})
+
+		s := NewServer(&mockRBACStore{rebacTuples: tuples})
+		resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+			Subject:      "user:alice",
+			Resource:     "documents:group:node-0",
+			ResourceType: "documents",
+			Action:       "read",
+		})
+		require.NoError(t, err)
+		assert.False(t, resp.GetAllowed())
+		assert.Equal(t, "rebac", resp.GetModelUsed())
+		assert.Equal(t, "max_depth_exceeded", resp.GetDenyReason())
+		assert.Equal(t, []string{"abac:deny_miss", "rbac:miss", "abac:allow_miss", "rebac:max_depth_exceeded"}, resp.GetEvalPath())
+	})
+}

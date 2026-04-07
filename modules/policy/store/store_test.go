@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -252,5 +253,140 @@ func TestStore_ListReBACTuples(t *testing.T) {
 
 		_, err := st.ListReBACTuples(context.Background(), "documents", "spec-1", "viewer")
 		assert.ErrorContains(t, err, "tuple query failed")
+	})
+}
+
+func TestStore_Constructors(t *testing.T) {
+	require.NotNil(t, NewWithDB(&fakeDB{}))
+	require.NotNil(t, New((*pgxpool.Pool)(nil)))
+}
+
+func TestStore_AdditionalErrorBranches(t *testing.T) {
+	t.Run("ListRoleIDsByIdentity query error", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return nil, errors.New("role query failed")
+			},
+		})
+
+		_, err := st.ListRoleIDsByIdentity(context.Background(), "id-1")
+		assert.ErrorContains(t, err, "role query failed")
+	})
+
+	t.Run("ListRoleIDsByIdentity returns rows.Err", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{
+					data: [][]any{{"role-1"}},
+					err:  errors.New("role rows failed"),
+				}, nil
+			},
+		})
+
+		_, err := st.ListRoleIDsByIdentity(context.Background(), "id-1")
+		assert.ErrorContains(t, err, "role rows failed")
+	})
+
+	t.Run("ListPermissionsByRoleIDs returns scan error", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{
+					data: [][]any{{123, "read"}},
+				}, nil
+			},
+		})
+
+		_, err := st.ListPermissionsByRoleIDs(context.Background(), []string{"role-1"})
+		assert.ErrorContains(t, err, "expected string value")
+	})
+
+	t.Run("ListPermissionsByRoleIDs returns rows.Err", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{
+					data: [][]any{{"documents", "read"}},
+					err:  errors.New("permission rows failed"),
+				}, nil
+			},
+		})
+
+		_, err := st.ListPermissionsByRoleIDs(context.Background(), []string{"role-1"})
+		assert.ErrorContains(t, err, "permission rows failed")
+	})
+
+	t.Run("ListABACRules returns rows.Err", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{
+					data: [][]any{{"allow_docs", "true", 1, "allow", true}},
+					err:  errors.New("abac rows failed"),
+				}, nil
+			},
+		})
+
+		_, err := st.ListABACRules(context.Background())
+		assert.ErrorContains(t, err, "abac rows failed")
+	})
+
+	t.Run("ListABACRules returns scan error", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{
+					data: [][]any{{"allow_docs", 123, 1, "allow", true}},
+				}, nil
+			},
+		})
+
+		_, err := st.ListABACRules(context.Background())
+		assert.ErrorContains(t, err, "expected string value")
+	})
+
+	t.Run("ListReBACTuples returns scan error", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{
+					data: [][]any{{"documents", "spec-1", "viewer", 123}},
+				}, nil
+			},
+		})
+
+		_, err := st.ListReBACTuples(context.Background(), "documents", "spec-1", "viewer")
+		assert.ErrorContains(t, err, "expected string value")
+	})
+
+	t.Run("ListReBACTuples returns rows.Err", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{
+					data: [][]any{{"documents", "spec-1", "viewer", "user:alice"}},
+					err:  errors.New("tuple rows failed"),
+				}, nil
+			},
+		})
+
+		_, err := st.ListReBACTuples(context.Background(), "documents", "spec-1", "viewer")
+		assert.ErrorContains(t, err, "tuple rows failed")
+	})
+
+	t.Run("GetRoleIDByName rejects empty role ID", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{""}}
+			},
+		})
+
+		_, err := st.GetRoleIDByName(context.Background(), "admin")
+		assert.ErrorContains(t, err, "empty role id returned")
+	})
+
+	t.Run("GetRoleIDByName returns non-no-rows errors", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{err: errors.New("database offline")}
+			},
+		})
+
+		_, err := st.GetRoleIDByName(context.Background(), "admin")
+		assert.ErrorContains(t, err, "database offline")
 	})
 }

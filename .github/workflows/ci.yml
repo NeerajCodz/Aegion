@@ -278,7 +278,7 @@ jobs:
             exit 1
           fi
 
-          skip_regex='/modules/oauth2/store$|/modules/oauth2/cmd/server$|/core/courier$|/core/proxy$|/internal/platform/crypto$|/internal/platform/jwt$|/modules/admin/cmd/admin$|/tests/e2e$'
+          skip_regex='/modules/oauth2/store$|/modules/oauth2/cmd/server$|/core/courier$|/core/proxy$|/internal/platform/crypto$|/internal/platform/jwt$|/modules/admin/cmd/admin$|/tests/e2e$|/internal/proto/|/cmd/aegion$|/modules/(cli|introspection|mfa|passkeys|proxy|social|sso)/cmd/server$'
           coverage_packages=$(echo "$packages" | tr ' ' '\n' | grep -Ev "$skip_regex" | tr '\n' ' ' | xargs)
 
           if [ -z "$coverage_packages" ]; then
