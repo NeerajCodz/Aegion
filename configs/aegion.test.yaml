@@ -30,6 +30,8 @@ module_versions:
   password:   "latest"
   magic_link: "latest"
   admin:      "latest"
+  policy:     "latest"
+  proxy:      "latest"
 
 module_registry:
   base_url: ""
@@ -259,6 +261,21 @@ admin:
     default_page_size: 20
     max_page_size: 1000
     token_last_used_update_timeout: 2s
+
+policy:
+  enabled: false
+  default_model: rbac
+  rbac:
+    enabled: true
+  abac:
+    enabled: false
+  rebac:
+    enabled: false
+
+proxy:
+  enabled: false
+  upstream_timeout: 15s
+  preserve_host: true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Observability — Minimal for tests

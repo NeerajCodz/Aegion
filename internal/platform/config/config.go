@@ -28,6 +28,8 @@ type Config struct {
 	Password       PasswordConfig    `yaml:"password"`
 	MagicLink      MagicLinkConfig   `yaml:"magic_link"`
 	Admin          AdminConfig       `yaml:"admin"`
+	Policy         PolicyConfig      `yaml:"policy"`
+	Proxy          ProxyConfig       `yaml:"proxy"`
 }
 
 // ModuleRegistry configures where to pull module images from.
@@ -242,6 +244,37 @@ type AdminSCIMConfig struct {
 	TokenLastUsedUpdateTimeout Duration `yaml:"token_last_used_update_timeout"`
 }
 
+// PolicyConfig configures the phase-3 policy engine defaults.
+type PolicyConfig struct {
+	Enabled      bool              `yaml:"enabled"`
+	DefaultModel string            `yaml:"default_model"`
+	RBAC         PolicyRBACConfig  `yaml:"rbac"`
+	ABAC         PolicyABACConfig  `yaml:"abac"`
+	ReBAC        PolicyReBACConfig `yaml:"rebac"`
+}
+
+// PolicyRBACConfig configures RBAC defaults.
+type PolicyRBACConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// PolicyABACConfig configures ABAC defaults.
+type PolicyABACConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// PolicyReBACConfig configures ReBAC defaults.
+type PolicyReBACConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// ProxyConfig configures phase-3 identity-aware proxy defaults.
+type ProxyConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	UpstreamTimeout Duration `yaml:"upstream_timeout"`
+	PreserveHost    bool     `yaml:"preserve_host"`
+}
+
 // Duration wraps time.Duration for YAML unmarshaling.
 type Duration time.Duration
 
@@ -412,6 +445,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Admin.SCIM.TokenLastUsedUpdateTimeout == 0 {
 		cfg.Admin.SCIM.TokenLastUsedUpdateTimeout = Duration(2 * time.Second)
+	}
+	if cfg.Policy.DefaultModel == "" {
+		cfg.Policy.DefaultModel = "rbac"
+	}
+	if cfg.Proxy.UpstreamTimeout == 0 {
+		cfg.Proxy.UpstreamTimeout = Duration(30 * time.Second)
 	}
 }
 
