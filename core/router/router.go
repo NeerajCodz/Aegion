@@ -2,6 +2,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/registry"
+	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
 
 // Router wraps chi.Router with Aegion-specific functionality.
@@ -19,6 +21,11 @@ type Router struct {
 
 	// Dependencies
 	registry *registry.Registry
+	policy   policyChecker
+}
+
+type policyChecker interface {
+	Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error)
 }
 
 // Config holds router configuration.
@@ -41,6 +48,9 @@ type Config struct {
 	// Module proxy timeout
 	ModuleTimeout time.Duration
 
+	// Policy model override for proxy authorization checks
+	PolicyModel string
+
 	// Trust proxy headers (X-Forwarded-For, etc.)
 	TrustProxy bool
 
@@ -49,6 +59,9 @@ type Config struct {
 
 	// Shutdown timeout for graceful shutdown
 	ShutdownTimeout time.Duration
+
+	// Optional in-process policy checker for module proxy authorization.
+	PolicyChecker policyChecker
 }
 
 // CORSConfig holds CORS settings.
@@ -101,6 +114,7 @@ func New(cfg Config, logger zerolog.Logger, reg *registry.Registry) *Router {
 		config:   cfg,
 		logger:   logger.With().Str("component", "router").Logger(),
 		registry: reg,
+		policy:   cfg.PolicyChecker,
 	}
 
 	r.setupMiddleware()
@@ -223,6 +237,8 @@ func (r *Router) ProxyToModule(moduleID string) http.Handler {
 		InternalToken: r.config.InternalToken,
 		SessionSecret: r.config.SessionSecret,
 		Timeout:       r.config.ModuleTimeout,
+		PolicyChecker: r.policy,
+		PolicyModel:   r.config.PolicyModel,
 		Logger:        r.logger,
 	})
 	return proxy

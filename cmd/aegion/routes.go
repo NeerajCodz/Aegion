@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
+	"strings"
 
+	"github.com/aegion/aegion/core/router"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -497,34 +499,78 @@ func (s *Server) handleModuleHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 	moduleID := chi.URLParam(r, "moduleId")
-	module, err := s.registry.GetModule(moduleID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "module not found", err)
-		return
-	}
+	moduleProxy := router.NewModuleProxy(router.ModuleProxyConfig{
+		Registry:      s.registry,
+		ModuleID:      moduleID,
+		InternalToken: s.currentInternalTokenForProxy(),
+		SessionSecret: s.sessionSecretForProxy(),
+		Timeout:       s.cfg.Proxy.UpstreamTimeout.Duration(),
+		PolicyChecker: s.policyChecker,
+		PolicyModel:   s.cfg.Policy.DefaultModel,
+		Logger:        s.log.With().Str("component", "module_proxy").Logger(),
+	})
 
-	// Find HTTP endpoint
-	var targetURL string
-	for _, ep := range module.Endpoints {
-		if ep.Type == registry.EndpointHTTP {
-			targetURL = ep.URL
-			break
+	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContext(r.Context(), r)))
+}
+
+func (s *Server) currentInternalTokenForProxy() string {
+	if s.tokenGen == nil {
+		return ""
+	}
+	token, err := s.tokenGen.Generate("core")
+	if err != nil {
+		s.log.Warn().Err(err).Msg("failed to generate internal token for module proxy")
+		return ""
+	}
+	return token
+}
+
+func (s *Server) sessionSecretForProxy() []byte {
+	if len(s.cfg.Secrets.Cookie) > 0 {
+		return []byte(s.cfg.Secrets.Cookie[0])
+	}
+	if len(s.cfg.Secrets.Internal) > 0 {
+		return []byte(s.cfg.Secrets.Internal[0])
+	}
+	if len(s.cfg.Secrets.Cipher) > 0 {
+		return []byte(s.cfg.Secrets.Cipher[0])
+	}
+	return nil
+}
+
+func withModuleProxyRequestContext(ctx context.Context, r *http.Request) context.Context {
+	ip := extractRequestIP(r)
+	if ip == "" {
+		return ctx
+	}
+	return router.WithRequestContextIP(ctx, ip)
+}
+
+func extractRequestIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			candidate := strings.TrimSpace(parts[0])
+			if candidate != "" {
+				return candidate
+			}
 		}
 	}
-
-	if targetURL == "" {
-		writeError(w, http.StatusBadGateway, "no HTTP endpoint available", nil)
-		return
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
 	}
-
-	target, err := url.Parse(targetURL)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "invalid module endpoint", err)
-		return
+	addr := strings.TrimSpace(r.RemoteAddr)
+	if addr == "" {
+		return ""
 	}
-
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.ServeHTTP(w, r)
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return strings.Trim(host, "[]")
+	}
+	return strings.Trim(addr, "[]")
 }
 
 // Internal flow handlers
