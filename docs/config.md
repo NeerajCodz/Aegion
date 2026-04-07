@@ -270,6 +270,22 @@ sso:
 
 ---
 
+## Production startup validation (enforced)
+
+When `AEGION_ENV=production` or `AEGION_ENVIRONMENT=production`, startup config validation rejects unsafe settings before the server boots.
+
+Current enforced checks:
+
+- session cookies must be secure (`sessions.cookie.secure: true`)
+- logging must be production-safe (`log.format: json`, `log.level` not `debug`)
+- database must not use SQLite and must not disable SSL (`sslmode=disable`)
+- module versions must be pinned (no `latest` tags in `module_versions`)
+- placeholder bootstrap credentials/secrets (for example `change-me`, `admin123!`) are rejected
+
+This is a hard fail-fast gate to prevent accidental production deployments with development defaults.
+
+---
+
 ## Anti-patterns
 
 - Treating module enable flags as runtime toggles
