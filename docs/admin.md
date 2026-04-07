@@ -119,6 +119,31 @@ This mirrors Discord-style permission ergonomics: flexible teams without sacrifi
 - hooks/webhooks and delivery templates
 - security posture controls
 
+#### Runtime config API contract
+
+The core admin runtime endpoints expose policy/proxy management under:
+
+- `GET /aegion/api/v1/system/config`
+- `PATCH /aegion/api/v1/system/config`
+
+Managed runtime domains currently include:
+
+- `policy`:
+  - `enabled`
+  - `default_model` (`rbac` | `abac` | `rebac`)
+  - model toggles (`rbac.enabled`, `abac.enabled`, `rebac.enabled`)
+- `proxy`:
+  - `enabled`
+  - `upstream_timeout`
+  - `preserve_host`
+  - `strip_inbound_identity_headers`
+  - `identity_signature_header`
+  - `signed_identity_headers`
+  - `identity_signing_secret` (write-only semantics in responses)
+
+Config is persisted in `core_system_config` and merged over bootstrap defaults from `aegion.yaml`.
+At read time, the API resolves effective values; at write time it validates input and upserts only the requested domains.
+
 ---
 
 ## Admin session security

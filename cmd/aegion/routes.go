@@ -3,18 +3,108 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aegion/aegion/core/router"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
 )
+
+const (
+	systemConfigKeyPolicy = "policy.settings"
+	systemConfigKeyProxy  = "proxy.settings"
+)
+
+type runtimePolicySettings struct {
+	Enabled      bool   `json:"enabled"`
+	DefaultModel string `json:"default_model"`
+	RBAC         struct {
+		Enabled bool `json:"enabled"`
+	} `json:"rbac"`
+	ABAC struct {
+		Enabled bool `json:"enabled"`
+	} `json:"abac"`
+	ReBAC struct {
+		Enabled bool `json:"enabled"`
+	} `json:"rebac"`
+}
+
+type runtimeProxySettings struct {
+	Enabled                     bool     `json:"enabled"`
+	UpstreamTimeout             string   `json:"upstream_timeout"`
+	PreserveHost                bool     `json:"preserve_host"`
+	StripInboundIdentityHeaders bool     `json:"strip_inbound_identity_headers"`
+	IdentitySigningSecret       string   `json:"identity_signing_secret,omitempty"`
+	IdentitySignatureHeader     string   `json:"identity_signature_header"`
+	SignedIdentityHeaders       []string `json:"signed_identity_headers"`
+}
+
+type runtimeConfigResponse struct {
+	Policy runtimePolicySettingsResponse `json:"policy"`
+	Proxy  runtimeProxySettingsResponse  `json:"proxy"`
+}
+
+type runtimePolicySettingsResponse struct {
+	Enabled      bool   `json:"enabled"`
+	DefaultModel string `json:"default_model"`
+	RBAC         struct {
+		Enabled bool `json:"enabled"`
+	} `json:"rbac"`
+	ABAC struct {
+		Enabled bool `json:"enabled"`
+	} `json:"abac"`
+	ReBAC struct {
+		Enabled bool `json:"enabled"`
+	} `json:"rebac"`
+}
+
+type runtimeProxySettingsResponse struct {
+	Enabled                     bool     `json:"enabled"`
+	UpstreamTimeout             string   `json:"upstream_timeout"`
+	PreserveHost                bool     `json:"preserve_host"`
+	StripInboundIdentityHeaders bool     `json:"strip_inbound_identity_headers"`
+	IdentitySigningSecretSet    bool     `json:"identity_signing_secret_set"`
+	IdentitySignatureHeader     string   `json:"identity_signature_header"`
+	SignedIdentityHeaders       []string `json:"signed_identity_headers"`
+}
+
+type runtimeConfigPatchRequest struct {
+	Policy *runtimePolicySettingsPatch `json:"policy"`
+	Proxy  *runtimeProxySettingsPatch  `json:"proxy"`
+}
+
+type runtimePolicySettingsPatch struct {
+	Enabled      *bool   `json:"enabled"`
+	DefaultModel *string `json:"default_model"`
+	RBAC         *struct {
+		Enabled *bool `json:"enabled"`
+	} `json:"rbac"`
+	ABAC *struct {
+		Enabled *bool `json:"enabled"`
+	} `json:"abac"`
+	ReBAC *struct {
+		Enabled *bool `json:"enabled"`
+	} `json:"rebac"`
+}
+
+type runtimeProxySettingsPatch struct {
+	Enabled                     *bool     `json:"enabled"`
+	UpstreamTimeout             *string   `json:"upstream_timeout"`
+	PreserveHost                *bool     `json:"preserve_host"`
+	StripInboundIdentityHeaders *bool     `json:"strip_inbound_identity_headers"`
+	IdentitySigningSecret       *string   `json:"identity_signing_secret"`
+	IdentitySignatureHeader     *string   `json:"identity_signature_header"`
+	SignedIdentityHeaders       *[]string `json:"signed_identity_headers"`
+}
 
 // SetupRoutes configures all HTTP routes for the server.
 func SetupRoutes(s *Server) chi.Router {
@@ -716,11 +806,318 @@ func (s *Server) handleAdminRestartModule(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	policySettings, err := s.loadRuntimePolicySettings(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load policy runtime config", err)
+		return
+	}
+	proxySettings, err := s.loadRuntimeProxySettings(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load proxy runtime config", err)
+		return
+	}
+
+	resp := runtimeConfigResponse{}
+	resp.Policy.Enabled = policySettings.Enabled
+	resp.Policy.DefaultModel = policySettings.DefaultModel
+	resp.Policy.RBAC.Enabled = policySettings.RBAC.Enabled
+	resp.Policy.ABAC.Enabled = policySettings.ABAC.Enabled
+	resp.Policy.ReBAC.Enabled = policySettings.ReBAC.Enabled
+
+	resp.Proxy.Enabled = proxySettings.Enabled
+	resp.Proxy.UpstreamTimeout = proxySettings.UpstreamTimeout
+	resp.Proxy.PreserveHost = proxySettings.PreserveHost
+	resp.Proxy.StripInboundIdentityHeaders = proxySettings.StripInboundIdentityHeaders
+	resp.Proxy.IdentitySigningSecretSet = strings.TrimSpace(proxySettings.IdentitySigningSecret) != ""
+	resp.Proxy.IdentitySignatureHeader = proxySettings.IdentitySignatureHeader
+	resp.Proxy.SignedIdentityHeaders = append([]string(nil), proxySettings.SignedIdentityHeaders...)
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
-	s.handleNotImplemented(w, r)
+	var req runtimeConfigPatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	if req.Policy == nil && req.Proxy == nil {
+		writeError(w, http.StatusBadRequest, "empty config update payload", nil)
+		return
+	}
+
+	ctx := r.Context()
+
+	if req.Policy != nil {
+		current, err := s.loadRuntimePolicySettings(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load policy runtime config", err)
+			return
+		}
+		next, err := applyRuntimePolicyPatch(current, req.Policy)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid policy runtime config patch", err)
+			return
+		}
+		if err := s.saveRuntimeConfig(ctx, systemConfigKeyPolicy, next); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to persist policy runtime config", err)
+			return
+		}
+	}
+
+	if req.Proxy != nil {
+		current, err := s.loadRuntimeProxySettings(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load proxy runtime config", err)
+			return
+		}
+		next, err := applyRuntimeProxyPatch(current, req.Proxy)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid proxy runtime config patch", err)
+			return
+		}
+		if err := s.saveRuntimeConfig(ctx, systemConfigKeyProxy, next); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to persist proxy runtime config", err)
+			return
+		}
+	}
+
+	s.handleAdminGetConfig(w, r)
+}
+
+func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySettings, error) {
+	settings := runtimePolicySettings{
+		Enabled:      s.cfg.Policy.Enabled,
+		DefaultModel: strings.TrimSpace(s.cfg.Policy.DefaultModel),
+	}
+	settings.RBAC.Enabled = s.cfg.Policy.RBAC.Enabled
+	settings.ABAC.Enabled = s.cfg.Policy.ABAC.Enabled
+	settings.ReBAC.Enabled = s.cfg.Policy.ReBAC.Enabled
+
+	if settings.DefaultModel == "" {
+		settings.DefaultModel = "rbac"
+	}
+	if s.db == nil || s.db.Pool == nil {
+		return settings, nil
+	}
+
+	var raw []byte
+	err := s.db.Pool.QueryRow(ctx, `
+		SELECT value
+		FROM core_system_config
+		WHERE key = $1
+	`, systemConfigKeyPolicy).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return settings, nil
+		}
+		return runtimePolicySettings{}, err
+	}
+
+	if unmarshalErr := json.Unmarshal(raw, &settings); unmarshalErr != nil {
+		return runtimePolicySettings{}, unmarshalErr
+	}
+
+	settings.DefaultModel = strings.ToLower(strings.TrimSpace(settings.DefaultModel))
+	if settings.DefaultModel == "" {
+		settings.DefaultModel = "rbac"
+	}
+
+	return settings, nil
+}
+
+func (s *Server) loadRuntimeProxySettings(ctx context.Context) (runtimeProxySettings, error) {
+	settings := runtimeProxySettings{
+		Enabled:                     s.cfg.Proxy.Enabled,
+		UpstreamTimeout:             s.cfg.Proxy.UpstreamTimeout.Duration().String(),
+		PreserveHost:                s.cfg.Proxy.PreserveHost,
+		StripInboundIdentityHeaders: s.cfg.Proxy.StripInboundIdentityHeaders,
+		IdentitySigningSecret:       strings.TrimSpace(s.cfg.Proxy.IdentitySigningSecret),
+		IdentitySignatureHeader:     strings.TrimSpace(s.cfg.Proxy.IdentitySignatureHeader),
+		SignedIdentityHeaders:       append([]string(nil), s.cfg.Proxy.SignedIdentityHeaders...),
+	}
+	if settings.UpstreamTimeout == "" || settings.UpstreamTimeout == "0s" {
+		settings.UpstreamTimeout = (30 * time.Second).String()
+	}
+	if settings.IdentitySignatureHeader == "" {
+		settings.IdentitySignatureHeader = "X-Aegion-Signature"
+	}
+	if len(settings.SignedIdentityHeaders) == 0 {
+		settings.SignedIdentityHeaders = []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
+	}
+	if s.db == nil || s.db.Pool == nil {
+		return settings, nil
+	}
+
+	var raw []byte
+	err := s.db.Pool.QueryRow(ctx, `
+		SELECT value
+		FROM core_system_config
+		WHERE key = $1
+	`, systemConfigKeyProxy).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return settings, nil
+		}
+		return runtimeProxySettings{}, err
+	}
+
+	if unmarshalErr := json.Unmarshal(raw, &settings); unmarshalErr != nil {
+		return runtimeProxySettings{}, unmarshalErr
+	}
+
+	settings.UpstreamTimeout = strings.TrimSpace(settings.UpstreamTimeout)
+	if settings.UpstreamTimeout == "" {
+		settings.UpstreamTimeout = (30 * time.Second).String()
+	}
+	settings.IdentitySignatureHeader = strings.TrimSpace(settings.IdentitySignatureHeader)
+	if settings.IdentitySignatureHeader == "" {
+		settings.IdentitySignatureHeader = "X-Aegion-Signature"
+	}
+	if len(settings.SignedIdentityHeaders) == 0 {
+		settings.SignedIdentityHeaders = []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
+	}
+
+	return settings, nil
+}
+
+func applyRuntimePolicyPatch(current runtimePolicySettings, patch *runtimePolicySettingsPatch) (runtimePolicySettings, error) {
+	next := current
+
+	if patch.Enabled != nil {
+		next.Enabled = *patch.Enabled
+	}
+	if patch.DefaultModel != nil {
+		next.DefaultModel = strings.ToLower(strings.TrimSpace(*patch.DefaultModel))
+	}
+	if patch.RBAC != nil && patch.RBAC.Enabled != nil {
+		next.RBAC.Enabled = *patch.RBAC.Enabled
+	}
+	if patch.ABAC != nil && patch.ABAC.Enabled != nil {
+		next.ABAC.Enabled = *patch.ABAC.Enabled
+	}
+	if patch.ReBAC != nil && patch.ReBAC.Enabled != nil {
+		next.ReBAC.Enabled = *patch.ReBAC.Enabled
+	}
+
+	if err := validateRuntimePolicySettings(next); err != nil {
+		return runtimePolicySettings{}, err
+	}
+
+	return next, nil
+}
+
+func applyRuntimeProxyPatch(current runtimeProxySettings, patch *runtimeProxySettingsPatch) (runtimeProxySettings, error) {
+	next := current
+
+	if patch.Enabled != nil {
+		next.Enabled = *patch.Enabled
+	}
+	if patch.UpstreamTimeout != nil {
+		next.UpstreamTimeout = strings.TrimSpace(*patch.UpstreamTimeout)
+	}
+	if patch.PreserveHost != nil {
+		next.PreserveHost = *patch.PreserveHost
+	}
+	if patch.StripInboundIdentityHeaders != nil {
+		next.StripInboundIdentityHeaders = *patch.StripInboundIdentityHeaders
+	}
+	if patch.IdentitySigningSecret != nil {
+		next.IdentitySigningSecret = strings.TrimSpace(*patch.IdentitySigningSecret)
+	}
+	if patch.IdentitySignatureHeader != nil {
+		next.IdentitySignatureHeader = strings.TrimSpace(*patch.IdentitySignatureHeader)
+	}
+	if patch.SignedIdentityHeaders != nil {
+		next.SignedIdentityHeaders = append([]string(nil), (*patch.SignedIdentityHeaders)...)
+	}
+
+	if err := validateRuntimeProxySettings(next); err != nil {
+		return runtimeProxySettings{}, err
+	}
+
+	return next, nil
+}
+
+func (s *Server) saveRuntimeConfig(ctx context.Context, key string, value interface{}) error {
+	if s.db == nil || s.db.Pool == nil {
+		return errors.New("database unavailable")
+	}
+
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.Pool.Exec(ctx, `
+		INSERT INTO core_system_config (key, value, updated_at)
+		VALUES ($1, $2::jsonb, NOW())
+		ON CONFLICT (key)
+		DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+	`, key, string(raw))
+	return err
+}
+
+func validateRuntimePolicySettings(settings runtimePolicySettings) error {
+	settings.DefaultModel = strings.ToLower(strings.TrimSpace(settings.DefaultModel))
+	switch settings.DefaultModel {
+	case "rbac", "abac", "rebac":
+	default:
+		return errors.New("default_model must be one of: rbac, abac, rebac")
+	}
+
+	enabledModels := 0
+	if settings.RBAC.Enabled {
+		enabledModels++
+	}
+	if settings.ABAC.Enabled {
+		enabledModels++
+	}
+	if settings.ReBAC.Enabled {
+		enabledModels++
+	}
+	if enabledModels == 0 {
+		return errors.New("at least one policy model must be enabled")
+	}
+
+	return nil
+}
+
+func validateRuntimeProxySettings(settings runtimeProxySettings) error {
+	if _, err := time.ParseDuration(settings.UpstreamTimeout); err != nil {
+		return errors.New("upstream_timeout must be a valid duration")
+	}
+
+	settings.IdentitySignatureHeader = strings.TrimSpace(settings.IdentitySignatureHeader)
+	if settings.IdentitySignatureHeader == "" {
+		return errors.New("identity_signature_header cannot be empty")
+	}
+
+	if len(settings.SignedIdentityHeaders) == 0 {
+		return errors.New("signed_identity_headers cannot be empty")
+	}
+
+	normalized := make([]string, 0, len(settings.SignedIdentityHeaders))
+	seen := map[string]struct{}{}
+	for _, header := range settings.SignedIdentityHeaders {
+		header = strings.TrimSpace(header)
+		if header == "" {
+			return errors.New("signed_identity_headers cannot contain empty values")
+		}
+		key := strings.ToLower(header)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, header)
+	}
+	settings.SignedIdentityHeaders = normalized
+
+	if strings.TrimSpace(settings.IdentitySigningSecret) != "" && len(settings.IdentitySigningSecret) < 16 {
+		return errors.New("identity_signing_secret must be at least 16 characters when set")
+	}
+
+	return nil
 }
 
 func (s *Server) handleAdminSystemHealth(w http.ResponseWriter, r *http.Request) {

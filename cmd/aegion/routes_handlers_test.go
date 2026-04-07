@@ -979,8 +979,6 @@ func TestNotImplementedHandlers(t *testing.T) {
 		{"admin delete session", s.handleAdminDeleteSession},
 		{"admin delete identity sessions", s.handleAdminDeleteIdentitySessions},
 		{"admin restart module", s.handleAdminRestartModule},
-		{"admin get config", s.handleAdminGetConfig},
-		{"admin update config", s.handleAdminUpdateConfig},
 		{"admin metrics", s.handleAdminMetrics},
 	}
 
@@ -997,6 +995,88 @@ func TestNotImplementedHandlers(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleAdminGetConfig_DefaultsWithoutDB(t *testing.T) {
+	s := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/aegion/api/v1/system/config", nil)
+	s.handleAdminGetConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	policy, ok := resp["policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected policy section")
+	}
+	if policy["default_model"] != "rbac" {
+		t.Fatalf("expected default policy model rbac, got %v", policy["default_model"])
+	}
+
+	proxy, ok := resp["proxy"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected proxy section")
+	}
+	if proxy["upstream_timeout"] != "30s" {
+		t.Fatalf("expected default upstream_timeout 30s, got %v", proxy["upstream_timeout"])
+	}
+	if proxy["identity_signature_header"] != "X-Aegion-Signature" {
+		t.Fatalf("expected default identity signature header, got %v", proxy["identity_signature_header"])
+	}
+	if proxy["identity_signing_secret_set"] != false {
+		t.Fatalf("expected identity_signing_secret_set=false, got %v", proxy["identity_signing_secret_set"])
+	}
+}
+
+func TestHandleAdminUpdateConfig_ValidationAndDBErrors(t *testing.T) {
+	s := newTestServer(t)
+
+	t.Run("empty payload", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("invalid policy model", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"policy":{"default_model":"unknown"}}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("invalid proxy duration", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"proxy":{"upstream_timeout":"not-a-duration"}}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("valid payload without db", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"policy":{"enabled":true,"rbac":{"enabled":true}}}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "database unavailable") {
+			t.Fatalf("expected database unavailable error, got %q", rec.Body.String())
+		}
+	})
 }
 
 func TestHandleAdminListModules(t *testing.T) {
