@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -253,34 +254,51 @@ func (rl *RateLimiter) generateKeys(r *http.Request) []string {
 
 // getClientIP extracts the real client IP from the request.
 func getClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+
 	// Check X-Forwarded-For header first (most common)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// X-Forwarded-For can contain multiple IPs, take the first one
-		if ips := strings.Split(xff, ","); len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		// X-Forwarded-For can contain multiple IPs, take the first non-empty one.
+		for _, ip := range strings.Split(xff, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				return ip
+			}
 		}
 	}
 
 	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
 	}
 
 	// Check CF-Connecting-IP header (Cloudflare)
-	if cfip := r.Header.Get("CF-Connecting-IP"); cfip != "" {
-		return strings.TrimSpace(cfip)
+	if cfip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfip != "" {
+		return cfip
 	}
 
 	// Fall back to RemoteAddr
-	if ip := r.RemoteAddr; ip != "" {
-		// RemoteAddr includes port, strip it
-		if idx := strings.LastIndex(ip, ":"); idx != -1 {
-			return ip[:idx]
-		}
+	if ip := getRemoteIP(r.RemoteAddr); ip != "" {
 		return ip
 	}
 
 	return ""
+}
+
+func getRemoteIP(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if remoteAddr == "" {
+		return ""
+	}
+
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err == nil {
+		return strings.Trim(host, "[]")
+	}
+
+	return strings.Trim(remoteAddr, "[]")
 }
 
 // Reset resets rate limiting for a specific key.

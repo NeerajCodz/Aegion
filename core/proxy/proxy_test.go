@@ -699,6 +699,7 @@ func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
 
 	original := httptest.NewRequest("GET", "http://edge.example.com/original", nil)
 	original.Host = "edge.example.com"
+	original.RemoteAddr = "198.51.100.20:4567"
 	original.Header.Set("X-Forwarded-For", "203.0.113.10")
 	original.Header.Set("X-Forwarded-Proto", "https")
 	original.Header.Set("X-Forwarded-Host", "gateway.example.com")
@@ -707,7 +708,7 @@ func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
 
 	proxy.addForwardedHeaders(forwarded, original)
 
-	assert.Equal(t, "203.0.113.10, 203.0.113.10", forwarded.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, "203.0.113.10, 198.51.100.20", forwarded.Header.Get("X-Forwarded-For"))
 	assert.Equal(t, "https", forwarded.Header.Get("X-Forwarded-Proto"))
 	assert.Equal(t, "gateway.example.com", forwarded.Header.Get("X-Forwarded-Host"))
 }

@@ -649,9 +649,30 @@ func TestGetClientIP_IPv6(t *testing.T) {
 	req.RemoteAddr = "[::1]:12345"
 
 	ip := getClientIP(req)
-	// IPv6 addresses are stored in brackets, but getClientIP strips at the last ':'
-	// So we get [::1] (bracket stays because :: contains colons)
-	assert.Equal(t, "[::1]", ip)
+	assert.Equal(t, "::1", ip)
+}
+
+func TestGetClientIP_NilRequest(t *testing.T) {
+	assert.Equal(t, "", getClientIP(nil))
+}
+
+func TestGetRemoteIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		expected   string
+	}{
+		{name: "ipv4 with port", remoteAddr: "192.0.2.1:443", expected: "192.0.2.1"},
+		{name: "ipv4 no port", remoteAddr: "192.0.2.1", expected: "192.0.2.1"},
+		{name: "ipv6 with port", remoteAddr: "[2001:db8::1]:8443", expected: "2001:db8::1"},
+		{name: "empty", remoteAddr: "", expected: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, getRemoteIP(tt.remoteAddr))
+		})
+	}
 }
 
 // TestGetClientIP_XForwardedFor tests X-Forwarded-For header priority

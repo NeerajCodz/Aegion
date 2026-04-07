@@ -121,7 +121,7 @@ func TestGetClientIP(t *testing.T) {
 			name:       "ipv6 remote addr",
 			headers:    map[string]string{},
 			remoteAddr: "[::1]:8080",
-			expected:   "[::1]",
+			expected:   "::1",
 		},
 		{
 			name:       "empty x-forwarded-for falls back to x-real-ip",

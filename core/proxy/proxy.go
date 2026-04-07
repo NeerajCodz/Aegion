@@ -357,7 +357,10 @@ func (p *Proxy) injectSessionHeaders(req *http.Request, sess *session.Session) {
 
 // addForwardedHeaders adds standard forwarded headers.
 func (p *Proxy) addForwardedHeaders(req, original *http.Request) {
-	clientIP := getClientIP(original)
+	clientIP := getRemoteIP(original.RemoteAddr)
+	if clientIP == "" {
+		clientIP = getClientIP(original)
+	}
 
 	// X-Forwarded-For
 	if prior := original.Header.Get("X-Forwarded-For"); prior != "" {

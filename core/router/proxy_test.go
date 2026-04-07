@@ -133,7 +133,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	if req.Header.Get("X-Request-ID") != "req-123" {
 		t.Fatalf("expected forwarded request id")
 	}
-	if req.Header.Get("X-Forwarded-For") != "203.0.113.10, 203.0.113.10" {
+	if req.Header.Get("X-Forwarded-For") != "203.0.113.10, 198.51.100.4" {
 		t.Fatalf("unexpected x-forwarded-for: %q", req.Header.Get("X-Forwarded-For"))
 	}
 	if req.Header.Get("X-Forwarded-Proto") != "https" {
