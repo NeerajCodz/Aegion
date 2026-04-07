@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -345,25 +346,38 @@ func Timeout(timeout time.Duration) func(http.Handler) http.Handler {
 // Helper functions
 
 func getClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+
 	// Check X-Forwarded-For header
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
 		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
+		for _, ip := range ips {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				return ip
+			}
 		}
 	}
 
 	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
 		return xri
 	}
 
 	// Fall back to RemoteAddr
-	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		return addr[:idx]
+	addr := strings.TrimSpace(r.RemoteAddr)
+	if addr == "" {
+		return ""
 	}
-	return addr
+
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return strings.Trim(host, "[]")
+	}
+
+	return strings.Trim(addr, "[]")
 }
 
 func timeToSeconds(seconds int) string {

@@ -151,7 +151,13 @@ func (p *ModuleProxy) injectSessionHeaders(req *http.Request) {
 
 // addForwardedHeaders adds X-Forwarded-* headers.
 func (p *ModuleProxy) addForwardedHeaders(req, originalReq *http.Request) {
-	clientIP := getClientIP(originalReq)
+	clientIP := originalReq.RemoteAddr
+	if host, _, err := net.SplitHostPort(strings.TrimSpace(originalReq.RemoteAddr)); err == nil {
+		clientIP = strings.Trim(host, "[]")
+	}
+	if clientIP == "" {
+		clientIP = getClientIP(originalReq)
+	}
 
 	if prior := originalReq.Header.Get("X-Forwarded-For"); prior != "" {
 		req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
