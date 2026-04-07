@@ -872,6 +872,150 @@ func TestSelfServiceFlowInitHandlers(t *testing.T) {
 	})
 }
 
+func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
+	s, _ := newFlowServer(t)
+
+	t.Run("payload validation", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+			"flow_id":    "not-a-uuid",
+			"csrf_token": "token",
+		}))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleSubmitLogin(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+			"flow_id": uuid.New().String(),
+		}))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleSubmitLogin(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("flow validation errors", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+			"flow_id":    uuid.New().String(),
+			"csrf_token": "token",
+		}))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleSubmitLogin(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+
+		loginFlow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+		if err != nil {
+			t.Fatalf("failed to create flow: %v", err)
+		}
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+			"flow_id":    loginFlow.ID.String(),
+			"csrf_token": "wrong-token",
+		}))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleSubmitLogin(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+		}
+	})
+
+	t.Run("flow type mismatch", func(t *testing.T) {
+		regFlow, err := s.flowService.CreateRegistrationFlow(context.Background(), "http://example.com/registration")
+		if err != nil {
+			t.Fatalf("failed to create registration flow: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+			"flow_id":    regFlow.ID.String(),
+			"csrf_token": regFlow.CSRFToken,
+		}))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleSubmitLogin(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("successful submissions", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			handler func(http.ResponseWriter, *http.Request)
+			create  func() (*flows.Flow, error)
+			path    string
+		}{
+			{
+				name:    "login",
+				handler: s.handleSubmitLogin,
+				path:    "/api/v1/self-service/login",
+				create: func() (*flows.Flow, error) {
+					return s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+				},
+			},
+			{
+				name:    "registration",
+				handler: s.handleSubmitRegistration,
+				path:    "/api/v1/self-service/registration",
+				create: func() (*flows.Flow, error) {
+					return s.flowService.CreateRegistrationFlow(context.Background(), "http://example.com/registration")
+				},
+			},
+			{
+				name:    "recovery",
+				handler: s.handleSubmitRecovery,
+				path:    "/api/v1/self-service/recovery",
+				create: func() (*flows.Flow, error) {
+					return s.flowService.CreateRecoveryFlow(context.Background(), "http://example.com/recovery")
+				},
+			},
+			{
+				name:    "settings",
+				handler: s.handleSubmitSettings,
+				path:    "/api/v1/self-service/settings",
+				create: func() (*flows.Flow, error) {
+					return s.flowService.CreateSettingsFlow(context.Background(), "http://example.com/settings", uuid.New())
+				},
+			},
+			{
+				name:    "verification",
+				handler: s.handleSubmitVerification,
+				path:    "/api/v1/self-service/verification",
+				create: func() (*flows.Flow, error) {
+					return s.flowService.CreateVerificationFlow(context.Background(), "http://example.com/verification", nil)
+				},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				flow, err := tc.create()
+				if err != nil {
+					t.Fatalf("failed to create flow: %v", err)
+				}
+
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodPost, tc.path, mustJSONBody(t, map[string]any{
+					"flow_id":    flow.ID.String(),
+					"csrf_token": flow.CSRFToken,
+				}))
+				req.Header.Set("Content-Type", "application/json")
+				tc.handler(rec, req)
+
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+				}
+			})
+		}
+	})
+}
+
 func TestSelfServiceFlowGetHandlers(t *testing.T) {
 	s, _ := newFlowServer(t)
 	ctx := context.Background()
@@ -1058,6 +1202,51 @@ func TestInternalFlowHandlers(t *testing.T) {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
 	})
+
+	t.Run("update flow ui", func(t *testing.T) {
+		s, store := newFlowServer(t)
+		created, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+		if err != nil {
+			t.Fatalf("failed to create flow: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		req := withURLParam(httptest.NewRequest(http.MethodPatch, "/internal/flows/not-a-uuid/ui", bytes.NewBufferString(`{"action":"x","method":"POST"}`)), "id", "not-a-uuid")
+		s.handleInternalUpdateFlowUI(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = withURLParam(httptest.NewRequest(http.MethodPatch, "/internal/flows/"+created.ID.String()+"/ui", bytes.NewBufferString("{")), "id", created.ID.String())
+		s.handleInternalUpdateFlowUI(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = withURLParam(httptest.NewRequest(http.MethodPatch, "/internal/flows/missing/ui", bytes.NewBufferString(`{"action":"x","method":"POST"}`)), "id", uuid.New().String())
+		s.handleInternalUpdateFlowUI(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+
+		store.updateErr = errors.New("update failed")
+		rec = httptest.NewRecorder()
+		req = withURLParam(httptest.NewRequest(http.MethodPatch, "/internal/flows/"+created.ID.String()+"/ui", bytes.NewBufferString(`{"action":"x","method":"POST"}`)), "id", created.ID.String())
+		s.handleInternalUpdateFlowUI(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		store.updateErr = nil
+		rec = httptest.NewRecorder()
+		req = withURLParam(httptest.NewRequest(http.MethodPatch, "/internal/flows/"+created.ID.String()+"/ui", bytes.NewBufferString(`{"ui":{"action":"x","method":"POST","nodes":[]}}`)), "id", created.ID.String())
+		s.handleInternalUpdateFlowUI(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
 }
 
 func TestNotImplementedHandlers(t *testing.T) {
@@ -1067,14 +1256,8 @@ func TestNotImplementedHandlers(t *testing.T) {
 		name    string
 		handler func(http.ResponseWriter, *http.Request)
 	}{
-		{"submit login", s.handleSubmitLogin},
-		{"submit registration", s.handleSubmitRegistration},
-		{"submit recovery", s.handleSubmitRecovery},
 		{"init settings browser", s.handleInitSettingsBrowser},
 		{"init settings api", s.handleInitSettingsAPI},
-		{"submit settings", s.handleSubmitSettings},
-		{"submit verification", s.handleSubmitVerification},
-		{"internal update flow ui", s.handleInternalUpdateFlowUI},
 		{"admin list identities", s.handleAdminListIdentities},
 		{"admin create identity", s.handleAdminCreateIdentity},
 		{"admin get identity", s.handleAdminGetIdentity},
