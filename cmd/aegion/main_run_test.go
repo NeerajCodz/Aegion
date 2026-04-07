@@ -99,6 +99,9 @@ func buildRunDeps(cfg *config.Config) (mainDeps, *bytes.Buffer, *bytes.Buffer, *
 		newWorkerMgr: func(log *logger.Logger, db *database.DB) *workers.Manager {
 			return workers.NewManager(workers.ManagerConfig{Log: log})
 		},
+		newObservability: func(ctx context.Context, cfg *config.Config) (telemetryProvider, error) {
+			return nil, nil
+		},
 		newServer: func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error) {
 			return server, nil
 		},
@@ -392,6 +395,20 @@ func TestRunDBAndMigrationErrors(t *testing.T) {
 	})
 }
 
+func TestRunObservabilityInitializationError(t *testing.T) {
+	deps, _, stderr, _, _, _ := buildRunDeps(validMainConfig())
+	deps.newObservability = func(ctx context.Context, cfg *config.Config) (telemetryProvider, error) {
+		return nil, errors.New("otel init failed")
+	}
+
+	if code := run(nil, deps); code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if got := stderr.String(); !strings.Contains(got, "Failed to initialize observability") {
+		t.Fatalf("expected observability initialization error output, got %q", got)
+	}
+}
+
 func TestRunMigrateOnlyPaths(t *testing.T) {
 	t.Run("flag migrate only", func(t *testing.T) {
 		deps, _, _, migrator, _, _ := buildRunDeps(validMainConfig())
@@ -621,7 +638,7 @@ func TestDefaultMainDeps(t *testing.T) {
 	if deps.loadConfig == nil || deps.validateConfig == nil || deps.newLogger == nil {
 		t.Fatalf("expected core dependency hooks to be initialized")
 	}
-	if deps.connectDB == nil || deps.newMigrator == nil || deps.newServer == nil {
+	if deps.connectDB == nil || deps.newMigrator == nil || deps.newServer == nil || deps.newObservability == nil {
 		t.Fatalf("expected runtime dependency hooks to be initialized")
 	}
 	if deps.newHTTPServer == nil || deps.newLifecycle == nil || deps.startHTTPServer == nil {

@@ -16,6 +16,7 @@ type LifecycleConfig struct {
 	Server        *Server
 	HTTPServer    *http.Server
 	WorkerManager *workers.Manager
+	Observability telemetryProvider
 }
 
 // Lifecycle manages graceful startup and shutdown of server components.
@@ -24,6 +25,7 @@ type Lifecycle struct {
 	server        *Server
 	httpServer    *http.Server
 	workerManager *workers.Manager
+	observability telemetryProvider
 
 	shutdownOnce sync.Once
 	draining     bool
@@ -37,6 +39,7 @@ func NewLifecycle(cfg *LifecycleConfig) *Lifecycle {
 		server:        cfg.Server,
 		httpServer:    cfg.HTTPServer,
 		workerManager: cfg.WorkerManager,
+		observability: cfg.Observability,
 	}
 }
 
@@ -110,6 +113,15 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 		if err := l.server.Shutdown(ctx); err != nil {
 			l.log.Error().Err(err).Msg("Error shutting down server")
 			recordShutdownErr(err)
+		}
+
+		// 5. Shutdown observability provider
+		if l.observability != nil {
+			l.log.Info().Msg("Shutting down observability provider")
+			if err := l.observability.Shutdown(ctx); err != nil {
+				l.log.Error().Err(err).Msg("Error shutting down observability provider")
+				recordShutdownErr(err)
+			}
 		}
 	})
 
