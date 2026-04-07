@@ -2,11 +2,16 @@ package router
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -107,11 +112,16 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 
 func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
-		InternalToken: "module-token",
-		SessionSecret: []byte("module-secret"),
-		ModuleID:      "admin",
-		Logger:        zerolog.Nop(),
+		InternalToken:               "module-token",
+		SessionSecret:               []byte("module-secret"),
+		IdentitySigningSecret:       []byte("identity-signing-secret"),
+		StripInboundIdentityHeaders: true,
+		ModuleID:                    "admin",
+		Logger:                      zerolog.Nop(),
 	})
+	proxy.now = func() time.Time {
+		return time.Unix(1742912521, 0).UTC()
+	}
 
 	target, _ := url.Parse("http://module.local/base")
 	original := httptest.NewRequest(http.MethodPost, "http://gateway.local/module/path?q=1", strings.NewReader("payload"))
@@ -119,6 +129,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	original.Header.Set("X-Forwarded-For", "203.0.113.10")
 	original.Header.Set("X-Forwarded-Proto", "https")
 	original.Header.Set("X-Forwarded-Host", "gateway.example.com")
+	original.Header.Set("X-User-ID", "spoofed")
 	original = original.WithContext(context.WithValue(original.Context(), contextKeyRequestID, "req-123"))
 
 	// Add a session to ensure session headers are injected.
@@ -164,6 +175,71 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	if req.Header.Get(session.HeaderPrefix+"Session-ID") == "" || req.Header.Get(session.HeaderPrefix+"Signature") == "" {
 		t.Fatalf("expected session headers to be injected")
 	}
+	if req.Header.Get("X-User-ID") != sess.IdentityID.String() {
+		t.Fatalf("expected canonical user id header to be injected")
+	}
+	if req.Header.Get("X-User-Session-ID") != sess.ID.String() {
+		t.Fatalf("expected canonical session id header to be injected")
+	}
+	if req.Header.Get("X-User-AAL") != string(sess.AAL) {
+		t.Fatalf("expected canonical AAL header to be injected")
+	}
+	if sig := req.Header.Get("X-Aegion-Signature"); sig == "" {
+		t.Fatalf("expected signed identity header")
+	}
+
+	expectedCanonical := "x-user-id:" + sess.IdentityID.String() + "\n" +
+		"x-user-session-id:" + sess.ID.String() + "\n" +
+		"x-user-aal:"
+	payload := strconv.FormatInt(1742912521, 10) + "." + expectedCanonical
+	mac := hmac.New(sha256.New, []byte("identity-signing-secret"))
+	_, _ = mac.Write([]byte(payload))
+	expectedSig := hex.EncodeToString(mac.Sum(nil))
+	if req.Header.Get("X-Aegion-Signature") != fmt.Sprintf("t=%d,v1=%s", 1742912521, expectedSig) {
+		t.Fatalf("unexpected signature header: %q", req.Header.Get("X-Aegion-Signature"))
+	}
+}
+
+func TestModuleProxyDirectorPreserveHost(t *testing.T) {
+	t.Run("preserve host true", func(t *testing.T) {
+		proxy := NewModuleProxy(ModuleProxyConfig{
+			ModuleID:      "admin",
+			PreserveHost:  true,
+			SessionSecret: []byte("module-secret"),
+			Logger:        zerolog.Nop(),
+		})
+
+		target, _ := url.Parse("http://module.local/base")
+		original := httptest.NewRequest(http.MethodGet, "http://gateway.local/module/path", nil)
+		original.Host = "gateway.example.com"
+		req := httptest.NewRequest(http.MethodGet, "http://placeholder/module/path", nil)
+		req = req.WithContext(original.Context())
+
+		proxy.director(target, original)(req)
+		if req.Host != "gateway.example.com" {
+			t.Fatalf("expected original host to be preserved, got %q", req.Host)
+		}
+	})
+
+	t.Run("preserve host false", func(t *testing.T) {
+		proxy := NewModuleProxy(ModuleProxyConfig{
+			ModuleID:      "admin",
+			PreserveHost:  false,
+			SessionSecret: []byte("module-secret"),
+			Logger:        zerolog.Nop(),
+		})
+
+		target, _ := url.Parse("http://module.local/base")
+		original := httptest.NewRequest(http.MethodGet, "http://gateway.local/module/path", nil)
+		original.Host = "gateway.example.com"
+		req := httptest.NewRequest(http.MethodGet, "http://placeholder/module/path", nil)
+		req = req.WithContext(original.Context())
+
+		proxy.director(target, original)(req)
+		if req.Host != "module.local" {
+			t.Fatalf("expected target host, got %q", req.Host)
+		}
+	})
 }
 
 func TestModuleProxyErrorHandlers(t *testing.T) {

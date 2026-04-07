@@ -276,6 +276,12 @@ proxy:
   enabled: false
   upstream_timeout: 15s
   preserve_host: true
+  strip_inbound_identity_headers: true
+  identity_signature_header: X-Aegion-Signature
+  signed_identity_headers:
+    - X-User-ID
+    - X-User-Session-ID
+    - X-User-AAL
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Observability — Minimal for tests

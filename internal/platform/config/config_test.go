@@ -312,6 +312,8 @@ func TestApplyDefaults(t *testing.T) {
 	// Proxy defaults
 	assert.False(t, cfg.Proxy.Enabled)
 	assert.Equal(t, Duration(30*time.Second), cfg.Proxy.UpstreamTimeout)
+	assert.Equal(t, "X-Aegion-Signature", cfg.Proxy.IdentitySignatureHeader)
+	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}, cfg.Proxy.SignedIdentityHeaders)
 }
 
 func TestApplyDefaults_DoesNotOverrideExisting(t *testing.T) {
@@ -647,6 +649,12 @@ proxy:
   enabled: true
   upstream_timeout: 45s
   preserve_host: true
+  strip_inbound_identity_headers: true
+  identity_signing_secret: test-signing-secret
+  identity_signature_header: X-Test-Signature
+  signed_identity_headers:
+    - X-User-ID
+    - X-User-Session-ID
 `
 
 	var cfg Config
@@ -663,6 +671,10 @@ proxy:
 	assert.True(t, cfg.Proxy.Enabled)
 	assert.Equal(t, Duration(45*time.Second), cfg.Proxy.UpstreamTimeout)
 	assert.True(t, cfg.Proxy.PreserveHost)
+	assert.True(t, cfg.Proxy.StripInboundIdentityHeaders)
+	assert.Equal(t, "test-signing-secret", cfg.Proxy.IdentitySigningSecret)
+	assert.Equal(t, "X-Test-Signature", cfg.Proxy.IdentitySignatureHeader)
+	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID"}, cfg.Proxy.SignedIdentityHeaders)
 }
 
 func TestLoad_Integration(t *testing.T) {

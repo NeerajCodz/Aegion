@@ -2,6 +2,9 @@ package router
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +42,13 @@ type ModuleProxyConfig struct {
 	InternalToken string
 	SessionSecret []byte
 	Timeout       time.Duration
+	PreserveHost  bool
+
+	StripInboundIdentityHeaders bool
+	IdentitySigningSecret       []byte
+	IdentitySignatureHeader     string
+	SignedIdentityHeaders       []string
+
 	PolicyChecker PolicyChecker
 	PolicyModel   string
 	Logger        zerolog.Logger
@@ -48,6 +59,7 @@ type ModuleProxy struct {
 	config    ModuleProxyConfig
 	logger    zerolog.Logger
 	transport *http.Transport
+	now       func() time.Time
 }
 
 type policyDenyError struct {
@@ -70,6 +82,12 @@ func NewModuleProxy(cfg ModuleProxyConfig) *ModuleProxy {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 30 * time.Second
 	}
+	if cfg.IdentitySignatureHeader == "" {
+		cfg.IdentitySignatureHeader = "X-Aegion-Signature"
+	}
+	if len(cfg.SignedIdentityHeaders) == 0 {
+		cfg.SignedIdentityHeaders = []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
+	}
 
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -88,6 +106,9 @@ func NewModuleProxy(cfg ModuleProxyConfig) *ModuleProxy {
 		config:    cfg,
 		logger:    cfg.Logger.With().Str("module", cfg.ModuleID).Logger(),
 		transport: transport,
+		now: func() time.Time {
+			return time.Now().UTC()
+		},
 	}
 }
 
@@ -250,7 +271,15 @@ func (p *ModuleProxy) director(target *url.URL, originalReq *http.Request) func(
 		req.URL.RawQuery = originalReq.URL.RawQuery
 
 		// Set Host header
-		req.Host = target.Host
+		if p.config.PreserveHost && originalReq.Host != "" {
+			req.Host = originalReq.Host
+		} else {
+			req.Host = target.Host
+		}
+
+		if p.config.StripInboundIdentityHeaders {
+			p.stripIdentityHeaders(req)
+		}
 
 		// Inject internal token
 		if p.config.InternalToken != "" {
@@ -259,6 +288,9 @@ func (p *ModuleProxy) director(target *url.URL, originalReq *http.Request) func(
 
 		// Inject session headers if session exists
 		p.injectSessionHeaders(req)
+
+		// Inject identity headers for upstream compatibility
+		p.injectIdentityHeaders(req)
 
 		// Preserve request ID
 		if requestID := GetRequestID(req.Context()); requestID != "" {
@@ -272,6 +304,8 @@ func (p *ModuleProxy) director(target *url.URL, originalReq *http.Request) func(
 			Str("request_id", GetRequestID(req.Context())).
 			Str("method", req.Method).
 			Str("target", req.URL.String()).
+			Bool("preserve_host", p.config.PreserveHost).
+			Bool("identity_headers_signed", len(p.config.IdentitySigningSecret) > 0).
 			Msg("proxying request to module")
 	}
 }
@@ -285,6 +319,56 @@ func (p *ModuleProxy) injectSessionHeaders(req *http.Request) {
 	}
 
 	session.InjectHeaders(req, sess, p.config.SessionSecret)
+}
+
+func (p *ModuleProxy) stripIdentityHeaders(req *http.Request) {
+	for _, header := range []string{
+		"X-User-ID",
+		"X-User-Email",
+		"X-User-Roles",
+		"X-User-Session-ID",
+		"X-User-AAL",
+		p.config.IdentitySignatureHeader,
+	} {
+		req.Header.Del(header)
+	}
+}
+
+func (p *ModuleProxy) injectIdentityHeaders(req *http.Request) {
+	sess := session.FromContext(req.Context())
+	if sess == nil {
+		return
+	}
+
+	req.Header.Set("X-User-ID", sess.IdentityID.String())
+	req.Header.Set("X-User-Session-ID", sess.ID.String())
+	req.Header.Set("X-User-AAL", string(sess.AAL))
+
+	if len(p.config.IdentitySigningSecret) == 0 {
+		return
+	}
+
+	timestamp := p.now().Unix()
+	canonical := p.canonicalIdentityHeaders(req)
+	payload := strconv.FormatInt(timestamp, 10) + "." + canonical
+
+	mac := hmac.New(sha256.New, p.config.IdentitySigningSecret)
+	_, _ = mac.Write([]byte(payload))
+	signature := hex.EncodeToString(mac.Sum(nil))
+
+	req.Header.Set(p.config.IdentitySignatureHeader, fmt.Sprintf("t=%d,v1=%s", timestamp, signature))
+}
+
+func (p *ModuleProxy) canonicalIdentityHeaders(req *http.Request) string {
+	parts := make([]string, 0, len(p.config.SignedIdentityHeaders))
+	for _, header := range p.config.SignedIdentityHeaders {
+		header = strings.TrimSpace(header)
+		if header == "" {
+			continue
+		}
+		parts = append(parts, strings.ToLower(header)+":"+strings.TrimSpace(req.Header.Get(header)))
+	}
+	return strings.Join(parts, "\n")
 }
 
 // addForwardedHeaders adds X-Forwarded-* headers.
@@ -464,6 +548,12 @@ func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, 
 // logResponse logs the proxied response.
 func (p *ModuleProxy) logResponse(resp *http.Response, requestID string, start time.Time) {
 	duration := time.Since(start)
+	upstreamHost := ""
+	upstreamPath := ""
+	if resp != nil && resp.Request != nil && resp.Request.URL != nil {
+		upstreamHost = resp.Request.URL.Host
+		upstreamPath = resp.Request.URL.Path
+	}
 
 	var event *zerolog.Event
 	switch {
@@ -477,6 +567,8 @@ func (p *ModuleProxy) logResponse(resp *http.Response, requestID string, start t
 
 	event.
 		Str("request_id", requestID).
+		Str("upstream", upstreamHost).
+		Str("upstream_path", upstreamPath).
 		Int("status", resp.StatusCode).
 		Dur("duration", duration).
 		Msg("module response")
