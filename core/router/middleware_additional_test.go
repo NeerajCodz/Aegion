@@ -96,3 +96,52 @@ func TestGetClientIPAdditionalBranches(t *testing.T) {
 		t.Fatalf("expected bracket-trimmed ipv6 address, got %q", got)
 	}
 }
+
+func TestLoggerMiddleware4xxStatusCodes(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := zerolog.New(&logBuf)
+
+	handler := Logger(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("not found"))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	req = req.WithContext(context.WithValue(req.Context(), contextKeyRequestID, "req-404"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, `"level":"warn"`) {
+		t.Fatalf("expected warn level for 404, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, `"status":404`) {
+		t.Fatalf("expected status 404 in log, got %q", logOutput)
+	}
+}
+
+func TestCORSMiddlewareRejectsDisallowedOrigin(t *testing.T) {
+	cfg := CORSConfig{
+		AllowedOrigins: []string{"https://example.com"},
+		AllowedMethods: []string{"GET", "POST"},
+		AllowedHeaders: []string{"Content-Type"},
+	}
+
+	handler := CORS(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/resource", nil)
+	req.Header.Set("Origin", "https://evil.com")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected disallowed origin to have no CORS headers, got %q", rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
