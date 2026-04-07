@@ -15,9 +15,11 @@ type mockRBACStore struct {
 	roleIDs     []string
 	permissions []policystore.Permission
 	abacRules   []policystore.ABACRule
+	rebacTuples []policystore.ReBACTuple
 	rolesErr    error
 	permsErr    error
 	abacErr     error
+	rebacErr    error
 
 	lastIdentity string
 	lastRoleIDs  []string
@@ -44,6 +46,19 @@ func (m *mockRBACStore) ListABACRules(ctx context.Context) ([]policystore.ABACRu
 		return nil, m.abacErr
 	}
 	return m.abacRules, nil
+}
+
+func (m *mockRBACStore) ListReBACTuples(ctx context.Context, namespace, objectID, relation string) ([]policystore.ReBACTuple, error) {
+	if m.rebacErr != nil {
+		return nil, m.rebacErr
+	}
+	out := make([]policystore.ReBACTuple, 0, len(m.rebacTuples))
+	for _, tpl := range m.rebacTuples {
+		if tpl.Namespace == namespace && tpl.ObjectID == objectID && tpl.Relation == relation {
+			out = append(out, tpl)
+		}
+	}
+	return out, nil
 }
 
 func TestServer_Check_Validation(t *testing.T) {
@@ -251,6 +266,68 @@ func TestServer_Check_ModelOverrideValidation(t *testing.T) {
 		Model:        "unknown",
 	})
 	assert.ErrorContains(t, err, "unsupported model")
+}
+
+func TestServer_Check_CELContextEvaluation(t *testing.T) {
+	st := &mockRBACStore{
+		abacRules: []policystore.ABACRule{
+			{Name: "allow_from_ten", Expression: `request.context.ip.startsWith("10.")`, Priority: 1, Effect: "allow", Enabled: true},
+		},
+	}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		Resource:     "documents:spec-1",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "abac",
+		Context: &policypb.Context{
+			Ip: "10.1.2.3",
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, "abac", resp.GetModelUsed())
+}
+
+func TestServer_Check_CELInvalidExpressionReturnsError(t *testing.T) {
+	st := &mockRBACStore{
+		abacRules: []policystore.ABACRule{
+			{Name: "bad_rule", Expression: `request.context.ip.startsWith(`, Priority: 1, Effect: "allow", Enabled: true},
+		},
+	}
+	s := NewServer(st)
+
+	_, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "abac",
+	})
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "evaluate ABAC rule")
+}
+
+func TestServer_Check_ModelOverrideReBAC(t *testing.T) {
+	st := &mockRBACStore{
+		rebacTuples: []policystore.ReBACTuple{
+			{Namespace: "documents", ObjectID: "spec-1", Relation: "viewer", SubjectID: "user:alice"},
+		},
+	}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		Resource:     "documents:spec-1",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "rebac",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, "rebac", resp.GetModelUsed())
+	assert.Equal(t, []string{"rebac:allow"}, resp.GetEvalPath())
 }
 
 func TestServer_BatchCheck(t *testing.T) {

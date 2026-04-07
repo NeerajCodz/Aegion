@@ -49,6 +49,14 @@ type ABACRule struct {
 	Enabled    bool
 }
 
+// ReBACTuple is a relationship tuple used for graph authorization checks.
+type ReBACTuple struct {
+	Namespace string
+	ObjectID  string
+	Relation  string
+	SubjectID string
+}
+
 // ListRoleIDsByIdentity returns role IDs assigned to an identity.
 func (s *Store) ListRoleIDsByIdentity(ctx context.Context, identityID string) ([]string, error) {
 	rows, err := s.db.Query(ctx, `
@@ -133,6 +141,33 @@ func (s *Store) ListABACRules(ctx context.Context) ([]ABACRule, error) {
 	}
 
 	return rules, nil
+}
+
+// ListReBACTuples returns tuples for a namespace/object/relation triple.
+func (s *Store) ListReBACTuples(ctx context.Context, namespace, objectID, relation string) ([]ReBACTuple, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT namespace, object_id, relation, subject_id
+		FROM pol_rebac_tuples
+		WHERE namespace = $1 AND object_id = $2 AND relation = $3
+	`, namespace, objectID, relation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tuples := make([]ReBACTuple, 0, 8)
+	for rows.Next() {
+		var tpl ReBACTuple
+		if err := rows.Scan(&tpl.Namespace, &tpl.ObjectID, &tpl.Relation, &tpl.SubjectID); err != nil {
+			return nil, err
+		}
+		tuples = append(tuples, tpl)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return tuples, nil
 }
 
 // GetRoleIDByName resolves a role name to role ID.
