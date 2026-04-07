@@ -222,3 +222,35 @@ func TestStore_ListABACRules(t *testing.T) {
 		assert.ErrorContains(t, err, "db unavailable")
 	})
 }
+
+func TestStore_ListReBACTuples(t *testing.T) {
+	t.Run("returns tuples for namespace object relation", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				assert.Contains(t, sql, "FROM pol_rebac_tuples")
+				assert.Equal(t, []any{"documents", "spec-1", "viewer"}, args)
+				return &fakeRows{data: [][]any{
+					{"documents", "spec-1", "viewer", "user:alice"},
+					{"documents", "spec-1", "viewer", "group:eng#member"},
+				}}, nil
+			},
+		})
+
+		tuples, err := st.ListReBACTuples(context.Background(), "documents", "spec-1", "viewer")
+		require.NoError(t, err)
+		require.Len(t, tuples, 2)
+		assert.Equal(t, ReBACTuple{Namespace: "documents", ObjectID: "spec-1", Relation: "viewer", SubjectID: "user:alice"}, tuples[0])
+		assert.Equal(t, ReBACTuple{Namespace: "documents", ObjectID: "spec-1", Relation: "viewer", SubjectID: "group:eng#member"}, tuples[1])
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		st := NewWithDB(&fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return nil, errors.New("tuple query failed")
+			},
+		})
+
+		_, err := st.ListReBACTuples(context.Background(), "documents", "spec-1", "viewer")
+		assert.ErrorContains(t, err, "tuple query failed")
+	})
+}
