@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+var (
+	signalNotify = signal.Notify
+	signalStop   = signal.Stop
+)
+
 // Config defines a standard HTTP module process contract.
 type Config struct {
 	Module             string
@@ -32,18 +37,7 @@ type metaResponse struct {
 	EventSubscriptions []string `json:"event_subscriptions"`
 }
 
-// Run starts a module HTTP server that exposes /health, /ready and /meta.
-func Run(cfg Config) error {
-	if cfg.Module == "" {
-		return errors.New("module name is required")
-	}
-	if cfg.Version == "" {
-		cfg.Version = "0.1.0"
-	}
-	if cfg.ListenAddr == "" {
-		cfg.ListenAddr = "0.0.0.0:9000"
-	}
-
+func buildModuleMux(cfg Config) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -73,10 +67,24 @@ func Run(cfg Config) error {
 			EventSubscriptions: cfg.EventSubscriptions,
 		})
 	})
+	return mux
+}
+
+// Run starts a module HTTP server that exposes /health, /ready and /meta.
+func Run(cfg Config) error {
+	if cfg.Module == "" {
+		return errors.New("module name is required")
+	}
+	if cfg.Version == "" {
+		cfg.Version = "0.1.0"
+	}
+	if cfg.ListenAddr == "" {
+		cfg.ListenAddr = "0.0.0.0:9000"
+	}
 
 	srv := &http.Server{
 		Addr:         cfg.ListenAddr,
-		Handler:      mux,
+		Handler:      buildModuleMux(cfg),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -94,8 +102,8 @@ func Run(cfg Config) error {
 	}()
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(stop)
+	signalNotify(stop, os.Interrupt, syscall.SIGTERM)
+	defer signalStop(stop)
 
 	select {
 	case err := <-errCh:
