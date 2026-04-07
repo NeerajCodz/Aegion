@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	policystore "github.com/aegion/aegion/modules/policy/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockRBACStore struct {
 	roleIDs     []string
-	permissions []Permission
+	permissions []policystore.Permission
 	rolesErr    error
 	permsErr    error
 
@@ -28,7 +29,7 @@ func (m *mockRBACStore) ListRoleIDsByIdentity(ctx context.Context, identityID st
 	return m.roleIDs, nil
 }
 
-func (m *mockRBACStore) ListPermissionsByRoleIDs(ctx context.Context, roleIDs []string) ([]Permission, error) {
+func (m *mockRBACStore) ListPermissionsByRoleIDs(ctx context.Context, roleIDs []string) ([]policystore.Permission, error) {
 	m.lastRoleIDs = append([]string(nil), roleIDs...)
 	if m.permsErr != nil {
 		return nil, m.permsErr
@@ -56,14 +57,14 @@ func TestServer_Check_Validation(t *testing.T) {
 func TestServer_Check_RBACDecisions(t *testing.T) {
 	tests := []struct {
 		name        string
-		permissions []Permission
+		permissions []policystore.Permission
 		resource    string
 		action      string
 		wantAllowed bool
 	}{
 		{
 			name: "exact match",
-			permissions: []Permission{
+			permissions: []policystore.Permission{
 				{ResourceType: "documents", Action: "read"},
 			},
 			resource:    "documents",
@@ -72,7 +73,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 		},
 		{
 			name: "resource wildcard",
-			permissions: []Permission{
+			permissions: []policystore.Permission{
 				{ResourceType: "*", Action: "read"},
 			},
 			resource:    "documents",
@@ -81,7 +82,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 		},
 		{
 			name: "action wildcard",
-			permissions: []Permission{
+			permissions: []policystore.Permission{
 				{ResourceType: "documents", Action: "*"},
 			},
 			resource:    "documents",
@@ -90,7 +91,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 		},
 		{
 			name: "global wildcard",
-			permissions: []Permission{
+			permissions: []policystore.Permission{
 				{ResourceType: "*", Action: "*"},
 			},
 			resource:    "documents",
@@ -99,7 +100,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 		},
 		{
 			name: "no match",
-			permissions: []Permission{
+			permissions: []policystore.Permission{
 				{ResourceType: "documents", Action: "read"},
 			},
 			resource:    "documents",
@@ -153,7 +154,7 @@ func TestServer_Check_StoreErrors(t *testing.T) {
 func TestServer_BatchCheck(t *testing.T) {
 	st := &mockRBACStore{
 		roleIDs: []string{"role-1"},
-		permissions: []Permission{
+		permissions: []policystore.Permission{
 			{ResourceType: "documents", Action: "read"},
 		},
 	}
