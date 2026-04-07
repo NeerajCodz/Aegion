@@ -345,6 +345,8 @@ type handlerDeviceStore struct {
 	client       *store.Client
 	deviceCode   *store.DeviceCode
 	deviceByUser *store.DeviceCode
+	lastUsedCode string
+	markUsedErr  error
 }
 
 func (s *handlerDeviceStore) GetClient(ctx context.Context, id string) (*store.Client, error) {
@@ -376,7 +378,8 @@ func (s *handlerDeviceStore) MarkDeviceCodeDenied(ctx context.Context, deviceCod
 	return nil
 }
 func (s *handlerDeviceStore) MarkDeviceCodeUsed(ctx context.Context, deviceCode string) error {
-	return nil
+	s.lastUsedCode = deviceCode
+	return s.markUsedErr
 }
 
 func TestOAuth2Handler_GrantHandlers(t *testing.T) {
@@ -414,6 +417,7 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 			"authorization_code",
 			"refresh_token",
 			"client_credentials",
+			"urn:ietf:params:oauth:grant-type:device_code",
 			"urn:ietf:params:oauth:grant-type:jwt-bearer",
 		},
 	}
@@ -519,7 +523,7 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
-	t.Run("device code grant currently not implemented", func(t *testing.T) {
+	t.Run("device code grant", func(t *testing.T) {
 		form := url.Values{}
 		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
 		form.Set("device_code", "dc-1")
@@ -528,8 +532,9 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec := httptest.NewRecorder()
 		h.HandleToken(rec, req)
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
-		assert.Contains(t, rec.Body.String(), "Token issuance not yet implemented")
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "\"access_token\"")
+		assert.Equal(t, "dc-1", deviceStore.lastUsedCode)
 	})
 
 	t.Run("revoke endpoint success", func(t *testing.T) {
@@ -587,6 +592,66 @@ func TestOAuth2Handler_DeviceGrantErrors(t *testing.T) {
 	h.HandleToken(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "authorization_pending")
+}
+
+func TestOAuth2Handler_DeviceGrantTokenIssuanceErrors(t *testing.T) {
+	now := time.Now().UTC()
+	client := &store.Client{
+		ID:                      "client-1",
+		TokenEndpointAuthMethod: "none",
+		GrantTypes:              []string{"urn:ietf:params:oauth:grant-type:device_code"},
+		AccessTokenTTL:          900,
+		IDTokenTTL:              3600,
+	}
+	deviceStore := &handlerDeviceStore{
+		client: client,
+		deviceCode: &store.DeviceCode{
+			DeviceCode: "dc-1",
+			ClientID:   "client-1",
+			Status:     "approved",
+			IdentityID: ptrString("identity-1"),
+			ExpiresAt:  now.Add(time.Hour),
+		},
+	}
+	deviceSvc := device.NewDeviceService(deviceStore, 10*time.Minute, 5, "https://issuer/device")
+
+	form := url.Values{}
+	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+	form.Set("device_code", "dc-1")
+	form.Set("client_id", "client-1")
+	newReq := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return req
+	}
+
+	t.Run("token service unavailable", func(t *testing.T) {
+		h := &OAuth2Handler{
+			deviceSvc: deviceSvc,
+		}
+		rec := httptest.NewRecorder()
+		h.HandleToken(rec, newReq())
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Token service unavailable")
+	})
+
+	t.Run("consume device code failure", func(t *testing.T) {
+		deviceStore.markUsedErr = errors.New("consume failed")
+		defer func() {
+			deviceStore.markUsedErr = nil
+		}()
+
+		h := &OAuth2Handler{
+			deviceSvc: deviceSvc,
+			tokenSvc: tokenSvc.NewTokenService(&handlerTokenStore{
+				client: client,
+			}, &tokenSvc.MockJWTSigner{}, "https://issuer"),
+		}
+		rec := httptest.NewRecorder()
+		h.HandleToken(rec, newReq())
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to finalize device code")
+	})
 }
 
 type handlerErrJWKSProvider struct{}

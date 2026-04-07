@@ -75,6 +75,17 @@ type TokenRequest struct {
 	Scope        string `json:"scope,omitempty"`
 }
 
+// DeviceCodeTokenRequest represents a device code token exchange request.
+type DeviceCodeTokenRequest struct {
+	ClientID     string    `json:"client_id"`
+	ClientSecret string    `json:"client_secret,omitempty"`
+	IdentityID   string    `json:"identity_id"`
+	SessionID    string    `json:"session_id,omitempty"`
+	Scopes       []string  `json:"scopes,omitempty"`
+	Audience     []string  `json:"audience,omitempty"`
+	AuthTime     time.Time `json:"auth_time,omitempty"`
+}
+
 // TokenResponse represents a successful token response.
 type TokenResponse struct {
 	AccessToken  string  `json:"access_token"`
@@ -244,6 +255,47 @@ func (s *TokenService) RefreshAccessToken(ctx context.Context, req *TokenRequest
 	}
 
 	return resp, nil
+}
+
+// ExchangeDeviceCode exchanges an approved device code context for tokens.
+func (s *TokenService) ExchangeDeviceCode(ctx context.Context, req *DeviceCodeTokenRequest) (*TokenResponse, error) {
+	if req == nil {
+		return nil, ErrInvalidRequest
+	}
+	if strings.TrimSpace(req.ClientID) == "" || strings.TrimSpace(req.IdentityID) == "" {
+		return nil, ErrInvalidRequest
+	}
+
+	client, err := s.store.GetClient(ctx, req.ClientID)
+	if err != nil {
+		return nil, ErrInvalidClient
+	}
+	if err := authenticateClient(client, req.ClientSecret); err != nil {
+		return nil, err
+	}
+	if len(client.GrantTypes) > 0 &&
+		!client.HasGrantType("urn:ietf:params:oauth:grant-type:device_code") &&
+		!client.HasGrantType("device_code") {
+		return nil, ErrUnauthorizedClient
+	}
+
+	authTime := req.AuthTime
+	if authTime.IsZero() {
+		authTime = time.Now().UTC()
+	}
+
+	return s.issueTokens(
+		ctx,
+		client,
+		req.IdentityID,
+		req.SessionID,
+		req.Scopes,
+		req.Audience,
+		nil,
+		"aal1",
+		[]string{"pwd"},
+		authTime,
+	)
 }
 
 // issueTokens issues a complete token set (access, refresh, ID).
