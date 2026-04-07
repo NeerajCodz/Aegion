@@ -6,18 +6,13 @@ import (
 	"strings"
 
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	policystore "github.com/aegion/aegion/modules/policy/store"
 )
 
 // RBACStore defines storage operations required for RBAC evaluation.
 type RBACStore interface {
 	ListRoleIDsByIdentity(ctx context.Context, identityID string) ([]string, error)
-	ListPermissionsByRoleIDs(ctx context.Context, roleIDs []string) ([]Permission, error)
-}
-
-// Permission is a role permission tuple.
-type Permission struct {
-	ResourceType string
-	Action       string
+	ListPermissionsByRoleIDs(ctx context.Context, roleIDs []string) ([]policystore.Permission, error)
 }
 
 // Server provides policy evaluation operations for generated gRPC transport handlers.
@@ -106,7 +101,7 @@ func normalizeSubject(subject string) string {
 	return subject
 }
 
-func hasPermission(perms []Permission, resourceType, action string) bool {
+func hasPermission(perms []policystore.Permission, resourceType, action string) bool {
 	resourceType = strings.TrimSpace(resourceType)
 	action = strings.TrimSpace(action)
 
