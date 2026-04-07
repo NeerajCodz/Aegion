@@ -387,6 +387,9 @@ func TestApplyEnvOverrides(t *testing.T) {
 }
 
 func TestConfig_Validate(t *testing.T) {
+	t.Setenv("AEGION_ENV", "")
+	t.Setenv("AEGION_ENVIRONMENT", "")
+
 	tests := []struct {
 		name    string
 		config  *Config
@@ -474,6 +477,30 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: "cipher secret must be at least 32 characters",
 		},
+		{
+			name: "short internal secret",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!"},
+					Cipher:   []string{"cipher-secret-32-characters-long!!"},
+					Internal: []string{"short"},
+				},
+			},
+			wantErr: "internal secret must be at least 32 characters",
+		},
+		{
+			name: "ignores optional empty rotated secrets",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!", ""},
+					Cipher:   []string{"cipher-secret-32-characters-long!!", "   "},
+					Internal: []string{"internal-secret-32-characters-long", ""},
+				},
+			},
+			wantErr: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -486,6 +513,134 @@ func TestConfig_Validate(t *testing.T) {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
 			}
+		})
+	}
+}
+
+func TestConfig_Validate_ProductionMode(t *testing.T) {
+	t.Setenv("AEGION_ENV", "production")
+	t.Setenv("AEGION_ENVIRONMENT", "")
+
+	valid := &Config{
+		ModuleVersions: map[string]string{
+			"password":   "v1.0.0",
+			"magic_link": "v1.0.0",
+		},
+		Database: DatabaseConfig{
+			URL: "postgres://user:pass@localhost/db?sslmode=require",
+		},
+		Secrets: SecretsConfig{
+			Cookie:   []string{"cookie-secret-32-characters-long!!", ""},
+			Cipher:   []string{"cipher-secret-32-characters-long!!"},
+			Internal: []string{"internal-secret-32-characters-long"},
+		},
+		Sessions: SessionsConfig{
+			Cookie: CookieConfig{
+				Secure: true,
+			},
+		},
+		Log: LogConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Operator: OperatorConfig{
+			Password: "StrongBootstrapPassword#2026",
+		},
+	}
+
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr string
+	}{
+		{
+			name:    "valid production config",
+			cfg:     valid,
+			wantErr: "",
+		},
+		{
+			name: "requires secure session cookies",
+			cfg: func() *Config {
+				c := *valid
+				c.Sessions.Cookie.Secure = false
+				return &c
+			}(),
+			wantErr: "sessions.cookie.secure must be true in production",
+		},
+		{
+			name: "rejects debug logging",
+			cfg: func() *Config {
+				c := *valid
+				c.Log.Level = "debug"
+				return &c
+			}(),
+			wantErr: "log.level=debug is not allowed in production",
+		},
+		{
+			name: "rejects text logging format",
+			cfg: func() *Config {
+				c := *valid
+				c.Log.Format = "text"
+				return &c
+			}(),
+			wantErr: "log.format must be json in production",
+		},
+		{
+			name: "rejects sqlite database in production",
+			cfg: func() *Config {
+				c := *valid
+				c.Database.URL = "sqlite://./aegion.db"
+				return &c
+			}(),
+			wantErr: "database.url must not use sqlite in production",
+		},
+		{
+			name: "rejects non-ssl postgres url in production",
+			cfg: func() *Config {
+				c := *valid
+				c.Database.URL = "postgres://user:pass@localhost/db?sslmode=disable"
+				return &c
+			}(),
+			wantErr: "database.url must enforce ssl in production",
+		},
+		{
+			name: "rejects placeholder secret values",
+			cfg: func() *Config {
+				c := *valid
+				c.Secrets.Cookie = []string{"change-me-change-me-change-me-1234"}
+				return &c
+			}(),
+			wantErr: "secrets must not use placeholder values in production",
+		},
+		{
+			name: "rejects placeholder operator password",
+			cfg: func() *Config {
+				c := *valid
+				c.Operator.Password = "admin123!"
+				return &c
+			}(),
+			wantErr: "operator.password must be rotated before production",
+		},
+		{
+			name: "rejects latest module version tags",
+			cfg: func() *Config {
+				c := *valid
+				c.ModuleVersions = map[string]string{"password": "latest"}
+				return &c
+			}(),
+			wantErr: "module_versions.password must be pinned in production",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }

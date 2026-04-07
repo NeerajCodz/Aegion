@@ -497,24 +497,107 @@ func (c *Config) Validate() error {
 	if c.Database.URL == "" {
 		return fmt.Errorf("database.url is required")
 	}
-	if len(c.Secrets.Cookie) == 0 {
+	cookieSecrets := normalizeSecrets(c.Secrets.Cookie)
+	if len(cookieSecrets) == 0 {
 		return fmt.Errorf("secrets.cookie is required")
 	}
-	if len(c.Secrets.Cipher) == 0 {
+	cipherSecrets := normalizeSecrets(c.Secrets.Cipher)
+	if len(cipherSecrets) == 0 {
 		return fmt.Errorf("secrets.cipher is required")
 	}
-	if len(c.Secrets.Internal) == 0 {
+	internalSecrets := normalizeSecrets(c.Secrets.Internal)
+	if len(internalSecrets) == 0 {
 		return fmt.Errorf("secrets.internal is required")
 	}
-	for _, s := range c.Secrets.Cookie {
+	for _, s := range cookieSecrets {
 		if len(s) < 32 {
 			return fmt.Errorf("cookie secret must be at least 32 characters")
 		}
 	}
-	for _, s := range c.Secrets.Cipher {
+	for _, s := range cipherSecrets {
 		if len(s) < 32 {
 			return fmt.Errorf("cipher secret must be at least 32 characters")
 		}
 	}
+	for _, s := range internalSecrets {
+		if len(s) < 32 {
+			return fmt.Errorf("internal secret must be at least 32 characters")
+		}
+	}
+
+	if !isProductionEnvironment() {
+		return nil
+	}
+
+	dbURL := strings.ToLower(strings.TrimSpace(c.Database.URL))
+	if strings.HasPrefix(dbURL, "sqlite://") {
+		return fmt.Errorf("database.url must not use sqlite in production")
+	}
+	if strings.Contains(dbURL, "sslmode=disable") {
+		return fmt.Errorf("database.url must enforce ssl in production")
+	}
+	if !c.Sessions.Cookie.Secure {
+		return fmt.Errorf("sessions.cookie.secure must be true in production")
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Log.Format), "text") {
+		return fmt.Errorf("log.format must be json in production")
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Log.Level), "debug") {
+		return fmt.Errorf("log.level=debug is not allowed in production")
+	}
+	if containsPlaceholderValue(c.Operator.Password) {
+		return fmt.Errorf("operator.password must be rotated before production")
+	}
+	if hasPlaceholderSecrets(cookieSecrets) || hasPlaceholderSecrets(cipherSecrets) || hasPlaceholderSecrets(internalSecrets) {
+		return fmt.Errorf("secrets must not use placeholder values in production")
+	}
+	for moduleName, version := range c.ModuleVersions {
+		if strings.EqualFold(strings.TrimSpace(version), "latest") {
+			return fmt.Errorf("module_versions.%s must be pinned in production", moduleName)
+		}
+	}
+
 	return nil
+}
+
+func normalizeSecrets(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	for _, raw := range values {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+func isProductionEnvironment() bool {
+	for _, key := range []string{"AEGION_ENV", "AEGION_ENVIRONMENT"} {
+		env := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if env == "production" || env == "prod" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPlaceholderValue(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "change-me") ||
+		strings.Contains(normalized, "changeme") ||
+		strings.Contains(normalized, "replace-me") ||
+		normalized == "admin123!"
+}
+
+func hasPlaceholderSecrets(values []string) bool {
+	for _, value := range values {
+		if containsPlaceholderValue(value) {
+			return true
+		}
+	}
+	return false
 }
