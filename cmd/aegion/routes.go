@@ -420,13 +420,58 @@ func (s *Server) handleSubmitRecovery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleInitSettingsBrowser(w http.ResponseWriter, r *http.Request) {
-	// TODO: Get identity from session
-	s.handleNotImplemented(w, r)
+	if s.sessionManager == nil {
+		writeError(w, http.StatusInternalServerError, "session manager unavailable", nil)
+		return
+	}
+
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		switch {
+		case errors.Is(err, coresession.ErrSessionNotFound),
+			errors.Is(err, coresession.ErrSessionExpired),
+			errors.Is(err, coresession.ErrSessionInvalid):
+			writeError(w, http.StatusUnauthorized, "active session required", nil)
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to resolve session", err)
+		}
+		return
+	}
+
+	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create settings flow", err)
+		return
+	}
+	redirectURL := "/ui/settings?flow=" + flow.ID.String()
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 
 func (s *Server) handleInitSettingsAPI(w http.ResponseWriter, r *http.Request) {
-	// TODO: Get identity from session
-	s.handleNotImplemented(w, r)
+	if s.sessionManager == nil {
+		writeError(w, http.StatusInternalServerError, "session manager unavailable", nil)
+		return
+	}
+
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		switch {
+		case errors.Is(err, coresession.ErrSessionNotFound),
+			errors.Is(err, coresession.ErrSessionExpired),
+			errors.Is(err, coresession.ErrSessionInvalid):
+			writeError(w, http.StatusUnauthorized, "active session required", nil)
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to resolve session", err)
+		}
+		return
+	}
+
+	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create settings flow", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, flow)
 }
 
 func (s *Server) handleGetSettingsFlow(w http.ResponseWriter, r *http.Request) {

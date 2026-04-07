@@ -783,6 +783,14 @@ func TestSelfServiceFlowInitHandlers(t *testing.T) {
 	t.Run("create flow failures", func(t *testing.T) {
 		s, store := newFlowServer(t)
 		store.createErr = errors.New("create failed")
+		s.sessionManager = &stubRouteSessionManager{
+			session: &session.Session{
+				ID:         uuid.New(),
+				IdentityID: uuid.New(),
+				AAL:        session.AAL1,
+				Active:     true,
+			},
+		}
 
 		handlers := []struct {
 			name    string
@@ -795,6 +803,8 @@ func TestSelfServiceFlowInitHandlers(t *testing.T) {
 			{"registration api", s.handleInitRegistrationAPI, "/api/v1/self-service/registration/api"},
 			{"recovery browser", s.handleInitRecoveryBrowser, "/api/v1/self-service/recovery/browser"},
 			{"recovery api", s.handleInitRecoveryAPI, "/api/v1/self-service/recovery/api"},
+			{"settings browser", s.handleInitSettingsBrowser, "/api/v1/self-service/settings/browser"},
+			{"settings api", s.handleInitSettingsAPI, "/api/v1/self-service/settings/api"},
 			{"verification browser", s.handleInitVerificationBrowser, "/api/v1/self-service/verification/browser"},
 			{"verification api", s.handleInitVerificationAPI, "/api/v1/self-service/verification/api"},
 		}
@@ -813,6 +823,14 @@ func TestSelfServiceFlowInitHandlers(t *testing.T) {
 
 	t.Run("successful browser and api initialization", func(t *testing.T) {
 		s, _ := newFlowServer(t)
+		s.sessionManager = &stubRouteSessionManager{
+			session: &session.Session{
+				ID:         uuid.New(),
+				IdentityID: uuid.New(),
+				AAL:        session.AAL1,
+				Active:     true,
+			},
+		}
 
 		browserCases := []struct {
 			name     string
@@ -823,6 +841,7 @@ func TestSelfServiceFlowInitHandlers(t *testing.T) {
 			{"login", "/api/v1/self-service/login/browser", "/ui/login?flow=", s.handleInitLoginBrowser},
 			{"registration", "/api/v1/self-service/registration/browser", "/ui/registration?flow=", s.handleInitRegistrationBrowser},
 			{"recovery", "/api/v1/self-service/recovery/browser", "/ui/recovery?flow=", s.handleInitRecoveryBrowser},
+			{"settings", "/api/v1/self-service/settings/browser", "/ui/settings?flow=", s.handleInitSettingsBrowser},
 			{"verification", "/api/v1/self-service/verification/browser", "/ui/verification?flow=", s.handleInitVerificationBrowser},
 		}
 
@@ -849,6 +868,7 @@ func TestSelfServiceFlowInitHandlers(t *testing.T) {
 			{"login", "/api/v1/self-service/login/api", flows.TypeLogin, s.handleInitLoginAPI},
 			{"registration", "/api/v1/self-service/registration/api", flows.TypeRegistration, s.handleInitRegistrationAPI},
 			{"recovery", "/api/v1/self-service/recovery/api", flows.TypeRecovery, s.handleInitRecoveryAPI},
+			{"settings", "/api/v1/self-service/settings/api", flows.TypeSettings, s.handleInitSettingsAPI},
 			{"verification", "/api/v1/self-service/verification/api", flows.TypeVerification, s.handleInitVerificationAPI},
 		}
 
@@ -868,6 +888,25 @@ func TestSelfServiceFlowInitHandlers(t *testing.T) {
 					t.Fatalf("expected flow type %q, got %q", tc.want, flow.Type)
 				}
 			})
+		}
+	})
+
+	t.Run("settings requires active session", func(t *testing.T) {
+		s, _ := newFlowServer(t)
+		s.sessionManager = &stubRouteSessionManager{getErr: session.ErrSessionNotFound}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/self-service/settings/browser", nil)
+		s.handleInitSettingsBrowser(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/self-service/settings/api", nil)
+		s.handleInitSettingsAPI(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
 		}
 	})
 }
@@ -1256,8 +1295,6 @@ func TestNotImplementedHandlers(t *testing.T) {
 		name    string
 		handler func(http.ResponseWriter, *http.Request)
 	}{
-		{"init settings browser", s.handleInitSettingsBrowser},
-		{"init settings api", s.handleInitSettingsAPI},
 		{"admin list identities", s.handleAdminListIdentities},
 		{"admin create identity", s.handleAdminCreateIdentity},
 		{"admin get identity", s.handleAdminGetIdentity},
