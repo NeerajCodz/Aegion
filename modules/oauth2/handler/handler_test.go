@@ -806,6 +806,118 @@ func TestOAuth2Handler_AdditionalErrorBranches(t *testing.T) {
 	})
 }
 
+func TestOAuth2Handler_ErrorMappers(t *testing.T) {
+	t.Run("authorization mapper", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			err    error
+			code   string
+			status int
+		}{
+			{name: "unauthorized client", err: authorization.ErrUnauthorizedClient, code: "unauthorized_client", status: http.StatusBadRequest},
+			{name: "unsupported response type", err: authorization.ErrUnsupportedResponseType, code: "unsupported_response_type", status: http.StatusBadRequest},
+			{name: "invalid scope", err: authorization.ErrInvalidScope, code: "invalid_scope", status: http.StatusBadRequest},
+			{name: "invalid request", err: authorization.ErrInvalidRequest, code: "invalid_request", status: http.StatusBadRequest},
+			{name: "invalid pkce", err: authorization.ErrInvalidPKCE, code: "invalid_request", status: http.StatusBadRequest},
+			{name: "pkce required", err: authorization.ErrPKCERequired, code: "invalid_request", status: http.StatusBadRequest},
+			{name: "default", err: errors.New("boom"), code: "server_error", status: http.StatusInternalServerError},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				code, desc, status := mapAuthorizationError(tc.err)
+				assert.Equal(t, tc.code, code)
+				assert.Equal(t, tc.status, status)
+				assert.NotEmpty(t, desc)
+			})
+		}
+	})
+
+	t.Run("token mapper", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			err    error
+			code   string
+			status int
+		}{
+			{name: "invalid client", err: tokenSvc.ErrInvalidClient, code: "invalid_client", status: http.StatusUnauthorized},
+			{name: "unauthorized client", err: tokenSvc.ErrUnauthorizedClient, code: "unauthorized_client", status: http.StatusBadRequest},
+			{name: "invalid scope", err: tokenSvc.ErrInvalidScope, code: "invalid_scope", status: http.StatusBadRequest},
+			{name: "invalid request", err: tokenSvc.ErrInvalidRequest, code: "invalid_request", status: http.StatusBadRequest},
+			{name: "unsupported grant", err: tokenSvc.ErrUnsupportedGrantType, code: "unsupported_grant_type", status: http.StatusBadRequest},
+			{name: "invalid grant", err: tokenSvc.ErrInvalidGrant, code: "invalid_grant", status: http.StatusBadRequest},
+			{name: "pkce required", err: store.ErrPKCERequired, code: "invalid_grant", status: http.StatusBadRequest},
+			{name: "pkce mismatch", err: store.ErrPKCEMismatch, code: "invalid_grant", status: http.StatusBadRequest},
+			{name: "family invalidated", err: store.ErrFamilyInvalidated, code: "invalid_grant", status: http.StatusBadRequest},
+			{name: "default", err: errors.New("other"), code: "server_error", status: http.StatusInternalServerError},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				code, desc, status := mapTokenGrantError(tc.err)
+				assert.Equal(t, tc.code, code)
+				assert.Equal(t, tc.status, status)
+				assert.NotEmpty(t, desc)
+			})
+		}
+	})
+
+	t.Run("client credentials mapper", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			err    error
+			code   string
+			status int
+		}{
+			{name: "invalid client", err: grants.ErrInvalidClient, code: "invalid_client", status: http.StatusUnauthorized},
+			{name: "unauthorized client", err: grants.ErrUnauthorizedClient, code: "unauthorized_client", status: http.StatusBadRequest},
+			{name: "invalid scope", err: grants.ErrInvalidScope, code: "invalid_scope", status: http.StatusBadRequest},
+			{name: "default", err: errors.New("other"), code: "server_error", status: http.StatusInternalServerError},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				code, desc, status := mapClientCredentialsError(tc.err)
+				assert.Equal(t, tc.code, code)
+				assert.Equal(t, tc.status, status)
+				assert.NotEmpty(t, desc)
+			})
+		}
+	})
+
+	t.Run("jwt bearer mapper", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			err    error
+			code   string
+			status int
+		}{
+			{name: "invalid client", err: grants.ErrInvalidClient, code: "invalid_client", status: http.StatusUnauthorized},
+			{name: "unauthorized client", err: grants.ErrUnauthorizedClient, code: "unauthorized_client", status: http.StatusBadRequest},
+			{name: "invalid scope", err: grants.ErrInvalidScope, code: "invalid_scope", status: http.StatusBadRequest},
+			{name: "default", err: errors.New("other"), code: "invalid_grant", status: http.StatusBadRequest},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				code, desc, status := mapJWTBearerError(tc.err)
+				assert.Equal(t, tc.code, code)
+				assert.Equal(t, tc.status, status)
+				assert.NotEmpty(t, desc)
+			})
+		}
+	})
+}
+
+func TestExtractClientCredentials_InvalidHeaderFallsBackToForm(t *testing.T) {
+	form := url.Values{}
+	form.Set("client_id", "fallback-client")
+	form.Set("client_secret", "fallback-secret")
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Basic !!!not-base64!!!")
+
+	clientID, secret := extractClientCredentials(req)
+	assert.Equal(t, "fallback-client", clientID)
+	assert.Equal(t, "fallback-secret", secret)
+}
+
 func TestOAuth2Handler_Construction(t *testing.T) {
 	h := NewOAuth2Handler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	require.NotNil(t, h)
