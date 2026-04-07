@@ -662,6 +662,265 @@ func assignScanDest(dest any, val any) error {
 	}
 }
 
+func TestAdminHandler_ConfigAndLoginAdditionalBranches(t *testing.T) {
+	t.Run("config override defaults and client ip branches", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}}, HandlerConfig{})
+		assert.Equal(t, 20, h.config.DefaultPageSize)
+		assert.Equal(t, 100, h.config.MaxPageSize)
+		assert.Equal(t, 8*time.Hour, h.config.SessionTokenExpiry)
+		assert.Equal(t, "aegion_", h.config.APIKeyPrefix)
+		assert.Equal(t, 12, h.config.APIKeyPrefixLen)
+		assert.Equal(t, 32, h.config.APIKeyEntropyBytes)
+		assert.NotNil(t, h.log)
+
+		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+		req.Header.Set("X-Forwarded-For", "5.5.5.5")
+		assert.Equal(t, "5.5.5.5", getClientIP(req))
+
+		req = httptest.NewRequest(http.MethodGet, "/admin", nil)
+		req.Header.Set("X-Real-IP", "9.9.9.9")
+		assert.Equal(t, "9.9.9.9", getClientIP(req))
+	})
+
+	t.Run("login validation and generic auth failures", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodPost, "/admin/auth/login", bytes.NewBufferString(`{"email":" ","password":" "}`))
+		rec := httptest.NewRecorder()
+		h.Login(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Email and password are required")
+
+		storeStub := &fakeStore{
+			authenticateFn: func(ctx context.Context, email, password string) (*store.Operator, error) {
+				return nil, errors.New("auth backend down")
+			},
+		}
+		h = New(&fakeService{store: storeStub})
+		req = httptest.NewRequest(http.MethodPost, "/admin/auth/login", bytes.NewBufferString(`{"email":"admin@example.com","password":"secret"}`))
+		rec = httptest.NewRecorder()
+		h.Login(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Authentication failed")
+	})
+
+	t.Run("token helper branches", func(t *testing.T) {
+		tokenHandler := New(&fakeService{store: &fakeStore{}}, HandlerConfig{
+			APIKeyPrefix:       "aegion_",
+			APIKeyPrefixLen:    12,
+			APIKeyEntropyBytes: 1,
+		})
+		token, err := tokenHandler.generateAPIKeyToken()
+		require.NoError(t, err)
+		assert.True(t, strings.HasPrefix(token, "aegion_"))
+		assert.NotEmpty(t, tokenHandler.lookupPrefix(token))
+		assert.Equal(t, "", tokenHandler.lookupPrefix("short"))
+	})
+}
+
+func TestAdminHandler_DashboardAndSettingsAdditionalBranches(t *testing.T) {
+	operator := &store.Operator{
+		ID:         uuid.New(),
+		IdentityID: uuid.New(),
+		Role:       "admin",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	t.Run("dashboard first query failure", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{err: errors.New("identity stats failed")}
+			},
+		}
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/stats", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		rec := httptest.NewRecorder()
+		h.DashboardStats(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to load identity stats")
+	})
+
+	t.Run("list sessions rows err branch", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{err: errors.New("rows failed")}, nil
+			},
+		}
+		req := httptest.NewRequest(http.MethodGet, "/admin/sessions", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		rec := httptest.NewRecorder()
+		h.ListSessions(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "Failed to list sessions")
+	})
+
+	t.Run("read settings invalid json fallback and marshal failure", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{[]byte("{invalid-json")}}
+			},
+		}
+		settings, err := h.readSettings(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 24, settings.SessionLifetimeHours)
+		assert.Equal(t, 8, settings.PasswordMinLength)
+
+		err = h.upsertSetting(context.Background(), uuid.New(), "admin.settings", map[string]interface{}{
+			"bad": make(chan int),
+		})
+		assert.Error(t, err)
+	})
+}
+
+func TestAdminHandler_IdentityStoreAdditionalBranches(t *testing.T) {
+	operator := &store.Operator{
+		ID:         uuid.New(),
+		IdentityID: uuid.New(),
+		Role:       "admin",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	identityID := uuid.New()
+	createdAt := time.Now().UTC()
+	updatedAt := createdAt.Add(time.Minute)
+	schemaID := uuid.New()
+
+	t.Run("get identity success path", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "FROM core_identities"):
+					return fakeRow{vals: []any{identityID.String(), schemaID, []byte(`{"email":"x@example.com"}`), "active", createdAt, updatedAt}}
+				case strings.Contains(sql, "FROM core_sessions") && strings.Contains(sql, "COUNT(*)"):
+					return fakeRow{vals: []any{int64(0)}}
+				default:
+					return fakeRow{err: errors.New("unexpected query")}
+				}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{}, nil
+			},
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/admin/identities/"+identityID.String(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", identityID.String())
+		rec := httptest.NewRecorder()
+		h.GetIdentity(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), identityID.String())
+	})
+
+	t.Run("invalid traits fallback, update no-op and marshal failure", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "FROM core_identities"):
+					return fakeRow{vals: []any{identityID.String(), schemaID, []byte("{invalid-json"), "active", createdAt, updatedAt}}
+				case strings.Contains(sql, "FROM core_sessions") && strings.Contains(sql, "COUNT(*)"):
+					return fakeRow{vals: []any{int64(0)}}
+				default:
+					return fakeRow{err: errors.New("unexpected query")}
+				}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{}, nil
+			},
+		}
+
+		identity, err := h.getIdentityWithSessions(context.Background(), identityID)
+		require.NoError(t, err)
+		assert.NotNil(t, identity.Traits)
+
+		identity, err = h.updateIdentityInStore(context.Background(), identityID, UpdateIdentityRequest{})
+		require.NoError(t, err)
+		assert.Equal(t, identityID.String(), identity.ID)
+
+		_, err = h.updateIdentityInStore(context.Background(), identityID, UpdateIdentityRequest{
+			Traits: map[string]interface{}{"bad": make(chan int)},
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("list identities scan and direct scanner errors", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{{identityID.String(), "not-a-uuid", []byte(`{}`), "active", createdAt, updatedAt}}}, nil
+			},
+		}
+
+		_, _, err := h.listIdentitiesFromStore(context.Background(), 10, 0, "", "")
+		assert.Error(t, err)
+
+		_, err = scanIdentityRow(fakeRow{err: errors.New("scan failed")})
+		assert.EqualError(t, err, "scan failed")
+	})
+}
+
+func TestAdminHandler_SearchAndAuditAdditionalBranches(t *testing.T) {
+	t.Run("search unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodPost, "/admin/identities/search", bytes.NewBufferString(`{"email":"x@example.com"}`))
+		rec := httptest.NewRecorder()
+		h.SearchIdentities(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("search traits marshal, query and scan errors", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		_, _, err := h.searchIdentitiesInStore(context.Background(), SearchIdentitiesRequest{
+			Traits: map[string]interface{}{"bad": make(chan int)},
+		}, 10, 0)
+		assert.Error(t, err)
+
+		now := time.Now().UTC()
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return nil, errors.New("query failed")
+			},
+		}
+		_, _, err = h.searchIdentitiesInStore(context.Background(), SearchIdentitiesRequest{Email: "x@example.com"}, 10, 0)
+		assert.EqualError(t, err, "query failed")
+
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{{uuid.New().String(), "not-a-uuid", []byte(`{}`), "active", now, now}}}, nil
+			},
+		}
+		_, _, err = h.searchIdentitiesInStore(context.Background(), SearchIdentitiesRequest{Email: "x@example.com"}, 10, 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("log action adds request id", func(t *testing.T) {
+		storeStub := &fakeStore{}
+		h := New(&fakeService{store: storeStub})
+		operatorID := uuid.New()
+		ctx := context.WithValue(context.Background(), middleware.RequestIDKey, "req-123")
+
+		h.logAction(ctx, &operatorID, "read", "identity", "resource-1", map[string]interface{}{}, "127.0.0.1")
+		require.Len(t, storeStub.auditLogs, 1)
+		assert.Equal(t, "req-123", storeStub.auditLogs[0].Details["request_id"])
+	})
+}
+
 func TestListRolesSuccess(t *testing.T) {
 	operator := &store.Operator{
 		ID:         uuid.New(),

@@ -247,6 +247,9 @@ func (s *TokenService) RefreshAccessToken(ctx context.Context, req *TokenRequest
 	if err != nil {
 		return nil, err
 	}
+	if resp.RefreshToken == nil || strings.TrimSpace(*resp.RefreshToken) == "" {
+		return nil, fmt.Errorf("%w: refreshed token set did not include a refresh token", ErrInvalidScope)
+	}
 
 	// Mark old refresh token as used and link to new one
 	gracePeriod := 0 * time.Second // TODO: make configurable

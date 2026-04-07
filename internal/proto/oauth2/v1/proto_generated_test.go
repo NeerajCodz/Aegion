@@ -15,11 +15,12 @@ import (
 
 type oauth2TestClientConn struct {
 	invokeCount int
+	invokeErr   error
 }
 
 func (c *oauth2TestClientConn) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
 	c.invokeCount++
-	return nil
+	return c.invokeErr
 }
 
 func (c *oauth2TestClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
@@ -160,4 +161,48 @@ func TestOAuth2GeneratedGRPCPaths(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestOAuth2GeneratedAdditionalBranches(t *testing.T) {
+	t.Run("client invoke errors", func(t *testing.T) {
+		invokeErr := errors.New("invoke failed")
+		conn := &oauth2TestClientConn{invokeErr: invokeErr}
+		client := NewTokenStoreClient(conn)
+
+		if _, err := client.Introspect(context.Background(), &IntrospectRequest{}); !errors.Is(err, invokeErr) {
+			t.Fatalf("expected introspect invoke error, got %v", err)
+		}
+		if _, err := client.Revoke(context.Background(), &RevokeRequest{}); !errors.Is(err, invokeErr) {
+			t.Fatalf("expected revoke invoke error, got %v", err)
+		}
+		if _, err := client.InvalidateFamily(context.Background(), &InvalidateFamilyRequest{}); !errors.Is(err, invokeErr) {
+			t.Fatalf("expected invalidate-family invoke error, got %v", err)
+		}
+	})
+
+	t.Run("all method decode errors", func(t *testing.T) {
+		srv := oauth2ProtoServer{}
+		for _, method := range TokenStore_ServiceDesc.Methods {
+			if _, err := method.Handler(srv, context.Background(), func(interface{}) error { return errors.New("decode failed") }, nil); err == nil {
+				t.Fatalf("expected decode error for method %s", method.MethodName)
+			}
+		}
+	})
+
+	t.Run("nil proto reflect and init guard", func(t *testing.T) {
+		var introspectReqNil *IntrospectRequest
+		_ = introspectReqNil.ProtoReflect()
+		var introspectRespNil *IntrospectResponse
+		_ = introspectRespNil.ProtoReflect()
+		var revokeReqNil *RevokeRequest
+		_ = revokeReqNil.ProtoReflect()
+		var revokeRespNil *RevokeResponse
+		_ = revokeRespNil.ProtoReflect()
+		var invalidateReqNil *InvalidateFamilyRequest
+		_ = invalidateReqNil.ProtoReflect()
+		var invalidateRespNil *InvalidateFamilyResponse
+		_ = invalidateRespNil.ProtoReflect()
+
+		file_oauth2_tokens_proto_init()
+	})
 }

@@ -15,11 +15,12 @@ import (
 
 type mfaTestClientConn struct {
 	invokeCount int
+	invokeErr   error
 }
 
 func (c *mfaTestClientConn) Invoke(ctx context.Context, method string, args interface{}, reply interface{}, opts ...grpc.CallOption) error {
 	c.invokeCount++
-	return nil
+	return c.invokeErr
 }
 
 func (c *mfaTestClientConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
@@ -149,4 +150,43 @@ func TestMFAGeneratedGRPCPaths(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestMFAGeneratedAdditionalBranches(t *testing.T) {
+	t.Run("client invoke errors", func(t *testing.T) {
+		invokeErr := errors.New("invoke failed")
+		conn := &mfaTestClientConn{invokeErr: invokeErr}
+		client := NewMFAEngineClient(conn)
+
+		if _, err := client.GetStatus(context.Background(), &MFAStatusRequest{}); !errors.Is(err, invokeErr) {
+			t.Fatalf("expected status invoke error, got %v", err)
+		}
+		if _, err := client.GetEnrolledFactors(context.Background(), &FactorListRequest{}); !errors.Is(err, invokeErr) {
+			t.Fatalf("expected enrolled-factors invoke error, got %v", err)
+		}
+	})
+
+	t.Run("all method decode errors", func(t *testing.T) {
+		srv := mfaProtoServer{}
+		for _, method := range MFAEngine_ServiceDesc.Methods {
+			if _, err := method.Handler(srv, context.Background(), func(interface{}) error { return errors.New("decode failed") }, nil); err == nil {
+				t.Fatalf("expected decode error for method %s", method.MethodName)
+			}
+		}
+	})
+
+	t.Run("nil proto reflect and init guard", func(t *testing.T) {
+		var statusReqNil *MFAStatusRequest
+		_ = statusReqNil.ProtoReflect()
+		var statusRespNil *MFAStatusResponse
+		_ = statusRespNil.ProtoReflect()
+		var listReqNil *FactorListRequest
+		_ = listReqNil.ProtoReflect()
+		var listRespNil *FactorListResponse
+		_ = listRespNil.ProtoReflect()
+		var factorNil *Factor
+		_ = factorNil.ProtoReflect()
+
+		file_mfa_mfa_proto_init()
+	})
 }
