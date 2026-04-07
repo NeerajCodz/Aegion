@@ -197,13 +197,13 @@ func TestHandleAdminUpdateConfig_WithDatabaseHooks(t *testing.T) {
 				"rebac":         map[string]any{"enabled": false},
 			},
 			"proxy": map[string]any{
-				"enabled":                       true,
-				"upstream_timeout":              "45s",
-				"preserve_host":                 true,
+				"enabled":                        true,
+				"upstream_timeout":               "45s",
+				"preserve_host":                  true,
 				"strip_inbound_identity_headers": true,
-				"identity_signing_secret":       "0123456789abcdef",
-				"identity_signature_header":     "X-Proxy-Sig",
-				"signed_identity_headers":       []string{"X-User-ID", "X-User-Session-ID"},
+				"identity_signing_secret":        "0123456789abcdef",
+				"identity_signature_header":      "X-Proxy-Sig",
+				"signed_identity_headers":        []string{"X-User-ID", "X-User-Session-ID"},
 			},
 		}))
 		s.handleAdminUpdateConfig(rec, req)

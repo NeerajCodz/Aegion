@@ -988,6 +988,22 @@ func TestOAuth2Handler_Construction(t *testing.T) {
 	require.NotNil(t, h)
 }
 
+func TestPtrTimeValue(t *testing.T) {
+	// Test nil pointer returns zero time
+	var nilPtr *time.Time
+	zeroTime := ptrTimeValue(nilPtr)
+	if !zeroTime.IsZero() {
+		t.Errorf("expected zero time for nil pointer, got %v", zeroTime)
+	}
+
+	// Test non-nil pointer returns dereferenced value
+	now := time.Now().UTC()
+	result := ptrTimeValue(&now)
+	if result != now {
+		t.Errorf("expected %v, got %v", now, result)
+	}
+}
+
 func ptrTime(v time.Time) *time.Time {
 	return &v
 }

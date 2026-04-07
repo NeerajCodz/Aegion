@@ -528,3 +528,91 @@ func TestWithRequestContextIPAndExtraction(t *testing.T) {
 		t.Fatalf("expected extracted host IP, got %q", ip)
 	}
 }
+
+func TestWithRequestContextIPEmpty(t *testing.T) {
+	ctx := context.Background()
+	ctx = WithRequestContextIP(ctx, "  ")
+	if ctx.Value(requestContextIPKey{}) != nil {
+		t.Fatal("expected empty IP not to be stored in context")
+	}
+
+	ctx = WithRequestContextIP(ctx, "")
+	if ctx.Value(requestContextIPKey{}) != nil {
+		t.Fatal("expected empty IP not to be stored in context")
+	}
+}
+
+func TestRequiredPolicyDenyResponseWithEmptyReason(t *testing.T) {
+	resp := requiredPolicyDenyResponse("")
+	if resp.Allowed {
+		t.Fatal("expected deny response")
+	}
+	if resp.DenyReason != "policy_denied" {
+		t.Fatalf("expected default deny reason, got %q", resp.DenyReason)
+	}
+	if resp.ModelUsed != "default" {
+		t.Fatalf("expected default model, got %q", resp.ModelUsed)
+	}
+
+	resp = requiredPolicyDenyResponse("   ")
+	if resp.DenyReason != "policy_denied" {
+		t.Fatalf("expected default deny reason for whitespace, got %q", resp.DenyReason)
+	}
+
+	resp = requiredPolicyDenyResponse("custom_reason")
+	if resp.DenyReason != "custom_reason" {
+		t.Fatalf("expected custom reason to be preserved, got %q", resp.DenyReason)
+	}
+}
+
+func TestPolicyActionFromMethodEdgeCases(t *testing.T) {
+	tests := []struct {
+		method   string
+		expected string
+	}{
+		{"GET", "read"},
+		{"HEAD", "read"},
+		{"OPTIONS", "read"},
+		{"POST", "write"},
+		{"PUT", "write"},
+		{"PATCH", "write"},
+		{"DELETE", "write"},
+		{"CONNECT", "connect"},
+		{"TRACE", "trace"},
+		{"UNKNOWN", "unknown"},
+		{"  connect  ", "connect"},
+		{"  GET  ", "read"},
+	}
+
+	for _, tt := range tests {
+		got := policyActionFromMethod(tt.method)
+		if got != tt.expected {
+			t.Errorf("policyActionFromMethod(%q) = %q, want %q", tt.method, got, tt.expected)
+		}
+	}
+}
+
+func TestNormalizePolicyModelEdgeCases(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"", ""},
+		{"default", "default"},
+		{"rbac", "rbac"},
+		{"abac", "abac"},
+		{"rebac", "rebac"},
+		{"RBAC", "rbac"},
+		{"  AbAc  ", "abac"},
+		{"invalid", ""},
+		{"unknown_model", ""},
+		{"rbac-extended", ""},
+	}
+
+	for _, tt := range tests {
+		got := normalizePolicyModel(tt.input)
+		if got != tt.expected {
+			t.Errorf("normalizePolicyModel(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
