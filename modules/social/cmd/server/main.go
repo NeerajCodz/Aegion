@@ -7,14 +7,23 @@ import (
 	"github.com/aegion/aegion/internal/platform/moduleserver"
 )
 
-func main() {
-	listenAddr := flag.String("listen", moduleserver.EnvOrDefault("AEGION_SOCIAL_HTTP_LISTEN_ADDR", "0.0.0.0:9006"), "HTTP listen address")
-	flag.Parse()
+const (
+	listenAddrEnv = "AEGION_SOCIAL_HTTP_LISTEN_ADDR"
+	defaultListen = "0.0.0.0:9006"
+	moduleVersion = "0.1.0"
+)
 
-	err := moduleserver.Run(moduleserver.Config{
+var runModuleServer = moduleserver.Run
+
+func defaultListenAddr() string {
+	return moduleserver.EnvOrDefault(listenAddrEnv, defaultListen)
+}
+
+func moduleConfig(listenAddr string) moduleserver.Config {
+	return moduleserver.Config{
 		Module:       "social",
-		Version:      "0.1.0",
-		ListenAddr:   *listenAddr,
+		Version:      moduleVersion,
+		ListenAddr:   listenAddr,
 		Capabilities: []string{"oauth2_social_login"},
 		Routes:       []string{"/self-service/social/*", "/api/v1/social/*"},
 		GRPCServices: []string{"social.SocialEngine"},
@@ -22,7 +31,14 @@ func main() {
 			"identity.created",
 			"identity.updated",
 		},
-	})
+	}
+}
+
+func main() {
+	listenAddr := flag.String("listen", defaultListenAddr(), "HTTP listen address")
+	flag.Parse()
+
+	err := runModuleServer(moduleConfig(*listenAddr))
 	if err != nil {
 		log.Fatal(err)
 	}

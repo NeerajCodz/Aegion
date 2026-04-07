@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/aegion/aegion/core/authtoken"
@@ -51,6 +52,10 @@ type Server struct {
 	flowService    *flows.Service
 	policyChecker  policyChecker
 	workerManager  *workers.Manager
+	dbQueryRowFn   func(ctx context.Context, sql string, args ...any) pgx.Row
+	dbQueryFn      func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	dbExecFn       func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	dbBeginFn      func(ctx context.Context) (pgx.Tx, error)
 }
 
 type policyChecker interface {
@@ -79,6 +84,68 @@ var newSessionManager = func(cfg session.ManagerConfig) sessionManager {
 
 var pingDatabase = func(ctx context.Context, db *database.DB) error {
 	return db.Pool.Ping(ctx)
+}
+
+var beginBootstrapAdminTx = func(ctx context.Context, db *database.DB) (pgx.Tx, error) {
+	return db.Pool.Begin(ctx)
+}
+
+type errorRow struct {
+	err error
+}
+
+func (r errorRow) Scan(dest ...any) error {
+	return r.err
+}
+
+func (s *Server) hasDatabaseAccess() bool {
+	if s == nil || s.db == nil {
+		return false
+	}
+	if s.db.Pool != nil {
+		return true
+	}
+	return s.dbQueryRowFn != nil || s.dbQueryFn != nil || s.dbExecFn != nil || s.dbBeginFn != nil
+}
+
+func (s *Server) queryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if s.dbQueryRowFn != nil {
+		return s.dbQueryRowFn(ctx, sql, args...)
+	}
+	if s.db == nil || s.db.Pool == nil {
+		return errorRow{err: errors.New("database unavailable")}
+	}
+	return s.db.Pool.QueryRow(ctx, sql, args...)
+}
+
+func (s *Server) query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if s.dbQueryFn != nil {
+		return s.dbQueryFn(ctx, sql, args...)
+	}
+	if s.db == nil || s.db.Pool == nil {
+		return nil, errors.New("database unavailable")
+	}
+	return s.db.Pool.Query(ctx, sql, args...)
+}
+
+func (s *Server) exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if s.dbExecFn != nil {
+		return s.dbExecFn(ctx, sql, args...)
+	}
+	if s.db == nil || s.db.Pool == nil {
+		return pgconn.CommandTag{}, errors.New("database unavailable")
+	}
+	return s.db.Pool.Exec(ctx, sql, args...)
+}
+
+func (s *Server) begin(ctx context.Context) (pgx.Tx, error) {
+	if s.dbBeginFn != nil {
+		return s.dbBeginFn(ctx)
+	}
+	if s.db == nil || s.db.Pool == nil {
+		return nil, errors.New("database unavailable")
+	}
+	return s.db.Pool.Begin(ctx)
 }
 
 type bootstrapAdminOutcome struct {
@@ -241,7 +308,7 @@ func bootstrapAdminOperator(ctx context.Context, db *database.DB, email, passwor
 		return outcome, errors.New("database unavailable")
 	}
 
-	tx, err := db.Pool.Begin(ctx)
+	tx, err := beginBootstrapAdminTx(ctx, db)
 	if err != nil {
 		return outcome, err
 	}

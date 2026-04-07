@@ -1,0 +1,341 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+type migrationTestRow struct {
+	scanFn func(dest ...any) error
+}
+
+func (r migrationTestRow) Scan(dest ...any) error {
+	if r.scanFn != nil {
+		return r.scanFn(dest...)
+	}
+	return nil
+}
+
+type migrationTestRows struct {
+	scanFns []func(dest ...any) error
+	index   int
+	err     error
+}
+
+func (r *migrationTestRows) Close() {}
+
+func (r *migrationTestRows) Err() error {
+	return r.err
+}
+
+func (r *migrationTestRows) CommandTag() pgconn.CommandTag {
+	return pgconn.CommandTag{}
+}
+
+func (r *migrationTestRows) FieldDescriptions() []pgconn.FieldDescription {
+	return nil
+}
+
+func (r *migrationTestRows) Next() bool {
+	return r.index < len(r.scanFns)
+}
+
+func (r *migrationTestRows) Scan(dest ...any) error {
+	if r.index >= len(r.scanFns) {
+		return errors.New("no rows")
+	}
+	fn := r.scanFns[r.index]
+	r.index++
+	if fn != nil {
+		return fn(dest...)
+	}
+	return nil
+}
+
+func (r *migrationTestRows) Values() ([]any, error) {
+	return nil, nil
+}
+
+func (r *migrationTestRows) RawValues() [][]byte {
+	return nil
+}
+
+func (r *migrationTestRows) Conn() *pgx.Conn {
+	return nil
+}
+
+type migrationTestTx struct {
+	pgx.Tx
+	execFn     func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	commitFn   func(ctx context.Context) error
+	rollbackFn func(ctx context.Context) error
+}
+
+func (tx *migrationTestTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if tx.execFn != nil {
+		return tx.execFn(ctx, sql, args...)
+	}
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+func (tx *migrationTestTx) Commit(ctx context.Context) error {
+	if tx.commitFn != nil {
+		return tx.commitFn(ctx)
+	}
+	return nil
+}
+
+func (tx *migrationTestTx) Rollback(ctx context.Context) error {
+	if tx.rollbackFn != nil {
+		return tx.rollbackFn(ctx)
+	}
+	return pgx.ErrTxClosed
+}
+
+type migrationTestDB struct {
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
+	execFn     func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	queryFn    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	beginFn    func(ctx context.Context) (pgx.Tx, error)
+}
+
+func (db *migrationTestDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if db.queryRowFn != nil {
+		return db.queryRowFn(ctx, sql, args...)
+	}
+	return migrationTestRow{}
+}
+
+func (db *migrationTestDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if db.execFn != nil {
+		return db.execFn(ctx, sql, args...)
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
+}
+
+func (db *migrationTestDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if db.queryFn != nil {
+		return db.queryFn(ctx, sql, args...)
+	}
+	return &migrationTestRows{}, nil
+}
+
+func (db *migrationTestDB) Begin(ctx context.Context) (pgx.Tx, error) {
+	if db.beginFn != nil {
+		return db.beginFn(ctx)
+	}
+	return &migrationTestTx{}, nil
+}
+
+func TestRunMigrationsWithFS_AppliesPendingMigrations(t *testing.T) {
+	fsys := fstest.MapFS{
+		"migrations/0001_first.up.sql":  {Data: []byte("SELECT 1;")},
+		"migrations/0002_second.up.sql": {Data: []byte("SELECT 2;")},
+	}
+
+	beginCalls := 0
+	appliedSQL := []string{}
+	db := &migrationTestDB{
+		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "pg_try_advisory_lock") {
+				return migrationTestRow{scanFn: func(dest ...any) error {
+					*(dest[0].(*bool)) = true
+					return nil
+				}}
+			}
+			return migrationTestRow{}
+		},
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			// Migration version 1 already applied, so only 2 should execute.
+			return &migrationTestRows{
+				scanFns: []func(dest ...any) error{
+					func(dest ...any) error {
+						*(dest[0].(*int)) = 1
+						return nil
+					},
+				},
+			}, nil
+		},
+		beginFn: func(ctx context.Context) (pgx.Tx, error) {
+			beginCalls++
+			return &migrationTestTx{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					appliedSQL = append(appliedSQL, sql)
+					return pgconn.NewCommandTag("INSERT 0 1"), nil
+				},
+			}, nil
+		},
+	}
+
+	if err := runMigrationsWithFS(context.Background(), db, fsys); err != nil {
+		t.Fatalf("runMigrationsWithFS failed: %v", err)
+	}
+	if beginCalls != 1 {
+		t.Fatalf("expected one migration transaction, got %d", beginCalls)
+	}
+	if len(appliedSQL) < 1 || !strings.Contains(appliedSQL[0], "SELECT 2") {
+		t.Fatalf("expected second migration sql to execute, got %v", appliedSQL)
+	}
+}
+
+func TestRunMigrationsWithFS_ErrorPaths(t *testing.T) {
+	fsys := fstest.MapFS{
+		"migrations/0001_first.up.sql": {Data: []byte("SELECT 1;")},
+	}
+
+	t.Run("advisory lock query failure", func(t *testing.T) {
+		db := &migrationTestDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return migrationTestRow{scanFn: func(dest ...any) error { return errors.New("lock query failed") }}
+			},
+		}
+		if err := runMigrationsWithFS(context.Background(), db, fsys); err == nil || !strings.Contains(err.Error(), "failed to acquire admin migration lock") {
+			t.Fatalf("expected lock query error, got %v", err)
+		}
+	})
+
+	t.Run("lock not acquired", func(t *testing.T) {
+		db := &migrationTestDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return migrationTestRow{scanFn: func(dest ...any) error {
+					*(dest[0].(*bool)) = false
+					return nil
+				}}
+			},
+		}
+		if err := runMigrationsWithFS(context.Background(), db, fsys); err == nil || !strings.Contains(err.Error(), "another admin migration is in progress") {
+			t.Fatalf("expected lock contention error, got %v", err)
+		}
+	})
+
+	t.Run("ensure migration table fails", func(t *testing.T) {
+		db := &migrationTestDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return migrationTestRow{scanFn: func(dest ...any) error {
+					*(dest[0].(*bool)) = true
+					return nil
+				}}
+			},
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				if strings.Contains(sql, "CREATE TABLE IF NOT EXISTS adm_schema_migrations") {
+					return pgconn.CommandTag{}, errors.New("create table failed")
+				}
+				return pgconn.NewCommandTag("UPDATE 1"), nil
+			},
+		}
+		if err := runMigrationsWithFS(context.Background(), db, fsys); err == nil || !strings.Contains(err.Error(), "failed to ensure admin migration table") {
+			t.Fatalf("expected ensure table error, got %v", err)
+		}
+	})
+
+	t.Run("load applied migrations fails", func(t *testing.T) {
+		db := &migrationTestDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return migrationTestRow{scanFn: func(dest ...any) error {
+					*(dest[0].(*bool)) = true
+					return nil
+				}}
+			},
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return nil, errors.New("query failed")
+			},
+		}
+		if err := runMigrationsWithFS(context.Background(), db, fsys); err == nil || !strings.Contains(err.Error(), "failed to load applied admin migrations") {
+			t.Fatalf("expected load applied error, got %v", err)
+		}
+	})
+
+	t.Run("apply migration begin failure", func(t *testing.T) {
+		db := &migrationTestDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return migrationTestRow{scanFn: func(dest ...any) error {
+					*(dest[0].(*bool)) = true
+					return nil
+				}}
+			},
+			beginFn: func(ctx context.Context) (pgx.Tx, error) {
+				return nil, errors.New("begin failed")
+			},
+		}
+		if err := runMigrationsWithFS(context.Background(), db, fsys); err == nil || !strings.Contains(err.Error(), "begin failed") {
+			t.Fatalf("expected begin failure, got %v", err)
+		}
+	})
+}
+
+func TestMigrationHelperFunctions(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("load applied migrations scan and rows errors", func(t *testing.T) {
+		db := &migrationTestDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &migrationTestRows{
+					scanFns: []func(dest ...any) error{
+						func(dest ...any) error { return errors.New("scan failed") },
+					},
+				}, nil
+			},
+		}
+		if _, err := loadAppliedAdminMigrations(ctx, db); err == nil || !strings.Contains(err.Error(), "scan failed") {
+			t.Fatalf("expected scan error, got %v", err)
+		}
+
+		db.queryFn = func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			return &migrationTestRows{err: errors.New("rows error")}, nil
+		}
+		if _, err := loadAppliedAdminMigrations(ctx, db); err == nil || !strings.Contains(err.Error(), "rows error") {
+			t.Fatalf("expected rows error, got %v", err)
+		}
+	})
+
+	t.Run("apply migration errors", func(t *testing.T) {
+		m := adminMigration{Version: 42, Name: "answer", UpSQL: "SELECT 42;"}
+
+		db := &migrationTestDB{
+			beginFn: func(ctx context.Context) (pgx.Tx, error) {
+				return &migrationTestTx{
+					execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+						return pgconn.CommandTag{}, errors.New("exec up failed")
+					},
+				}, nil
+			},
+		}
+		if err := applyAdminMigration(ctx, db, m); err == nil || !strings.Contains(err.Error(), "failed to apply admin migration") {
+			t.Fatalf("expected apply migration exec error, got %v", err)
+		}
+
+		callCount := 0
+		db.beginFn = func(ctx context.Context) (pgx.Tx, error) {
+			return &migrationTestTx{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					callCount++
+					if callCount == 1 {
+						return pgconn.NewCommandTag("UPDATE 1"), nil
+					}
+					return pgconn.CommandTag{}, errors.New("insert record failed")
+				},
+			}, nil
+		}
+		if err := applyAdminMigration(ctx, db, m); err == nil || !strings.Contains(err.Error(), "failed to record admin migration") {
+			t.Fatalf("expected record migration error, got %v", err)
+		}
+
+		db.beginFn = func(ctx context.Context) (pgx.Tx, error) {
+			return &migrationTestTx{
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
+				commitFn: func(ctx context.Context) error { return errors.New("commit failed") },
+			}, nil
+		}
+		if err := applyAdminMigration(ctx, db, m); err == nil || !strings.Contains(err.Error(), "commit failed") {
+			t.Fatalf("expected commit failure, got %v", err)
+		}
+	})
+}
