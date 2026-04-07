@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -521,11 +522,14 @@ func (p *Proxy) writeErrorResponse(w http.ResponseWriter, statusCode int, messag
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
-	response := fmt.Sprintf(
-		`{"error":{"code":%d,"message":"%s","request_id":"%s"}}`,
-		statusCode, message, requestID,
-	)
-	if _, err := w.Write([]byte(response)); err != nil {
+	response := map[string]any{
+		"error": map[string]any{
+			"code":       statusCode,
+			"message":    message,
+			"request_id": requestID,
+		},
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		p.logger.Error().
 			Str("request_id", requestID).
 			Err(err).
