@@ -1089,7 +1089,7 @@ func (s *Server) handleAdminListIdentities(w http.ResponseWriter, r *http.Reques
 	}
 
 	var total int64
-	if err := s.db.Pool.QueryRow(r.Context(), `
+	if err := s.queryRow(r.Context(), `
 		SELECT COUNT(*)
 		FROM core_identities ci
 	`+where, args...).Scan(&total); err != nil {
@@ -1105,7 +1105,7 @@ func (s *Server) handleAdminListIdentities(w http.ResponseWriter, r *http.Reques
 		LIMIT $` + strconv.Itoa(argPos) + ` OFFSET $` + strconv.Itoa(argPos+1)
 	args = append(args, perPage, offset)
 
-	rows, err := s.db.Pool.Query(r.Context(), query, args...)
+	rows, err := s.query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list identities", err)
 		return
@@ -1179,7 +1179,7 @@ func (s *Server) handleAdminCreateIdentity(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	tx, err := s.db.Pool.Begin(r.Context())
+	tx, err := s.begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create identity", err)
 		return
@@ -1304,7 +1304,7 @@ func (s *Server) handleAdminUpdateIdentity(w http.ResponseWriter, r *http.Reques
 		argPos++
 	}
 
-	tx, err := s.db.Pool.Begin(r.Context())
+	tx, err := s.begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update identity", err)
 		return
@@ -1368,7 +1368,7 @@ func (s *Server) handleAdminDeleteIdentity(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	tx, err := s.db.Pool.Begin(r.Context())
+	tx, err := s.begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete identity", err)
 		return
@@ -1437,7 +1437,7 @@ func (s *Server) handleAdminListSessions(w http.ResponseWriter, r *http.Request)
 
 	var total int64
 	countQuery := "SELECT COUNT(*) FROM core_sessions cs " + where
-	if err := s.db.Pool.QueryRow(r.Context(), countQuery, args...).Scan(&total); err != nil {
+	if err := s.queryRow(r.Context(), countQuery, args...).Scan(&total); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list sessions", err)
 		return
 	}
@@ -1459,7 +1459,7 @@ func (s *Server) handleAdminListSessions(w http.ResponseWriter, r *http.Request)
 		LIMIT $` + strconv.Itoa(argPos) + ` OFFSET $` + strconv.Itoa(argPos+1)
 	args = append(args, perPage, offset)
 
-	rows, err := s.db.Pool.Query(r.Context(), query, args...)
+	rows, err := s.query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list sessions", err)
 		return
@@ -1512,7 +1512,7 @@ func (s *Server) handleAdminDeleteSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	result, err := s.db.Pool.Exec(r.Context(), `
+	result, err := s.exec(r.Context(), `
 		UPDATE core_sessions
 		SET active = FALSE, updated_at = NOW()
 		WHERE id = $1
@@ -1525,7 +1525,7 @@ func (s *Server) handleAdminDeleteSession(w http.ResponseWriter, r *http.Request
 
 	if result.RowsAffected() == 0 {
 		var exists bool
-		if err := s.db.Pool.QueryRow(r.Context(), `
+		if err := s.queryRow(r.Context(), `
 			SELECT EXISTS(SELECT 1 FROM core_sessions WHERE id = $1)
 		`, sessionID).Scan(&exists); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to revoke session", err)
@@ -1558,7 +1558,7 @@ func (s *Server) handleAdminDeleteIdentitySessions(w http.ResponseWriter, r *htt
 		return
 	}
 
-	result, err := s.db.Pool.Exec(r.Context(), `
+	result, err := s.exec(r.Context(), `
 		UPDATE core_sessions
 		SET active = FALSE, updated_at = NOW()
 		WHERE identity_id = $1
@@ -1571,7 +1571,7 @@ func (s *Server) handleAdminDeleteIdentitySessions(w http.ResponseWriter, r *htt
 
 	if result.RowsAffected() == 0 {
 		var exists bool
-		if err := s.db.Pool.QueryRow(r.Context(), `
+		if err := s.queryRow(r.Context(), `
 			SELECT EXISTS(
 				SELECT 1
 				FROM core_identities
@@ -1596,7 +1596,7 @@ func (s *Server) handleAdminDeleteIdentitySessions(w http.ResponseWriter, r *htt
 }
 
 func (s *Server) requireAdminDatabase(w http.ResponseWriter) bool {
-	if s.db == nil || s.db.Pool == nil {
+	if !s.hasDatabaseAccess() {
 		writeError(w, http.StatusServiceUnavailable, "database unavailable", nil)
 		return false
 	}
@@ -1766,7 +1766,7 @@ func (s *Server) resolveAdminSchemaID(ctx context.Context, schemaRef string) (uu
 	schemaRef = strings.TrimSpace(schemaRef)
 	switch {
 	case schemaRef == "":
-		err = s.db.Pool.QueryRow(ctx, `
+		err = s.queryRow(ctx, `
 			SELECT id
 			FROM core_identity_schemas
 			ORDER BY is_default DESC, created_at ASC
@@ -1774,13 +1774,13 @@ func (s *Server) resolveAdminSchemaID(ctx context.Context, schemaRef string) (uu
 		`).Scan(&schemaID)
 	case isUUID(schemaRef):
 		parsed := uuid.MustParse(schemaRef)
-		err = s.db.Pool.QueryRow(ctx, `
+		err = s.queryRow(ctx, `
 			SELECT id
 			FROM core_identity_schemas
 			WHERE id = $1
 		`, parsed).Scan(&schemaID)
 	default:
-		err = s.db.Pool.QueryRow(ctx, `
+		err = s.queryRow(ctx, `
 			SELECT id
 			FROM core_identity_schemas
 			WHERE name = $1
@@ -1806,7 +1806,7 @@ func (s *Server) getAdminIdentityByID(ctx context.Context, identityID uuid.UUID)
 		item      adminIdentityView
 	)
 
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT id, schema_id, traits, state, created_at, updated_at
 		FROM core_identities
 		WHERE id = $1
@@ -1971,12 +1971,12 @@ func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySettings, error) {
 	settings := defaultRuntimePolicySettings(s.cfg)
-	if s.db == nil || s.db.Pool == nil {
+	if !s.hasDatabaseAccess() {
 		return settings, nil
 	}
 
 	var raw []byte
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT value
 		FROM core_system_config
 		WHERE key = $1
@@ -2002,12 +2002,12 @@ func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySe
 
 func (s *Server) loadRuntimeProxySettings(ctx context.Context) (runtimeProxySettings, error) {
 	settings := defaultRuntimeProxySettings(s.cfg)
-	if s.db == nil || s.db.Pool == nil {
+	if !s.hasDatabaseAccess() {
 		return settings, nil
 	}
 
 	var raw []byte
-	err := s.db.Pool.QueryRow(ctx, `
+	err := s.queryRow(ctx, `
 		SELECT value
 		FROM core_system_config
 		WHERE key = $1
@@ -2156,7 +2156,7 @@ func applyRuntimeProxyPatch(current runtimeProxySettings, patch *runtimeProxySet
 }
 
 func (s *Server) saveRuntimeConfig(ctx context.Context, key string, value interface{}) error {
-	if s.db == nil || s.db.Pool == nil {
+	if !s.hasDatabaseAccess() {
 		return errors.New("database unavailable")
 	}
 
@@ -2165,7 +2165,7 @@ func (s *Server) saveRuntimeConfig(ctx context.Context, key string, value interf
 		return err
 	}
 
-	_, err = s.db.Pool.Exec(ctx, `
+	_, err = s.exec(ctx, `
 		INSERT INTO core_system_config (key, value, updated_at)
 		VALUES ($1, $2::jsonb, NOW())
 		ON CONFLICT (key)
@@ -2301,14 +2301,14 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 		"healthy_count": healthyCount,
 	}
 
-	if s.db == nil || s.db.Pool == nil {
+	if !s.hasDatabaseAccess() {
 		resp["database"] = "unavailable"
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
 	var identityCount int64
-	if err := s.db.Pool.QueryRow(r.Context(), `
+	if err := s.queryRow(r.Context(), `
 		SELECT COUNT(*)
 		FROM core_identities
 		WHERE deleted_at IS NULL
@@ -2318,7 +2318,7 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var activeSessionCount int64
-	if err := s.db.Pool.QueryRow(r.Context(), `
+	if err := s.queryRow(r.Context(), `
 		SELECT COUNT(*)
 		FROM core_sessions
 		WHERE active = TRUE

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -463,12 +464,26 @@ func setupLogger(logConfig LogConfig) {
 	log.Info().Str("level", level.String()).Msg("Logger initialized")
 }
 
+type adminMigrationDB interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
 func runMigrations(ctx context.Context, db *pgxpool.Pool) error {
+	return runMigrationsWithFS(ctx, db, adminmodule.GetMigrationFiles())
+}
+
+func runMigrationsWithFS(ctx context.Context, db adminMigrationDB, migrationFS fs.FS) error {
 	if db == nil {
 		return errors.New("database pool is nil")
 	}
+	if pool, ok := db.(*pgxpool.Pool); ok && pool == nil {
+		return errors.New("database pool is nil")
+	}
 
-	migrations, err := loadAdminMigrations(adminmodule.GetMigrationFiles())
+	migrations, err := loadAdminMigrations(migrationFS)
 	if err != nil {
 		return fmt.Errorf("failed to load admin migrations: %w", err)
 	}
@@ -572,7 +587,7 @@ func loadAdminMigrations(fsys fs.FS) ([]adminMigration, error) {
 	return migrations, nil
 }
 
-func ensureAdminMigrationsTable(ctx context.Context, db *pgxpool.Pool) error {
+func ensureAdminMigrationsTable(ctx context.Context, db adminMigrationDB) error {
 	_, err := db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS adm_schema_migrations (
 			version    INT PRIMARY KEY,
@@ -583,7 +598,7 @@ func ensureAdminMigrationsTable(ctx context.Context, db *pgxpool.Pool) error {
 	return err
 }
 
-func loadAppliedAdminMigrations(ctx context.Context, db *pgxpool.Pool) (map[int]struct{}, error) {
+func loadAppliedAdminMigrations(ctx context.Context, db adminMigrationDB) (map[int]struct{}, error) {
 	rows, err := db.Query(ctx, `SELECT version FROM adm_schema_migrations`)
 	if err != nil {
 		return nil, err
@@ -606,7 +621,7 @@ func loadAppliedAdminMigrations(ctx context.Context, db *pgxpool.Pool) (map[int]
 	return applied, nil
 }
 
-func applyAdminMigration(ctx context.Context, db *pgxpool.Pool, migration adminMigration) error {
+func applyAdminMigration(ctx context.Context, db adminMigrationDB, migration adminMigration) error {
 	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err

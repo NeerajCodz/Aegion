@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -346,6 +348,18 @@ func TestDeviceStoreAdapter(t *testing.T) {
 		assert.Equal(t, "IJKL-MNOP", approvedUserCode)
 	})
 
+	t.Run("MarkDeviceCodeApproved returns lookup errors", func(t *testing.T) {
+		oauthStore := store.NewWithDB(&adapterMockDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return adapterMockRow{err: pgx.ErrNoRows}
+			},
+		})
+		adapter := &deviceStoreAdapter{Store: oauthStore}
+
+		err := adapter.MarkDeviceCodeApproved(ctx, "missing", "identity-1", []string{"openid"})
+		assert.ErrorIs(t, err, store.ErrNotFound)
+	})
+
 	t.Run("MarkDeviceCodeDenied denies by user code", func(t *testing.T) {
 		var deniedUserCode any
 		oauthStore := store.NewWithDB(&adapterMockDB{
@@ -364,6 +378,18 @@ func TestDeviceStoreAdapter(t *testing.T) {
 		err := adapter.MarkDeviceCodeDenied(ctx, "dc-3")
 		require.NoError(t, err)
 		assert.Equal(t, "QRST-UVWX", deniedUserCode)
+	})
+
+	t.Run("MarkDeviceCodeDenied returns lookup errors", func(t *testing.T) {
+		oauthStore := store.NewWithDB(&adapterMockDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return adapterMockRow{err: pgx.ErrNoRows}
+			},
+		})
+		adapter := &deviceStoreAdapter{Store: oauthStore}
+
+		err := adapter.MarkDeviceCodeDenied(ctx, "missing")
+		assert.ErrorIs(t, err, store.ErrNotFound)
 	})
 
 	t.Run("MarkDeviceCodeUsed delegates to delete", func(t *testing.T) {
@@ -390,4 +416,66 @@ func TestBuildHandler(t *testing.T) {
 
 	h := buildHandler(cfg, store.NewWithDB(&adapterMockDB{}))
 	require.NotNil(t, h)
+}
+
+func TestMainWithInjectedHooks(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "postgres://demo:demo@127.0.0.1:1/demo?sslmode=disable&connect_timeout=1")
+	require.NoError(t, err)
+	t.Cleanup(func() { pool.Close() })
+
+	origLoadConfigHook := loadConfigHook
+	origConnectDBHook := connectDBHook
+	origBuildHandlerHook := buildHandlerHook
+	origNewHTTPServerHook := newHTTPServerHook
+	origNotifySignalsHook := notifySignalsHook
+	origStopSignalsHook := stopSignalsHook
+	origListenAndServeHook := listenAndServeHook
+	origArgs := os.Args
+	origFlagSet := flag.CommandLine
+	t.Cleanup(func() {
+		loadConfigHook = origLoadConfigHook
+		connectDBHook = origConnectDBHook
+		buildHandlerHook = origBuildHandlerHook
+		newHTTPServerHook = origNewHTTPServerHook
+		notifySignalsHook = origNotifySignalsHook
+		stopSignalsHook = origStopSignalsHook
+		listenAndServeHook = origListenAndServeHook
+		os.Args = origArgs
+		flag.CommandLine = origFlagSet
+	})
+
+	loadConfigHook = func(path string) (*Config, error) {
+		cfg := &Config{}
+		applyDefaults(cfg)
+		cfg.Server.Address = "127.0.0.1"
+		cfg.Server.Port = 0
+		return cfg, nil
+	}
+	connectDBHook = func(ctx context.Context, cfg *Config) (*pgxpool.Pool, error) {
+		return pool, nil
+	}
+	buildInvoked := false
+	buildHandlerHook = func(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
+		buildInvoked = true
+		require.NotNil(t, oauthStore)
+		return &handler.OAuth2Handler{}
+	}
+	newHTTPServerHook = func(cfg *Config, oauthHandler *handler.OAuth2Handler) *http.Server {
+		require.NotNil(t, oauthHandler)
+		return &http.Server{Addr: "127.0.0.1:0", Handler: http.NewServeMux()}
+	}
+	notifySignalsHook = func(c chan<- os.Signal, sig ...os.Signal) {
+		c <- os.Interrupt
+	}
+	stopSignalsHook = func(c chan<- os.Signal) {}
+	listenAndServeHook = func(srv *http.Server) error {
+		return http.ErrServerClosed
+	}
+
+	os.Args = []string{"oauth2-server"}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+	main()
+
+	assert.True(t, buildInvoked, "expected buildHandlerHook to be invoked")
 }

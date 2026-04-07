@@ -7,14 +7,23 @@ import (
 	"github.com/aegion/aegion/internal/platform/moduleserver"
 )
 
-func main() {
-	listenAddr := flag.String("listen", moduleserver.EnvOrDefault("AEGION_PASSKEYS_HTTP_LISTEN_ADDR", "0.0.0.0:9004"), "HTTP listen address")
-	flag.Parse()
+const (
+	listenAddrEnv = "AEGION_PASSKEYS_HTTP_LISTEN_ADDR"
+	defaultListen = "0.0.0.0:9004"
+	moduleVersion = "0.1.0"
+)
 
-	err := moduleserver.Run(moduleserver.Config{
+var runModuleServer = moduleserver.Run
+
+func defaultListenAddr() string {
+	return moduleserver.EnvOrDefault(listenAddrEnv, defaultListen)
+}
+
+func moduleConfig(listenAddr string) moduleserver.Config {
+	return moduleserver.Config{
 		Module:       "passkeys",
-		Version:      "0.1.0",
-		ListenAddr:   *listenAddr,
+		Version:      moduleVersion,
+		ListenAddr:   listenAddr,
 		Capabilities: []string{"webauthn_passwordless"},
 		Routes:       []string{"/self-service/passkeys/*", "/api/v1/passkeys/*"},
 		GRPCServices: []string{"passkeys.PasskeyEngine"},
@@ -22,7 +31,14 @@ func main() {
 			"session.created",
 			"identity.deleted",
 		},
-	})
+	}
+}
+
+func main() {
+	listenAddr := flag.String("listen", defaultListenAddr(), "HTTP listen address")
+	flag.Parse()
+
+	err := runModuleServer(moduleConfig(*listenAddr))
 	if err != nil {
 		log.Fatal(err)
 	}

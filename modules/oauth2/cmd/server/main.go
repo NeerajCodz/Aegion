@@ -28,6 +28,18 @@ import (
 
 const version = "1.0.0"
 
+var (
+	loadConfigHook     = loadConfig
+	connectDBHook      = connectDB
+	buildHandlerHook   = buildHandler
+	newHTTPServerHook  = newHTTPServer
+	notifySignalsHook  = signal.Notify
+	stopSignalsHook    = signal.Stop
+	listenAndServeHook = func(srv *http.Server) error {
+		return srv.ListenAndServe()
+	}
+)
+
 type Config struct {
 	Database struct {
 		URL      string `yaml:"url"`
@@ -60,28 +72,28 @@ func main() {
 		return
 	}
 
-	cfg, err := loadConfig(*configPath)
+	cfg, err := loadConfigHook(*configPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load config")
 	}
 
 	ctx := context.Background()
-	db, err := connectDB(ctx, cfg)
+	db, err := connectDBHook(ctx, cfg)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect database")
 	}
 	defer db.Close()
 
-	h := buildHandler(cfg, store.New(db))
-	srv := newHTTPServer(cfg, h)
+	h := buildHandlerHook(cfg, store.New(db))
+	srv := newHTTPServerHook(cfg, h)
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(stop)
+	notifySignalsHook(stop, os.Interrupt, syscall.SIGTERM)
+	defer stopSignalsHook(stop)
 
 	go func() {
 		log.Info().Str("addr", srv.Addr).Msg("OAuth2 module listening")
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := listenAndServeHook(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal().Err(err).Msg("OAuth2 server failed")
 		}
 	}()

@@ -1001,3 +1001,162 @@ func TestTokenStoreBranches(t *testing.T) {
 		}
 	})
 }
+
+func TestStoreAdditionalSuccessAndErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC().Round(0)
+
+	t.Run("getter success paths populate models", func(t *testing.T) {
+		secretHash := "secret-hash"
+		ownerID := "owner-1"
+		reqObj := "request-object"
+		state := "state-1"
+		identityID := "identity-1"
+		sessionID := "session-1"
+
+		s := NewWithDB(&mockDB{queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "FROM oa2_auth_codes"):
+				return mockRow{values: []any{
+					"code-1", "client-1", identityID, sessionID, "https://app.example.com/callback",
+					[]string{"openid"}, []string{"aud1"}, nil, nil, nil, &state, "urn:mace:incommon:iap:silver",
+					[]string{"pwd"}, now, &reqObj, false, (*time.Time)(nil), now.Add(5 * time.Minute), now,
+				}}
+			case strings.Contains(sql, "FROM oa2_device_codes WHERE device_code"):
+				return mockRow{values: []any{
+					"dc-1", "ABCD-EFGH", "client-1", []string{"openid"}, []string{"aud1"}, "https://issuer.example.com/device",
+					(*string)(nil), 5, &identityID, &sessionID, "approved", &now, now.Add(5 * time.Minute), &now, now,
+				}}
+			case strings.Contains(sql, "FROM oa2_device_codes WHERE user_code"):
+				return mockRow{values: []any{
+					"dc-2", "WXYZ-QRST", "client-1", []string{"openid"}, []string{"aud1"}, "https://issuer.example.com/device",
+					(*string)(nil), 5, &identityID, &sessionID, "pending", (*time.Time)(nil), now.Add(5 * time.Minute), (*time.Time)(nil), now,
+				}}
+			case strings.Contains(sql, "FROM oa2_access_tokens"):
+				return mockRow{values: []any{
+					"at-1", (*string)(nil), "client-1", identityID, sessionID, []string{"openid"}, []string{"aud1"},
+					"https://issuer.example.com", "sub-1", []byte(`{"role":"admin"}`), false, (*time.Time)(nil), now.Add(5 * time.Minute), now,
+				}}
+			case strings.Contains(sql, "FROM oa2_refresh_tokens"):
+				return mockRow{values: []any{
+					"rt-1", "family-1", "client-1", identityID, sessionID, []string{"openid"}, []string{"aud1"},
+					true, false, (*time.Time)(nil), (*string)(nil), (*time.Time)(nil), (*time.Time)(nil), (*string)(nil),
+					[]byte(`{"offline":true}`), now.Add(10 * time.Minute), now,
+				}}
+			case strings.Contains(sql, "FROM oa2_clients"):
+				return mockRow{values: []any{
+					"client-1", &secretHash, "Client One", (*string)(nil), (*string)(nil), (*string)(nil), (*string)(nil), (*string)(nil),
+					[]string{"https://app.example.com/callback"}, []string{"https://app.example.com/logout"},
+					[]string{"authorization_code"}, []string{"code"}, []string{"openid"}, []string{"aud1"},
+					"none", (*string)(nil), []byte(`{}`), (*string)(nil), "public", "RS256", "jwt",
+					900, 2592000, 3600, 600, true, true, true, []byte(`{"team":"core"}`), &ownerID, now, now,
+				}}
+			case strings.Contains(sql, "FROM oa2_consent_sessions"):
+				rememberFor := 3600
+				return mockRow{values: []any{
+					"consent-1", "client-1", identityID, []string{"openid"}, []string{"aud1"}, true, &rememberFor,
+					map[string]any{"key": "value"}, map[string]any{"id": "claim"}, true, &now, &now, now, now,
+				}}
+			case strings.Contains(sql, "FROM oa2_login_challenges"):
+				return mockRow{values: []any{
+					"login-1", "client-1", "https://issuer.example.com/login", "https://app.example.com/cb",
+					[]string{"openid"}, []string{"aud1"}, []string{"urn:mace:incommon:iap:silver"},
+					(*string)(nil), (*string)(nil), (*string)(nil), (*string)(nil), false, &identityID, &sessionID, &now, now.Add(time.Minute), now,
+				}}
+			case strings.Contains(sql, "FROM oa2_consent_challenges"):
+				return mockRow{values: []any{
+					"consent-ch-1", "login-1", "client-1", identityID, sessionID, "https://issuer.example.com/consent",
+					"https://app.example.com/cb", []string{"openid"}, []string{"aud1"}, false, []string{"openid"}, []string{"aud1"},
+					(*bool)(nil), (*int)(nil), map[string]any{"key": "value"}, map[string]any{"id": "claim"},
+					false, (*time.Time)(nil), false, (*string)(nil), (*string)(nil), now.Add(time.Minute), now,
+				}}
+			default:
+				return mockRow{err: errors.New("unexpected query")}
+			}
+		}})
+
+		if _, err := s.GetAuthCode(ctx, "code-1"); err != nil {
+			t.Fatalf("GetAuthCode success path failed: %v", err)
+		}
+		if _, err := s.GetDeviceCodeByDeviceCode(ctx, "dc-1"); err != nil {
+			t.Fatalf("GetDeviceCodeByDeviceCode success path failed: %v", err)
+		}
+		if _, err := s.GetDeviceCodeByUserCode(ctx, "ABCD-EFGH"); err != nil {
+			t.Fatalf("GetDeviceCodeByUserCode success path failed: %v", err)
+		}
+		if token, err := s.GetAccessToken(ctx, "at-1"); err != nil || token.ExtraClaims["role"] != "admin" {
+			t.Fatalf("GetAccessToken success path failed: token=%+v err=%v", token, err)
+		}
+		if token, err := s.GetRefreshToken(ctx, "rt-1"); err != nil || token.ExtraClaims["offline"] != true {
+			t.Fatalf("GetRefreshToken success path failed: token=%+v err=%v", token, err)
+		}
+		if client, err := s.GetClient(ctx, "client-1"); err != nil || client.Metadata["team"] != "core" {
+			t.Fatalf("GetClient success path failed: client=%+v err=%v", client, err)
+		}
+		if _, err := s.GetConsentSession(ctx, "client-1", identityID); err != nil {
+			t.Fatalf("GetConsentSession success path failed: %v", err)
+		}
+		if _, err := s.GetLoginChallenge(ctx, "login-1"); err != nil {
+			t.Fatalf("GetLoginChallenge success path failed: %v", err)
+		}
+		if _, err := s.GetConsentChallenge(ctx, "consent-ch-1"); err != nil {
+			t.Fatalf("GetConsentChallenge success path failed: %v", err)
+		}
+	})
+
+	t.Run("update success paths and direct exec errors", func(t *testing.T) {
+		s := NewWithDB(&mockDB{execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		}})
+
+		if err := s.MarkAuthCodeUsed(ctx, "code-1"); err != nil {
+			t.Fatalf("MarkAuthCodeUsed success path failed: %v", err)
+		}
+		if err := s.UpdateClient(ctx, &Client{ID: "client-1"}); err != nil {
+			t.Fatalf("UpdateClient success path failed: %v", err)
+		}
+		if err := s.UpdateClientSecret(ctx, "client-1", "hashed"); err != nil {
+			t.Fatalf("UpdateClientSecret success path failed: %v", err)
+		}
+		if err := s.DeleteClient(ctx, "client-1"); err != nil {
+			t.Fatalf("DeleteClient success path failed: %v", err)
+		}
+		if err := s.AcceptLoginChallenge(ctx, "login-1", "identity-1", "session-1"); err != nil {
+			t.Fatalf("AcceptLoginChallenge success path failed: %v", err)
+		}
+		if err := s.AcceptConsentChallenge(ctx, "consent-1", []string{"openid"}, []string{"aud1"}, true, nil); err != nil {
+			t.Fatalf("AcceptConsentChallenge success path failed: %v", err)
+		}
+		if err := s.RejectConsentChallenge(ctx, "consent-1", "access_denied", "denied"); err != nil {
+			t.Fatalf("RejectConsentChallenge success path failed: %v", err)
+		}
+		if err := s.UpdateDeviceCodePoll(ctx, "dc-1"); err != nil {
+			t.Fatalf("UpdateDeviceCodePoll success path failed: %v", err)
+		}
+		if err := s.ApproveDeviceCode(ctx, "ABCD-EFGH", "identity-1", "session-1"); err != nil {
+			t.Fatalf("ApproveDeviceCode success path failed: %v", err)
+		}
+		if err := s.DenyDeviceCode(ctx, "ABCD-EFGH"); err != nil {
+			t.Fatalf("DenyDeviceCode success path failed: %v", err)
+		}
+		if err := s.MarkJWTAssertionUsed(ctx, "jti-1"); err != nil {
+			t.Fatalf("MarkJWTAssertionUsed success path failed: %v", err)
+		}
+		if err := s.RevokeAccessToken(ctx, "at-1"); err != nil {
+			t.Fatalf("RevokeAccessToken success path failed: %v", err)
+		}
+
+		errStore := NewWithDB(&mockDB{execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, errors.New("exec failed")
+		}})
+		if err := errStore.MarkAuthCodeUsed(ctx, "code-err"); err == nil {
+			t.Fatal("expected MarkAuthCodeUsed exec error")
+		}
+		if err := errStore.UpdateDeviceCodePoll(ctx, "dc-err"); err == nil {
+			t.Fatal("expected UpdateDeviceCodePoll exec error")
+		}
+		if err := errStore.RevokeAccessToken(ctx, "at-err"); err == nil {
+			t.Fatal("expected RevokeAccessToken exec error")
+		}
+	})
+}
