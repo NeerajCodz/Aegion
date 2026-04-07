@@ -14,8 +14,10 @@ import (
 type mockRBACStore struct {
 	roleIDs     []string
 	permissions []policystore.Permission
+	abacRules   []policystore.ABACRule
 	rolesErr    error
 	permsErr    error
+	abacErr     error
 
 	lastIdentity string
 	lastRoleIDs  []string
@@ -35,6 +37,13 @@ func (m *mockRBACStore) ListPermissionsByRoleIDs(ctx context.Context, roleIDs []
 		return nil, m.permsErr
 	}
 	return m.permissions, nil
+}
+
+func (m *mockRBACStore) ListABACRules(ctx context.Context) ([]policystore.ABACRule, error) {
+	if m.abacErr != nil {
+		return nil, m.abacErr
+	}
+	return m.abacRules, nil
 }
 
 func TestServer_Check_Validation(t *testing.T) {
@@ -61,6 +70,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 		resource    string
 		action      string
 		wantAllowed bool
+		wantModel   string
 	}{
 		{
 			name: "exact match",
@@ -70,6 +80,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 			resource:    "documents",
 			action:      "read",
 			wantAllowed: true,
+			wantModel:   "rbac",
 		},
 		{
 			name: "resource wildcard",
@@ -79,6 +90,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 			resource:    "documents",
 			action:      "read",
 			wantAllowed: true,
+			wantModel:   "rbac",
 		},
 		{
 			name: "action wildcard",
@@ -88,6 +100,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 			resource:    "documents",
 			action:      "delete",
 			wantAllowed: true,
+			wantModel:   "rbac",
 		},
 		{
 			name: "global wildcard",
@@ -97,6 +110,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 			resource:    "documents",
 			action:      "delete",
 			wantAllowed: true,
+			wantModel:   "rbac",
 		},
 		{
 			name: "no match",
@@ -106,6 +120,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 			resource:    "documents",
 			action:      "write",
 			wantAllowed: false,
+			wantModel:   "default",
 		},
 	}
 
@@ -124,7 +139,7 @@ func TestServer_Check_RBACDecisions(t *testing.T) {
 			})
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantAllowed, resp.GetAllowed())
-			assert.Equal(t, "rbac", resp.GetModelUsed())
+			assert.Equal(t, tc.wantModel, resp.GetModelUsed())
 			assert.Equal(t, "alice", st.lastIdentity)
 		})
 	}
@@ -149,6 +164,93 @@ func TestServer_Check_StoreErrors(t *testing.T) {
 		Action:       "read",
 	})
 	assert.ErrorContains(t, err, "permissions down")
+
+	s = NewServer(&mockRBACStore{abacErr: errors.New("abac down")})
+	_, err = s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+	})
+	assert.ErrorContains(t, err, "abac down")
+}
+
+func TestServer_Check_ABACDenyPrecedence(t *testing.T) {
+	st := &mockRBACStore{
+		roleIDs: []string{"role-1"},
+		permissions: []policystore.Permission{
+			{ResourceType: "documents", Action: "read"},
+		},
+		abacRules: []policystore.ABACRule{
+			{Name: "block_reads", Expression: `action == "read"`, Priority: 1, Effect: "deny", Enabled: true},
+		},
+	}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetAllowed())
+	assert.Equal(t, "abac", resp.GetModelUsed())
+	assert.Equal(t, "abac_deny_rule_matched", resp.GetDenyReason())
+	assert.Equal(t, []string{"abac:deny:block_reads"}, resp.GetEvalPath())
+}
+
+func TestServer_Check_ABACAllowAfterRBACMiss(t *testing.T) {
+	st := &mockRBACStore{
+		roleIDs: []string{"role-1"},
+		permissions: []policystore.Permission{
+			{ResourceType: "documents", Action: "read"},
+		},
+		abacRules: []policystore.ABACRule{
+			{Name: "allow_write", Expression: `action == "write"`, Priority: 5, Effect: "allow", Enabled: true},
+		},
+	}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "write",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, "abac", resp.GetModelUsed())
+	assert.Equal(t, []string{"abac:deny_miss", "rbac:miss", "abac:allow:allow_write"}, resp.GetEvalPath())
+}
+
+func TestServer_Check_ModelOverrideABAC(t *testing.T) {
+	st := &mockRBACStore{
+		abacRules: []policystore.ABACRule{
+			{Name: "allow_docs", Expression: `resource.type == "documents"`, Priority: 1, Effect: "allow", Enabled: true},
+		},
+	}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "abac",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, "abac", resp.GetModelUsed())
+	assert.Equal(t, []string{"abac:deny_miss", "abac:allow:allow_docs"}, resp.GetEvalPath())
+	assert.Empty(t, st.lastIdentity)
+}
+
+func TestServer_Check_ModelOverrideValidation(t *testing.T) {
+	s := NewServer(&mockRBACStore{})
+	_, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "unknown",
+	})
+	assert.ErrorContains(t, err, "unsupported model")
 }
 
 func TestServer_BatchCheck(t *testing.T) {

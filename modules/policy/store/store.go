@@ -40,6 +40,15 @@ type Permission struct {
 	Action       string
 }
 
+// ABACRule is an attribute-based access rule.
+type ABACRule struct {
+	Name       string
+	Expression string
+	Priority   int
+	Effect     string
+	Enabled    bool
+}
+
 // ListRoleIDsByIdentity returns role IDs assigned to an identity.
 func (s *Store) ListRoleIDsByIdentity(ctx context.Context, identityID string) ([]string, error) {
 	rows, err := s.db.Query(ctx, `
@@ -96,6 +105,34 @@ func (s *Store) ListPermissionsByRoleIDs(ctx context.Context, roleIDs []string) 
 	}
 
 	return permissions, nil
+}
+
+// ListABACRules returns enabled ABAC rules ordered by priority.
+func (s *Store) ListABACRules(ctx context.Context) ([]ABACRule, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT name, expression, priority, effect, enabled
+		FROM pol_abac_rules
+		WHERE enabled = TRUE
+		ORDER BY priority ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rules := make([]ABACRule, 0, 16)
+	for rows.Next() {
+		var r ABACRule
+		if err := rows.Scan(&r.Name, &r.Expression, &r.Priority, &r.Effect, &r.Enabled); err != nil {
+			return nil, err
+		}
+		rules = append(rules, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return rules, nil
 }
 
 // GetRoleIDByName resolves a role name to role ID.
