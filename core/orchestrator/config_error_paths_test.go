@@ -279,6 +279,74 @@ func TestEnabledModuleOrder(t *testing.T) {
 	})
 }
 
+func TestValidateModuleDependencies_ProductionModuleMaturity(t *testing.T) {
+	t.Run("rejects experimental modules in production by default", func(t *testing.T) {
+		t.Setenv("AEGION_ENV", "production")
+		t.Setenv("AEGION_ALLOW_EXPERIMENTAL_MODULES", "")
+
+		err := ValidateModuleDependencies(&AegionConfig{
+			ModuleVersions: map[string]string{
+				"password": "v1.0.0",
+				"mfa":      "v1.0.0",
+			},
+		})
+		if !errors.Is(err, ErrExperimentalModule) {
+			t.Fatalf("expected ErrExperimentalModule, got %v", err)
+		}
+		if err == nil || !strings.Contains(err.Error(), `module "mfa"`) {
+			t.Fatalf("expected module detail in error, got %v", err)
+		}
+	})
+
+	t.Run("allows experimental modules with explicit override", func(t *testing.T) {
+		t.Setenv("AEGION_ENV", "production")
+		t.Setenv("AEGION_ALLOW_EXPERIMENTAL_MODULES", "true")
+
+		err := ValidateModuleDependencies(&AegionConfig{
+			ModuleVersions: map[string]string{
+				"password": "v1.0.0",
+				"mfa":      "v1.0.0",
+			},
+		})
+		if err != nil {
+			t.Fatalf("expected nil error with override, got %v", err)
+		}
+	})
+
+	t.Run("allows production-ready module set in production", func(t *testing.T) {
+		t.Setenv("AEGION_ENV", "production")
+		t.Setenv("AEGION_ALLOW_EXPERIMENTAL_MODULES", "")
+
+		err := ValidateModuleDependencies(&AegionConfig{
+			ModuleVersions: map[string]string{
+				"password":   "v1.0.0",
+				"oauth2":     "v1.0.0",
+				"policy":     "v1.0.0",
+				"admin":      "v1.0.0",
+				"magic_link": "v1.0.0",
+			},
+		})
+		if err != nil {
+			t.Fatalf("expected nil error for production-ready modules, got %v", err)
+		}
+	})
+
+	t.Run("ignores disabled experimental modules in production", func(t *testing.T) {
+		t.Setenv("AEGION_ENV", "production")
+		t.Setenv("AEGION_ALLOW_EXPERIMENTAL_MODULES", "")
+
+		err := ValidateModuleDependencies(&AegionConfig{
+			ModuleVersions: map[string]string{
+				"mfa":      "off",
+				"password": "v1.0.0",
+			},
+		})
+		if err != nil {
+			t.Fatalf("expected nil error when experimental module is disabled, got %v", err)
+		}
+	})
+}
+
 func mustAppearAfter(t *testing.T, order []string, module, dependency string) {
 	t.Helper()
 

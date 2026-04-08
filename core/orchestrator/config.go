@@ -13,12 +13,13 @@ import (
 )
 
 var (
-	ErrConfigNotFound    = errors.New("configuration file not found")
-	ErrInvalidConfig     = errors.New("invalid module configuration")
-	ErrMissingImage      = errors.New("module image is required")
-	ErrMissingModuleID   = errors.New("module ID is required")
-	ErrMissingModuleName = errors.New("module name is required")
-	ErrMissingDependency = errors.New("module dependency not satisfied")
+	ErrConfigNotFound     = errors.New("configuration file not found")
+	ErrInvalidConfig      = errors.New("invalid module configuration")
+	ErrMissingImage       = errors.New("module image is required")
+	ErrMissingModuleID    = errors.New("module ID is required")
+	ErrMissingModuleName  = errors.New("module name is required")
+	ErrMissingDependency  = errors.New("module dependency not satisfied")
+	ErrExperimentalModule = errors.New("experimental module is not allowed in production")
 )
 
 // ModuleConfig defines the configuration for a module container.
@@ -183,6 +184,15 @@ var moduleDependencies = map[string][]string{
 	"cli":           {"core"},
 }
 
+var productionReadyModules = map[string]struct{}{
+	"core":       {},
+	"password":   {},
+	"magic_link": {},
+	"oauth2":     {},
+	"policy":     {},
+	"admin":      {},
+}
+
 // ValidateModuleDependencies validates enabled module dependency constraints.
 func ValidateModuleDependencies(cfg *AegionConfig) error {
 	if cfg == nil {
@@ -206,7 +216,46 @@ func ValidateModuleDependencies(cfg *AegionConfig) error {
 		}
 	}
 
+	if err := validateProductionModuleMaturity(cfg); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func validateProductionModuleMaturity(cfg *AegionConfig) error {
+	if cfg == nil || !isProductionEnvironment() || allowExperimentalModules() {
+		return nil
+	}
+	for moduleID, version := range cfg.ModuleVersions {
+		if !isEnabledByVersion(version) {
+			continue
+		}
+		if _, ready := productionReadyModules[moduleID]; ready {
+			continue
+		}
+		return fmt.Errorf(
+			"%w: module %q is not production-ready; disable it or set AEGION_ALLOW_EXPERIMENTAL_MODULES=true",
+			ErrExperimentalModule,
+			moduleID,
+		)
+	}
+	return nil
+}
+
+func isProductionEnvironment() bool {
+	for _, key := range []string{"AEGION_ENV", "AEGION_ENVIRONMENT"} {
+		env := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if env == "production" || env == "prod" {
+			return true
+		}
+	}
+	return false
+}
+
+func allowExperimentalModules() bool {
+	override := strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ALLOW_EXPERIMENTAL_MODULES")))
+	return override == "1" || override == "true" || override == "yes" || override == "on"
 }
 
 // EnabledModuleOrder returns enabled modules in deterministic dependency order.

@@ -414,3 +414,9 @@ Before deployment:
 8. Configure resource limits per module container (CPU/memory) appropriate to workload
 9. Set `module_auto_restart: true` in feature flags for production
 10. Monitor the Platform → Modules view in admin after first boot
+
+Production safety gate:
+
+- When `AEGION_ENV=production` (or `AEGION_ENVIRONMENT=production`), startup rejects experimental module versions by default (`mfa`, `passkeys`, `social`, `sso`, `introspection`, `cli`, `proxy`).
+- To explicitly allow experimental modules in production, set `AEGION_ALLOW_EXPERIMENTAL_MODULES=true`.
+- Recommended production-ready module set today: `password`, `magic_link`, `oauth2`, `policy`, `admin` (plus `core`).
