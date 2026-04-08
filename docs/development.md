@@ -206,15 +206,6 @@ go test -memprofile=mem.prof -bench=. ./internal/...
 go tool pprof mem.prof
 ```
 
-### GitHub Actions on Forks
-
-By default, CI workflows run automatically on the primary repository owner and are skipped on forks.
-
-To opt in on a fork, set these repository variables:
-
-- `AEGION_ENABLE_FORK_WORKFLOWS=true` (enables CI/Build/Security workflow jobs)
-- `AEGION_ENABLE_INTEGRATION_SMOKE=true` (additionally enables the Integration Smoke job in CI)
-
 ## Code Style and Linting
 
 ### Go Code Style
