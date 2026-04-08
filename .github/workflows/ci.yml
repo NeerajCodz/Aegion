@@ -23,7 +23,6 @@ jobs:
   go-lint:
     name: Go Lint
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -67,7 +66,6 @@ jobs:
   rust-lint:
     name: Rust Lint
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     defaults:
       run:
         working-directory: rust
@@ -98,7 +96,6 @@ jobs:
   detect-modules:
     name: Detect Changed Modules
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     outputs:
       modules: ${{ steps.detect.outputs.modules }}
       has_modules: ${{ steps.detect.outputs.has_modules }}
@@ -157,17 +154,28 @@ jobs:
           echo "Module matrix: $modules_json"
 
   # ---------------------------------------------------------------------------
-  # Per-Module Verification (path-scoped, shared changes fan out)
+  # Per-Module Verification (full matrix)
   # ---------------------------------------------------------------------------
   module-check:
     name: Module Check (${{ matrix.module }})
     runs-on: ubuntu-latest
     needs: detect-modules
-    if: ${{ (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true') && needs.detect-modules.outputs.has_modules == 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        module: ${{ fromJson(needs.detect-modules.outputs.modules) }}
+        module:
+          - admin
+          - cli
+          - introspection
+          - magic_link
+          - mfa
+          - oauth2
+          - passkeys
+          - password
+          - policy
+          - proxy
+          - social
+          - sso
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -202,7 +210,6 @@ jobs:
   proto-consistency:
     name: Proto Consistency
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -233,7 +240,6 @@ jobs:
   release-manifest:
     name: Release Manifest Check
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -248,7 +254,6 @@ jobs:
     name: Go Test
     runs-on: ubuntu-latest
     needs: [go-lint, proto-consistency]
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -317,13 +322,55 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ---------------------------------------------------------------------------
+  # Full Go Race Test (all core/module packages)
+  # ---------------------------------------------------------------------------
+  go-test-full:
+    name: Go Test Full
+    runs-on: ubuntu-latest
+    needs: [go-lint, proto-consistency]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Rust (for CGO)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Build Rust libraries
+        working-directory: rust
+        run: cargo build --release --workspace
+
+      - name: Run full race tests
+        env:
+          CGO_ENABLED: 1
+          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
+        run: |
+          packages=$(go list ./cmd/... ./core/... ./internal/... ./modules/... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
+          if [ -z "$packages" ]; then
+            echo "No Go packages found for full race tests"
+            exit 1
+          fi
+          go test -count=1 -race $packages
+
+  # ---------------------------------------------------------------------------
   # Integration Smoke Checks
   # ---------------------------------------------------------------------------
   integration-smoke:
     name: Integration Smoke
     runs-on: ubuntu-latest
-    needs: go-test
-    if: ${{ (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true') && (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_INTEGRATION_SMOKE == 'true') }}
+    needs: [go-test, go-test-full]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -344,7 +391,6 @@ jobs:
     name: Rust Test
     runs-on: ubuntu-latest
     needs: rust-lint
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     defaults:
       run:
         working-directory: rust
@@ -392,9 +438,10 @@ jobs:
       - proto-consistency
       - release-manifest
       - go-test
+      - go-test-full
       - integration-smoke
       - rust-test
-    if: ${{ (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true') && always() }}
+    if: always()
     steps:
       - name: Check all jobs passed
         shell: bash
@@ -416,6 +463,7 @@ jobs:
           check_result "proto-consistency" "${{ needs.proto-consistency.result }}"
           check_result "release-manifest" "${{ needs.release-manifest.result }}"
           check_result "go-test" "${{ needs.go-test.result }}"
+          check_result "go-test-full" "${{ needs.go-test-full.result }}"
           check_result "integration-smoke" "${{ needs.integration-smoke.result }}"
           check_result "rust-test" "${{ needs.rust-test.result }}"
 
