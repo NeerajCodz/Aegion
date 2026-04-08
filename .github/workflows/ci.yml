@@ -23,6 +23,7 @@ jobs:
   go-lint:
     name: Go Lint
     runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -66,6 +67,7 @@ jobs:
   rust-lint:
     name: Rust Lint
     runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     defaults:
       run:
         working-directory: rust
@@ -96,6 +98,7 @@ jobs:
   detect-modules:
     name: Detect Changed Modules
     runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     outputs:
       modules: ${{ steps.detect.outputs.modules }}
       has_modules: ${{ steps.detect.outputs.has_modules }}
@@ -160,7 +163,7 @@ jobs:
     name: Module Check (${{ matrix.module }})
     runs-on: ubuntu-latest
     needs: detect-modules
-    if: needs.detect-modules.outputs.has_modules == 'true'
+    if: ${{ (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true') && needs.detect-modules.outputs.has_modules == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -199,6 +202,7 @@ jobs:
   proto-consistency:
     name: Proto Consistency
     runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -229,6 +233,7 @@ jobs:
   release-manifest:
     name: Release Manifest Check
     runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -243,6 +248,7 @@ jobs:
     name: Go Test
     runs-on: ubuntu-latest
     needs: [go-lint, proto-consistency]
+    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -317,7 +323,7 @@ jobs:
     name: Integration Smoke
     runs-on: ubuntu-latest
     needs: go-test
-    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_INTEGRATION_SMOKE == 'true' }}
+    if: ${{ (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true') && (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_INTEGRATION_SMOKE == 'true') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -338,6 +344,7 @@ jobs:
     name: Rust Test
     runs-on: ubuntu-latest
     needs: rust-lint
+    if: ${{ github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true' }}
     defaults:
       run:
         working-directory: rust
@@ -387,7 +394,7 @@ jobs:
       - go-test
       - integration-smoke
       - rust-test
-    if: always()
+    if: ${{ (github.repository_owner == 'Qypher' || vars.AEGION_ENABLE_FORK_WORKFLOWS == 'true') && always() }}
     steps:
       - name: Check all jobs passed
         shell: bash
