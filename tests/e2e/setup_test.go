@@ -336,15 +336,20 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		)`,
 
 		// Create simplified aliases for testing
-		`CREATE VIEW IF NOT EXISTS identities AS SELECT 
-			id, email, name, state, created_at, updated_at 
+		`CREATE OR REPLACE VIEW identities AS SELECT 
+			id,
+			traits->>'email' AS email,
+			traits->>'name' AS name,
+			state,
+			created_at,
+			updated_at
 			FROM core_identities`,
 
-		`CREATE VIEW IF NOT EXISTS identity_credentials AS SELECT 
+		`CREATE OR REPLACE VIEW identity_credentials AS SELECT 
 			id, identity_id, 'password' as type, password_hash, created_at, updated_at
 			FROM module_password_credentials`,
 
-		`CREATE VIEW IF NOT EXISTS sessions AS SELECT 
+		`CREATE OR REPLACE VIEW sessions AS SELECT 
 			id, token, identity_id, aal, expires_at, active, authenticated_at as created_at, expires_at as updated_at
 			FROM core_sessions`,
 
