@@ -203,8 +203,8 @@ func TestSPAFileServerBehavior(t *testing.T) {
 	spa := NewSPAFileServer()
 
 	t.Run("javascript assets are immutable", func(t *testing.T) {
-		jsAssetPath := findEmbeddedAssetPath(t, ".js")
-		req := httptest.NewRequest(http.MethodGet, "/"+jsAssetPath, nil)
+		assetPath := findEmbeddedAssetPath(t, ".js", ".css")
+		req := httptest.NewRequest(http.MethodGet, "/"+assetPath, nil)
 		rec := httptest.NewRecorder()
 		spa.ServeHTTP(rec, req)
 
@@ -212,7 +212,7 @@ func TestSPAFileServerBehavior(t *testing.T) {
 			t.Fatalf("expected immutable cache header, got %q", cache)
 		}
 		if rec.Code != http.StatusOK {
-			t.Fatalf("expected status 200 for existing JS asset, got %d", rec.Code)
+			t.Fatalf("expected status 200 for existing immutable asset, got %d", rec.Code)
 		}
 	})
 
@@ -243,8 +243,11 @@ func TestSPAFileServerBehavior(t *testing.T) {
 	})
 }
 
-func findEmbeddedAssetPath(t *testing.T, ext string) string {
+func findEmbeddedAssetPath(t *testing.T, exts ...string) string {
 	t.Helper()
+	if len(exts) == 0 {
+		t.Fatalf("at least one extension must be provided")
+	}
 
 	var found string
 	err := fs.WalkDir(admin.GetSPAFiles(), ".", func(path string, d fs.DirEntry, err error) error {
@@ -254,9 +257,11 @@ func findEmbeddedAssetPath(t *testing.T, ext string) string {
 		if d.IsDir() {
 			return nil
 		}
-		if strings.HasSuffix(path, ext) {
-			found = path
-			return fs.SkipAll
+		for _, ext := range exts {
+			if strings.HasSuffix(path, ext) {
+				found = path
+				return fs.SkipAll
+			}
 		}
 		return nil
 	})
@@ -264,7 +269,7 @@ func findEmbeddedAssetPath(t *testing.T, ext string) string {
 		t.Fatalf("failed to walk embedded SPA files: %v", err)
 	}
 	if found == "" {
-		t.Fatalf("no embedded asset found with extension %q", ext)
+		t.Fatalf("no embedded asset found with extensions %v", exts)
 	}
 
 	return found
