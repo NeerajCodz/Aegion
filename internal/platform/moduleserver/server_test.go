@@ -2,11 +2,15 @@ package moduleserver
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestBuildModuleMuxEndpoints(t *testing.T) {
@@ -141,5 +145,55 @@ func TestRunShutdownViaSignal(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected graceful shutdown, got %v", err)
+	}
+}
+
+func TestBuildModuleMuxConcurrentRequestLoad(t *testing.T) {
+	cfg := Config{
+		Module:             "scalable-module",
+		Version:            "1.0.0",
+		Capabilities:       []string{"health", "ready", "meta"},
+		Routes:             []string{"/health", "/ready", "/meta"},
+		GRPCServices:       []string{"scalable.v1.Service"},
+		EventSubscriptions: []string{"module.updated"},
+	}
+	server := httptest.NewServer(buildModuleMux(cfg))
+	defer server.Close()
+
+	paths := []string{"/health", "/ready", "/meta"}
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	const workers = 40
+	const requestsPerWorker = 40
+
+	var failures atomic.Int64
+	start := time.Now()
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for i := 0; i < requestsPerWorker; i++ {
+				path := paths[(workerID+i)%len(paths)]
+				resp, err := client.Get(server.URL + path)
+				if err != nil {
+					failures.Add(1)
+					continue
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					failures.Add(1)
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
+
+	if got := failures.Load(); got != 0 {
+		t.Fatalf("expected zero request failures under concurrent load, got %d", got)
+	}
+	if duration := time.Since(start); duration > 15*time.Second {
+		t.Fatalf("expected concurrent load test to complete quickly, took %v", duration)
 	}
 }

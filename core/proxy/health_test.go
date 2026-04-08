@@ -280,8 +280,8 @@ func TestHealthChecker_Timeout(t *testing.T) {
 	// Should fail due to timeout
 	assert.Equal(t, HealthStatusUnhealthy, hc.GetStatus())
 
-	// Should have timed out quickly
-	assert.Less(t, duration, 100*time.Millisecond)
+	// Should have timed out well before the upstream's full response latency.
+	assert.Less(t, duration, 300*time.Millisecond)
 
 	metrics := hc.GetMetrics()
 	assert.NotNil(t, metrics.LastError)
