@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"sort"
 	"sync"
 	"sync/atomic"
 )
@@ -88,6 +89,7 @@ func (d *Discovery) GetEndpointByName(moduleName string, endpointType EndpointTy
 	if len(endpoints) == 0 {
 		return nil, ErrNoHealthyInstances
 	}
+	sort.Strings(endpoints)
 
 	return endpoints, nil
 }
