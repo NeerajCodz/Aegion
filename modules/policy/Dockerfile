@@ -1,5 +1,5 @@
 # =============================================================================
-# Aegion OAuth2 Module Dockerfile
+# Aegion Policy Module Dockerfile
 # =============================================================================
 
 FROM golang:1.25.8-alpine AS builder
@@ -16,11 +16,11 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the OAuth2 module server
+# Build the policy module server
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w -X main.version=${VERSION}" \
-    -o /out/aegion-oauth2 ./modules/oauth2/cmd/server
+    -o /out/aegion-policy ./modules/policy/cmd/server
 
 # Final runtime image
 FROM gcr.io/distroless/static-debian12:nonroot
@@ -28,20 +28,20 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 
 # Copy binary
-COPY --from=builder /out/aegion-oauth2 /app/aegion-oauth2
+COPY --from=builder /out/aegion-policy /app/aegion-policy
 
 # Environment defaults
-ENV MODULE_PORT=9005
+ENV MODULE_PORT=9004
 ENV MODULE_LOG_LEVEL=info
 ENV MODULE_LOG_FORMAT=json
 
-# Expose module port
-EXPOSE 9005
+# Expose gRPC port
+EXPOSE 9004
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/app/aegion-oauth2", "health"]
+    CMD ["/app/aegion-policy", "health"]
 
 # Entry point
-ENTRYPOINT ["/app/aegion-oauth2"]
+ENTRYPOINT ["/app/aegion-policy"]
 CMD ["serve"]

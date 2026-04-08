@@ -1,0 +1,323 @@
+# =============================================================================
+# Aegion Security Scanning Script
+# Runs comprehensive security scans on codebase and containers
+# =============================================================================
+
+$ErrorActionPreference = "Continue"
+
+$script:IssuesFound = 0
+$script:ScansRun = 0
+
+function Write-Section { param($Title) Write-Host "`n=== $Title ===" -ForegroundColor Cyan }
+function Write-Issue { param($Message) Write-Host "⚠ $Message" -ForegroundColor Yellow; $script:IssuesFound++ }
+function Write-Pass { param($Message) Write-Host "✓ $Message" -ForegroundColor Green }
+function Write-Info { param($Message) Write-Host "ℹ $Message" -ForegroundColor Blue }
+
+# Check if a command exists
+function Test-Command {
+    param([string]$Command)
+    $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
+}
+
+# Scan 1: Go Security Checker (gosec)
+function Scan-GoSecurity {
+    Write-Section "Go Security Scan (gosec)"
+    $script:ScansRun++
+    
+    if (-not (Test-Command "gosec")) {
+        Write-Info "gosec not installed. Installing..."
+        try {
+            go install github.com/securego/gosec/v2/cmd/gosec@latest
+        } catch {
+            Write-Issue "Failed to install gosec: $_"
+            return
+        }
+    }
+    
+    Write-Info "Running gosec..."
+    $gosecOutput = gosec -fmt=json -out=security-gosec.json ./... 2>&1
+    
+    if (Test-Path "security-gosec.json") {
+        $results = Get-Content "security-gosec.json" | ConvertFrom-Json
+        $issueCount = $results.Issues.Count
+        
+        if ($issueCount -gt 0) {
+            Write-Issue "Found $issueCount security issues in Go code"
+            $results.Issues | ForEach-Object {
+                Write-Host "  [$($_.severity)] $($_.rule): $($_.details)"
+                Write-Host "    File: $($_.file):$($_.line)"
+            }
+        } else {
+            Write-Pass "No security issues found in Go code"
+        }
+    }
+}
+
+# Scan 2: Dependency vulnerabilities (govulncheck)
+function Scan-Dependencies {
+    Write-Section "Dependency Vulnerability Scan (govulncheck)"
+    $script:ScansRun++
+    
+    if (-not (Test-Command "govulncheck")) {
+        Write-Info "govulncheck not installed. Installing..."
+        try {
+            go install golang.org/x/vuln/cmd/govulncheck@latest
+        } catch {
+            Write-Issue "Failed to install govulncheck: $_"
+            return
+        }
+    }
+    
+    Write-Info "Running govulncheck..."
+    $vulnOutput = govulncheck -json ./... 2>&1 | Out-String
+    
+    if ($vulnOutput -match "No vulnerabilities found") {
+        Write-Pass "No known vulnerabilities in dependencies"
+    } else {
+        Write-Issue "Found vulnerabilities in dependencies"
+        Write-Host $vulnOutput
+    }
+}
+
+# Scan 3: Docker image vulnerabilities (trivy)
+function Scan-DockerImages {
+    Write-Section "Docker Image Vulnerability Scan (trivy)"
+    $script:ScansRun++
+    
+    if (-not (Test-Command "trivy")) {
+        Write-Issue "trivy not installed. Please install from: https://github.com/aquasecurity/trivy"
+        return
+    }
+    
+    $images = @(
+        "aegion/core:latest",
+        "aegion/module-password:latest",
+        "aegion/module-magic-link:latest",
+        "aegion/module-admin:latest",
+        "aegion/module-oauth2:latest",
+        "aegion/module-policy:latest"
+    )
+    
+    foreach ($image in $images) {
+        Write-Info "Scanning $image..."
+        $trivyOutput = trivy image --severity HIGH,CRITICAL --format json --output "security-trivy-$($image -replace '[\/:.]','-').json" $image 2>&1
+        
+        if (Test-Path "security-trivy-$($image -replace '[\/:.]','-').json") {
+            $results = Get-Content "security-trivy-$($image -replace '[\/:.]','-').json" | ConvertFrom-Json
+            $vulnCount = ($results.Results | ForEach-Object { $_.Vulnerabilities.Count } | Measure-Object -Sum).Sum
+            
+            if ($vulnCount -gt 0) {
+                Write-Issue "$image has $vulnCount HIGH/CRITICAL vulnerabilities"
+            } else {
+                Write-Pass "$image has no HIGH/CRITICAL vulnerabilities"
+            }
+        }
+    }
+}
+
+# Scan 4: Secret detection (gitleaks)
+function Scan-Secrets {
+    Write-Section "Secret Detection Scan (gitleaks)"
+    $script:ScansRun++
+    
+    if (-not (Test-Command "gitleaks")) {
+        Write-Info "gitleaks not installed. Skipping..."
+        return
+    }
+    
+    Write-Info "Running gitleaks..."
+    $gitleaksResult = gitleaks detect --no-git --report-path=security-gitleaks.json 2>&1
+    $exitCode = $LASTEXITCODE
+    
+    if (Test-Path "security-gitleaks.json") {
+        $results = Get-Content "security-gitleaks.json" | ConvertFrom-Json
+        
+        if ($results.Count -gt 0) {
+            Write-Issue "Found $($results.Count) potential secrets in codebase"
+            $results | ForEach-Object {
+                Write-Host "  $($_.Description) in $($_.File):$($_.StartLine)"
+            }
+        } else {
+            Write-Pass "No secrets detected in codebase"
+        }
+    } elseif ($exitCode -eq 0) {
+        Write-Pass "No secrets detected in codebase"
+    }
+}
+
+# Scan 5: Container security best practices (docker scout)
+function Scan-ContainerBestPractices {
+    Write-Section "Container Security Best Practices"
+    $script:ScansRun++
+    
+    Write-Info "Checking Dockerfile best practices..."
+    
+    # Check all Dockerfiles
+    $dockerfiles = Get-ChildItem -Recurse -Filter "Dockerfile*" | Where-Object { $_.Name -notmatch "\.bak$" }
+    
+    foreach ($dockerfile in $dockerfiles) {
+        Write-Info "Checking $($dockerfile.FullName)..."
+        $content = Get-Content $dockerfile.FullName -Raw
+        
+        # Check for common issues
+        $issues = @()
+        
+        if ($content -notmatch "USER\s+\w+") {
+            $issues += "No USER directive (may run as root)"
+        }
+        
+        if ($content -match "COPY\s+\.\s+\.") {
+            $issues += "Copies entire context (should be selective)"
+        }
+        
+        if ($content -match "RUN\s+.*&&.*&&.*&&") {
+            # This is actually good (layer optimization)
+        }
+        
+        if ($content -match "EXPOSE\s+22") {
+            $issues += "Exposes SSH port (security risk)"
+        }
+        
+        if ($content -match "ADD\s+http") {
+            $issues += "Uses ADD with URL (prefer curl/wget in RUN)"
+        }
+        
+        if ($issues.Count -gt 0) {
+            Write-Issue "$($dockerfile.Name) has potential issues:"
+            $issues | ForEach-Object { Write-Host "  - $_" }
+        } else {
+            Write-Pass "$($dockerfile.Name) follows best practices"
+        }
+    }
+}
+
+# Scan 6: Configuration security
+function Scan-Configuration {
+    Write-Section "Configuration Security Check"
+    $script:ScansRun++
+    
+    Write-Info "Checking configuration files..."
+    
+    # Check for default/weak credentials
+    $configFiles = Get-ChildItem -Recurse -Include "*.yaml","*.yml","*.json",".env*" | Where-Object { $_.Name -notmatch "\.lock$" }
+    
+    foreach ($file in $configFiles) {
+        $content = Get-Content $file.FullName -Raw
+        
+        # Check for common weak patterns
+        if ($content -match "(password|passwd|pwd)\s*[:=]\s*(admin|password|123456|root)") {
+            Write-Issue "$($file.Name) contains potential weak credentials"
+        }
+        
+        if ($content -match "sslmode\s*[:=]\s*disable") {
+            Write-Issue "$($file.Name) has SSL disabled for database"
+        }
+        
+        if ($content -match "secure\s*[:=]\s*false" -and $file.Name -notmatch "example") {
+            Write-Issue "$($file.Name) has insecure cookies configured"
+        }
+    }
+    
+    Write-Pass "Configuration security check complete"
+}
+
+# Scan 7: TLS/SSL configuration
+function Scan-TLSConfiguration {
+    Write-Section "TLS/SSL Configuration Check"
+    $script:ScansRun++
+    
+    Write-Info "Checking TLS configuration..."
+    
+    # Search for TLS configuration in Go files
+    $goFiles = Get-ChildItem -Recurse -Filter "*.go"
+    $tlsFound = $false
+    $weakCiphers = $false
+    
+    foreach ($file in $goFiles) {
+        $content = Get-Content $file.FullName -Raw
+        
+        if ($content -match "tls\.Config") {
+            $tlsFound = $true
+            
+            if ($content -match "MinVersion.*tls\.VersionTLS1[01]") {
+                $weakCiphers = $true
+                Write-Issue "$($file.Name) allows TLS 1.0/1.1 (should be TLS 1.2+)"
+            }
+            
+            if ($content -match "InsecureSkipVerify.*true") {
+                Write-Issue "$($file.Name) skips certificate verification (insecure)"
+            }
+        }
+    }
+    
+    if ($tlsFound -and -not $weakCiphers) {
+        Write-Pass "TLS configuration uses secure versions"
+    } elseif (-not $tlsFound) {
+        Write-Info "No TLS configuration found in codebase"
+    }
+}
+
+# Scan 8: Authentication implementation
+function Scan-Authentication {
+    Write-Section "Authentication Implementation Check"
+    $script:ScansRun++
+    
+    Write-Info "Checking authentication patterns..."
+    
+    $goFiles = Get-ChildItem -Recurse -Filter "*.go"
+    
+    foreach ($file in $goFiles) {
+        $content = Get-Content $file.FullName -Raw
+        
+        # Check for timing attacks in comparisons
+        if ($content -match "==.*password|password.*==" -and $content -notmatch "subtle\.ConstantTimeCompare") {
+            Write-Issue "$($file.Name) may have timing attack vulnerability (use constant-time comparison)"
+        }
+        
+        # Check for MD5/SHA1 hashing (weak)
+        if ($content -match "(md5|sha1)\.Sum") {
+            Write-Issue "$($file.Name) uses weak hashing algorithm (MD5/SHA1)"
+        }
+    }
+    
+    Write-Pass "Authentication pattern check complete"
+}
+
+# Main execution
+function Main {
+    Write-Host "==================================================" -ForegroundColor Cyan
+    Write-Host "  Aegion Security Scanning Suite" -ForegroundColor Cyan
+    Write-Host "==================================================" -ForegroundColor Cyan
+    
+    # Ensure we're in the project root
+    if (-not (Test-Path "go.mod")) {
+        Write-Host "Error: Must run from project root directory" -ForegroundColor Red
+        exit 1
+    }
+    
+    # Run all scans
+    Scan-GoSecurity
+    Scan-Dependencies
+    Scan-Configuration
+    Scan-TLSConfiguration
+    Scan-Authentication
+    Scan-ContainerBestPractices
+    Scan-Secrets
+    # Scan-DockerImages  # Uncomment if Docker images are built
+    
+    # Summary
+    Write-Section "Security Scan Summary"
+    Write-Host "Scans run: $($script:ScansRun)" -ForegroundColor Cyan
+    
+    if ($script:IssuesFound -eq 0) {
+        Write-Host "✓ No security issues found!" -ForegroundColor Green
+        exit 0
+    } else {
+        Write-Host "⚠ Found $($script:IssuesFound) potential security issues" -ForegroundColor Yellow
+        Write-Host "Please review the findings above and address critical issues." -ForegroundColor Yellow
+        exit 0  # Don't fail CI, just warn
+    }
+}
+
+# Run main
+Main
