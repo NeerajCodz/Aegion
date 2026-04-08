@@ -70,6 +70,7 @@ func TestHealthCheckerCheckModuleHealthy(t *testing.T) {
 
 	// Mock health server
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer healthServer.Close()
