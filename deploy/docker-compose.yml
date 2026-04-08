@@ -89,72 +89,70 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Password Module
-  # Handles password-based authentication
+  # Password Module (Currently embedded in core, standalone service planned)
   # ─────────────────────────────────────────────────────────────────────────
-  module-password:
-    image: ${AEGION_IMAGE:-aegion/module-password}:${AEGION_VERSION:-latest}
-    build:
-      context: ..
-      dockerfile: modules/password/Dockerfile
-      args:
-        VERSION: ${AEGION_VERSION:-dev}
-    environment:
-      MODULE_PORT: 9001
-      MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
-      AEGION_CORE_URL: http://aegion:8080
-      AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
-    depends_on:
-      aegion:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - aegion_modules
-    restart: unless-stopped
+  # module-password:
+  #   image: ${AEGION_IMAGE:-aegion/module-password}:${AEGION_VERSION:-latest}
+  #   build:
+  #     context: ..
+  #     dockerfile: modules/password/Dockerfile
+  #     args:
+  #       VERSION: ${AEGION_VERSION:-dev}
+  #   environment:
+  #     MODULE_PORT: 9001
+  #     MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+  #     AEGION_CORE_URL: http://aegion:8080
+  #     AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+  #   depends_on:
+  #     aegion:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-q", "--spider", "http://localhost:9001/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
+  #   networks:
+  #     - aegion_modules
+  #   restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Magic Link Module
-  # Handles passwordless authentication via email/SMS
+  # Magic Link Module (Currently embedded in core, standalone service planned)
   # ─────────────────────────────────────────────────────────────────────────
-  module-magic-link:
-    image: ${AEGION_IMAGE:-aegion/module-magic-link}:${AEGION_VERSION:-latest}
-    build:
-      context: ..
-      dockerfile: modules/magic_link/Dockerfile
-      args:
-        VERSION: ${AEGION_VERSION:-dev}
-    environment:
-      MODULE_PORT: 9002
-      MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
-      AEGION_CORE_URL: http://aegion:8080
-      AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
-    depends_on:
-      aegion:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - aegion_modules
-    restart: unless-stopped
+  # module-magic-link:
+  #   image: ${AEGION_IMAGE:-aegion/module-magic-link}:${AEGION_VERSION:-latest}
+  #   build:
+  #     context: ..
+  #     dockerfile: modules/magic_link/Dockerfile
+  #     args:
+  #       VERSION: ${AEGION_VERSION:-dev}
+  #   environment:
+  #     MODULE_PORT: 9002
+  #     MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+  #     AEGION_CORE_URL: http://aegion:8080
+  #     AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+  #   depends_on:
+  #     aegion:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-q", "--spider", "http://localhost:9002/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 10s
+  #   networks:
+  #     - aegion_modules
+  #   restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
   # Admin Module
-  # Admin dashboard and management API
+  # Admin dashboard and management API (Standalone service)
   # ─────────────────────────────────────────────────────────────────────────
   module-admin:
     image: ${AEGION_IMAGE:-aegion/module-admin}:${AEGION_VERSION:-latest}
     build:
       context: ..
-      dockerfile: modules/admin/Dockerfile
+      dockerfile: build/Dockerfile.admin
       args:
         VERSION: ${AEGION_VERSION:-dev}
     environment:
@@ -167,6 +165,35 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - aegion_modules
+    restart: unless-stopped
+  
+  # ─────────────────────────────────────────────────────────────────────────
+  # OAuth2 Module
+  # OAuth2/OIDC authorization server (Standalone service)
+  # ─────────────────────────────────────────────────────────────────────────
+  module-oauth2:
+    image: ${AEGION_IMAGE:-aegion/module-oauth2}:${AEGION_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: modules/oauth2/Dockerfile
+      args:
+        VERSION: ${AEGION_VERSION:-dev}
+    environment:
+      MODULE_PORT: 9005
+      MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+      AEGION_CORE_URL: http://aegion:8080
+      AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+    depends_on:
+      aegion:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9005/health"]
       interval: 30s
       timeout: 10s
       retries: 3
