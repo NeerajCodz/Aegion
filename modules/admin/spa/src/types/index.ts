@@ -62,6 +62,23 @@ export interface DashboardStats {
   mfa_adoption_rate: number;
 }
 
+export type HealthState = 'healthy' | 'degraded' | 'offline';
+
+export interface ModuleHealthStatus {
+  key: string;
+  label: string;
+  endpoint: string;
+  status: HealthState;
+  status_code: number;
+  response_time_ms: number;
+  message: string;
+  checked_at: string;
+}
+
+export interface DashboardConfig {
+  base_path: string;
+}
+
 export interface AuthState {
   operator: Operator | null;
   token: string | null;

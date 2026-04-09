@@ -74,6 +74,17 @@ type Config struct {
 		ServiceURL string `yaml:"service_url"`
 		APIKey     string `yaml:"api_key"`
 	} `yaml:"core"`
+	Observability struct {
+		Enabled      bool          `yaml:"enabled"`
+		ProbeTimeout time.Duration `yaml:"probe_timeout"`
+		Endpoints    struct {
+			OTelCollector string `yaml:"otel_collector"`
+			Prometheus    string `yaml:"prometheus"`
+			Grafana       string `yaml:"grafana"`
+			Tempo         string `yaml:"tempo"`
+			Loki          string `yaml:"loki"`
+		} `yaml:"endpoints"`
+	} `yaml:"observability"`
 	Log LogConfig `yaml:"log"`
 }
 
@@ -376,10 +387,45 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Database.MinConns == 0 {
 		cfg.Database.MinConns = 5
 	}
+	if cfg.Observability.ProbeTimeout == 0 {
+		cfg.Observability.ProbeTimeout = 5 * time.Second
+	}
+	if cfg.Observability.Endpoints.OTelCollector == "" {
+		cfg.Observability.Endpoints.OTelCollector = "http://otel-collector:13133"
+	}
+	if cfg.Observability.Endpoints.Prometheus == "" {
+		cfg.Observability.Endpoints.Prometheus = "http://prometheus:9090/-/healthy"
+	}
+	if cfg.Observability.Endpoints.Grafana == "" {
+		cfg.Observability.Endpoints.Grafana = "http://grafana:3000/api/health"
+	}
+	if cfg.Observability.Endpoints.Tempo == "" {
+		cfg.Observability.Endpoints.Tempo = "http://tempo:3200/ready"
+	}
+	if cfg.Observability.Endpoints.Loki == "" {
+		cfg.Observability.Endpoints.Loki = "http://loki:3100/ready"
+	}
 
 	// Override with environment variables
 	if dbURL := getEnv("DATABASE_URL", ""); dbURL != "" {
 		cfg.Database.URL = dbURL
+	}
+	cfg.Observability.Enabled = getEnvBool("AEGION_ADMIN_OBSERVABILITY_ENABLED", cfg.Observability.Enabled)
+	cfg.Observability.ProbeTimeout = getEnvDuration("AEGION_ADMIN_OBSERVABILITY_PROBE_TIMEOUT", cfg.Observability.ProbeTimeout)
+	if value := getEnv("AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL", ""); value != "" {
+		cfg.Observability.Endpoints.OTelCollector = value
+	}
+	if value := getEnv("AEGION_ADMIN_OBS_PROMETHEUS_URL", ""); value != "" {
+		cfg.Observability.Endpoints.Prometheus = value
+	}
+	if value := getEnv("AEGION_ADMIN_OBS_GRAFANA_URL", ""); value != "" {
+		cfg.Observability.Endpoints.Grafana = value
+	}
+	if value := getEnv("AEGION_ADMIN_OBS_TEMPO_URL", ""); value != "" {
+		cfg.Observability.Endpoints.Tempo = value
+	}
+	if value := getEnv("AEGION_ADMIN_OBS_LOKI_URL", ""); value != "" {
+		cfg.Observability.Endpoints.Loki = value
 	}
 
 	return &cfg, nil
@@ -665,4 +711,32 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
 }

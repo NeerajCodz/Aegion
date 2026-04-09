@@ -15,8 +15,8 @@ export function Login() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-surface-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-aegion-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground"></div>
       </div>
     );
   }
@@ -32,7 +32,7 @@ export function Login() {
 
     try {
       await login({ email, password });
-    } catch (err) {
+    } catch {
       setError('Invalid email or password');
     } finally {
       setIsSubmitting(false);
@@ -40,14 +40,14 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="card p-8 w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-aegion-600 rounded-2xl mb-4">
-            <Shield className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-primary rounded-2xl mb-4">
+            <Shield className="w-8 h-8 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold text-surface-900">Aegion Admin</h1>
-          <p className="text-surface-500 mt-1">Sign in to your account</p>
+          <h1 className="text-2xl font-bold text-foreground">Aegion Admin</h1>
+          <p className="text-muted-foreground mt-1">Sign in to your account</p>
         </div>
 
         {error && (

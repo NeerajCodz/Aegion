@@ -23,6 +23,8 @@ import {
   useResetMfa,
   useDeleteIdentity,
 } from '../hooks/useIdentities';
+import { Badge } from '@/components/ui/badge';
+import { identityStatusVariant, mfaVariant } from '@/lib/status';
 
 export function IdentityDetail() {
   const { id } = useParams<{ id: string }>();
@@ -142,7 +144,7 @@ export function IdentityDetail() {
                     </div>
                   ) : (
                     <p
-                      className="text-surface-900 cursor-pointer hover:text-aegion-600"
+                      className="text-surface-900 cursor-pointer hover:text-foreground"
                       onClick={() => {
                         setEditedName(identity.display_name);
                         setIsEditing(true);
@@ -193,17 +195,9 @@ export function IdentityDetail() {
                 <label className="block text-sm font-medium text-surface-500 mb-1">
                   Account Status
                 </label>
-                <span
-                  className={`badge ${
-                    identity.status === 'active'
-                      ? 'badge-success'
-                      : identity.status === 'suspended'
-                      ? 'badge-error'
-                      : 'badge-warning'
-                  }`}
-                >
+                <Badge variant={identityStatusVariant(identity.status)}>
                   {identity.status}
-                </span>
+                </Badge>
               </div>
 
               <div>
@@ -211,13 +205,9 @@ export function IdentityDetail() {
                   <Shield className="w-4 h-4 inline mr-1" />
                   MFA
                 </label>
-                <span
-                  className={`badge ${
-                    identity.mfa_enabled ? 'badge-success' : 'badge-warning'
-                  }`}
-                >
+                <Badge variant={mfaVariant(identity.mfa_enabled)}>
                   {identity.mfa_enabled ? 'Enabled' : 'Disabled'}
-                </span>
+                </Badge>
               </div>
 
               <div>

@@ -4,6 +4,8 @@ import { Shield, Plus, AlertCircle, Trash2, Edit, X } from 'lucide-react';
 import { Dialog } from '@headlessui/react';
 import { operatorsApi } from '../api/operators';
 import type { Operator } from '../types';
+import { Badge } from '@/components/ui/badge';
+import { operatorRoleVariant, operatorStatusVariant } from '@/lib/status';
 
 export function Operators() {
   const [page, setPage] = useState(1);
@@ -139,26 +141,14 @@ export function Operators() {
                       </div>
                     </td>
                     <td className="px-4 py-4">
-                      <span
-                        className={`badge ${
-                          operator.role === 'admin'
-                            ? 'badge-error'
-                            : operator.role === 'operator'
-                            ? 'badge-warning'
-                            : 'badge-info'
-                        }`}
-                      >
+                      <Badge variant={operatorRoleVariant(operator.role)}>
                         {operator.role}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-4 py-4">
-                      <span
-                        className={`badge ${
-                          operator.status === 'active' ? 'badge-success' : 'badge-error'
-                        }`}
-                      >
+                      <Badge variant={operatorStatusVariant(operator.status)}>
                         {operator.status}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-4 py-4 text-sm text-surface-500">
                       {operator.last_login_at

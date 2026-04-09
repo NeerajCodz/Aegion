@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Settings as SettingsIcon, Save, AlertCircle, CheckCircle } from 'lucide-react';
 import { settingsApi } from '../api/operators';
 import type { SystemSettings } from '../types';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export function Settings() {
   const [successMessage, setSuccessMessage] = useState('');
@@ -63,22 +64,22 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-surface-900">Settings</h1>
-        <p className="text-surface-500">Configure system-wide security settings</p>
+        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
+        <p className="text-muted-foreground">Configure system-wide security settings</p>
       </div>
 
       {successMessage && (
-        <div className="flex items-center gap-2 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
+        <Alert variant="success">
           <CheckCircle className="w-5 h-5" />
-          {successMessage}
-        </div>
+          <AlertDescription>{successMessage}</AlertDescription>
+        </Alert>
       )}
 
       {updateMutation.error && (
-        <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+        <Alert variant="destructive">
           <AlertCircle className="w-5 h-5" />
-          Failed to save settings
-        </div>
+          <AlertDescription>Failed to save settings</AlertDescription>
+        </Alert>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">

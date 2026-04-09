@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, ChevronLeft, ChevronRight, AlertCircle, User } from 'lucide-react';
 import { useIdentities } from '../hooks/useIdentities';
+import { Badge } from '@/components/ui/badge';
+import { identityStatusVariant, mfaVariant } from '@/lib/status';
 
 export function Identities() {
   const [search, setSearch] = useState('');
@@ -111,10 +113,10 @@ export function Identities() {
                 data?.data.map((identity) => (
                   <tr key={identity.id} className="hover:bg-surface-50 transition-colors">
                     <td className="px-4 py-4">
-                      <Link
-                        to={`/identities/${identity.id}`}
-                        className="flex items-center gap-3 hover:text-aegion-600"
-                      >
+                       <Link
+                          to={`/identities/${identity.id}`}
+                          className="flex items-center gap-3 hover:text-foreground"
+                        >
                         <div className="w-10 h-10 bg-surface-200 rounded-full flex items-center justify-center flex-shrink-0">
                           {identity.avatar_url ? (
                             <img
@@ -135,26 +137,14 @@ export function Identities() {
                       </Link>
                     </td>
                     <td className="px-4 py-4">
-                      <span
-                        className={`badge ${
-                          identity.status === 'active'
-                            ? 'badge-success'
-                            : identity.status === 'suspended'
-                            ? 'badge-error'
-                            : 'badge-warning'
-                        }`}
-                      >
+                      <Badge variant={identityStatusVariant(identity.status)}>
                         {identity.status}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-4 py-4">
-                      <span
-                        className={`badge ${
-                          identity.mfa_enabled ? 'badge-success' : 'badge-warning'
-                        }`}
-                      >
+                      <Badge variant={mfaVariant(identity.mfa_enabled)}>
                         {identity.mfa_enabled ? 'Enabled' : 'Disabled'}
-                      </span>
+                      </Badge>
                     </td>
                     <td className="px-4 py-4 text-sm text-surface-500">
                       {new Date(identity.created_at).toLocaleDateString()}
