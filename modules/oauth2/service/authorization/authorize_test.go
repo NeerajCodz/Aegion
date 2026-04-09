@@ -424,6 +424,10 @@ func TestAuthorizationService_ErrorPaths(t *testing.T) {
 		assert.True(t, st.consentChallenge.Skip)
 
 		st = &mockAuthzStore{
+			client: &store.Client{
+				ID:             "client-1",
+				RequireConsent: true,
+			},
 			loginChallenge: &store.LoginChallenge{
 				ID:        "lc-remember",
 				ClientID:  "client-1",
@@ -433,6 +437,7 @@ func TestAuthorizationService_ErrorPaths(t *testing.T) {
 			consentSession: &store.ConsentSession{
 				ClientID: "client-1",
 				Remember: true,
+				Scopes:   []string{"openid"},
 			},
 		}
 		svc = NewAuthorizationService(st)
@@ -445,6 +450,32 @@ func TestAuthorizationService_ErrorPaths(t *testing.T) {
 		st.acceptConsentErr = errors.New("auto-accept failed")
 		_, err = svc.AcceptLogin(ctx, "lc-remember", "identity-1", "session-1")
 		assert.ErrorIs(t, err, st.acceptConsentErr)
+
+		st = &mockAuthzStore{
+			client: &store.Client{
+				ID:             "client-1",
+				RequireConsent: true,
+			},
+			loginChallenge: &store.LoginChallenge{
+				ID:        "lc-remember-escalation",
+				ClientID:  "client-1",
+				Scopes:    []string{"openid", "profile"},
+				Audience:  []string{"api://new"},
+				ExpiresAt: time.Now().UTC().Add(time.Minute),
+			},
+			consentSession: &store.ConsentSession{
+				ClientID: "client-1",
+				Remember: true,
+				Scopes:   []string{"openid"},
+				Audience: []string{"api://old"},
+			},
+		}
+		svc = NewAuthorizationService(st)
+		resp, err = svc.AcceptLogin(ctx, "lc-remember-escalation", "identity-1", "session-1")
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.ConsentChallenge)
+		require.NotNil(t, st.consentChallenge)
+		assert.False(t, st.consentChallenge.Skip)
 	})
 
 	t.Run("AcceptConsent validations and downstream failures", func(t *testing.T) {

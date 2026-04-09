@@ -25,13 +25,15 @@ docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml log
 
 Use the production configuration:
 
+> **Security note:** pin immutable image versions (or digests) for production. Do not deploy `latest`.
+
 ```yaml
 # deploy/docker-compose.prod.yml
 version: '3.8'
 
 services:
   aegion:
-    image: aegion:latest
+    image: ghcr.io/aegion/core:${AEGION_VERSION}
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -49,7 +51,7 @@ services:
       retries: 3
 
   postgres:
-    image: postgres:14
+    image: postgres:15.6-alpine
     restart: unless-stopped
     environment:
       - POSTGRES_DB=aegion
@@ -66,7 +68,7 @@ services:
       retries: 3
 
   nginx:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
       - "80:80"
@@ -207,6 +209,8 @@ cors:
 
 ```bash
 # .env.production
+AEGION_ENV=production
+AEGION_VERSION=1.0.0
 DATABASE_URL=postgres://aegion:secure_password@postgres:5432/aegion?sslmode=require
 SESSION_SECRET=your-32-character-session-secret-key
 CSRF_SECRET=your-32-character-csrf-secret-key
@@ -440,7 +444,7 @@ Use PgBouncer for connection pooling:
 ```yaml
 # deploy/docker-compose.yml
 pgbouncer:
-  image: pgbouncer/pgbouncer:latest
+  image: pgbouncer/pgbouncer:1.24.0
   environment:
     DATABASES_HOST: postgres
     DATABASES_PORT: 5432
@@ -549,7 +553,7 @@ spec:
     spec:
       containers:
       - name: aegion
-        image: aegion:latest
+        image: ghcr.io/aegion/core:1.0.0
         ports:
         - containerPort: 8080
         env:

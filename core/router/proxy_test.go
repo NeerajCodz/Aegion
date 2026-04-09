@@ -119,6 +119,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 		InternalToken:               "module-token",
 		SessionSecret:               []byte("module-secret"),
 		IdentitySigningSecret:       []byte("identity-signing-secret"),
+		TrustForwardedHeaders:       false,
 		StripInboundIdentityHeaders: true,
 		ModuleID:                    "admin",
 		Logger:                      zerolog.Nop(),
@@ -167,14 +168,14 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	if req.Header.Get("X-Request-ID") != "req-123" {
 		t.Fatalf("expected forwarded request id")
 	}
-	if req.Header.Get("X-Forwarded-For") != "203.0.113.10, 198.51.100.4" {
+	if req.Header.Get("X-Forwarded-For") != "198.51.100.4" {
 		t.Fatalf("unexpected x-forwarded-for: %q", req.Header.Get("X-Forwarded-For"))
 	}
-	if req.Header.Get("X-Forwarded-Proto") != "https" {
-		t.Fatalf("expected forwarded proto https")
+	if req.Header.Get("X-Forwarded-Proto") != "http" {
+		t.Fatalf("expected forwarded proto http")
 	}
-	if req.Header.Get("X-Forwarded-Host") != "gateway.example.com" {
-		t.Fatalf("expected forwarded host from original header")
+	if req.Header.Get("X-Forwarded-Host") != "gateway.local" {
+		t.Fatalf("expected forwarded host from original request host")
 	}
 	if req.Header.Get(session.HeaderPrefix+"Session-ID") == "" || req.Header.Get(session.HeaderPrefix+"Signature") == "" {
 		t.Fatalf("expected session headers to be injected")
@@ -201,6 +202,35 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	expectedSig := hex.EncodeToString(mac.Sum(nil))
 	if req.Header.Get("X-Aegion-Signature") != fmt.Sprintf("t=%d,v1=%s", 1742912521, expectedSig) {
 		t.Fatalf("unexpected signature header: %q", req.Header.Get("X-Aegion-Signature"))
+	}
+}
+
+func TestModuleProxyAddForwardedHeadersTrustForwardedHeaders(t *testing.T) {
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		ModuleID:                    "admin",
+		TrustForwardedHeaders:       true,
+		IdentitySigningSecret:       []byte("identity-signing-secret"),
+		StripInboundIdentityHeaders: true,
+		Logger:                      zerolog.Nop(),
+	})
+
+	original := httptest.NewRequest(http.MethodGet, "http://gateway.local/module/path", nil)
+	original.RemoteAddr = "198.51.100.4:1234"
+	original.Header.Set("X-Forwarded-For", "203.0.113.10")
+	original.Header.Set("X-Forwarded-Proto", "https")
+	original.Header.Set("X-Forwarded-Host", "gateway.example.com")
+
+	req := httptest.NewRequest(http.MethodGet, "http://placeholder/module/path", nil)
+	proxy.addForwardedHeaders(req, original)
+
+	if req.Header.Get("X-Forwarded-For") != "203.0.113.10, 198.51.100.4" {
+		t.Fatalf("unexpected x-forwarded-for: %q", req.Header.Get("X-Forwarded-For"))
+	}
+	if req.Header.Get("X-Forwarded-Proto") != "https" {
+		t.Fatalf("expected forwarded proto https")
+	}
+	if req.Header.Get("X-Forwarded-Host") != "gateway.example.com" {
+		t.Fatalf("expected forwarded host from original header")
 	}
 }
 

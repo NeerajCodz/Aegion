@@ -183,6 +183,29 @@ func TestDecryptFieldKeyValidation(t *testing.T) {
 	}
 }
 
+func TestEncryptField_EmptyPlaintext(t *testing.T) {
+	key := make([]byte, KeySize)
+
+	ciphertext, err := EncryptField(key, []byte{}, []byte("aad"))
+	if err != nil {
+		if err != ErrEncryptFailed {
+			t.Fatalf("EncryptField() unexpected error = %v", err)
+		}
+		return
+	}
+
+	plaintext, err := DecryptField(key, ciphertext, []byte("aad"))
+	if err != nil {
+		if err != ErrDecryptFailed {
+			t.Fatalf("DecryptField() unexpected error = %v", err)
+		}
+		return
+	}
+	if len(plaintext) != 0 {
+		t.Fatalf("expected empty plaintext, got %q", string(plaintext))
+	}
+}
+
 // TestFunctionSignatures verifies that all functions have the expected signatures
 // and can be called without compilation errors
 func TestFunctionSignatures(t *testing.T) {

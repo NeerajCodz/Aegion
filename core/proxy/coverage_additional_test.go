@@ -180,6 +180,7 @@ func TestProxy_AdditionalCoverageBranches(t *testing.T) {
 	defaultSigCfg.IdentitySigningSecret = "secret"
 	defaultSigCfg.IdentitySignatureHeader = ""
 	defaultSigCfg.SignedIdentityHeaders = nil
+	defaultSigCfg.TrustForwardedHeaders = true
 	defaultSigProxy := newProxyForTest(t, defaultSigCfg, nil, logger)
 	defaultSigReq := httptest.NewRequest(http.MethodGet, "/test", nil)
 	defaultSigReq.Header.Set("X-Aegion-Identity-ID", "identity-1")

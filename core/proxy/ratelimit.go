@@ -230,7 +230,7 @@ func (rl *RateLimiter) generateKeys(r *http.Request) []string {
 
 	// Rate limit by IP
 	if rl.config.ByIP {
-		ip := getClientIP(r)
+		ip := getClientIPWithTrust(r, rl.config.TrustForwardedHeaders)
 		if ip != "" {
 			keys = append(keys, "ip:"+ip)
 		}
@@ -254,29 +254,35 @@ func (rl *RateLimiter) generateKeys(r *http.Request) []string {
 
 // getClientIP extracts the real client IP from the request.
 func getClientIP(r *http.Request) string {
+	return getClientIPWithTrust(r, true)
+}
+
+func getClientIPWithTrust(r *http.Request, trustForwardedHeaders bool) string {
 	if r == nil {
 		return ""
 	}
 
-	// Check X-Forwarded-For header first (most common)
-	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-		// X-Forwarded-For can contain multiple IPs, take the first non-empty one.
-		for _, ip := range strings.Split(xff, ",") {
-			ip = strings.TrimSpace(ip)
-			if ip != "" {
-				return ip
+	if trustForwardedHeaders {
+		// Check X-Forwarded-For header first (most common)
+		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+			// X-Forwarded-For can contain multiple IPs, take the first non-empty one.
+			for _, ip := range strings.Split(xff, ",") {
+				ip = strings.TrimSpace(ip)
+				if ip != "" {
+					return ip
+				}
 			}
 		}
-	}
 
-	// Check X-Real-IP header
-	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
-	}
+		// Check X-Real-IP header
+		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+			return xri
+		}
 
-	// Check CF-Connecting-IP header (Cloudflare)
-	if cfip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfip != "" {
-		return cfip
+		// Check CF-Connecting-IP header (Cloudflare)
+		if cfip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfip != "" {
+			return cfip
+		}
 	}
 
 	// Fall back to RemoteAddr

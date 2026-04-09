@@ -91,6 +91,7 @@ func NewProxy(config Config, rules *RuleEngine, logger zerolog.Logger) *Proxy {
 
 	// Initialize global rate limiter.
 	globalRateLimit := DefaultRateLimitConfig()
+	globalRateLimit.TrustForwardedHeaders = config.TrustForwardedHeaders
 	proxy.limiter = NewRateLimiter(*globalRateLimit, NewMemoryStore())
 
 	// Initialize circuit breakers for each upstream
@@ -347,7 +348,11 @@ func (p *Proxy) getRuleLimiter(rule *Rule) *RateLimiter {
 		return limiter
 	}
 
-	limiter = NewRateLimiter(*rule.RateLimit, NewMemoryStore())
+	ruleRateLimit := *rule.RateLimit
+	if p.config.TrustForwardedHeaders {
+		ruleRateLimit.TrustForwardedHeaders = true
+	}
+	limiter = NewRateLimiter(ruleRateLimit, NewMemoryStore())
 	p.ruleLimiters[key] = limiter
 	return limiter
 }
@@ -421,33 +426,61 @@ func (p *Proxy) identityHeaders() []string {
 
 // addForwardedHeaders adds standard forwarded headers.
 func (p *Proxy) addForwardedHeaders(req, original *http.Request) {
+	if req == nil || original == nil {
+		return
+	}
+
 	clientIP := getRemoteIP(original.RemoteAddr)
 	if clientIP == "" {
-		clientIP = getClientIP(original)
+		clientIP = getClientIPWithTrust(original, p.config.TrustForwardedHeaders)
+	}
+
+	if p.config.TrustForwardedHeaders {
+		// X-Forwarded-For
+		if prior := strings.TrimSpace(original.Header.Get("X-Forwarded-For")); prior != "" {
+			if clientIP != "" {
+				req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
+			} else {
+				req.Header.Set("X-Forwarded-For", prior)
+			}
+		} else if clientIP != "" {
+			req.Header.Set("X-Forwarded-For", clientIP)
+		}
+
+		// X-Forwarded-Proto
+		if proto := strings.TrimSpace(original.Header.Get("X-Forwarded-Proto")); proto != "" {
+			req.Header.Set("X-Forwarded-Proto", proto)
+		} else if original.TLS != nil {
+			req.Header.Set("X-Forwarded-Proto", "https")
+		} else {
+			req.Header.Set("X-Forwarded-Proto", "http")
+		}
+
+		// X-Forwarded-Host
+		if host := strings.TrimSpace(original.Header.Get("X-Forwarded-Host")); host != "" {
+			req.Header.Set("X-Forwarded-Host", host)
+		} else {
+			req.Header.Set("X-Forwarded-Host", original.Host)
+		}
+		return
 	}
 
 	// X-Forwarded-For
-	if prior := original.Header.Get("X-Forwarded-For"); prior != "" {
-		req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
+	if clientIP == "" {
+		req.Header.Del("X-Forwarded-For")
 	} else {
 		req.Header.Set("X-Forwarded-For", clientIP)
 	}
 
 	// X-Forwarded-Proto
-	if proto := original.Header.Get("X-Forwarded-Proto"); proto != "" {
-		req.Header.Set("X-Forwarded-Proto", proto)
-	} else if original.TLS != nil {
+	if original.TLS != nil {
 		req.Header.Set("X-Forwarded-Proto", "https")
 	} else {
 		req.Header.Set("X-Forwarded-Proto", "http")
 	}
 
 	// X-Forwarded-Host
-	if host := original.Header.Get("X-Forwarded-Host"); host != "" {
-		req.Header.Set("X-Forwarded-Host", host)
-	} else {
-		req.Header.Set("X-Forwarded-Host", original.Host)
-	}
+	req.Header.Set("X-Forwarded-Host", original.Host)
 }
 
 // startHealthCheckers starts health checking for all configured upstreams.

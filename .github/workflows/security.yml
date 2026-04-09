@@ -17,10 +17,9 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 env:
-  GO_VERSION: '1.25.8'
+  GO_VERSION: '1.25.9'
   RUST_VERSION: 'stable'
 
 jobs:
@@ -30,6 +29,9 @@ jobs:
   gosec:
     name: Go Security (gosec)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -92,6 +94,9 @@ jobs:
   trivy:
     name: Container Security (Trivy)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

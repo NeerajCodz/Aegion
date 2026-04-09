@@ -127,7 +127,7 @@ fn validate_claims(claims: &Claims, options: &VerifyOptions) -> Result<(), JwtEr
     // Check expiration
     if !options.ignore_exp {
         if let Some(exp) = claims.exp {
-            if now > exp + options.leeway {
+            if now > exp.saturating_add(options.leeway) {
                 return Err(JwtError::TokenExpired);
             }
         }
@@ -136,7 +136,7 @@ fn validate_claims(claims: &Claims, options: &VerifyOptions) -> Result<(), JwtEr
     // Check not-before
     if !options.ignore_nbf {
         if let Some(nbf) = claims.nbf {
-            if now + options.leeway < nbf {
+            if now.saturating_add(options.leeway) < nbf {
                 return Err(JwtError::TokenNotYetValid);
             }
         }
@@ -505,5 +505,21 @@ mod tests {
             result.claims.custom.get("role"),
             Some(&serde_json::json!("tester"))
         );
+    }
+
+    #[test]
+    fn test_validate_claims_huge_leeway_does_not_overflow() {
+        let claims = Claims {
+            exp: Some(1),
+            nbf: Some(1),
+            ..Claims::default()
+        };
+        let options = VerifyOptions {
+            leeway: u64::MAX,
+            ..Default::default()
+        };
+
+        let result = validate_claims(&claims, &options);
+        assert!(result.is_ok());
     }
 }

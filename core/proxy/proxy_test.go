@@ -828,7 +828,9 @@ func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
 }
 
 func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
-	proxy := newProxyForTest(t, DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
+	cfg := DefaultConfig()
+	cfg.TrustForwardedHeaders = true
+	proxy := newProxyForTest(t, cfg, nil, zerolog.New(zerolog.NewTestWriter(t)))
 
 	original := httptest.NewRequest("GET", "http://edge.example.com/original", nil)
 	original.Host = "edge.example.com"
@@ -844,6 +846,24 @@ func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
 	assert.Equal(t, "203.0.113.10, 198.51.100.20", forwarded.Header.Get("X-Forwarded-For"))
 	assert.Equal(t, "https", forwarded.Header.Get("X-Forwarded-Proto"))
 	assert.Equal(t, "gateway.example.com", forwarded.Header.Get("X-Forwarded-Host"))
+}
+
+func TestProxy_AddForwardedHeaders_DefaultIgnoresIncomingHeaders(t *testing.T) {
+	proxy := newProxyForTest(t, DefaultConfig(), nil, zerolog.New(zerolog.NewTestWriter(t)))
+
+	original := httptest.NewRequest("GET", "http://edge.example.com/original", nil)
+	original.Host = "edge.example.com"
+	original.RemoteAddr = "198.51.100.20:4567"
+	original.Header.Set("X-Forwarded-For", "203.0.113.10")
+	original.Header.Set("X-Forwarded-Proto", "https")
+	original.Header.Set("X-Forwarded-Host", "gateway.example.com")
+
+	forwarded := httptest.NewRequest("GET", "http://upstream.example.com/resource", nil)
+	proxy.addForwardedHeaders(forwarded, original)
+
+	assert.Equal(t, "198.51.100.20", forwarded.Header.Get("X-Forwarded-For"))
+	assert.Equal(t, "http", forwarded.Header.Get("X-Forwarded-Proto"))
+	assert.Equal(t, "edge.example.com", forwarded.Header.Get("X-Forwarded-Host"))
 }
 
 // TestProxy_ServeHTTP_PreservesExistingRequestID tests request ID preservation

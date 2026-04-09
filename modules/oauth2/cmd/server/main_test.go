@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
 	"github.com/aegion/aegion/modules/oauth2/handler"
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/jackc/pgx/v5"
@@ -49,9 +51,11 @@ func TestApplyDefaults_TrimBaseURL(t *testing.T) {
 type mockLookupStore struct {
 	token *store.AccessToken
 	err   error
+	last  string
 }
 
 func (m *mockLookupStore) GetAccessToken(ctx context.Context, jti string) (*store.AccessToken, error) {
+	m.last = jti
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -61,27 +65,88 @@ func (m *mockLookupStore) GetAccessToken(ctx context.Context, jti string) (*stor
 	return nil, store.ErrNotFound
 }
 
+func signAccessTokenForTest(t *testing.T, keyPair *platformjwt.KeyPair, issuer, subject, jti string, expiresAt time.Time) string {
+	t.Helper()
+	token, err := platformjwt.Sign(platformjwt.Claims{
+		Issuer:    issuer,
+		Subject:   subject,
+		JWTID:     jti,
+		IssuedAt:  time.Now().UTC().Unix(),
+		ExpiresAt: expiresAt.Unix(),
+	}, keyPair.PrivateKey, keyPair.Algorithm, keyPair.KeyID)
+	require.NoError(t, err)
+	return token
+}
+
 func TestAccessTokenValidator(t *testing.T) {
+	issuer := "https://issuer.example.com"
+	keyPair, err := platformjwt.GenerateECKeyPair("validator-kid")
+	require.NoError(t, err)
+	validToken := signAccessTokenForTest(t, keyPair, issuer, "identity-1", "jti-1", time.Now().UTC().Add(time.Minute))
+
 	t.Run("success", func(t *testing.T) {
-		v := &accessTokenValidator{
-			store: &mockLookupStore{
-				token: &store.AccessToken{
-					JTI:        "jti-1",
-					ClientID:   "client-1",
-					IdentityID: "identity-1",
-					Scopes:     []string{"openid"},
-					ExpiresAt:  time.Now().UTC().Add(time.Minute),
-				},
+		lookup := &mockLookupStore{
+			token: &store.AccessToken{
+				JTI:        "jti-1",
+				ClientID:   "client-1",
+				IdentityID: "identity-1",
+				Scopes:     []string{"openid"},
+				Subject:    "identity-1",
+				Issuer:     issuer,
+				ExpiresAt:  time.Now().UTC().Add(time.Minute),
 			},
 		}
-		got, err := v.ValidateAccessToken(context.Background(), "jti-1")
+		v := &accessTokenValidator{
+			store:     lookup,
+			publicKey: keyPair.PublicKey,
+			algorithm: keyPair.Algorithm,
+			issuer:    issuer,
+		}
+		got, err := v.ValidateAccessToken(context.Background(), validToken)
 		require.NoError(t, err)
 		assert.Equal(t, "identity-1", got.IdentityID)
+		assert.Equal(t, "jti-1", lookup.last)
+	})
+
+	t.Run("invalid signature and claim mismatch errors", func(t *testing.T) {
+		otherKeyPair, err := platformjwt.GenerateECKeyPair("other-kid")
+		require.NoError(t, err)
+		tampered := signAccessTokenForTest(t, otherKeyPair, issuer, "identity-1", "jti-1", time.Now().UTC().Add(time.Minute))
+
+		v := &accessTokenValidator{
+			store:     &mockLookupStore{},
+			publicKey: keyPair.PublicKey,
+			algorithm: keyPair.Algorithm,
+			issuer:    issuer,
+		}
+		_, err = v.ValidateAccessToken(context.Background(), tampered)
+		assert.Error(t, err)
+
+		v = &accessTokenValidator{
+			store: &mockLookupStore{
+				token: &store.AccessToken{
+					JTI:       "jti-1",
+					Subject:   "different",
+					Issuer:    issuer,
+					ExpiresAt: time.Now().UTC().Add(time.Minute),
+				},
+			},
+			publicKey: keyPair.PublicKey,
+			algorithm: keyPair.Algorithm,
+			issuer:    issuer,
+		}
+		_, err = v.ValidateAccessToken(context.Background(), validToken)
+		assert.ErrorContains(t, err, "subject mismatch")
 	})
 
 	t.Run("store and inactive errors", func(t *testing.T) {
-		v := &accessTokenValidator{store: &mockLookupStore{err: errors.New("db down")}}
-		_, err := v.ValidateAccessToken(context.Background(), "jti-1")
+		v := &accessTokenValidator{
+			store:     &mockLookupStore{err: errors.New("db down")},
+			publicKey: keyPair.PublicKey,
+			algorithm: keyPair.Algorithm,
+			issuer:    issuer,
+		}
+		_, err := v.ValidateAccessToken(context.Background(), validToken)
 		assert.ErrorContains(t, err, "db down")
 
 		v = &accessTokenValidator{
@@ -92,8 +157,11 @@ func TestAccessTokenValidator(t *testing.T) {
 					ExpiresAt: time.Now().UTC().Add(time.Minute),
 				},
 			},
+			publicKey: keyPair.PublicKey,
+			algorithm: keyPair.Algorithm,
+			issuer:    issuer,
 		}
-		_, err = v.ValidateAccessToken(context.Background(), "jti-1")
+		_, err = v.ValidateAccessToken(context.Background(), validToken)
 		assert.ErrorContains(t, err, "inactive")
 
 		v = &accessTokenValidator{
@@ -103,10 +171,73 @@ func TestAccessTokenValidator(t *testing.T) {
 					ExpiresAt: time.Now().UTC().Add(-time.Second),
 				},
 			},
+			publicKey: keyPair.PublicKey,
+			algorithm: keyPair.Algorithm,
+			issuer:    issuer,
 		}
-		_, err = v.ValidateAccessToken(context.Background(), "jti-1")
+		_, err = v.ValidateAccessToken(context.Background(), validToken)
 		assert.ErrorContains(t, err, "inactive")
 	})
+}
+
+func TestNewOAuth2SigningKeyPair(t *testing.T) {
+	t.Run("loads configured key pair from env", func(t *testing.T) {
+		source, err := platformjwt.GenerateECKeyPair("source-kid")
+		require.NoError(t, err)
+
+		t.Setenv(signingKeyIDEnv, "configured-kid")
+		t.Setenv(signingPrivateKeyB64Env, base64.StdEncoding.EncodeToString(source.PrivateKey))
+		t.Setenv(signingPublicKeyB64Env, base64.StdEncoding.EncodeToString(source.PublicKey))
+
+		got, err := newOAuth2SigningKeyPair()
+		require.NoError(t, err)
+		assert.Equal(t, "configured-kid", got.KeyID)
+		assert.Equal(t, defaultSigningAlgorithm, got.Algorithm)
+		assert.Equal(t, source.PrivateKey, got.PrivateKey)
+		assert.Equal(t, source.PublicKey, got.PublicKey)
+	})
+
+	t.Run("rejects partial key configuration", func(t *testing.T) {
+		t.Setenv(signingPrivateKeyB64Env, "Zm9v")
+		t.Setenv(signingPublicKeyB64Env, "")
+
+		_, err := newOAuth2SigningKeyPair()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "must be set together")
+	})
+}
+
+func TestOAuth2JWTSignerAndJWKSProvider(t *testing.T) {
+	keyPair, err := platformjwt.GenerateECKeyPair("runtime-kid")
+	require.NoError(t, err)
+
+	signer := &oauth2JWTSigner{keyPair: keyPair}
+	token, err := signer.SignAccessToken(map[string]interface{}{
+		"iss":   "https://issuer.example.com",
+		"sub":   "identity-1",
+		"aud":   []string{"aud-1", "aud-2"},
+		"iat":   time.Now().UTC().Unix(),
+		"exp":   time.Now().UTC().Add(time.Minute).Unix(),
+		"jti":   "jti-1",
+		"scope": "openid profile",
+	})
+	require.NoError(t, err)
+
+	verified, err := platformjwt.Verify(token, keyPair.PublicKey, keyPair.Algorithm, platformjwt.VerifyOptions{
+		Issuer: "https://issuer.example.com",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "jti-1", verified.Claims.JWTID)
+	assert.Equal(t, "aud-1", verified.Claims.Audience)
+
+	provider, err := newStaticJWKSProvider(keyPair)
+	require.NoError(t, err)
+	keys, err := provider.GetPublicKeys(context.Background())
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	assert.Equal(t, keyPair.KeyID, keys[0].KID)
+	assert.Equal(t, keyPair.Algorithm, keys[0].ALG)
+	assert.Equal(t, "sig", keys[0].USE)
 }
 
 func TestUserInfoProviderAndHelpers(t *testing.T) {

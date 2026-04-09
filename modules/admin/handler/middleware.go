@@ -4,6 +4,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -17,8 +18,10 @@ import (
 type contextKey string
 
 const (
-	contextKeyOperator  contextKey = "aegion.admin.operator"
-	contextKeyIPAddress contextKey = "aegion.admin.ip_address"
+	contextKeyOperator   contextKey = "aegion.admin.operator"
+	contextKeyIPAddress  contextKey = "aegion.admin.ip_address"
+	contextKeyAuthMethod contextKey = "aegion.admin.auth_method"
+	contextKeyAuthKeyID  contextKey = "aegion.admin.auth_key_id"
 )
 
 // OperatorFromContext retrieves the operator from request context.
@@ -41,22 +44,30 @@ func IPAddressFromContext(ctx context.Context) string {
 func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		// Get identity ID from session context headers
-		identityIDStr := r.Header.Get("X-Aegion-Session-Identity-ID")
-		if identityIDStr == "" {
-			// Try Authorization header for API key auth
-			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(auth, "Bearer "+h.config.APIKeyPrefix) {
-				h.handleAPIKeyAuth(w, r, next, auth)
-				return
-			}
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if strings.HasPrefix(auth, "Bearer "+h.config.APIKeyPrefix) {
+			h.handleAPIKeyAuth(w, r, next, auth)
+			return
+		}
 
+		identityIDStr := strings.TrimSpace(r.Header.Get("X-Aegion-Session-Identity-ID"))
+		if identityIDStr == "" {
 			h.log.WarnContext(r.Context(), "admin auth missing credentials",
 				"path", r.URL.Path,
 				"method", r.Method,
 				"duration_ms", time.Since(start).Milliseconds(),
 			)
 
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+			return
+		}
+
+		if !allowSessionIdentityHeaderAuth() {
+			h.log.WarnContext(r.Context(), "admin auth rejected untrusted session identity header",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 			return
 		}
@@ -164,8 +175,8 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	// Store operator and IP in context
 	ctx := context.WithValue(r.Context(), contextKeyOperator, operator)
 	ctx = context.WithValue(ctx, contextKeyIPAddress, getClientIP(r))
-	ctx = context.WithValue(ctx, contextKey("aegion.admin.auth_method"), "api_key")
-	ctx = context.WithValue(ctx, contextKey("aegion.admin.auth_key_id"), key.ID.String())
+	ctx = context.WithValue(ctx, contextKeyAuthMethod, "api_key")
+	ctx = context.WithValue(ctx, contextKeyAuthKeyID, key.ID.String())
 
 	h.log.InfoContext(ctx, "admin api key auth success",
 		"operator_id", operator.ID.String(),
@@ -285,4 +296,13 @@ func fmtUUID(op *store.Operator) string {
 		return ""
 	}
 	return op.ID.String()
+}
+
+func allowSessionIdentityHeaderAuth() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

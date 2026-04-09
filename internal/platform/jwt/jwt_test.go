@@ -19,6 +19,8 @@ func TestErrors(t *testing.T) {
 		{"ErrVerifyFailed", ErrVerifyFailed, "JWT verification failed"},
 		{"ErrInvalidToken", ErrInvalidToken, "invalid token format"},
 		{"ErrInvalidAlg", ErrInvalidAlg, "invalid algorithm"},
+		{"ErrInvalidKey", ErrInvalidKey, "invalid key: must be non-empty"},
+		{"ErrInvalidLeeway", ErrInvalidLeeway, "invalid leeway: must be non-negative"},
 		{"ErrTokenExpired", ErrTokenExpired, "token expired"},
 		{"ErrTokenNotYetValid", ErrTokenNotYetValid, "token not yet valid"},
 	}
@@ -314,31 +316,32 @@ func TestFunctionSignatures(t *testing.T) {
 }
 
 func TestGuardRailsForEmptyKeys(t *testing.T) {
-	t.Run("Sign with empty private key panics", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatalf("expected panic for empty private key")
-			}
-		}()
-		_, _ = Sign(Claims{Issuer: "aegion"}, []byte{}, "ES256", "kid")
+	t.Run("Sign with empty private key returns validation error", func(t *testing.T) {
+		_, err := Sign(Claims{Issuer: "aegion"}, []byte{}, "ES256", "kid")
+		if err != ErrInvalidKey {
+			t.Fatalf("expected ErrInvalidKey, got %v", err)
+		}
 	})
 
-	t.Run("Verify with empty public key panics", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatalf("expected panic for empty public key")
-			}
-		}()
-		_, _ = Verify("x.y.z", []byte{}, "ES256", VerifyOptions{})
+	t.Run("Verify with empty public key returns validation error", func(t *testing.T) {
+		_, err := Verify("x.y.z", []byte{}, "ES256", VerifyOptions{})
+		if err != ErrInvalidKey {
+			t.Fatalf("expected ErrInvalidKey, got %v", err)
+		}
 	})
 
-	t.Run("ToJWK with empty public key panics", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Fatalf("expected panic for empty public key")
-			}
-		}()
-		_, _ = ToJWK("ES256", "kid", []byte{})
+	t.Run("ToJWK with empty public key returns validation error", func(t *testing.T) {
+		_, err := ToJWK("ES256", "kid", []byte{})
+		if err != ErrInvalidKey {
+			t.Fatalf("expected ErrInvalidKey, got %v", err)
+		}
+	})
+
+	t.Run("Verify with negative leeway returns validation error", func(t *testing.T) {
+		_, err := Verify("x.y.z", []byte("public"), "ES256", VerifyOptions{Leeway: -time.Second})
+		if err != ErrInvalidLeeway {
+			t.Fatalf("expected ErrInvalidLeeway, got %v", err)
+		}
 	})
 }
 

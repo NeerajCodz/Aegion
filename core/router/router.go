@@ -130,7 +130,7 @@ func (r *Router) setupMiddleware() {
 	r.mux.Use(RequestID)
 
 	// Logger middleware for structured logging
-	r.mux.Use(Logger(r.logger))
+	r.mux.Use(LoggerWithTrustProxy(r.logger, r.config.TrustProxy))
 
 	// Panic recovery
 	r.mux.Use(Recoverer(r.logger))
@@ -142,7 +142,7 @@ func (r *Router) setupMiddleware() {
 
 	// Rate limiting
 	if r.config.RateLimit.Enabled {
-		r.mux.Use(RateLimit(r.config.RateLimit))
+		r.mux.Use(RateLimitWithTrustProxy(r.config.RateLimit, r.config.TrustProxy))
 	}
 
 	// Security headers

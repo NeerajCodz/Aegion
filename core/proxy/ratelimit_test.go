@@ -192,6 +192,28 @@ func TestRateLimiter_GenerateKeys(t *testing.T) {
 	assert.ElementsMatch(t, expectedKeys, keys)
 }
 
+func TestRateLimiter_GenerateKeys_TrustForwardedHeadersToggle(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/users", nil)
+	req.RemoteAddr = "192.168.1.100:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+
+	withoutTrust := NewRateLimiter(RateLimitConfig{
+		RequestsPerSecond:     10,
+		ByIP:                  true,
+		TrustForwardedHeaders: false,
+	}, NewMemoryStore())
+	keys := withoutTrust.generateKeys(req)
+	assert.Equal(t, []string{"ip:192.168.1.100"}, keys)
+
+	withTrust := NewRateLimiter(RateLimitConfig{
+		RequestsPerSecond:     10,
+		ByIP:                  true,
+		TrustForwardedHeaders: true,
+	}, NewMemoryStore())
+	keys = withTrust.generateKeys(req)
+	assert.Equal(t, []string{"ip:203.0.113.50"}, keys)
+}
+
 func TestRateLimiter_GenerateKeys_OnlyIP(t *testing.T) {
 	config := RateLimitConfig{
 		RequestsPerSecond: 10,

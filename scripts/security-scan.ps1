@@ -7,6 +7,13 @@ $ErrorActionPreference = "Continue"
 
 $script:IssuesFound = 0
 $script:ScansRun = 0
+$script:FailOnIssues = $true
+$script:GosecVersion = if ($env:AEGION_GOSEC_VERSION) { $env:AEGION_GOSEC_VERSION } else { "v2.25.0" }
+$script:GovulncheckVersion = if ($env:AEGION_GOVULNCHECK_VERSION) { $env:AEGION_GOVULNCHECK_VERSION } else { "v1.1.4" }
+
+if ($env:AEGION_SECURITY_SCAN_FAIL_ON_ISSUES -and $env:AEGION_SECURITY_SCAN_FAIL_ON_ISSUES.ToLowerInvariant() -in @("false", "0", "no")) {
+    $script:FailOnIssues = $false
+}
 
 function Write-Section { param($Title) Write-Host "`n=== $Title ===" -ForegroundColor Cyan }
 function Write-Issue { param($Message) Write-Host "⚠ $Message" -ForegroundColor Yellow; $script:IssuesFound++ }
@@ -27,7 +34,7 @@ function Scan-GoSecurity {
     if (-not (Test-Command "gosec")) {
         Write-Info "gosec not installed. Installing..."
         try {
-            go install github.com/securego/gosec/v2/cmd/gosec@latest
+            go install "github.com/securego/gosec/v2/cmd/gosec@$($script:GosecVersion)"
         } catch {
             Write-Issue "Failed to install gosec: $_"
             return
@@ -61,7 +68,7 @@ function Scan-Dependencies {
     if (-not (Test-Command "govulncheck")) {
         Write-Info "govulncheck not installed. Installing..."
         try {
-            go install golang.org/x/vuln/cmd/govulncheck@latest
+            go install "golang.org/x/vuln/cmd/govulncheck@$($script:GovulncheckVersion)"
         } catch {
             Write-Issue "Failed to install govulncheck: $_"
             return
@@ -314,8 +321,12 @@ function Main {
         exit 0
     } else {
         Write-Host "⚠ Found $($script:IssuesFound) potential security issues" -ForegroundColor Yellow
-        Write-Host "Please review the findings above and address critical issues." -ForegroundColor Yellow
-        exit 0  # Don't fail CI, just warn
+        if ($script:FailOnIssues) {
+            Write-Host "Failing scan (set AEGION_SECURITY_SCAN_FAIL_ON_ISSUES=false to override)." -ForegroundColor Yellow
+            exit 1
+        }
+        Write-Host "Continuing despite findings (AEGION_SECURITY_SCAN_FAIL_ON_ISSUES=false)." -ForegroundColor Yellow
+        exit 0
     }
 }
 

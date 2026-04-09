@@ -1070,6 +1070,13 @@ func TestTokenService_AdditionalCoverageBranches(t *testing.T) {
 			SecretHash:              ptrString(string(hash)),
 		}, "valid-secret")
 		assert.NoError(t, err)
+
+		err = authenticateClient(&store.Client{
+			ID:                      "unsupported-auth",
+			TokenEndpointAuthMethod: "private_key_jwt",
+			SecretHash:              ptrString(string(hash)),
+		}, "valid-secret")
+		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 }
 

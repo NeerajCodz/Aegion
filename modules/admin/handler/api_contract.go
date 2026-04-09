@@ -116,7 +116,40 @@ func (h *Handler) lookupPrefix(token string) string {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	authMethod, _ := r.Context().Value(contextKeyAuthMethod).(string)
+	if authMethod == "api_key" {
+		keyIDRaw, _ := r.Context().Value(contextKeyAuthKeyID).(string)
+		keyID, err := uuid.Parse(strings.TrimSpace(keyIDRaw))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke session token")
+			return
+		}
+
+		if err := h.revokeAPIKey(r.Context(), keyID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke session token")
+			return
+		}
+	}
+
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type apiKeyRevoker interface {
+	DeleteAPIKey(ctx context.Context, id uuid.UUID) error
+}
+
+func (h *Handler) revokeAPIKey(ctx context.Context, keyID uuid.UUID) error {
+	revoker, ok := h.service.Store().(apiKeyRevoker)
+	if !ok {
+		return errors.New("api key revocation unavailable")
+	}
+
+	err := revoker.DeleteAPIKey(ctx, keyID)
+	if err != nil && !errors.Is(err, store.ErrAPIKeyNotFound) {
+		return err
+	}
+
+	return nil
 }
 
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {

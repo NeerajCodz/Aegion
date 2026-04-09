@@ -425,6 +425,7 @@ func (m *Manager) GetFromRequest(ctx context.Context, r *http.Request) (*Session
 func (m *Manager) SetCookie(w http.ResponseWriter, session *Session) {
 	signedToken := m.signToken(session.Token)
 
+	// #nosec G124 -- Attributes are runtime-configurable and validated for production in config.Validate.
 	cookie := &http.Cookie{
 		Name:     m.cookieConfig.Name,
 		Value:    signedToken,
@@ -440,11 +441,14 @@ func (m *Manager) SetCookie(w http.ResponseWriter, session *Session) {
 
 // ClearCookie removes the session cookie.
 func (m *Manager) ClearCookie(w http.ResponseWriter) {
+	// #nosec G124 -- Attributes are runtime-configurable and validated for production in config.Validate.
 	cookie := &http.Cookie{
 		Name:     m.cookieConfig.Name,
 		Value:    "",
 		Path:     m.cookieConfig.Path,
 		Domain:   m.cookieConfig.Domain,
+		SameSite: m.cookieConfig.SameSite,
+		Secure:   m.cookieConfig.Secure,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 		HttpOnly: m.cookieConfig.HTTPOnly,

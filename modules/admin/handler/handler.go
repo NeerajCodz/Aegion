@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -288,24 +291,41 @@ func buildPaginationMeta(page, perPage int, total int64) PaginationMeta {
 
 // getClientIP extracts the client IP address from request.
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the chain
-		if idx := len(xff); idx > 0 {
-			for i := 0; i < len(xff); i++ {
-				if xff[i] == ',' {
-					return xff[:i]
+	if r == nil {
+		return ""
+	}
+
+	if allowAdminForwardedHeaders() {
+		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				if candidate := strings.TrimSpace(parts[0]); candidate != "" {
+					return candidate
 				}
 			}
-			return xff
+		}
+
+		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+			return xri
 		}
 	}
 
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+	addr := strings.TrimSpace(r.RemoteAddr)
+	if addr == "" {
+		return ""
 	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		return host
+	}
+	return addr
+}
 
-	// Fall back to RemoteAddr
-	return r.RemoteAddr
+func allowAdminForwardedHeaders() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

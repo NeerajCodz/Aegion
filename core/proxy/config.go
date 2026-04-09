@@ -41,6 +41,9 @@ type Config struct {
 
 	// SignedIdentityHeaders lists identity headers included in signature canonicalization.
 	SignedIdentityHeaders []string `json:"signed_identity_headers" yaml:"signed_identity_headers"`
+
+	// TrustForwardedHeaders controls whether inbound X-Forwarded-* headers are trusted.
+	TrustForwardedHeaders bool `json:"trust_forwarded_headers" yaml:"trust_forwarded_headers"`
 }
 
 // Upstream defines a backend service configuration.
@@ -119,6 +122,9 @@ type RateLimitConfig struct {
 
 	// ByPath enables per-path rate limiting
 	ByPath bool `json:"by_path" yaml:"by_path"`
+
+	// TrustForwardedHeaders controls whether inbound X-Forwarded-* headers are used for IP keys.
+	TrustForwardedHeaders bool `json:"trust_forwarded_headers" yaml:"trust_forwarded_headers"`
 }
 
 // DefaultConfig returns sensible proxy defaults.
@@ -132,6 +138,7 @@ func DefaultConfig() Config {
 		HealthCheckInterval:         30 * time.Second,
 		StripInboundIdentityHeaders: true,
 		IdentitySignatureHeader:     "X-Aegion-Signature",
+		TrustForwardedHeaders:       false,
 		SignedIdentityHeaders: []string{
 			"X-Aegion-Session-ID",
 			"X-Aegion-Identity-ID",
@@ -164,10 +171,11 @@ func DefaultCircuitBreakerConfig() *CircuitBreakerConfig {
 // DefaultRateLimitConfig returns default rate limiting settings.
 func DefaultRateLimitConfig() *RateLimitConfig {
 	return &RateLimitConfig{
-		RequestsPerSecond: 100,
-		BurstSize:         200,
-		ByIP:              true,
-		ByUser:            false,
-		ByPath:            false,
+		RequestsPerSecond:     100,
+		BurstSize:             200,
+		ByIP:                  true,
+		ByUser:                false,
+		ByPath:                false,
+		TrustForwardedHeaders: false,
 	}
 }

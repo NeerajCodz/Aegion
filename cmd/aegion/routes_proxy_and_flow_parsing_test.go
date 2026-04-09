@@ -184,15 +184,23 @@ func TestModuleProxyHelpers(t *testing.T) {
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "198.51.100.99:443"
 		req.Header.Set("X-Forwarded-For", "198.51.100.10, 198.51.100.11")
-		if got := extractRequestIP(req); got != "198.51.100.10" {
-			t.Fatalf("expected first forwarded IP, got %q", got)
+		if got := extractRequestIP(req); got != "198.51.100.99" {
+			t.Fatalf("expected remote addr when forwarded headers are not trusted, got %q", got)
+		}
+		if got := extractRequestIPWithTrust(req, true); got != "198.51.100.10" {
+			t.Fatalf("expected first forwarded IP when trusted, got %q", got)
 		}
 
 		req = httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "198.51.100.98:443"
 		req.Header.Set("X-Real-IP", "203.0.113.2")
-		if got := extractRequestIP(req); got != "203.0.113.2" {
-			t.Fatalf("expected real IP, got %q", got)
+		if got := extractRequestIP(req); got != "198.51.100.98" {
+			t.Fatalf("expected remote addr when forwarded headers are not trusted, got %q", got)
+		}
+		if got := extractRequestIPWithTrust(req, true); got != "203.0.113.2" {
+			t.Fatalf("expected real IP when trusted, got %q", got)
 		}
 
 		req = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -210,10 +218,15 @@ func TestModuleProxyHelpers(t *testing.T) {
 		}
 
 		req = httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = ""
 		req.Header.Set("X-Forwarded-For", "198.51.100.20")
 		ctx = withModuleProxyRequestContext(baseCtx, req)
+		if ctx != baseCtx {
+			t.Fatal("expected unchanged context when forwarded headers are not trusted")
+		}
+		ctx = withModuleProxyRequestContextWithTrust(baseCtx, req, true)
 		if ctx == baseCtx {
-			t.Fatal("expected derived context when request ip is available")
+			t.Fatal("expected derived context when trusted request ip is available")
 		}
 	})
 }

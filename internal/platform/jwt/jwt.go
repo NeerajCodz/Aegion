@@ -59,6 +59,8 @@ var (
 	ErrVerifyFailed     = errors.New("JWT verification failed")
 	ErrInvalidToken     = errors.New("invalid token format")
 	ErrInvalidAlg       = errors.New("invalid algorithm")
+	ErrInvalidKey       = errors.New("invalid key: must be non-empty")
+	ErrInvalidLeeway    = errors.New("invalid leeway: must be non-negative")
 	ErrTokenExpired     = errors.New("token expired")
 	ErrTokenNotYetValid = errors.New("token not yet valid")
 )
@@ -161,6 +163,10 @@ func GenerateECKeyPair(keyID string) (*KeyPair, error) {
 
 // Sign creates a signed JWT from the given claims.
 func Sign(claims Claims, privateKey []byte, algorithm, keyID string) (string, error) {
+	if len(privateKey) == 0 {
+		return "", ErrInvalidKey
+	}
+
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
 		return "", err
@@ -194,6 +200,13 @@ func Sign(claims Claims, privateKey []byte, algorithm, keyID string) (string, er
 
 // Verify verifies a JWT and returns the claims.
 func Verify(token string, publicKey []byte, algorithm string, opts VerifyOptions) (*VerifyResult, error) {
+	if len(publicKey) == 0 {
+		return nil, ErrInvalidKey
+	}
+	if opts.Leeway < 0 {
+		return nil, ErrInvalidLeeway
+	}
+
 	cToken := C.CString(token)
 	cAlgorithm := C.CString(algorithm)
 	defer C.free(unsafe.Pointer(cToken))
@@ -209,7 +222,7 @@ func Verify(token string, publicKey []byte, algorithm string, opts VerifyOptions
 		defer C.free(unsafe.Pointer(cAudience))
 	}
 
-	leeway := C.uint64_t(opts.Leeway.Seconds())
+	leeway := C.uint64_t(opts.Leeway / time.Second)
 
 	result := C.jwt_verify(
 		cToken,
@@ -254,6 +267,10 @@ func Verify(token string, publicKey []byte, algorithm string, opts VerifyOptions
 
 // ToJWK converts a public key to JWK JSON format.
 func ToJWK(algorithm, keyID string, publicKey []byte) (string, error) {
+	if len(publicKey) == 0 {
+		return "", ErrInvalidKey
+	}
+
 	cAlgorithm := C.CString(algorithm)
 	cKeyID := C.CString(keyID)
 	defer C.free(unsafe.Pointer(cAlgorithm))

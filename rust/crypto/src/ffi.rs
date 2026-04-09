@@ -129,7 +129,8 @@ pub unsafe extern "C" fn crypto_encrypt_field(
     aad: *const u8,
     aad_len: size_t,
 ) -> CryptoResult {
-    if key.is_null() || plaintext.is_null() {
+    if key.is_null() || (plaintext.is_null() && plaintext_len > 0) || (aad.is_null() && aad_len > 0)
+    {
         return CryptoResult {
             error_code: -1,
             result: ptr::null_mut(),
@@ -137,8 +138,12 @@ pub unsafe extern "C" fn crypto_encrypt_field(
     }
 
     let key_slice = slice::from_raw_parts(key, 32);
-    let plaintext_slice = slice::from_raw_parts(plaintext, plaintext_len);
-    let aad_opt = if aad.is_null() || aad_len == 0 {
+    let plaintext_slice = if plaintext_len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(plaintext, plaintext_len)
+    };
+    let aad_opt = if aad_len == 0 {
         None
     } else {
         Some(slice::from_raw_parts(aad, aad_len))
@@ -173,7 +178,7 @@ pub unsafe extern "C" fn crypto_decrypt_field(
     aad: *const u8,
     aad_len: size_t,
 ) -> BytesResult {
-    if key.is_null() || ciphertext.is_null() {
+    if key.is_null() || ciphertext.is_null() || (aad.is_null() && aad_len > 0) {
         return BytesResult {
             error_code: -1,
             data: ptr::null_mut(),
@@ -192,7 +197,7 @@ pub unsafe extern "C" fn crypto_decrypt_field(
             }
         }
     };
-    let aad_opt = if aad.is_null() || aad_len == 0 {
+    let aad_opt = if aad_len == 0 {
         None
     } else {
         Some(slice::from_raw_parts(aad, aad_len))
@@ -296,5 +301,71 @@ pub unsafe extern "C" fn crypto_free_string(s: *mut c_char) {
 pub unsafe extern "C" fn crypto_free_bytes(data: *mut u8, len: size_t) {
     if !data.is_null() {
         drop(Vec::from_raw_parts(data, len, len));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    #[test]
+    fn encrypt_rejects_null_plaintext_with_nonzero_length() {
+        let key = generate_key().unwrap();
+
+        let result = unsafe { crypto_encrypt_field(key.as_ptr(), ptr::null(), 1, ptr::null(), 0) };
+
+        assert_eq!(result.error_code, -1);
+        assert!(result.result.is_null());
+    }
+
+    #[test]
+    fn encrypt_and_decrypt_empty_plaintext() {
+        let key = generate_key().unwrap();
+
+        let encrypted =
+            unsafe { crypto_encrypt_field(key.as_ptr(), ptr::null(), 0, ptr::null(), 0) };
+        assert_eq!(encrypted.error_code, 0);
+        assert!(!encrypted.result.is_null());
+
+        let decrypted = unsafe {
+            crypto_decrypt_field(
+                key.as_ptr(),
+                encrypted.result as *const c_char,
+                ptr::null(),
+                0,
+            )
+        };
+        assert_eq!(decrypted.error_code, 0);
+        assert_eq!(decrypted.len, 0);
+
+        unsafe {
+            crypto_free_string(encrypted.result);
+            crypto_free_bytes(decrypted.data, decrypted.len);
+        }
+    }
+
+    #[test]
+    fn decrypt_rejects_null_aad_with_nonzero_length() {
+        let key = generate_key().unwrap();
+        let encrypted =
+            unsafe { crypto_encrypt_field(key.as_ptr(), b"x".as_ptr(), 1, ptr::null(), 0) };
+        assert_eq!(encrypted.error_code, 0);
+
+        let result = unsafe {
+            crypto_decrypt_field(
+                key.as_ptr(),
+                encrypted.result as *const c_char,
+                ptr::null(),
+                1,
+            )
+        };
+        assert_eq!(result.error_code, -1);
+        assert!(result.data.is_null());
+        assert_eq!(result.len, 0);
+
+        unsafe {
+            crypto_free_string(encrypted.result);
+        }
     }
 }

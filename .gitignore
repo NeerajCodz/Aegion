@@ -88,3 +88,6 @@ cover_router
 
 # Exclude accidental vendored Go package under SPA dependencies
 modules/admin/spa/node_modules/flatted/golang/
+
+.agents
+skills-lock.json

@@ -40,6 +40,7 @@ extern void crypto_free_bytes(uint8_t* data, size_t len);
 import "C"
 import (
 	"errors"
+	"math"
 	"unsafe"
 )
 
@@ -57,6 +58,13 @@ var (
 
 var generateKeyFn = func(key []byte) int {
 	return int(C.crypto_generate_key((*C.uint8_t)(unsafe.Pointer(&key[0]))))
+}
+
+func byteSlicePtr(data []byte) *C.uint8_t {
+	if len(data) == 0 {
+		return nil
+	}
+	return (*C.uint8_t)(unsafe.Pointer(&data[0]))
 }
 
 // HashPassword hashes a password using Argon2id with secure defaults.
@@ -103,19 +111,12 @@ func EncryptField(key, plaintext, aad []byte) (string, error) {
 		return "", ErrInvalidKeyLength
 	}
 
-	var aadPtr *C.uint8_t
-	var aadLen C.size_t
-	if len(aad) > 0 {
-		aadPtr = (*C.uint8_t)(unsafe.Pointer(&aad[0]))
-		aadLen = C.size_t(len(aad))
-	}
-
 	result := C.crypto_encrypt_field(
 		(*C.uint8_t)(unsafe.Pointer(&key[0])),
-		(*C.uint8_t)(unsafe.Pointer(&plaintext[0])),
+		byteSlicePtr(plaintext),
 		C.size_t(len(plaintext)),
-		aadPtr,
-		aadLen,
+		byteSlicePtr(aad),
+		C.size_t(len(aad)),
 	)
 	if result.error_code != 0 {
 		return "", ErrEncryptFailed
@@ -135,27 +136,25 @@ func DecryptField(key []byte, ciphertext string, aad []byte) ([]byte, error) {
 	cCiphertext := C.CString(ciphertext)
 	defer C.free(unsafe.Pointer(cCiphertext))
 
-	var aadPtr *C.uint8_t
-	var aadLen C.size_t
-	if len(aad) > 0 {
-		aadPtr = (*C.uint8_t)(unsafe.Pointer(&aad[0]))
-		aadLen = C.size_t(len(aad))
-	}
-
 	result := C.crypto_decrypt_field(
 		(*C.uint8_t)(unsafe.Pointer(&key[0])),
 		cCiphertext,
-		aadPtr,
-		aadLen,
+		byteSlicePtr(aad),
+		C.size_t(len(aad)),
 	)
 	if result.error_code != 0 {
 		return nil, ErrDecryptFailed
 	}
 	defer C.crypto_free_bytes(result.data, result.len)
 
-	out := make([]byte, result.len)
-	copy(out, (*[1 << 30]byte)(unsafe.Pointer(result.data))[:result.len:result.len])
-	return out, nil
+	if result.data == nil && result.len > 0 {
+		return nil, ErrDecryptFailed
+	}
+	if result.len > C.size_t(math.MaxInt32) {
+		return nil, ErrDecryptFailed
+	}
+
+	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.len)), nil
 }
 
 // GenerateKey generates a cryptographically secure random 32-byte key.
