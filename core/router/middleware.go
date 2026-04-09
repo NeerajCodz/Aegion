@@ -82,6 +82,11 @@ func (rr *responseRecorder) Write(b []byte) (int, error) {
 
 // Logger middleware provides structured request logging.
 func Logger(logger zerolog.Logger) func(http.Handler) http.Handler {
+	return LoggerWithTrustProxy(logger, false)
+}
+
+// LoggerWithTrustProxy controls whether forwarded client-IP headers are trusted.
+func LoggerWithTrustProxy(logger zerolog.Logger, trustProxy bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := GetRequestID(r.Context())
@@ -109,7 +114,7 @@ func Logger(logger zerolog.Logger) func(http.Handler) http.Handler {
 				Str("method", r.Method).
 				Str("route", route).
 				Str("path", r.URL.Path).
-				Str("remote_addr", getClientIP(r)).
+				Str("remote_addr", getClientIPWithTrust(r, trustProxy)).
 				Int("status", rr.statusCode).
 				Int64("bytes", rr.written).
 				Dur("duration", duration).
@@ -164,22 +169,31 @@ func CORS(cfg CORSConfig) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
 			if origin == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Check if origin is allowed
-			allowed := allowAll || allowedOriginsSet[origin]
-			if !allowed {
+			allowOrigin := ""
+			switch {
+			case allowedOriginsSet[origin]:
+				allowOrigin = origin
+			case allowAll && !cfg.AllowCredentials:
+				allowOrigin = "*"
+			}
+
+			if allowOrigin == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Set CORS headers
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			if cfg.AllowCredentials {
+			if allowOrigin != "*" {
+				appendVaryHeader(w.Header(), "Origin")
+			}
+			w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+			if cfg.AllowCredentials && allowOrigin != "*" {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			if exposedHeadersStr != "" {
@@ -241,6 +255,11 @@ func (tb *tokenBucket) take() bool {
 
 // RateLimit middleware implements token bucket rate limiting per IP.
 func RateLimit(cfg RateLimitConfig) func(http.Handler) http.Handler {
+	return RateLimitWithTrustProxy(cfg, false)
+}
+
+// RateLimitWithTrustProxy controls whether forwarded client-IP headers are trusted.
+func RateLimitWithTrustProxy(cfg RateLimitConfig, trustProxy bool) func(http.Handler) http.Handler {
 	buckets := make(map[string]*tokenBucket)
 	var mu sync.RWMutex
 
@@ -264,7 +283,7 @@ func RateLimit(cfg RateLimitConfig) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := getClientIP(r)
+			ip := getClientIPWithTrust(r, trustProxy)
 
 			mu.RLock()
 			bucket, exists := buckets[ip]
@@ -353,24 +372,30 @@ func Timeout(timeout time.Duration) func(http.Handler) http.Handler {
 // Helper functions
 
 func getClientIP(r *http.Request) string {
+	return getClientIPWithTrust(r, true)
+}
+
+func getClientIPWithTrust(r *http.Request, trustProxy bool) string {
 	if r == nil {
 		return ""
 	}
 
-	// Check X-Forwarded-For header
-	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-		ips := strings.Split(xff, ",")
-		for _, ip := range ips {
-			ip = strings.TrimSpace(ip)
-			if ip != "" {
-				return ip
+	if trustProxy {
+		// Check X-Forwarded-For header
+		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+			ips := strings.Split(xff, ",")
+			for _, ip := range ips {
+				ip = strings.TrimSpace(ip)
+				if ip != "" {
+					return ip
+				}
 			}
 		}
-	}
 
-	// Check X-Real-IP header
-	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
+		// Check X-Real-IP header
+		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+			return xri
+		}
 	}
 
 	// Fall back to RemoteAddr
@@ -389,6 +414,21 @@ func getClientIP(r *http.Request) string {
 
 func timeToSeconds(seconds int) string {
 	return fmt.Sprintf("%d", seconds)
+}
+
+func appendVaryHeader(header http.Header, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	for _, existing := range header.Values("Vary") {
+		for _, part := range strings.Split(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), value) {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
 }
 
 func withCorrelationFields(event *zerolog.Event, ctx context.Context, requestID string) *zerolog.Event {

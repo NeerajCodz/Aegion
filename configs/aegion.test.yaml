@@ -276,6 +276,7 @@ proxy:
   enabled: false
   upstream_timeout: 15s
   preserve_host: true
+  trust_forwarded_headers: false
   strip_inbound_identity_headers: true
   identity_signature_header: X-Aegion-Signature
   signed_identity_headers:

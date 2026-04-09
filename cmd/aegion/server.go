@@ -558,22 +558,40 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
 
-		// Check if origin is allowed
-		allowed := false
-		for _, o := range s.cfg.Server.CORS.AllowedOrigins {
-			if o == "*" || o == origin {
-				allowed = true
-				break
+		allowAll := false
+		explicitAllowed := false
+		for _, configuredOrigin := range s.cfg.Server.CORS.AllowedOrigins {
+			configuredOrigin = strings.TrimSpace(configuredOrigin)
+			if configuredOrigin == "" {
+				continue
+			}
+			if configuredOrigin == "*" {
+				allowAll = true
+				continue
+			}
+			if configuredOrigin == origin {
+				explicitAllowed = true
 			}
 		}
 
-		if allowed {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
+		allowOrigin := ""
+		switch {
+		case explicitAllowed:
+			allowOrigin = origin
+		case allowAll && !s.cfg.Server.CORS.AllowCredentials:
+			allowOrigin = "*"
+		}
+
+		if allowOrigin != "" {
+			if allowOrigin != "*" {
+				appendVaryHeader(w.Header(), "Origin")
+			}
+			w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 			w.Header().Set("Access-Control-Allow-Methods", joinStrings(s.cfg.Server.CORS.AllowedMethods))
 			w.Header().Set("Access-Control-Allow-Headers", joinStrings(s.cfg.Server.CORS.AllowedHeaders))
-			if s.cfg.Server.CORS.AllowCredentials {
+			if s.cfg.Server.CORS.AllowCredentials && allowOrigin != "*" {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 		}
@@ -597,6 +615,21 @@ func joinStrings(ss []string) string {
 		result += s
 	}
 	return result
+}
+
+func appendVaryHeader(header http.Header, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	for _, existing := range header.Values("Vary") {
+		for _, part := range strings.Split(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), value) {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
 }
 
 func parseSameSite(value string) http.SameSite {

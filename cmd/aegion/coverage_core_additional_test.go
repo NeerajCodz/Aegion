@@ -216,6 +216,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 			Enabled:                     true,
 			UpstreamTimeout:             platformconfig.Duration(12 * time.Second),
 			PreserveHost:                true,
+			TrustForwardedHeaders:       true,
 			StripInboundIdentityHeaders: true,
 			IdentitySigningSecret:       "  keep-secret-value  ",
 			IdentitySignatureHeader:     "X-Proxy-Sig",
@@ -223,7 +224,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 		},
 	}
 	proxySettings := defaultRuntimeProxySettings(cfg)
-	if !proxySettings.Enabled || !proxySettings.PreserveHost || !proxySettings.StripInboundIdentityHeaders {
+	if !proxySettings.Enabled || !proxySettings.PreserveHost || !proxySettings.TrustForwardedHeaders || !proxySettings.StripInboundIdentityHeaders {
 		t.Fatalf("expected proxy boolean flags to carry from config")
 	}
 	if proxySettings.UpstreamTimeout != "12s" {
@@ -306,6 +307,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 		Enabled:                     boolPtr(true),
 		UpstreamTimeout:             stringPtr("60s"),
 		PreserveHost:                boolPtr(true),
+		TrustForwardedHeaders:       boolPtr(true),
 		StripInboundIdentityHeaders: boolPtr(true),
 		IdentitySigningSecret:       stringPtr("  0123456789abcdef  "),
 		IdentitySignatureHeader:     stringPtr(" X-Patched-Sig "),
@@ -315,7 +317,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected valid patch application, got %v", err)
 	}
-	if !next.Enabled || !next.PreserveHost || !next.StripInboundIdentityHeaders {
+	if !next.Enabled || !next.PreserveHost || !next.TrustForwardedHeaders || !next.StripInboundIdentityHeaders {
 		t.Fatalf("expected proxy flags to be patched to true")
 	}
 	if next.UpstreamTimeout != "60s" {

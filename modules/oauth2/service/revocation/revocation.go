@@ -57,14 +57,19 @@ func (s *RevocationService) RevokeToken(ctx context.Context, req *RevocationRequ
 	}
 
 	// Verify client can authenticate
-	if client.TokenEndpointAuthMethod != "none" {
+	switch client.TokenEndpointAuthMethod {
+	case "", "none":
+		// Public client
+	case "client_secret_basic", "client_secret_post":
 		if req.ClientSecret == "" {
 			return ErrInvalidClient
 		}
 		// For basic/post auth methods, verify secret
-		if client.SecretHash != nil && !authenticateClientSecret(*client.SecretHash, req.ClientSecret) {
+		if client.SecretHash == nil || !authenticateClientSecret(*client.SecretHash, req.ClientSecret) {
 			return ErrInvalidClient
 		}
+	default:
+		return ErrInvalidClient
 	}
 
 	// Determine token type and revoke

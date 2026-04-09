@@ -200,7 +200,9 @@ func (s *AuthorizationService) AcceptLogin(ctx context.Context, challengeID, ide
 			// Check remembered consent
 			consent, err := s.store.GetConsentSession(ctx, challenge.ClientID, identityID)
 			if err == nil && consent != nil && consent.Remember {
-				if consent.ExpiresAt == nil || time.Now().UTC().Before(*consent.ExpiresAt) {
+				if (consent.ExpiresAt == nil || time.Now().UTC().Before(*consent.ExpiresAt)) &&
+					isSubset(challenge.Scopes, consent.Scopes) &&
+					isSubset(challenge.Audience, consent.Audience) {
 					skipConsent = true
 				}
 			}

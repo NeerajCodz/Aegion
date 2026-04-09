@@ -79,7 +79,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["/app/aegion", "health"]
+      test: ["CMD", "/app/aegion", "health"]
       interval: 30s
       timeout: 10s
       retries: 3

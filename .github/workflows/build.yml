@@ -22,6 +22,9 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository }}
 
+permissions:
+  contents: read
+
 jobs:
   # ---------------------------------------------------------------------------
   # Build Base Images

@@ -108,6 +108,7 @@ func TestModuleProxyIdentityAndForwarded_AdditionalBranches(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID:              "module-a",
 		SignedIdentityHeaders: []string{"X-User-ID", "  ", "X-User-AAL"},
+		TrustForwardedHeaders: true,
 		Logger:                zerolog.Nop(),
 	})
 

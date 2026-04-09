@@ -682,13 +682,14 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*SCIMToken, 
 	}
 
 	// Update last used timestamp (best effort)
-	go func(tokenID uuid.UUID) {
-		updateCtx, cancel := context.WithTimeout(context.Background(), s.config.TokenLastUsedUpdateTimeout)
+	baseCtx := context.WithoutCancel(ctx)
+	go func(parent context.Context, tokenID uuid.UUID) {
+		updateCtx, cancel := context.WithTimeout(parent, s.config.TokenLastUsedUpdateTimeout)
 		defer cancel()
 		if err := s.store.UpdateSCIMTokenLastUsed(updateCtx, tokenID); err != nil {
 			s.log.WarnContext(updateCtx, "failed to update SCIM token last-used timestamp", "token_id", tokenID.String(), "error", err)
 		}
-	}(scimToken.ID)
+	}(baseCtx, scimToken.ID)
 
 	return scimToken, nil
 }

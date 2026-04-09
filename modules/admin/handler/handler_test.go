@@ -53,11 +53,24 @@ func TestBuildPaginationMeta(t *testing.T) {
 }
 
 func TestGetClientIP(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
-	req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+	t.Run("does not trust forwarded headers by default", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+		req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+		req.RemoteAddr = "192.0.2.10:12345"
 
-	ip := getClientIP(req)
-	assert.Equal(t, "1.1.1.1", ip)
+		ip := getClientIP(req)
+		assert.Equal(t, "192.0.2.10", ip)
+	})
+
+	t.Run("trusts forwarded headers when enabled", func(t *testing.T) {
+		t.Setenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS", "true")
+		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+		req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+		req.RemoteAddr = "192.0.2.10:12345"
+
+		ip := getClientIP(req)
+		assert.Equal(t, "1.1.1.1", ip)
+	})
 }
 
 func TestRequireAdminUnauthorized(t *testing.T) {
@@ -88,6 +101,8 @@ func TestRequireAdminInvalidIdentity(t *testing.T) {
 }
 
 func TestRequireAdminWithIdentity(t *testing.T) {
+	t.Setenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH", "true")
+
 	operator := &store.Operator{
 		ID:         uuid.New(),
 		IdentityID: uuid.New(),
@@ -116,6 +131,37 @@ func TestRequireAdminWithIdentity(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestRequireAdminRejectsSessionIdentityHeaderByDefault(t *testing.T) {
+	operator := &store.Operator{
+		ID:         uuid.New(),
+		IdentityID: uuid.New(),
+		Role:       "admin",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	called := false
+	svc := &fakeService{
+		getOperatorByIdentityIDFn: func(ctx context.Context, identityID uuid.UUID) (*store.Operator, error) {
+			called = true
+			return operator, nil
+		},
+	}
+
+	h := New(svc)
+	req := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
+	req.Header.Set("X-Aegion-Session-Identity-ID", operator.IdentityID.String())
+	rec := httptest.NewRecorder()
+
+	handler := h.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	handler.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.False(t, called)
 }
 
 func TestRequireAdminAPIKeyInvalid(t *testing.T) {
@@ -295,16 +341,18 @@ func (f *fakeService) ListAuditLogs(ctx context.Context, actorID uuid.UUID, filt
 }
 
 type fakeStore struct {
-	operators       map[uuid.UUID]*store.Operator
-	apiKeysByPrefix map[string]*store.APIKey
-	updatedLastUsed bool
-	auditLogs       []*store.AuditLogEntry
-	auditLogsMu     sync.RWMutex
-	createdAPIKey   *store.APIKey
+	operators        map[uuid.UUID]*store.Operator
+	apiKeysByPrefix  map[string]*store.APIKey
+	updatedLastUsed  bool
+	auditLogs        []*store.AuditLogEntry
+	auditLogsMu      sync.RWMutex
+	createdAPIKey    *store.APIKey
+	deletedAPIKeyIDs []uuid.UUID
 
 	authenticateFn       func(ctx context.Context, email, password string) (*store.Operator, error)
 	getIdentityProfileFn func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error)
 	createAPIKeyFn       func(ctx context.Context, key *store.APIKey) error
+	deleteAPIKeyFn       func(ctx context.Context, id uuid.UUID) error
 }
 
 func (f *fakeStore) CreateOperator(ctx context.Context, op *store.Operator) error {
@@ -397,6 +445,14 @@ func (f *fakeStore) CreateAPIKey(ctx context.Context, key *store.APIKey) error {
 	copyKey := *key
 	f.apiKeysByPrefix[key.KeyPrefix] = &copyKey
 	f.createdAPIKey = &copyKey
+	return nil
+}
+
+func (f *fakeStore) DeleteAPIKey(ctx context.Context, id uuid.UUID) error {
+	if f.deleteAPIKeyFn != nil {
+		return f.deleteAPIKeyFn(ctx, id)
+	}
+	f.deletedAPIKeyIDs = append(f.deletedAPIKeyIDs, id)
 	return nil
 }
 
@@ -675,6 +731,13 @@ func TestAdminHandler_ConfigAndLoginAdditionalBranches(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 		req.Header.Set("X-Forwarded-For", "5.5.5.5")
+		req.RemoteAddr = "203.0.113.9:8080"
+		assert.Equal(t, "203.0.113.9", getClientIP(req))
+
+		t.Setenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS", "true")
+		req = httptest.NewRequest(http.MethodGet, "/admin", nil)
+		req.Header.Set("X-Forwarded-For", "5.5.5.5")
+		req.RemoteAddr = "203.0.113.9:8080"
 		assert.Equal(t, "5.5.5.5", getClientIP(req))
 
 		req = httptest.NewRequest(http.MethodGet, "/admin", nil)
@@ -1216,6 +1279,56 @@ func TestLogout(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
 
+func TestLogoutRevokesAPIKeySession(t *testing.T) {
+	keyID := uuid.New()
+	storeStub := &fakeStore{}
+	h := New(&fakeService{store: storeStub})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/auth/logout", nil)
+	ctx := context.WithValue(req.Context(), contextKeyAuthMethod, "api_key")
+	ctx = context.WithValue(ctx, contextKeyAuthKeyID, keyID.String())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.Logout(rec, req)
+
+	assert.Equal(t, http.StatusNoContent, rec.Code)
+	require.Len(t, storeStub.deletedAPIKeyIDs, 1)
+	assert.Equal(t, keyID, storeStub.deletedAPIKeyIDs[0])
+}
+
+func TestLogoutAPIKeyContextInvalid(t *testing.T) {
+	h := New(&fakeService{store: &fakeStore{}})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/auth/logout", nil)
+	ctx := context.WithValue(req.Context(), contextKeyAuthMethod, "api_key")
+	ctx = context.WithValue(ctx, contextKeyAuthKeyID, "not-a-uuid")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.Logout(rec, req)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestLogoutAPIKeyRevocationError(t *testing.T) {
+	keyID := uuid.New()
+	storeStub := &fakeStore{
+		deleteAPIKeyFn: func(ctx context.Context, id uuid.UUID) error {
+			return errors.New("delete failed")
+		},
+	}
+	h := New(&fakeService{store: storeStub})
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/auth/logout", nil)
+	ctx := context.WithValue(req.Context(), contextKeyAuthMethod, "api_key")
+	ctx = context.WithValue(ctx, contextKeyAuthKeyID, keyID.String())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	h.Logout(rec, req)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 func TestAPIContractHelperFunctions(t *testing.T) {
 	assert.Equal(t, "active", normalizeIdentityState("ACTIVE"))
 	assert.Equal(t, "inactive", normalizeIdentityState("banned"))
@@ -1285,6 +1398,8 @@ func TestRequirePermissionAllowed(t *testing.T) {
 }
 
 func TestRequireAdminNotOperator(t *testing.T) {
+	t.Setenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH", "true")
+
 	h := New(&fakeService{
 		getOperatorByIdentityIDFn: func(ctx context.Context, identityID uuid.UUID) (*store.Operator, error) {
 			return nil, errors.New("not operator")

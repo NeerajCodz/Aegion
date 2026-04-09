@@ -228,10 +228,11 @@ func TestSecurityAudit(t *testing.T) {
 
 func TestGetClientIP(t *testing.T) {
 	tests := []struct {
-		name       string
-		headers    map[string]string
-		remoteAddr string
-		expected   string
+		name           string
+		headers        map[string]string
+		remoteAddr     string
+		trustForwarded bool
+		expected       string
 	}{
 		{
 			name:       "direct connection",
@@ -239,27 +240,32 @@ func TestGetClientIP(t *testing.T) {
 			expected:   "192.168.1.1",
 		},
 		{
-			name:       "X-Real-IP header",
+			name:       "X-Real-IP ignored by default",
 			headers:    map[string]string{"X-Real-IP": "10.0.0.1"},
 			remoteAddr: "192.168.1.1:12345",
-			expected:   "10.0.0.1",
+			expected:   "192.168.1.1",
 		},
 		{
-			name:       "X-Forwarded-For header single IP",
-			headers:    map[string]string{"X-Forwarded-For": "10.0.0.2"},
-			remoteAddr: "192.168.1.1:12345",
-			expected:   "10.0.0.2",
+			name:           "X-Forwarded-For single IP when trusted",
+			headers:        map[string]string{"X-Forwarded-For": "10.0.0.2"},
+			remoteAddr:     "192.168.1.1:12345",
+			trustForwarded: true,
+			expected:       "10.0.0.2",
 		},
 		{
-			name:       "X-Forwarded-For header multiple IPs",
-			headers:    map[string]string{"X-Forwarded-For": "10.0.0.3, 10.0.0.4, 10.0.0.5"},
-			remoteAddr: "192.168.1.1:12345",
-			expected:   "10.0.0.3",
+			name:           "X-Forwarded-For multiple IPs when trusted",
+			headers:        map[string]string{"X-Forwarded-For": "10.0.0.3, 10.0.0.4, 10.0.0.5"},
+			remoteAddr:     "192.168.1.1:12345",
+			trustForwarded: true,
+			expected:       "10.0.0.3",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.trustForwarded {
+				t.Setenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS", "true")
+			}
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			for k, v := range tt.headers {
 				req.Header.Set(k, v)
@@ -344,27 +350,41 @@ func TestCSRFProtectionSafeMethods(t *testing.T) {
 
 func TestRateLimitKeyGeneration(t *testing.T) {
 	tests := []struct {
-		name       string
-		identityID string
-		ip         string
-		wantPrefix string
+		name                string
+		identityID          string
+		ip                  string
+		trustIdentityHeader bool
+		wantPrefix          string
 	}{
 		{
-			name:       "with identity ID",
-			identityID: "test-identity-123",
-			ip:         "192.168.1.1",
-			wantPrefix: "id:test-identity-123",
+			name:                "with identity ID when trusted",
+			identityID:          "11111111-1111-1111-1111-111111111111",
+			ip:                  "192.168.1.1",
+			trustIdentityHeader: true,
+			wantPrefix:          "id:11111111-1111-1111-1111-111111111111",
 		},
 		{
-			name:       "without identity ID",
-			identityID: "",
-			ip:         "10.0.0.1",
-			wantPrefix: "ip:10.0.0.1",
+			name:                "ignores identity ID by default",
+			identityID:          "11111111-1111-1111-1111-111111111111",
+			ip:                  "10.0.0.1",
+			trustIdentityHeader: false,
+			wantPrefix:          "ip:10.0.0.1",
+		},
+		{
+			name:                "without identity ID",
+			identityID:          "",
+			ip:                  "10.0.0.2",
+			trustIdentityHeader: false,
+			wantPrefix:          "ip:10.0.0.2",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.trustIdentityHeader {
+				t.Setenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH", "true")
+			}
+
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			if tt.identityID != "" {
 				req.Header.Set("X-Aegion-Session-Identity-ID", tt.identityID)
@@ -492,8 +512,17 @@ func TestTokenBucketRefillAndLimiterHelpers(t *testing.T) {
 func TestRateLimitAndClientIPExtraBranches(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Real-IP", "10.10.0.1")
-	if key := rateLimitKey(req); key != "ip:10.10.0.1" {
+	req.RemoteAddr = "198.51.100.9:4321"
+	if key := rateLimitKey(req); key != "ip:198.51.100.9" {
 		t.Fatalf("unexpected rate limit key: %s", key)
+	}
+
+	t.Setenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS", "true")
+	reqTrusted := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqTrusted.Header.Set("X-Real-IP", "10.10.0.1")
+	reqTrusted.RemoteAddr = "198.51.100.9:4321"
+	if key := rateLimitKey(reqTrusted); key != "ip:10.10.0.1" {
+		t.Fatalf("unexpected trusted rate limit key: %s", key)
 	}
 
 	reqIPFallback := httptest.NewRequest(http.MethodGet, "/", nil)

@@ -312,6 +312,7 @@ func TestApplyDefaults(t *testing.T) {
 	// Proxy defaults
 	assert.False(t, cfg.Proxy.Enabled)
 	assert.Equal(t, Duration(30*time.Second), cfg.Proxy.UpstreamTimeout)
+	assert.False(t, cfg.Proxy.TrustForwardedHeaders)
 	assert.Equal(t, "X-Aegion-Signature", cfg.Proxy.IdentitySignatureHeader)
 	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}, cfg.Proxy.SignedIdentityHeaders)
 }
@@ -343,13 +344,14 @@ func TestApplyDefaults_DoesNotOverrideExisting(t *testing.T) {
 func TestApplyEnvOverrides(t *testing.T) {
 	// Set environment variables
 	envVars := map[string]string{
-		"AEGION_DATABASE_URL":     "postgres://env:pass@host/db",
-		"AEGION_CACHE_URL":        "redis://env:6379",
-		"AEGION_LOG_LEVEL":        "debug",
-		"AEGION_SERVER_PORT":      "9090",
-		"AEGION_SECRETS_COOKIE":   "env-cookie-1,env-cookie-2",
-		"AEGION_SECRETS_CIPHER":   "env-cipher-1,env-cipher-2",
-		"AEGION_SECRETS_INTERNAL": "env-internal-1,env-internal-2",
+		"AEGION_DATABASE_URL":                  "postgres://env:pass@host/db",
+		"AEGION_CACHE_URL":                     "redis://env:6379",
+		"AEGION_LOG_LEVEL":                     "debug",
+		"AEGION_SERVER_PORT":                   "9090",
+		"AEGION_PROXY_TRUST_FORWARDED_HEADERS": "true",
+		"AEGION_SECRETS_COOKIE":                "env-cookie-1,env-cookie-2",
+		"AEGION_SECRETS_CIPHER":                "env-cipher-1,env-cipher-2",
+		"AEGION_SECRETS_INTERNAL":              "env-internal-1,env-internal-2",
 	}
 
 	for key, value := range envVars {
@@ -375,15 +377,75 @@ func TestApplyEnvOverrides(t *testing.T) {
 		},
 	}
 
-	applyEnvOverrides(cfg)
+	require.NoError(t, applyEnvOverrides(cfg))
 
 	assert.Equal(t, "postgres://env:pass@host/db", cfg.Database.URL)
 	assert.Equal(t, "redis://env:6379", cfg.Cache.URL)
 	assert.Equal(t, "debug", cfg.Log.Level)
 	assert.Equal(t, 9090, cfg.Server.Port)
+	assert.True(t, cfg.Proxy.TrustForwardedHeaders)
 	assert.Equal(t, []string{"env-cookie-1", "env-cookie-2"}, cfg.Secrets.Cookie)
 	assert.Equal(t, []string{"env-cipher-1", "env-cipher-2"}, cfg.Secrets.Cipher)
 	assert.Equal(t, []string{"env-internal-1", "env-internal-2"}, cfg.Secrets.Internal)
+}
+
+func TestApplyEnvOverrides_FromFile(t *testing.T) {
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "database-url.txt")
+	cacheFile := filepath.Join(tempDir, "cache-url.txt")
+	cookieFile := filepath.Join(tempDir, "cookie-secrets.txt")
+	cipherFile := filepath.Join(tempDir, "cipher-secrets.txt")
+	internalFile := filepath.Join(tempDir, "internal-secrets.txt")
+
+	require.NoError(t, os.WriteFile(dbFile, []byte("postgres://file:pass@host/filedb?sslmode=require\n"), 0o600))
+	require.NoError(t, os.WriteFile(cacheFile, []byte("redis://cache:6379/0\n"), 0o600))
+	require.NoError(t, os.WriteFile(cookieFile, []byte("cookie-file-1,cookie-file-2\ncookie-file-3"), 0o600))
+	require.NoError(t, os.WriteFile(cipherFile, []byte("cipher-file-1\ncipher-file-2"), 0o600))
+	require.NoError(t, os.WriteFile(internalFile, []byte("internal-file-1,internal-file-2"), 0o600))
+
+	t.Setenv("AEGION_DATABASE_URL_FILE", dbFile)
+	t.Setenv("AEGION_CACHE_URL_FILE", cacheFile)
+	t.Setenv("AEGION_SECRETS_COOKIE_FILE", cookieFile)
+	t.Setenv("AEGION_SECRETS_CIPHER_FILE", cipherFile)
+	t.Setenv("AEGION_SECRETS_INTERNAL_FILE", internalFile)
+
+	cfg := &Config{}
+	require.NoError(t, applyEnvOverrides(cfg))
+
+	assert.Equal(t, "postgres://file:pass@host/filedb?sslmode=require", cfg.Database.URL)
+	assert.Equal(t, "redis://cache:6379/0", cfg.Cache.URL)
+	assert.Equal(t, []string{"cookie-file-1", "cookie-file-2", "cookie-file-3"}, cfg.Secrets.Cookie)
+	assert.Equal(t, []string{"cipher-file-1", "cipher-file-2"}, cfg.Secrets.Cipher)
+	assert.Equal(t, []string{"internal-file-1", "internal-file-2"}, cfg.Secrets.Internal)
+}
+
+func TestApplyEnvOverrides_EnvPrecedenceOverFile(t *testing.T) {
+	tempDir := t.TempDir()
+	dbFile := filepath.Join(tempDir, "database-url.txt")
+	cookieFile := filepath.Join(tempDir, "cookie-secrets.txt")
+
+	require.NoError(t, os.WriteFile(dbFile, []byte("postgres://file:pass@host/filedb?sslmode=require"), 0o600))
+	require.NoError(t, os.WriteFile(cookieFile, []byte("cookie-file-1,cookie-file-2"), 0o600))
+
+	t.Setenv("AEGION_DATABASE_URL", "postgres://env:pass@host/envdb?sslmode=require")
+	t.Setenv("AEGION_DATABASE_URL_FILE", dbFile)
+	t.Setenv("AEGION_SECRETS_COOKIE", "cookie-env-1,cookie-env-2")
+	t.Setenv("AEGION_SECRETS_COOKIE_FILE", cookieFile)
+
+	cfg := &Config{}
+	require.NoError(t, applyEnvOverrides(cfg))
+
+	assert.Equal(t, "postgres://env:pass@host/envdb?sslmode=require", cfg.Database.URL)
+	assert.Equal(t, []string{"cookie-env-1", "cookie-env-2"}, cfg.Secrets.Cookie)
+}
+
+func TestApplyEnvOverrides_InvalidFileReturnsError(t *testing.T) {
+	t.Setenv("AEGION_DATABASE_URL_FILE", filepath.Join(t.TempDir(), "missing-db-url.txt"))
+
+	cfg := &Config{}
+	err := applyEnvOverrides(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AEGION_DATABASE_URL_FILE")
 }
 
 func TestConfig_Validate(t *testing.T) {
@@ -536,7 +598,8 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 		},
 		Sessions: SessionsConfig{
 			Cookie: CookieConfig{
-				Secure: true,
+				Secure:   true,
+				HTTPOnly: true,
 			},
 		},
 		Log: LogConfig{
@@ -566,6 +629,15 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 				return &c
 			}(),
 			wantErr: "sessions.cookie.secure must be true in production",
+		},
+		{
+			name: "requires http_only session cookies",
+			cfg: func() *Config {
+				c := *valid
+				c.Sessions.Cookie.HTTPOnly = false
+				return &c
+			}(),
+			wantErr: "sessions.cookie.http_only must be true in production",
 		},
 		{
 			name: "rejects debug logging",
@@ -804,6 +876,7 @@ proxy:
   enabled: true
   upstream_timeout: 45s
   preserve_host: true
+  trust_forwarded_headers: true
   strip_inbound_identity_headers: true
   identity_signing_secret: test-signing-secret
   identity_signature_header: X-Test-Signature
@@ -826,6 +899,7 @@ proxy:
 	assert.True(t, cfg.Proxy.Enabled)
 	assert.Equal(t, Duration(45*time.Second), cfg.Proxy.UpstreamTimeout)
 	assert.True(t, cfg.Proxy.PreserveHost)
+	assert.True(t, cfg.Proxy.TrustForwardedHeaders)
 	assert.True(t, cfg.Proxy.StripInboundIdentityHeaders)
 	assert.Equal(t, "test-signing-secret", cfg.Proxy.IdentitySigningSecret)
 	assert.Equal(t, "X-Test-Signature", cfg.Proxy.IdentitySignatureHeader)

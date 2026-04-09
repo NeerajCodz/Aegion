@@ -290,6 +290,7 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 }
 
 func loadConfig(path string) (*Config, error) {
+	// #nosec G304 -- Config path is provided by trusted operator/CLI input.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -413,8 +414,8 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	var cfg Config
 
 	cfg.Database.URL = superCfg.Database.URL
-	cfg.Database.MaxConns = int32(superCfg.Database.MaxOpenConns)
-	cfg.Database.MinConns = int32(superCfg.Database.MaxIdleConns)
+	cfg.Database.MaxConns = safeInt32(superCfg.Database.MaxOpenConns)
+	cfg.Database.MinConns = safeInt32(superCfg.Database.MaxIdleConns)
 	cfg.Database.MaxIdleTime = superCfg.Database.ConnMaxIdleTime.Duration().String()
 
 	cfg.Server.Address = superCfg.Server.Host
@@ -444,6 +445,19 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	cfg.Log.Format = superCfg.Log.Format
 
 	return cfg
+}
+
+func safeInt32(value int) int32 {
+	const maxInt32 = int(^uint32(0) >> 1)
+	const minInt32 = -maxInt32 - 1
+	switch {
+	case value > maxInt32:
+		return int32(maxInt32)
+	case value < minInt32:
+		return int32(minInt32)
+	default:
+		return int32(value)
+	}
 }
 
 func setupLogger(logConfig LogConfig) {

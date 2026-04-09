@@ -253,7 +253,7 @@ password:
   hibp_enabled: true
   hibp_host: ${AEGION_PASSWORD_HIBP_HOST:-api.pwnedpasswords.com}
   hibp_timeout: ${AEGION_PASSWORD_HIBP_TIMEOUT:-5s}
-  hibp_ignore_network_errors: ${AEGION_PASSWORD_HIBP_IGNORE_NETWORK_ERRORS:-true}
+  hibp_ignore_network_errors: ${AEGION_PASSWORD_HIBP_IGNORE_NETWORK_ERRORS:-false}
   hibp_min_breach_count: ${AEGION_PASSWORD_HIBP_MIN_BREACH_COUNT:-1}
   history_count: 10
 
@@ -303,6 +303,7 @@ proxy:
   enabled: ${AEGION_PROXY_ENABLED:-false}
   upstream_timeout: ${AEGION_PROXY_UPSTREAM_TIMEOUT:-30s}
   preserve_host: ${AEGION_PROXY_PRESERVE_HOST:-true}
+  trust_forwarded_headers: ${AEGION_PROXY_TRUST_FORWARDED_HEADERS:-false}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Observability

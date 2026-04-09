@@ -28,6 +28,8 @@ import (
 const (
 	systemConfigKeyPolicy = "policy.settings"
 	systemConfigKeyProxy  = "proxy.settings"
+	adminModuleID         = "admin"
+	coreModuleID          = "core"
 )
 
 type runtimePolicySettings struct {
@@ -48,6 +50,7 @@ type runtimeProxySettings struct {
 	Enabled                     bool     `json:"enabled"`
 	UpstreamTimeout             string   `json:"upstream_timeout"`
 	PreserveHost                bool     `json:"preserve_host"`
+	TrustForwardedHeaders       bool     `json:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders bool     `json:"strip_inbound_identity_headers"`
 	IdentitySigningSecret       string   `json:"identity_signing_secret,omitempty"`
 	IdentitySignatureHeader     string   `json:"identity_signature_header"`
@@ -77,6 +80,7 @@ type runtimeProxySettingsResponse struct {
 	Enabled                     bool     `json:"enabled"`
 	UpstreamTimeout             string   `json:"upstream_timeout"`
 	PreserveHost                bool     `json:"preserve_host"`
+	TrustForwardedHeaders       bool     `json:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders bool     `json:"strip_inbound_identity_headers"`
 	IdentitySigningSecretSet    bool     `json:"identity_signing_secret_set"`
 	IdentitySignatureHeader     string   `json:"identity_signature_header"`
@@ -106,6 +110,7 @@ type runtimeProxySettingsPatch struct {
 	Enabled                     *bool     `json:"enabled"`
 	UpstreamTimeout             *string   `json:"upstream_timeout"`
 	PreserveHost                *bool     `json:"preserve_host"`
+	TrustForwardedHeaders       *bool     `json:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders *bool     `json:"strip_inbound_identity_headers"`
 	IdentitySigningSecret       *string   `json:"identity_signing_secret"`
 	IdentitySignatureHeader     *string   `json:"identity_signature_header"`
@@ -245,6 +250,7 @@ func setupAdminRoutes(r chi.Router, s *Server) {
 	r.Use(authtoken.Middleware(authtoken.MiddlewareConfig{
 		Generator: s.tokenGen,
 	}))
+	r.Use(authtoken.RequireModuleID(adminModuleID, coreModuleID))
 
 	// Admin API
 	r.Route("/api/v1", func(r chi.Router) {
@@ -715,6 +721,20 @@ func (s *Server) handleModuleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
+	moduleID := strings.TrimSpace(authtoken.ModuleIDFromContext(r.Context()))
+	if moduleID == "" {
+		writeError(w, http.StatusUnauthorized, "module not identified", nil)
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeError(w, http.StatusBadRequest, "module id is required", nil)
+		return
+	}
+	if req.ID != moduleID {
+		writeError(w, http.StatusForbidden, "module id mismatch", nil)
+		return
+	}
 
 	resp, err := s.registry.Register(req)
 	if err != nil {
@@ -736,6 +756,20 @@ func (s *Server) handleModuleDeregister(w http.ResponseWriter, r *http.Request) 
 	var req registry.DeregistrationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	moduleID := strings.TrimSpace(authtoken.ModuleIDFromContext(r.Context()))
+	if moduleID == "" {
+		writeError(w, http.StatusUnauthorized, "module not identified", nil)
+		return
+	}
+	req.ModuleID = strings.TrimSpace(req.ModuleID)
+	if req.ModuleID == "" {
+		writeError(w, http.StatusBadRequest, "module id is required", nil)
+		return
+	}
+	if req.ModuleID != moduleID {
+		writeError(w, http.StatusForbidden, "module id mismatch", nil)
 		return
 	}
 
@@ -788,6 +822,10 @@ func (s *Server) handleModuleHeartbeat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 	moduleID := chi.URLParam(r, "moduleId")
 	proxySettings, policySettings := s.moduleProxyRuntimeSettings(r.Context())
+	if !proxySettings.Enabled {
+		writeError(w, http.StatusServiceUnavailable, "module proxy disabled", nil)
+		return
+	}
 
 	checker := s.policyChecker
 	requirePolicy := policySettings.Enabled
@@ -810,6 +848,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		SessionSecret:               s.sessionSecretForProxy(),
 		Timeout:                     timeout,
 		PreserveHost:                proxySettings.PreserveHost,
+		TrustForwardedHeaders:       proxySettings.TrustForwardedHeaders,
 		StripInboundIdentityHeaders: proxySettings.StripInboundIdentityHeaders,
 		IdentitySigningSecret:       s.proxyIdentitySigningSecret(proxySettings.IdentitySigningSecret),
 		IdentitySignatureHeader:     proxySettings.IdentitySignatureHeader,
@@ -820,7 +859,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		Logger:                      s.log.With().Str("component", "module_proxy").Logger(),
 	})
 
-	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContext(r.Context(), r)))
+	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContextWithTrust(r.Context(), r, proxySettings.TrustForwardedHeaders)))
 }
 
 func (s *Server) moduleProxyRuntimeSettings(ctx context.Context) (runtimeProxySettings, runtimePolicySettings) {
@@ -878,7 +917,11 @@ func (s *Server) proxyIdentitySigningSecret(override string) []byte {
 }
 
 func withModuleProxyRequestContext(ctx context.Context, r *http.Request) context.Context {
-	ip := extractRequestIP(r)
+	return withModuleProxyRequestContextWithTrust(ctx, r, false)
+}
+
+func withModuleProxyRequestContextWithTrust(ctx context.Context, r *http.Request, trustForwardedHeaders bool) context.Context {
+	ip := extractRequestIPWithTrust(r, trustForwardedHeaders)
 	if ip == "" {
 		return ctx
 	}
@@ -886,20 +929,27 @@ func withModuleProxyRequestContext(ctx context.Context, r *http.Request) context
 }
 
 func extractRequestIP(r *http.Request) string {
+	return extractRequestIPWithTrust(r, false)
+}
+
+func extractRequestIPWithTrust(r *http.Request, trustForwardedHeaders bool) string {
 	if r == nil {
 		return ""
 	}
-	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			candidate := strings.TrimSpace(parts[0])
-			if candidate != "" {
-				return candidate
+
+	if trustForwardedHeaders {
+		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				candidate := strings.TrimSpace(parts[0])
+				if candidate != "" {
+					return candidate
+				}
 			}
 		}
-	}
-	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
+		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+			return xri
+		}
 	}
 	addr := strings.TrimSpace(r.RemoteAddr)
 	if addr == "" {
@@ -1905,6 +1955,7 @@ func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {
 	resp.Proxy.Enabled = proxySettings.Enabled
 	resp.Proxy.UpstreamTimeout = proxySettings.UpstreamTimeout
 	resp.Proxy.PreserveHost = proxySettings.PreserveHost
+	resp.Proxy.TrustForwardedHeaders = proxySettings.TrustForwardedHeaders
 	resp.Proxy.StripInboundIdentityHeaders = proxySettings.StripInboundIdentityHeaders
 	resp.Proxy.IdentitySigningSecretSet = strings.TrimSpace(proxySettings.IdentitySigningSecret) != ""
 	resp.Proxy.IdentitySignatureHeader = proxySettings.IdentitySignatureHeader
@@ -2081,6 +2132,7 @@ func defaultRuntimeProxySettings(cfg *platformconfig.Config) runtimeProxySetting
 
 	settings.Enabled = cfg.Proxy.Enabled
 	settings.PreserveHost = cfg.Proxy.PreserveHost
+	settings.TrustForwardedHeaders = cfg.Proxy.TrustForwardedHeaders
 	settings.StripInboundIdentityHeaders = cfg.Proxy.StripInboundIdentityHeaders
 	settings.IdentitySigningSecret = strings.TrimSpace(cfg.Proxy.IdentitySigningSecret)
 
@@ -2134,6 +2186,9 @@ func applyRuntimeProxyPatch(current runtimeProxySettings, patch *runtimeProxySet
 	}
 	if patch.PreserveHost != nil {
 		next.PreserveHost = *patch.PreserveHost
+	}
+	if patch.TrustForwardedHeaders != nil {
+		next.TrustForwardedHeaders = *patch.TrustForwardedHeaders
 	}
 	if patch.StripInboundIdentityHeaders != nil {
 		next.StripInboundIdentityHeaders = *patch.StripInboundIdentityHeaders
@@ -2343,14 +2398,12 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 }
 
 func writeError(w http.ResponseWriter, status int, message string, err error) {
+	_ = err // Avoid leaking internal error details in API responses.
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	resp := map[string]interface{}{
 		"error": message,
 		"code":  status,
-	}
-	if err != nil {
-		resp["details"] = err.Error()
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }

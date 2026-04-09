@@ -95,6 +95,14 @@ func TestRevocationService_RevokeToken(t *testing.T) {
 			Token:        "x",
 		})
 		assert.ErrorIs(t, err, ErrInvalidClient)
+
+		st.client.TokenEndpointAuthMethod = "client_secret_jwt"
+		err = svc.RevokeToken(ctx, &RevocationRequest{
+			ClientID:     "client-1",
+			ClientSecret: "expected-secret",
+			Token:        "x",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 
 	t.Run("access token revoke success", func(t *testing.T) {

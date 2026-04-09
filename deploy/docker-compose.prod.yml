@@ -78,18 +78,32 @@ services:
           memory: 256M
       replicas: 1
     environment:
+      # Ensure strict production validation is always enabled.
+      AEGION_ENV: production
       AEGION_LOG_LEVEL: info
       AEGION_LOG_FORMAT: json
       AEGION_DEBUG_PPROF: "false"
+      # Force database URL to come from a secrets file in production.
+      AEGION_DATABASE_URL: ""
+      AEGION_DATABASE_URL_FILE: /run/secrets/aegion_database_url
+      # Keep redis explicit in production (override if using external managed redis).
+      AEGION_CACHE_URL: ${AEGION_CACHE_URL:-redis://redis:6379/0}
+      # Prevent insecure fallback to plaintext env defaults from the base compose file.
+      AEGION_SECRETS_COOKIE: ""
+      AEGION_SECRETS_CIPHER: ""
+      AEGION_SECRETS_INTERNAL: ""
       # Secrets from files
       AEGION_SECRETS_COOKIE_FILE: /run/secrets/aegion_cookie_secret
       AEGION_SECRETS_CIPHER_FILE: /run/secrets/aegion_cipher_secret
       AEGION_SECRETS_INTERNAL_FILE: /run/secrets/aegion_internal_secret
     secrets:
+      - aegion_database_url
       - aegion_cookie_secret
       - aegion_cipher_secret
       - aegion_internal_secret
     volumes:
+      - ../configs/aegion.production.yaml:/config/aegion.yaml:ro
+      - ../configs/schemas:/config/schemas:ro
       - aegion-data:/data
     logging:
       driver: json-file
@@ -173,6 +187,31 @@ services:
         max-file: "5"
 
   # ─────────────────────────────────────────────────────────────────────────
+  # OAuth2 Module - Production
+  # ─────────────────────────────────────────────────────────────────────────
+  module-oauth2:
+    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-oauth2:${AEGION_VERSION}
+    # No exposed ports in production (accessed through core)
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    environment:
+      MODULE_LOG_LEVEL: info
+      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
+    secrets:
+      - aegion_internal_secret
+    logging:
+      driver: json-file
+      options:
+        max-size: "25m"
+        max-file: "5"
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Mailpit - Disabled in production
   # ─────────────────────────────────────────────────────────────────────────
   mailpit:
@@ -185,6 +224,8 @@ services:
 secrets:
   postgres_password:
     file: ./secrets/postgres_password.txt
+  aegion_database_url:
+    file: ./secrets/aegion_database_url.txt
   aegion_cookie_secret:
     file: ./secrets/aegion_cookie_secret.txt
   aegion_cipher_secret:

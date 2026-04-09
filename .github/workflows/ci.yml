@@ -12,9 +12,12 @@ on:
     branches: [main, beta]
 
 env:
-  GO_VERSION: '1.25.8'
+  GO_VERSION: '1.25.9'
   RUST_VERSION: 'stable'
   CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
 
 jobs:
   # ---------------------------------------------------------------------------

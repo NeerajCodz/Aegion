@@ -145,3 +145,127 @@ func TestCORSMiddlewareRejectsDisallowedOrigin(t *testing.T) {
 		t.Fatalf("expected disallowed origin to have no CORS headers, got %q", rec.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
+
+func TestCORSMiddlewareWildcardWithCredentialsRequiresExplicitOrigin(t *testing.T) {
+	cfg := CORSConfig{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST"},
+		AllowedHeaders:   []string{"Content-Type"},
+		AllowCredentials: true,
+	}
+
+	nextCalled := false
+	handler := CORS(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/resource", nil)
+	req.Header.Set("Origin", "https://evil.com")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatalf("expected next handler to run")
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected no CORS origin header when wildcard is used with credentials")
+	}
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("expected no credentials header when origin is not explicitly allowed")
+	}
+}
+
+func TestCORSMiddlewareWildcardWithoutCredentialsAllowsAnyOrigin(t *testing.T) {
+	cfg := CORSConfig{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST"},
+		AllowedHeaders:   []string{"Content-Type"},
+		AllowCredentials: false,
+	}
+
+	handler := CORS(cfg)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/resource", nil)
+	req.Header.Set("Origin", "https://anywhere.example")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("expected wildcard allow-origin header, got %q", rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("expected credentials header to be omitted for wildcard origin")
+	}
+}
+
+func TestGetClientIPWithTrustFalseIgnoresForwardedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
+	req.RemoteAddr = "192.0.2.9:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.7")
+	req.Header.Set("X-Real-IP", "198.51.100.3")
+
+	if got := getClientIPWithTrust(req, false); got != "192.0.2.9" {
+		t.Fatalf("expected remote address when proxy headers are not trusted, got %q", got)
+	}
+}
+
+func TestRateLimitMiddlewareDefaultDoesNotTrustForwardedHeaders(t *testing.T) {
+	handler := RateLimit(RateLimitConfig{
+		RequestsPerSecond: 1,
+		Burst:             1,
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req1.RemoteAddr = "192.0.2.1:1111"
+	req1.Header.Set("X-Forwarded-For", "198.51.100.10")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.RemoteAddr = "192.0.2.1:2222"
+	req2.Header.Set("X-Forwarded-For", "198.51.100.11")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected first request to pass, got %d", rec1.Code)
+	}
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second request to be rate limited by remote addr, got %d", rec2.Code)
+	}
+}
+
+func TestRateLimitMiddlewareTrustProxyUsesForwardedHeaders(t *testing.T) {
+	handler := RateLimitWithTrustProxy(RateLimitConfig{
+		RequestsPerSecond: 1,
+		Burst:             1,
+	}, true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req1.RemoteAddr = "192.0.2.1:1111"
+	req1.Header.Set("X-Forwarded-For", "198.51.100.10")
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.RemoteAddr = "192.0.2.1:2222"
+	req2.Header.Set("X-Forwarded-For", "198.51.100.11")
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected first request to pass, got %d", rec1.Code)
+	}
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected second request with distinct forwarded IP to pass, got %d", rec2.Code)
+	}
+}

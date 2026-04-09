@@ -58,25 +58,25 @@ git checkout <version-tag>  # e.g., v1.0.0
 # Copy and customize environment
 cp deploy/.env.example deploy/.env
 
-# Generate secure secrets
-export AEGION_SECRETS_COOKIE=$(openssl rand -base64 32 | head -c 32)
-export AEGION_SECRETS_CIPHER=$(openssl rand -base64 32 | head -c 32)
-export AEGION_SECRETS_INTERNAL=$(openssl rand -base64 32 | head -c 32)
+# Pin an immutable release tag (never use latest in production)
+sed -i 's/^AEGION_VERSION=.*/AEGION_VERSION=1.0.0/' deploy/.env
 
-# Update .env file
-sed -i "s/AEGION_SECRETS_COOKIE=.*/AEGION_SECRETS_COOKIE=$AEGION_SECRETS_COOKIE/" deploy/.env
-sed -i "s/AEGION_SECRETS_CIPHER=.*/AEGION_SECRETS_CIPHER=$AEGION_SECRETS_CIPHER/" deploy/.env
-sed -i "s/AEGION_SECRETS_INTERNAL=.*/AEGION_SECRETS_INTERNAL=$AEGION_SECRETS_INTERNAL/" deploy/.env
+# Store production secrets in files consumed by deploy/docker-compose.prod.yml
+mkdir -p deploy/secrets
+openssl rand -base64 48 | head -c 32 > deploy/secrets/aegion_cookie_secret.txt
+openssl rand -base64 48 | head -c 32 > deploy/secrets/aegion_cipher_secret.txt
+openssl rand -base64 48 | head -c 32 > deploy/secrets/aegion_internal_secret.txt
 
-# Configure database (use external managed DB recommended)
-# Edit deploy/.env:
-# DATABASE_URL=postgres://user:pass@db.example.com:5432/aegion?sslmode=require
-# CACHE_URL=redis://redis.example.com:6379/0
+# Production database URL must enforce TLS (sslmode=require or verify-full)
+printf '%s\n' 'postgres://user:pass@db.example.com:5432/aegion?sslmode=require' > deploy/secrets/aegion_database_url.txt
+
+# Restrict secret file permissions
+chmod 600 deploy/secrets/*.txt
 ```
 
 #### Step 3: Configure Module Set
 
-Edit `configs/aegion.yaml`:
+Edit `configs/aegion.production.yaml`:
 
 ```yaml
 # Production module configuration
@@ -226,8 +226,14 @@ curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stabl
 chmod +x kubectl
 sudo mv kubectl /usr/local/bin/
 
-# Install Helm
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# Install Helm (verify checksum; avoid curl-to-shell)
+HELM_VERSION=v3.16.3
+curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+curl -fsSLO "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
+sha256sum --check "helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
+tar -xzf "helm-${HELM_VERSION}-linux-amd64.tar.gz"
+sudo install linux-amd64/helm /usr/local/bin/helm
+rm -rf "helm-${HELM_VERSION}-linux-amd64.tar.gz" "helm-${HELM_VERSION}-linux-amd64.tar.gz.sha256sum" linux-amd64
 
 # Configure kubectl for your cluster
 # AWS EKS:

@@ -304,6 +304,7 @@ func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) (string, error) {
 		return "", err
 	}
 
+	// #nosec G124 -- CSRF cookie is intentionally readable by the SPA for double-submit protection.
 	http.SetCookie(w, &http.Cookie{
 		Name:     csrfCookieName,
 		Value:    token,
@@ -431,31 +432,48 @@ func (r *rateLimiter) cleanupLoop() {
 }
 
 func rateLimitKey(r *http.Request) string {
-	if identityID := strings.TrimSpace(r.Header.Get("X-Aegion-Session-Identity-ID")); identityID != "" {
-		return "id:" + identityID
+	if allowSessionIdentityHeaderAuth() {
+		if identityID := strings.TrimSpace(r.Header.Get("X-Aegion-Session-Identity-ID")); identityID != "" {
+			if _, err := uuid.Parse(identityID); err == nil {
+				return "id:" + identityID
+			}
+		}
 	}
 
 	return "ip:" + getClientIP(r)
 }
 
 func getClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
+	if r == nil {
+		return ""
+	}
+
+	if allowAdminForwardedHeaders() {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				if candidate := strings.TrimSpace(parts[0]); candidate != "" {
+					return candidate
+				}
+			}
+		}
+
+		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+			return xri
 		}
 	}
 
-	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-		return xri
+	addr := strings.TrimSpace(r.RemoteAddr)
+	if addr == "" {
+		return ""
 	}
 
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	host, _, err := net.SplitHostPort(addr)
 	if err == nil && host != "" {
 		return host
 	}
 
-	return r.RemoteAddr
+	return addr
 }
 
 func loadRateLimitConfig() (float64, int) {
@@ -474,6 +492,24 @@ func loadRateLimitConfig() (float64, int) {
 	}
 
 	return rps, burst
+}
+
+func allowSessionIdentityHeaderAuth() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowAdminForwardedHeaders() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func minFloat(a, b float64) float64 {

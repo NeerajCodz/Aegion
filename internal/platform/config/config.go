@@ -273,6 +273,7 @@ type ProxyConfig struct {
 	Enabled                     bool     `yaml:"enabled"`
 	UpstreamTimeout             Duration `yaml:"upstream_timeout"`
 	PreserveHost                bool     `yaml:"preserve_host"`
+	TrustForwardedHeaders       bool     `yaml:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders bool     `yaml:"strip_inbound_identity_headers"`
 	IdentitySigningSecret       string   `yaml:"identity_signing_secret"`
 	IdentitySignatureHeader     string   `yaml:"identity_signature_header"`
@@ -303,6 +304,7 @@ func (d Duration) Duration() time.Duration {
 
 // Load reads and parses the configuration file.
 func Load(path string) (*Config, error) {
+	// #nosec G304 -- Config path is operator-provided process input.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -320,7 +322,9 @@ func Load(path string) (*Config, error) {
 	applyDefaults(&cfg)
 
 	// Override with environment variables
-	applyEnvOverrides(&cfg)
+	if err := applyEnvOverrides(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to apply environment overrides: %w", err)
+	}
 
 	return &cfg, nil
 }
@@ -465,11 +469,15 @@ func applyDefaults(cfg *Config) {
 }
 
 // applyEnvOverrides overrides config with environment variables.
-func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("AEGION_DATABASE_URL"); v != "" {
+func applyEnvOverrides(cfg *Config) error {
+	if v, ok, err := readEnvOrFile("AEGION_DATABASE_URL"); err != nil {
+		return err
+	} else if ok {
 		cfg.Database.URL = v
 	}
-	if v := os.Getenv("AEGION_CACHE_URL"); v != "" {
+	if v, ok, err := readEnvOrFile("AEGION_CACHE_URL"); err != nil {
+		return err
+	} else if ok {
 		cfg.Cache.URL = v
 	}
 	if v := os.Getenv("AEGION_LOG_LEVEL"); v != "" {
@@ -480,16 +488,70 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Server.Port = port
 		}
 	}
-	// Cookie secrets from env (comma-separated)
-	if v := os.Getenv("AEGION_SECRETS_COOKIE"); v != "" {
-		cfg.Secrets.Cookie = strings.Split(v, ",")
+	if v := os.Getenv("AEGION_PROXY_TRUST_FORWARDED_HEADERS"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.Proxy.TrustForwardedHeaders = parsed
+		}
 	}
-	if v := os.Getenv("AEGION_SECRETS_CIPHER"); v != "" {
-		cfg.Secrets.Cipher = strings.Split(v, ",")
+	// Cookie secrets from env/file (comma- or newline-separated)
+	if v, ok, err := readEnvOrFile("AEGION_SECRETS_COOKIE"); err != nil {
+		return err
+	} else if ok {
+		cfg.Secrets.Cookie = splitSecretList(v)
 	}
-	if v := os.Getenv("AEGION_SECRETS_INTERNAL"); v != "" {
-		cfg.Secrets.Internal = strings.Split(v, ",")
+	if v, ok, err := readEnvOrFile("AEGION_SECRETS_CIPHER"); err != nil {
+		return err
+	} else if ok {
+		cfg.Secrets.Cipher = splitSecretList(v)
 	}
+	if v, ok, err := readEnvOrFile("AEGION_SECRETS_INTERNAL"); err != nil {
+		return err
+	} else if ok {
+		cfg.Secrets.Internal = splitSecretList(v)
+	}
+
+	return nil
+}
+
+func readEnvOrFile(key string) (string, bool, error) {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value, true, nil
+	}
+
+	fileKey := key + "_FILE"
+	filePath := strings.TrimSpace(os.Getenv(fileKey))
+	if filePath == "" {
+		return "", false, nil
+	}
+
+	// #nosec G304,G703 -- _FILE env paths are controlled by trusted deployment configuration.
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", false, fmt.Errorf("%s points to unreadable file %q: %w", fileKey, filePath, err)
+	}
+
+	value := strings.TrimSpace(string(data))
+	if value == "" {
+		return "", false, fmt.Errorf("%s points to empty file %q", fileKey, filePath)
+	}
+
+	return value, true, nil
+}
+
+func splitSecretList(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r'
+	})
+
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
 }
 
 // Validate checks that the configuration is valid.
@@ -538,6 +600,9 @@ func (c *Config) Validate() error {
 	}
 	if !c.Sessions.Cookie.Secure {
 		return fmt.Errorf("sessions.cookie.secure must be true in production")
+	}
+	if !c.Sessions.Cookie.HTTPOnly {
+		return fmt.Errorf("sessions.cookie.http_only must be true in production")
 	}
 	if strings.EqualFold(strings.TrimSpace(c.Log.Format), "text") {
 		return fmt.Errorf("log.format must be json in production")

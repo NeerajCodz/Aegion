@@ -160,6 +160,13 @@ func TestClientCredentialsService_IssueClientCredentials(t *testing.T) {
 			Scope:        "read",
 		})
 		require.NoError(t, err)
+
+		st.client.TokenEndpointAuthMethod = "private_key_jwt"
+		_, err = svc.IssueClientCredentials(ctx, &ClientCredentialsRequest{
+			ClientID: "client-1",
+			Scope:    "read",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 
 	t.Run("sign and store errors", func(t *testing.T) {
@@ -250,6 +257,17 @@ func TestJWTBearerService_IssueJWTBearer(t *testing.T) {
 		validator.err = errors.New("bad assertion")
 		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{ClientID: "x", Assertion: "assertion"})
 		assert.ErrorIs(t, err, validator.err)
+
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+		require.NoError(t, hashErr)
+		st.client.TokenEndpointAuthMethod = "client_secret_jwt"
+		st.client.SecretHash = ptrString(string(hash))
+		validator.err = nil
+		_, err = svc.IssueJWTBearer(ctx, &JWTBearerRequest{
+			ClientID:  "x",
+			Assertion: "assertion",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 
 	t.Run("scope must be allowed by client", func(t *testing.T) {

@@ -43,6 +43,8 @@ type ModuleProxyConfig struct {
 	SessionSecret []byte
 	Timeout       time.Duration
 	PreserveHost  bool
+	// TrustForwardedHeaders controls whether inbound X-Forwarded-* headers are trusted.
+	TrustForwardedHeaders bool
 
 	StripInboundIdentityHeaders bool
 	IdentitySigningSecret       []byte
@@ -394,33 +396,67 @@ func (p *ModuleProxy) canonicalIdentityHeaders(req *http.Request) string {
 
 // addForwardedHeaders adds X-Forwarded-* headers.
 func (p *ModuleProxy) addForwardedHeaders(req, originalReq *http.Request) {
-	clientIP := originalReq.RemoteAddr
-	if host, _, err := net.SplitHostPort(strings.TrimSpace(originalReq.RemoteAddr)); err == nil {
-		clientIP = strings.Trim(host, "[]")
+	if req == nil || originalReq == nil {
+		return
 	}
-	if clientIP == "" {
+
+	clientIP := remoteIPFromAddr(originalReq.RemoteAddr)
+	if clientIP == "" && p.config.TrustForwardedHeaders {
 		clientIP = getClientIP(originalReq)
 	}
 
-	if prior := originalReq.Header.Get("X-Forwarded-For"); prior != "" {
-		req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
+	if p.config.TrustForwardedHeaders {
+		if prior := strings.TrimSpace(originalReq.Header.Get("X-Forwarded-For")); prior != "" {
+			if clientIP != "" {
+				req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
+			} else {
+				req.Header.Set("X-Forwarded-For", prior)
+			}
+		} else if clientIP != "" {
+			req.Header.Set("X-Forwarded-For", clientIP)
+		}
+
+		if proto := strings.TrimSpace(originalReq.Header.Get("X-Forwarded-Proto")); proto != "" {
+			req.Header.Set("X-Forwarded-Proto", proto)
+		} else if originalReq.TLS != nil {
+			req.Header.Set("X-Forwarded-Proto", "https")
+		} else {
+			req.Header.Set("X-Forwarded-Proto", "http")
+		}
+
+		if host := strings.TrimSpace(originalReq.Header.Get("X-Forwarded-Host")); host != "" {
+			req.Header.Set("X-Forwarded-Host", host)
+		} else {
+			req.Header.Set("X-Forwarded-Host", originalReq.Host)
+		}
+		return
+	}
+
+	if clientIP == "" {
+		req.Header.Del("X-Forwarded-For")
 	} else {
 		req.Header.Set("X-Forwarded-For", clientIP)
 	}
 
-	if proto := originalReq.Header.Get("X-Forwarded-Proto"); proto != "" {
-		req.Header.Set("X-Forwarded-Proto", proto)
-	} else if originalReq.TLS != nil {
+	if originalReq.TLS != nil {
 		req.Header.Set("X-Forwarded-Proto", "https")
 	} else {
 		req.Header.Set("X-Forwarded-Proto", "http")
 	}
 
-	if host := originalReq.Header.Get("X-Forwarded-Host"); host != "" {
-		req.Header.Set("X-Forwarded-Host", host)
-	} else {
-		req.Header.Set("X-Forwarded-Host", originalReq.Host)
+	req.Header.Set("X-Forwarded-Host", originalReq.Host)
+}
+
+func remoteIPFromAddr(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if remoteAddr == "" {
+		return ""
 	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err == nil {
+		return strings.Trim(host, "[]")
+	}
+	return strings.Trim(remoteAddr, "[]")
 }
 
 // getModuleEndpoint retrieves the HTTP endpoint for a module.

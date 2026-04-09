@@ -489,8 +489,13 @@ func authenticateClient(client *store.Client, clientSecret string) error {
 		return ErrInvalidClient
 	}
 
-	if client.TokenEndpointAuthMethod != "client_secret_basic" && client.TokenEndpointAuthMethod != "client_secret_post" {
+	switch client.TokenEndpointAuthMethod {
+	case "", "none":
 		return nil
+	case "client_secret_basic", "client_secret_post":
+		// continue
+	default:
+		return ErrInvalidClient
 	}
 
 	if client.SecretHash == nil || strings.TrimSpace(*client.SecretHash) == "" {

@@ -198,6 +198,16 @@ func TestWriteJSONAndWriteError(t *testing.T) {
 	if errBody["error"] != "bad request" {
 		t.Fatalf("expected error message, got %v", errBody["error"])
 	}
+
+	rec = httptest.NewRecorder()
+	writeError(rec, http.StatusInternalServerError, "internal error", errors.New("database connection string leaked"))
+	errBody = map[string]interface{}{}
+	if err := json.NewDecoder(rec.Body).Decode(&errBody); err != nil {
+		t.Fatalf("failed to decode writeError body: %v", err)
+	}
+	if _, ok := errBody["details"]; ok {
+		t.Fatalf("expected writeError to avoid exposing internal error details")
+	}
 }
 
 func TestCORSMiddleware(t *testing.T) {
@@ -257,6 +267,49 @@ func TestCORSMiddleware(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareWildcardOriginWithCredentialsDoesNotReflectOrigin(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.Server.CORS.AllowedOrigins = []string{"*"}
+	s.cfg.Server.CORS.AllowCredentials = true
+
+	nextCalled := false
+	handler := s.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/sessions/whoami", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected preflight %d, got %d", http.StatusNoContent, rec.Code)
+	}
+	if nextCalled {
+		t.Fatalf("expected next handler not to be called on preflight")
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected no allow-origin header when credentials are enabled with wildcard origin")
+	}
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+		t.Fatalf("expected no allow-credentials header when origin is not explicitly allowed")
+	}
+
+	nextCalled = false
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/sessions/whoami", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !nextCalled {
+		t.Fatalf("expected next handler to be called for non-preflight request")
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected no allow-origin header for non-explicit origin")
+	}
+}
+
 func TestModuleHandlers(t *testing.T) {
 	s := newTestServer(t)
 
@@ -270,6 +323,7 @@ func TestModuleHandlers(t *testing.T) {
 			},
 			HealthURL: "http://localhost:9000/health",
 		}))
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "password"))
 		rec := httptest.NewRecorder()
 		s.handleModuleRegister(rec, req)
 		if rec.Code != http.StatusCreated {
@@ -304,6 +358,7 @@ func TestModuleHandlers(t *testing.T) {
 			ID:      "invalid-module",
 			Version: "v1.0.0",
 		}))
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "invalid-module"))
 		rec = httptest.NewRecorder()
 		s.handleModuleRegister(rec, req)
 		if rec.Code != http.StatusBadRequest {
@@ -319,10 +374,44 @@ func TestModuleHandlers(t *testing.T) {
 			},
 			HealthURL: "http://localhost:9000/health",
 		}))
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "password"))
 		rec = httptest.NewRecorder()
 		s.handleModuleRegister(rec, req)
 		if rec.Code != http.StatusConflict {
 			t.Fatalf("expected %d, got %d", http.StatusConflict, rec.Code)
+		}
+	})
+
+	t.Run("register enforces module identity", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/internal/registry/register", mustJSONBody(t, registry.RegistrationRequest{
+			ID:      "password",
+			Name:    "password",
+			Version: "v1.0.0",
+			Endpoints: []registry.Endpoint{
+				{Type: registry.EndpointHTTP, URL: "http://localhost:9000"},
+			},
+			HealthURL: "http://localhost:9000/health",
+		}))
+		rec := httptest.NewRecorder()
+		s.handleModuleRegister(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+
+		req = httptest.NewRequest(http.MethodPost, "/internal/registry/register", mustJSONBody(t, registry.RegistrationRequest{
+			ID:      "password",
+			Name:    "password",
+			Version: "v1.0.0",
+			Endpoints: []registry.Endpoint{
+				{Type: registry.EndpointHTTP, URL: "http://localhost:9000"},
+			},
+			HealthURL: "http://localhost:9000/health",
+		}))
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "magic_link"))
+		rec = httptest.NewRecorder()
+		s.handleModuleRegister(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
 		}
 	})
 
@@ -337,6 +426,17 @@ func TestModuleHandlers(t *testing.T) {
 		req = httptest.NewRequest(http.MethodPost, "/internal/registry/deregister", mustJSONBody(t, registry.DeregistrationRequest{
 			ModuleID: "password",
 		}))
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "magic_link"))
+		rec = httptest.NewRecorder()
+		s.handleModuleDeregister(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
+		}
+
+		req = httptest.NewRequest(http.MethodPost, "/internal/registry/deregister", mustJSONBody(t, registry.DeregistrationRequest{
+			ModuleID: "password",
+		}))
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "password"))
 		rec = httptest.NewRecorder()
 		s.handleModuleDeregister(rec, req)
 		if rec.Code != http.StatusOK {
@@ -347,6 +447,7 @@ func TestModuleHandlers(t *testing.T) {
 		req = httptest.NewRequest(http.MethodPost, "/internal/registry/deregister", mustJSONBody(t, registry.DeregistrationRequest{
 			ModuleID: "password",
 		}))
+		req = req.WithContext(context.WithValue(req.Context(), authtoken.ContextKeyModuleID, "password"))
 		s.handleModuleDeregister(rec, req)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
@@ -394,6 +495,18 @@ func TestModuleHandlers(t *testing.T) {
 func TestModuleProxyHandler(t *testing.T) {
 	s := newTestServer(t)
 
+	t.Run("proxy disabled", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/missing/anything", nil)
+		req = withURLParam(req, "moduleId", "missing")
+		rec := httptest.NewRecorder()
+		s.handleModuleProxy(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	s.cfg.Proxy.Enabled = true
+
 	t.Run("module not found", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/missing/anything", nil)
 		req = withURLParam(req, "moduleId", "missing")
@@ -436,10 +549,16 @@ func TestModuleProxyHandler(t *testing.T) {
 		var upstreamHost string
 		var upstreamUserID string
 		var upstreamSignature string
+		var upstreamForwardedFor string
+		var upstreamForwardedProto string
+		var upstreamForwardedHost string
 		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			upstreamHost = r.Host
 			upstreamUserID = r.Header.Get("X-User-ID")
 			upstreamSignature = r.Header.Get("X-Aegion-Signature")
+			upstreamForwardedFor = r.Header.Get("X-Forwarded-For")
+			upstreamForwardedProto = r.Header.Get("X-Forwarded-Proto")
+			upstreamForwardedHost = r.Header.Get("X-Forwarded-Host")
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte("proxied"))
 		}))
@@ -449,6 +568,10 @@ func TestModuleProxyHandler(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/proxy-ok/path", nil)
 		req.Host = "gateway.example.test"
+		req.RemoteAddr = "198.51.100.25:1234"
+		req.Header.Set("X-Forwarded-For", "203.0.113.10")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "spoofed.example")
 		req.Header.Set("X-User-ID", "spoofed-user")
 		req = req.WithContext(session.WithSession(req.Context(), &session.Session{
 			ID:         uuid.New(),
@@ -474,6 +597,58 @@ func TestModuleProxyHandler(t *testing.T) {
 		}
 		if upstreamSignature == "" {
 			t.Fatalf("expected signed identity header to be injected")
+		}
+		if upstreamForwardedFor != "198.51.100.25, 198.51.100.25" {
+			t.Fatalf("expected sanitized X-Forwarded-For, got %q", upstreamForwardedFor)
+		}
+		if upstreamForwardedProto != "http" {
+			t.Fatalf("expected sanitized X-Forwarded-Proto, got %q", upstreamForwardedProto)
+		}
+		if upstreamForwardedHost != "gateway.example.test" {
+			t.Fatalf("expected sanitized X-Forwarded-Host, got %q", upstreamForwardedHost)
+		}
+	})
+
+	t.Run("proxy can trust forwarded headers when explicitly enabled", func(t *testing.T) {
+		s.cfg.Proxy.TrustForwardedHeaders = true
+		defer func() {
+			s.cfg.Proxy.TrustForwardedHeaders = false
+		}()
+
+		var upstreamForwardedFor string
+		var upstreamForwardedProto string
+		var upstreamForwardedHost string
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstreamForwardedFor = r.Header.Get("X-Forwarded-For")
+			upstreamForwardedProto = r.Header.Get("X-Forwarded-Proto")
+			upstreamForwardedHost = r.Header.Get("X-Forwarded-Host")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("proxied"))
+		}))
+		defer target.Close()
+
+		registerTestModule(t, s, "proxy-trust-headers", registry.EndpointHTTP, target.URL)
+
+		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/proxy-trust-headers/path", nil)
+		req.RemoteAddr = "198.51.100.30:4567"
+		req.Header.Set("X-Forwarded-For", "203.0.113.10")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", "gateway.example.com")
+		req = withURLParam(req, "moduleId", "proxy-trust-headers")
+
+		rec := httptest.NewRecorder()
+		s.handleModuleProxy(rec, req)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("expected %d, got %d", http.StatusAccepted, rec.Code)
+		}
+		if upstreamForwardedFor != "203.0.113.10, 198.51.100.30, 198.51.100.30" {
+			t.Fatalf("expected trusted forwarded-for chain, got %q", upstreamForwardedFor)
+		}
+		if upstreamForwardedProto != "https" {
+			t.Fatalf("expected trusted forwarded proto, got %q", upstreamForwardedProto)
+		}
+		if upstreamForwardedHost != "gateway.example.com" {
+			t.Fatalf("expected trusted forwarded host, got %q", upstreamForwardedHost)
 		}
 	})
 
@@ -707,7 +882,7 @@ func TestSetupRoutes_InternalAuthAndAdminMount(t *testing.T) {
 		s2.cfg.Admin.Enabled = true
 		router2 := SetupRoutes(s2)
 
-		token, err := s2.tokenGen.Generate("module-admin")
+		token, err := s2.tokenGen.Generate("admin")
 		if err != nil {
 			t.Fatalf("failed to generate token: %v", err)
 		}
@@ -718,6 +893,25 @@ func TestSetupRoutes_InternalAuthAndAdminMount(t *testing.T) {
 		router2.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("admin route rejects non-admin module token", func(t *testing.T) {
+		s2 := newTestServer(t)
+		s2.cfg.Admin.Enabled = true
+		router2 := SetupRoutes(s2)
+
+		token, err := s2.tokenGen.Generate("password")
+		if err != nil {
+			t.Fatalf("failed to generate token: %v", err)
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/aegion/api/v1/system/health", nil)
+		req.Header.Set(authtoken.HeaderInternalToken, token)
+		router2.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected %d, got %d", http.StatusForbidden, rec.Code)
 		}
 	})
 }
@@ -1694,6 +1888,9 @@ func TestHandleAdminGetConfig_DefaultsWithoutDB(t *testing.T) {
 	if proxy["identity_signing_secret_set"] != false {
 		t.Fatalf("expected identity_signing_secret_set=false, got %v", proxy["identity_signing_secret_set"])
 	}
+	if proxy["trust_forwarded_headers"] != false {
+		t.Fatalf("expected trust_forwarded_headers=false by default, got %v", proxy["trust_forwarded_headers"])
+	}
 }
 
 func TestHandleAdminUpdateConfig_ValidationAndDBErrors(t *testing.T) {
@@ -1742,8 +1939,8 @@ func TestHandleAdminUpdateConfig_ValidationAndDBErrors(t *testing.T) {
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
 		}
-		if !strings.Contains(rec.Body.String(), "database unavailable") {
-			t.Fatalf("expected database unavailable error, got %q", rec.Body.String())
+		if !strings.Contains(rec.Body.String(), "failed to persist policy runtime config") {
+			t.Fatalf("expected generic persistence error, got %q", rec.Body.String())
 		}
 	})
 
@@ -1763,8 +1960,8 @@ func TestHandleAdminUpdateConfig_ValidationAndDBErrors(t *testing.T) {
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
 		}
-		if !strings.Contains(rec.Body.String(), "database unavailable") {
-			t.Fatalf("expected database unavailable error, got %q", rec.Body.String())
+		if !strings.Contains(rec.Body.String(), "failed to persist policy runtime config") {
+			t.Fatalf("expected generic persistence error, got %q", rec.Body.String())
 		}
 	})
 }
