@@ -5,6 +5,7 @@ import {
   Activity,
   AlertCircle,
   ArrowRight,
+  ExternalLink,
   Gauge,
   HeartPulse,
   Server,
@@ -101,6 +102,13 @@ export function Dashboard() {
     refetchInterval: 30000,
   })
 
+  const observabilityQuery = useQuery({
+    queryKey: ["dashboard-observability"],
+    queryFn: dashboardApi.getObservability,
+    staleTime: 15000,
+    refetchInterval: 30000,
+  })
+
   const recentIdentitiesQuery = useQuery({
     queryKey: ["dashboard-recent-identities"],
     queryFn: () => identitiesApi.list({ page: 1, per_page: 6 }),
@@ -127,6 +135,7 @@ export function Dashboard() {
   const recentSessions = recentSessionsQuery.data?.data ?? []
   const operators = operatorsQuery.data?.data ?? []
   const healthChecks = healthQuery.data ?? []
+  const observabilityChecks = observabilityQuery.data ?? []
 
   const totalIdentities = stats?.total_identities ?? 0
   const activeSessions = stats?.active_sessions ?? 0
@@ -208,6 +217,7 @@ export function Dashboard() {
   const adminOperators = operators.filter((item) => item.role === "admin").length
   const healthyChecks = healthChecks.filter((item) => item.status === "healthy").length
   const unhealthyChecks = healthChecks.filter((item) => item.status !== "healthy").length
+  const healthyObservabilityChecks = observabilityChecks.filter((item) => item.status === "healthy").length
 
   const observabilityRows = [
     {
@@ -229,6 +239,14 @@ export function Dashboard() {
       metric: "Operator Availability",
       value: `${activeOperators}/${totalOperators}`,
       trend: `${adminOperators} admins on duty`,
+    },
+    {
+      metric: "Observability Stack",
+      value:
+        observabilityChecks.length > 0
+          ? `${healthyObservabilityChecks}/${observabilityChecks.length}`
+          : "Disabled",
+      trend: observabilityQuery.error ? "Probe fetch failed" : "Grafana, Prometheus, Tempo, Loki",
     },
   ]
 
@@ -501,6 +519,63 @@ export function Dashboard() {
                   ))}
                 </TableBody>
               </Table>
+
+              <Separator className="my-6" />
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Integrated Observability Stack</p>
+                  {observabilityQuery.error && <Badge variant="warning">Probe fetch failed</Badge>}
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Service</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Latency</TableHead>
+                      <TableHead>Endpoint</TableHead>
+                      <TableHead className="text-right">Message</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {observabilityChecks.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          Observability probes are disabled or unavailable.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      observabilityChecks.map((check) => (
+                        <TableRow key={check.key}>
+                          <TableCell className="font-medium">{check.label}</TableCell>
+                          <TableCell>
+                            <Badge variant={healthStatusVariant(check.status)}>{check.status}</Badge>
+                          </TableCell>
+                          <TableCell>{check.response_time_ms} ms</TableCell>
+                          <TableCell>
+                            {check.url ? (
+                              <a
+                                href={check.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                              >
+                                Open
+                                <ExternalLink className="size-3" />
+                              </a>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="max-w-48 truncate text-right text-muted-foreground">
+                            {check.message}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
 
               <div className="mt-6 rounded-lg border bg-muted/30 p-4">
                 <div className="flex items-center gap-2 text-sm font-medium">

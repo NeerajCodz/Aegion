@@ -25,6 +25,13 @@ The admin module is configured through YAML files and environment variables.
 | `AEGION_LOG_PRETTY` | Enable pretty logging | `false` |
 | `AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH` | Allow trusted legacy `X-Aegion-Session-Identity-ID` header auth | `false` |
 | `AEGION_ADMIN_TRUST_FORWARDED_HEADERS` | Trust `X-Forwarded-For` and `X-Real-IP` for client IP derivation | `false` |
+| `AEGION_ADMIN_OBSERVABILITY_ENABLED` | Enable dashboard observability backend probes | `false` |
+| `AEGION_ADMIN_OBSERVABILITY_PROBE_TIMEOUT` | Probe timeout duration (Go duration format) | `5s` |
+| `AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL` | OTel collector health URL | `http://otel-collector:13133` |
+| `AEGION_ADMIN_OBS_PROMETHEUS_URL` | Prometheus health URL | `http://prometheus:9090/-/healthy` |
+| `AEGION_ADMIN_OBS_GRAFANA_URL` | Grafana health URL | `http://grafana:3000/api/health` |
+| `AEGION_ADMIN_OBS_TEMPO_URL` | Tempo readiness URL | `http://tempo:3200/ready` |
+| `AEGION_ADMIN_OBS_LOKI_URL` | Loki readiness URL | `http://loki:3100/ready` |
 
 ### Configuration File Structure
 
@@ -50,6 +57,16 @@ admin:
 core:
   service_url: "${AEGION_CORE_URL:-http://localhost:8080}"
   api_key: "${AEGION_CORE_API_KEY}"
+
+observability:
+  enabled: false
+  probe_timeout: 5s
+  endpoints:
+    otel_collector: "${AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL:-http://otel-collector:13133}"
+    prometheus: "${AEGION_ADMIN_OBS_PROMETHEUS_URL:-http://prometheus:9090/-/healthy}"
+    grafana: "${AEGION_ADMIN_OBS_GRAFANA_URL:-http://grafana:3000/api/health}"
+    tempo: "${AEGION_ADMIN_OBS_TEMPO_URL:-http://tempo:3200/ready}"
+    loki: "${AEGION_ADMIN_OBS_LOKI_URL:-http://loki:3100/ready}"
 
 log:
   level: "info"  # debug, info, warn, error
