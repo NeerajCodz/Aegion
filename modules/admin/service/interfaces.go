@@ -24,6 +24,10 @@ type Store interface {
 
 	ListRoles(ctx context.Context, opts store.ListOptions) ([]*store.Role, int64, error)
 	GetRoleByName(ctx context.Context, name string) (*store.Role, error)
+	CreateRole(ctx context.Context, role *store.Role) error
+	UpdateRole(ctx context.Context, role *store.Role) error
+	DeleteRole(ctx context.Context, id uuid.UUID) error
+	CountOperatorsByRole(ctx context.Context, role string) (int64, error)
 
 	ListAuditLogs(ctx context.Context, filter store.AuditFilter, opts store.ListOptions) ([]*store.AuditLogEntry, int64, error)
 	LogAction(ctx context.Context, entry *store.AuditLogEntry) error

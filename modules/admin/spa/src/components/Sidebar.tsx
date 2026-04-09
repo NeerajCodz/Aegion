@@ -4,11 +4,13 @@ import {
   Users,
   Activity,
   Shield,
+  KeyRound,
   Settings,
   LogOut,
   X,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { operatorHasPermission } from '../lib/permissions';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -16,15 +18,19 @@ interface SidebarProps {
 }
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Identities', href: '/identities', icon: Users },
-  { name: 'Sessions', href: '/sessions', icon: Activity },
-  { name: 'Operators', href: '/operators', icon: Shield },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, permission: 'audit:read' },
+  { name: 'Identities', href: '/identities', icon: Users, permission: 'identities:read' },
+  { name: 'Sessions', href: '/sessions', icon: Activity, permission: 'sessions:read' },
+  { name: 'Operators', href: '/operators', icon: Shield, permission: 'operators:read' },
+  { name: 'Roles', href: '/roles', icon: KeyRound, permission: 'roles:read' },
+  { name: 'Settings', href: '/settings', icon: Settings, permission: 'config:read' },
 ];
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { operator, logout } = useAuth();
+  const visibleNavigation = navigation.filter((item) =>
+    operatorHasPermission(operator, item.permission)
+  );
 
   return (
     <>
@@ -63,7 +69,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-            {navigation.map((item) => (
+            {visibleNavigation.map((item) => (
               <NavLink
                 key={item.name}
                 to={item.href}

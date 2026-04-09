@@ -33,6 +33,7 @@ type Service interface {
 	Store() service.Store
 	EvaluateCapability(ctx context.Context, operatorID uuid.UUID, permission string) error
 	GetOperatorByIdentityID(ctx context.Context, identityID uuid.UUID) (*store.Operator, error)
+	GetEffectivePermissions(ctx context.Context, operatorID uuid.UUID) ([]string, error)
 	ListOperators(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Operator, int64, error)
 	GetOperator(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID) (*store.Operator, error)
 	CreateOperator(ctx context.Context, actorID uuid.UUID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error)
@@ -40,6 +41,10 @@ type Service interface {
 	DeleteOperator(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID, ipAddress string) error
 	ListRoles(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Role, int64, error)
 	GetRole(ctx context.Context, actorID uuid.UUID, name string) (*store.Role, error)
+	CreateRole(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error)
+	UpdateRole(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error)
+	DeleteRole(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error
+	AvailablePermissions() []string
 	ListAuditLogs(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error)
 }
 
@@ -68,15 +73,16 @@ func DefaultHandlerConfig() HandlerConfig {
 
 // OperatorView is the API representation used by auth and operator endpoints.
 type OperatorView struct {
-	ID          string                 `json:"id"`
-	Email       string                 `json:"email"`
-	Name        string                 `json:"name"`
-	Role        string                 `json:"role"`
-	Status      string                 `json:"status"`
-	Permissions map[string]interface{} `json:"permissions,omitempty"`
-	CreatedAt   string                 `json:"created_at"`
-	UpdatedAt   string                 `json:"updated_at"`
-	LastLoginAt *string                `json:"last_login_at,omitempty"`
+	ID                   string                 `json:"id"`
+	Email                string                 `json:"email"`
+	Name                 string                 `json:"name"`
+	Role                 string                 `json:"role"`
+	Status               string                 `json:"status"`
+	Permissions          map[string]interface{} `json:"permissions,omitempty"`
+	EffectivePermissions []string               `json:"effective_permissions,omitempty"`
+	CreatedAt            string                 `json:"created_at"`
+	UpdatedAt            string                 `json:"updated_at"`
+	LastLoginAt          *string                `json:"last_login_at,omitempty"`
 }
 
 // DashboardStatsResponse powers the admin dashboard widgets.
@@ -195,7 +201,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		// Roles
 		r.Route("/roles", func(r chi.Router) {
 			r.With(RequirePermission(h, service.PermRolesRead)).Get("/", h.ListRoles)
+			r.With(RequirePermission(h, service.PermRolesRead)).Get("/permissions", h.ListPermissions)
+			r.With(RequirePermission(h, service.PermRolesCreate)).Post("/", h.CreateRole)
 			r.With(RequirePermission(h, service.PermRolesRead)).Get("/{name}", h.GetRole)
+			r.With(RequirePermission(h, service.PermRolesUpdate)).Patch("/{name}", h.UpdateRole)
+			r.With(RequirePermission(h, service.PermRolesDelete)).Delete("/{name}", h.DeleteRole)
 		})
 
 		// Dashboard and system settings

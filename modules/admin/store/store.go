@@ -339,6 +339,15 @@ func (s *Store) DeleteOperator(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// CountOperatorsByRole returns the number of operators assigned to a role.
+func (s *Store) CountOperatorsByRole(ctx context.Context, role string) (int64, error) {
+	var count int64
+	if err := s.db.QueryRow(ctx, "SELECT COUNT(*) FROM adm_operators WHERE role = $1", role).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // ListOperators retrieves all operators with pagination.
 func (s *Store) ListOperators(ctx context.Context, opts ListOptions) ([]*Operator, int64, error) {
 	var totalCount int64
@@ -350,9 +359,18 @@ func (s *Store) ListOperators(ctx context.Context, opts ListOptions) ([]*Operato
 	if opts.Limit <= 0 {
 		opts.Limit = 10
 	}
-	if opts.Sort == "" {
-		opts.Sort = "created_at DESC"
-	}
+	opts.Sort = safeSortExpression(
+		opts.Sort,
+		"created_at DESC",
+		map[string]string{
+			"created_at desc": "created_at DESC",
+			"created_at asc":  "created_at ASC",
+			"updated_at desc": "updated_at DESC",
+			"updated_at asc":  "updated_at ASC",
+			"role asc":        "role ASC",
+			"role desc":       "role DESC",
+		},
+	)
 
 	rows, err := s.db.Query(ctx, `
 		SELECT id, identity_id, role, permissions, created_at, updated_at
@@ -535,9 +553,19 @@ func (s *Store) ListRoles(ctx context.Context, opts ListOptions) ([]*Role, int64
 	if opts.Limit <= 0 {
 		opts.Limit = 10
 	}
-	if opts.Sort == "" {
-		opts.Sort = "is_system DESC, name ASC"
-	}
+	opts.Sort = safeSortExpression(
+		opts.Sort,
+		"is_system DESC, name ASC",
+		map[string]string{
+			"is_system desc, name asc": "is_system DESC, name ASC",
+			"name asc":                 "name ASC",
+			"name desc":                "name DESC",
+			"created_at desc":          "created_at DESC",
+			"created_at asc":           "created_at ASC",
+			"updated_at desc":          "updated_at DESC",
+			"updated_at asc":           "updated_at ASC",
+		},
+	)
 
 	rows, err := s.db.Query(ctx, `
 		SELECT id, name, description, permissions, is_system, created_at, updated_at
@@ -642,9 +670,18 @@ func (s *Store) ListAuditLogs(ctx context.Context, filter AuditFilter, opts List
 	if opts.Limit <= 0 {
 		opts.Limit = 50
 	}
-	if opts.Sort == "" {
-		opts.Sort = "created_at DESC"
-	}
+	opts.Sort = safeSortExpression(
+		opts.Sort,
+		"created_at DESC",
+		map[string]string{
+			"created_at desc":    "created_at DESC",
+			"created_at asc":     "created_at ASC",
+			"action asc":         "action ASC",
+			"action desc":        "action DESC",
+			"resource_type asc":  "resource_type ASC",
+			"resource_type desc": "resource_type DESC",
+		},
+	)
 
 	query := `
 		SELECT id, operator_id, action, resource_type, resource_id, details, ip_address, created_at
@@ -836,6 +873,17 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func safeSortExpression(input, fallback string, allowed map[string]string) string {
+	normalized := strings.TrimSpace(strings.ToLower(input))
+	if normalized == "" {
+		return fallback
+	}
+	if safe, ok := allowed[normalized]; ok {
+		return safe
+	}
+	return fallback
 }
 
 func itoa(n int) string {

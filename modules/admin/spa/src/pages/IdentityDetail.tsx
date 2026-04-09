@@ -25,6 +25,8 @@ import {
 } from '../hooks/useIdentities';
 import { Badge } from '@/components/ui/badge';
 import { identityStatusVariant, mfaVariant } from '@/lib/status';
+import { useAuth } from '../hooks/useAuth';
+import { operatorHasPermission } from '../lib/permissions';
 
 export function IdentityDetail() {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +34,9 @@ export function IdentityDetail() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const { operator } = useAuth();
+  const canUpdateIdentity = operatorHasPermission(operator, 'identities:update');
+  const canDeleteIdentity = operatorHasPermission(operator, 'identities:delete');
 
   const { data: identity, isLoading, error } = useIdentity(id || '');
   const updateMutation = useUpdateIdentity();
@@ -63,32 +68,32 @@ export function IdentityDetail() {
   }
 
   const handleSave = async () => {
-    if (id && editedName) {
+    if (id && editedName && canUpdateIdentity) {
       await updateMutation.mutateAsync({ id, data: { display_name: editedName } });
       setIsEditing(false);
     }
   };
 
   const handleSuspend = async () => {
-    if (id) {
+    if (id && canUpdateIdentity) {
       await suspendMutation.mutateAsync(id);
     }
   };
 
   const handleActivate = async () => {
-    if (id) {
+    if (id && canUpdateIdentity) {
       await activateMutation.mutateAsync(id);
     }
   };
 
   const handleResetMfa = async () => {
-    if (id) {
+    if (id && canUpdateIdentity) {
       await resetMfaMutation.mutateAsync(id);
     }
   };
 
   const handleDelete = async () => {
-    if (id) {
+    if (id && canDeleteIdentity) {
       await deleteMutation.mutateAsync(id);
       navigate('/identities');
     }
@@ -138,14 +143,15 @@ export function IdentityDetail() {
                         onChange={(e) => setEditedName(e.target.value)}
                         className="input flex-1"
                       />
-                      <button onClick={handleSave} className="btn btn-primary">
+                      <button onClick={handleSave} disabled={!canUpdateIdentity} className="btn btn-primary">
                         <Save className="w-4 h-4" />
                       </button>
                     </div>
                   ) : (
                     <p
-                      className="text-surface-900 cursor-pointer hover:text-foreground"
+                      className={`text-surface-900 ${canUpdateIdentity ? 'cursor-pointer hover:text-foreground' : ''}`}
                       onClick={() => {
+                        if (!canUpdateIdentity) return;
                         setEditedName(identity.display_name);
                         setIsEditing(true);
                       }}
@@ -241,7 +247,7 @@ export function IdentityDetail() {
               {identity.status === 'active' ? (
                 <button
                   onClick={handleSuspend}
-                  disabled={suspendMutation.isPending}
+                  disabled={suspendMutation.isPending || !canUpdateIdentity}
                   className="btn btn-secondary w-full justify-start"
                 >
                   <Ban className="w-4 h-4 mr-2" />
@@ -250,7 +256,7 @@ export function IdentityDetail() {
               ) : (
                 <button
                   onClick={handleActivate}
-                  disabled={activateMutation.isPending}
+                  disabled={activateMutation.isPending || !canUpdateIdentity}
                   className="btn btn-secondary w-full justify-start"
                 >
                   <CheckCircle className="w-4 h-4 mr-2" />
@@ -261,7 +267,7 @@ export function IdentityDetail() {
               {identity.mfa_enabled && (
                 <button
                   onClick={handleResetMfa}
-                  disabled={resetMfaMutation.isPending}
+                  disabled={resetMfaMutation.isPending || !canUpdateIdentity}
                   className="btn btn-secondary w-full justify-start"
                 >
                   <RefreshCw className="w-4 h-4 mr-2" />
@@ -269,13 +275,15 @@ export function IdentityDetail() {
                 </button>
               )}
 
-              <button
-                onClick={() => setIsDeleteOpen(true)}
-                className="btn btn-danger w-full justify-start"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete Identity
-              </button>
+              {canDeleteIdentity && (
+                <button
+                  onClick={() => setIsDeleteOpen(true)}
+                  className="btn btn-danger w-full justify-start"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Identity
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -306,7 +314,7 @@ export function IdentityDetail() {
               </button>
               <button
                 onClick={handleDelete}
-                disabled={deleteMutation.isPending}
+                disabled={deleteMutation.isPending || !canDeleteIdentity}
                 className="btn btn-danger"
               >
                 Delete

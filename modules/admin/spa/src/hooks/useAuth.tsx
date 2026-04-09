@@ -1,4 +1,4 @@
-import { useState, useCallback, createContext, useContext, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from 'react';
 import type { AuthState, Operator, LoginCredentials } from '../types';
 import { authApi } from '../api/operators';
 
@@ -45,6 +45,35 @@ const readStoredAuthState = (): AuthState => {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(() => readStoredAuthState());
   const isLoading = false;
+
+  useEffect(() => {
+    if (!state.token || !state.isAuthenticated) {
+      return;
+    }
+
+    let cancelled = false;
+    authApi
+      .me()
+      .then((operator) => {
+        if (cancelled) {
+          return;
+        }
+        localStorage.setItem('aegion_admin_operator', JSON.stringify(operator));
+        setState((previous) => ({ ...previous, operator }));
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        localStorage.removeItem('aegion_admin_token');
+        localStorage.removeItem('aegion_admin_operator');
+        setState(defaultAuthState);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.token, state.isAuthenticated]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     const { token, operator } = await authApi.login(credentials);

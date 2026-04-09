@@ -87,7 +87,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	operatorView := operatorToView(op, profile)
+	effectivePermissions, err := h.service.GetEffectivePermissions(r.Context(), op.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve operator permissions")
+		return
+	}
+
+	operatorView := operatorToView(op, profile, effectivePermissions)
 	writeJSON(w, http.StatusOK, authLoginResponse{
 		Token:    token,
 		Operator: operatorView,
@@ -165,7 +171,13 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, operatorToView(operator, profile))
+	effectivePermissions, err := h.service.GetEffectivePermissions(r.Context(), operator.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve operator permissions")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, operatorToView(operator, profile, effectivePermissions))
 }
 
 func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
@@ -462,14 +474,15 @@ func (h *Handler) upsertSetting(ctx context.Context, actorIdentityID uuid.UUID, 
 	return err
 }
 
-func operatorToView(op *store.Operator, profile *store.IdentityProfile) OperatorView {
+func operatorToView(op *store.Operator, profile *store.IdentityProfile, effectivePermissions []string) OperatorView {
 	view := OperatorView{
-		ID:          op.ID.String(),
-		Role:        op.Role,
-		Status:      "active",
-		Permissions: op.Permissions,
-		CreatedAt:   op.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   op.UpdatedAt.Format(time.RFC3339),
+		ID:                   op.ID.String(),
+		Role:                 op.Role,
+		Status:               "active",
+		Permissions:          op.Permissions,
+		EffectivePermissions: effectivePermissions,
+		CreatedAt:            op.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:            op.UpdatedAt.Format(time.RFC3339),
 	}
 
 	if profile != nil {

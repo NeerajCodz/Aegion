@@ -113,6 +113,25 @@ func TestCreateOperatorSuperAdminDenied(t *testing.T) {
 	assert.Equal(t, ErrPermissionDenied, err)
 }
 
+func TestCreateOperatorCanGrantPermissionsBeyondActor(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("operator")
+	actor.Permissions = map[string]interface{}{PermOperatorsCreate: true}
+	mem.updateOperator(actor)
+	svc := New(mem, Config{})
+
+	created, err := svc.CreateOperator(
+		context.Background(),
+		actor.ID,
+		uuid.New(),
+		"admin",
+		map[string]interface{}{PermRolesDelete: true},
+		"10.0.0.1",
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, true, created.Permissions[PermRolesDelete])
+}
+
 func TestGetOperatorAndGetOperatorByIdentityID(t *testing.T) {
 	mem := newMemoryStore()
 	actor := mem.addOperator("super_admin")
@@ -182,6 +201,45 @@ func TestUpdateOperatorSuccess(t *testing.T) {
 	assert.Equal(t, "viewer", updated.Role)
 	assert.Equal(t, true, updated.Permissions[PermSessionsRead])
 	assert.Len(t, mem.auditLogs, 1)
+}
+
+func TestUpdateOperatorCanGrantPermissionsBeyondActor(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("operator")
+	actor.Permissions = map[string]interface{}{PermOperatorsUpdate: true}
+	mem.updateOperator(actor)
+	target := mem.addOperator("viewer")
+	svc := New(mem, Config{})
+
+	updated, err := svc.UpdateOperator(
+		context.Background(),
+		actor.ID,
+		target.ID,
+		"admin",
+		map[string]interface{}{PermRolesDelete: true},
+		"10.0.0.1",
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "admin", updated.Role)
+	assert.Equal(t, true, updated.Permissions[PermRolesDelete])
+}
+
+func TestUpdateOperatorSelfPermissionUpdateWithoutRoleChange(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	svc := New(mem, Config{})
+
+	updated, err := svc.UpdateOperator(
+		context.Background(),
+		actor.ID,
+		actor.ID,
+		"",
+		map[string]interface{}{PermAuditRead: true},
+		"10.0.0.1",
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "super_admin", updated.Role)
+	assert.Equal(t, true, updated.Permissions[PermAuditRead])
 }
 
 func TestDeleteOperatorSelfDeletion(t *testing.T) {
@@ -308,6 +366,17 @@ func TestMatchPermission(t *testing.T) {
 	assert.False(t, matchPermission(PermOperatorsRead, PermOperatorsDelete))
 }
 
+func TestHasPermissionExplicitWildcardDeny(t *testing.T) {
+	mem := newMemoryStore()
+	svc := New(mem, Config{})
+
+	allowed := svc.hasPermission("admin", map[string]interface{}{}, PermIdentitiesRead)
+	assert.True(t, allowed)
+
+	denied := svc.hasPermission("admin", map[string]interface{}{PermIdentitiesAll: false}, PermIdentitiesRead)
+	assert.False(t, denied)
+}
+
 func TestListOperatorsLimitBounds(t *testing.T) {
 	mem := newMemoryStore()
 	actor := mem.addOperator("super_admin")
@@ -337,8 +406,9 @@ func TestListRolesAndGetRole(t *testing.T) {
 
 	roles, total, err := svc.ListRoles(context.Background(), actor.ID, 0, 0)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1), total)
-	assert.Len(t, roles, 1)
+	assert.GreaterOrEqual(t, total, int64(1))
+	assert.NotEmpty(t, roles)
+	assert.Contains(t, collectRoleNames(roles), "admin")
 	assert.Equal(t, 20, mem.lastRoleListOptions.Limit)
 
 	_, _, err = svc.ListRoles(context.Background(), actor.ID, 200, 0)
@@ -348,6 +418,76 @@ func TestListRolesAndGetRole(t *testing.T) {
 	role, err := svc.GetRole(context.Background(), actor.ID, "admin")
 	assert.NoError(t, err)
 	assert.Equal(t, "admin", role.Name)
+}
+
+func TestCreateUpdateDeleteRoleLifecycle(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	svc := New(mem, Config{})
+
+	created, err := svc.CreateRole(
+		context.Background(),
+		actor.ID,
+		"support_agent",
+		"Support team role",
+		[]string{PermIdentitiesRead, PermSessionsRead},
+		"10.0.0.1",
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, "support_agent", created.Name)
+
+	description := "Updated support role"
+	updated, err := svc.UpdateRole(
+		context.Background(),
+		actor.ID,
+		created.Name,
+		&description,
+		[]string{PermIdentitiesRead, PermSessionsRead, PermAuditRead},
+		"10.0.0.1",
+	)
+	assert.NoError(t, err)
+	assert.Equal(t, description, updated.Description)
+	assert.Contains(t, updated.Permissions, PermAuditRead)
+
+	err = svc.DeleteRole(context.Background(), actor.ID, created.Name, "10.0.0.1")
+	assert.NoError(t, err)
+	_, err = mem.GetRoleByName(context.Background(), created.Name)
+	assert.ErrorIs(t, err, store.ErrRoleNotFound)
+}
+
+func TestDeleteRoleInUse(t *testing.T) {
+	mem := newMemoryStore()
+	mem.roles["custom_role"] = &store.Role{
+		ID:          uuid.New(),
+		Name:        "custom_role",
+		Description: "Custom",
+		Permissions: []string{PermIdentitiesRead},
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	actor := mem.addOperator("super_admin")
+	user := mem.addOperator("viewer")
+	user.Role = "custom_role"
+	mem.updateOperator(user)
+	svc := New(mem, Config{})
+
+	err := svc.DeleteRole(context.Background(), actor.ID, "custom_role", "10.0.0.1")
+	assert.ErrorIs(t, err, ErrRoleInUse)
+}
+
+func TestCreateRoleValidation(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	svc := New(mem, Config{})
+
+	_, err := svc.CreateRole(context.Background(), actor.ID, "Admin", "bad", []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+
+	_, err = svc.CreateRole(context.Background(), actor.ID, "bad-role", "bad", []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrInvalidRoleName)
+
+	_, err = svc.CreateRole(context.Background(), actor.ID, "custom_role", "bad", []string{"invalid:permission"}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrInvalidPermission)
 }
 
 func TestGetRolePermissionDenied(t *testing.T) {
@@ -380,6 +520,14 @@ func TestListAuditLogsLimitBounds(t *testing.T) {
 	assert.Equal(t, 500, mem.lastAuditListOptions.Limit)
 }
 
+func collectRoleNames(roles []*store.Role) []string {
+	names := make([]string, 0, len(roles))
+	for _, role := range roles {
+		names = append(names, role.Name)
+	}
+	return names
+}
+
 type memoryStore struct {
 	operators               map[uuid.UUID]*store.Operator
 	operatorsByIdentity     map[uuid.UUID]*store.Operator
@@ -398,18 +546,35 @@ type memoryStore struct {
 	listOperatorsErr  error
 	listRolesErr      error
 	getRoleByNameErr  error
+	createRoleErr     error
+	updateRoleErr     error
+	deleteRoleErr     error
 	listAuditLogsErr  error
 	logActionErr      error
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{
+	mem := &memoryStore{
 		operators:           make(map[uuid.UUID]*store.Operator),
 		operatorsByIdentity: make(map[uuid.UUID]*store.Operator),
 		roles:               make(map[string]*store.Role),
 		auditLogs:           []*store.AuditLogEntry{},
 		apiKeysByPrefix:     make(map[string]*store.APIKey),
 	}
+
+	now := time.Now().UTC()
+	for roleName, permissions := range DefaultRolePermissions {
+		mem.roles[roleName] = &store.Role{
+			ID:          uuid.New(),
+			Name:        roleName,
+			Permissions: append([]string{}, permissions...),
+			IsSystem:    true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+	}
+
+	return mem
 }
 
 func (m *memoryStore) addOperator(role string) *store.Operator {
@@ -525,6 +690,61 @@ func (m *memoryStore) GetRoleByName(ctx context.Context, name string) (*store.Ro
 		return &copyRole, nil
 	}
 	return nil, store.ErrRoleNotFound
+}
+
+func (m *memoryStore) CreateRole(ctx context.Context, role *store.Role) error {
+	if m.createRoleErr != nil {
+		return m.createRoleErr
+	}
+	if _, exists := m.roles[role.Name]; exists {
+		return store.ErrDuplicateRole
+	}
+	copyRole := *role
+	m.roles[role.Name] = &copyRole
+	return nil
+}
+
+func (m *memoryStore) UpdateRole(ctx context.Context, role *store.Role) error {
+	if m.updateRoleErr != nil {
+		return m.updateRoleErr
+	}
+	current, exists := m.roles[role.Name]
+	if !exists {
+		return store.ErrRoleNotFound
+	}
+	if current.IsSystem {
+		return store.ErrSystemRole
+	}
+	copyRole := *role
+	m.roles[role.Name] = &copyRole
+	return nil
+}
+
+func (m *memoryStore) DeleteRole(ctx context.Context, id uuid.UUID) error {
+	if m.deleteRoleErr != nil {
+		return m.deleteRoleErr
+	}
+	for name, role := range m.roles {
+		if role.ID != id {
+			continue
+		}
+		if role.IsSystem {
+			return store.ErrSystemRole
+		}
+		delete(m.roles, name)
+		return nil
+	}
+	return store.ErrRoleNotFound
+}
+
+func (m *memoryStore) CountOperatorsByRole(ctx context.Context, role string) (int64, error) {
+	var count int64
+	for _, operator := range m.operators {
+		if operator.Role == role {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (m *memoryStore) ListAuditLogs(ctx context.Context, filter store.AuditFilter, opts store.ListOptions) ([]*store.AuditLogEntry, int64, error) {

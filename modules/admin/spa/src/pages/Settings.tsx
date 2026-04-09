@@ -4,10 +4,14 @@ import { Settings as SettingsIcon, Save, AlertCircle, CheckCircle } from 'lucide
 import { settingsApi } from '../api/operators';
 import type { SystemSettings } from '../types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useAuth } from '../hooks/useAuth';
+import { operatorHasPermission } from '../lib/permissions';
 
 export function Settings() {
   const [successMessage, setSuccessMessage] = useState('');
   const queryClient = useQueryClient();
+  const { operator } = useAuth();
+  const canUpdateSettings = operatorHasPermission(operator, 'config:update');
 
   const { data: settings, isLoading, error } = useQuery({
     queryKey: ['settings'],
@@ -25,6 +29,9 @@ export function Settings() {
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!canUpdateSettings) {
+      return;
+    }
     const formData = new FormData(e.currentTarget);
     
     const updatedSettings: Partial<SystemSettings> = {
@@ -82,7 +89,15 @@ export function Settings() {
         </Alert>
       )}
 
+      {!canUpdateSettings && (
+        <Alert variant="warning">
+          <AlertCircle className="w-5 h-5" />
+          <AlertDescription>Your role has read-only access to configuration.</AlertDescription>
+        </Alert>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
+        <fieldset disabled={!canUpdateSettings || updateMutation.isPending} className="space-y-6">
         {/* Session Settings */}
         <div className="card p-6">
           <div className="flex items-center gap-2 mb-4">
@@ -208,13 +223,14 @@ export function Settings() {
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || !canUpdateSettings}
             className="btn btn-primary"
           >
             <Save className="w-4 h-4 mr-2" />
-            {updateMutation.isPending ? 'Saving...' : 'Save Settings'}
+            {canUpdateSettings ? (updateMutation.isPending ? 'Saving...' : 'Save Settings') : 'Read-only'}
           </button>
         </div>
+        </fieldset>
       </form>
     </div>
   );

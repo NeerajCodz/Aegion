@@ -2,17 +2,32 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Shield, Plus, AlertCircle, Trash2, Edit, X } from 'lucide-react';
 import { Dialog } from '@headlessui/react';
-import { operatorsApi } from '../api/operators';
+import { operatorsApi, rolesApi } from '../api/operators';
 import type { Operator } from '../types';
 import { Badge } from '@/components/ui/badge';
 import { operatorRoleVariant, operatorStatusVariant } from '@/lib/status';
+import { useAuth } from '../hooks/useAuth';
+import { operatorHasPermission } from '../lib/permissions';
+
+function toPermissionOverrideMap(input: Record<string, boolean> | undefined): Record<string, boolean> {
+  if (!input) {
+    return {};
+  }
+  return Object.entries(input).reduce<Record<string, boolean>>((acc, [permission, value]) => {
+    acc[permission] = Boolean(value);
+    return acc;
+  }, {});
+}
 
 export function Operators() {
   const [page, setPage] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editOperator, setEditOperator] = useState<Operator | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [createOverrides, setCreateOverrides] = useState<Record<string, boolean>>({});
+  const [editOverrides, setEditOverrides] = useState<Record<string, boolean>>({});
   const perPage = 20;
+  const { operator: currentOperator } = useAuth();
 
   const queryClient = useQueryClient();
 
@@ -21,11 +36,33 @@ export function Operators() {
     queryFn: () => operatorsApi.list(page, perPage),
   });
 
+  const rolesQuery = useQuery({
+    queryKey: ['roles', 'all'],
+    queryFn: () => rolesApi.list(1, 100),
+  });
+  const permissionsQuery = useQuery({
+    queryKey: ['roles', 'permissions'],
+    queryFn: rolesApi.listPermissions,
+  });
+  const roleOptions: Array<{ id: string; name: string }> =
+    rolesQuery.data?.data.map((role) => ({ id: role.id, name: role.name })) ?? [
+      { id: 'super_admin', name: 'super_admin' },
+      { id: 'admin', name: 'admin' },
+      { id: 'operator', name: 'operator' },
+      { id: 'viewer', name: 'viewer' },
+    ];
+  const permissionCatalog = permissionsQuery.data ?? [];
+
+  const canCreateOperator = operatorHasPermission(currentOperator, 'operators:create');
+  const canUpdateOperator = operatorHasPermission(currentOperator, 'operators:update');
+  const canDeleteOperator = operatorHasPermission(currentOperator, 'operators:delete');
+
   const createMutation = useMutation({
     mutationFn: operatorsApi.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['operators'] });
       setIsCreateOpen(false);
+      setCreateOverrides({});
     },
   });
 
@@ -35,6 +72,7 @@ export function Operators() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['operators'] });
       setEditOperator(null);
+      setEditOverrides({});
     },
   });
 
@@ -48,27 +86,30 @@ export function Operators() {
 
   const handleCreate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!canCreateOperator) return;
     const formData = new FormData(e.currentTarget);
     createMutation.mutate({
       email: formData.get('email') as string,
       name: formData.get('name') as string,
-      role: formData.get('role') as 'admin' | 'operator' | 'viewer',
+      role: formData.get('role') as string,
       password: formData.get('password') as string,
       status: 'active',
+      permissions: createOverrides,
     });
   };
 
   const handleUpdate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!editOperator) return;
+    if (!editOperator || !canUpdateOperator) return;
     const formData = new FormData(e.currentTarget);
     updateMutation.mutate({
       id: editOperator.id,
-      data: {
-        name: formData.get('name') as string,
-        role: formData.get('role') as 'admin' | 'operator' | 'viewer',
-      },
-    });
+        data: {
+          name: formData.get('name') as string,
+          role: formData.get('role') as string,
+          permissions: editOverrides,
+        },
+      });
   };
 
   if (error) {
@@ -89,10 +130,18 @@ export function Operators() {
           <h1 className="text-2xl font-bold text-surface-900">Operators</h1>
           <p className="text-surface-500">Manage admin users and their permissions</p>
         </div>
-        <button onClick={() => setIsCreateOpen(true)} className="btn btn-primary">
-          <Plus className="w-4 h-4 mr-2" />
-          Add Operator
-        </button>
+        {canCreateOperator && (
+          <button
+            onClick={() => {
+              setCreateOverrides({});
+              setIsCreateOpen(true);
+            }}
+            className="btn btn-primary"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Operator
+          </button>
+        )}
       </div>
 
       <div className="card overflow-hidden">
@@ -157,20 +206,27 @@ export function Operators() {
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => setEditOperator(operator)}
-                          className="btn btn-secondary p-2"
-                          title="Edit"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteId(operator.id)}
-                          className="btn btn-secondary p-2 text-red-600 hover:bg-red-50"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {canUpdateOperator && (
+                          <button
+                            onClick={() => {
+                              setEditOperator(operator);
+                              setEditOverrides(toPermissionOverrideMap(operator.permissions));
+                            }}
+                            className="btn btn-secondary p-2"
+                            title="Edit"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canDeleteOperator && (
+                          <button
+                            onClick={() => setDeleteId(operator.id)}
+                            className="btn btn-secondary p-2 text-red-600 hover:bg-red-50"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -210,7 +266,10 @@ export function Operators() {
       {/* Create operator dialog */}
       <Dialog
         open={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
+        onClose={() => {
+          setIsCreateOpen(false);
+          setCreateOverrides({});
+        }}
         className="relative z-50"
       >
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
@@ -221,7 +280,10 @@ export function Operators() {
                 Add Operator
               </Dialog.Title>
               <button
-                onClick={() => setIsCreateOpen(false)}
+                onClick={() => {
+                  setIsCreateOpen(false);
+                  setCreateOverrides({});
+                }}
                 className="text-surface-400 hover:text-surface-600"
               >
                 <X className="w-5 h-5" />
@@ -252,22 +314,56 @@ export function Operators() {
                   Role
                 </label>
                 <select name="role" required className="input">
-                  <option value="viewer">Viewer</option>
-                  <option value="operator">Operator</option>
-                  <option value="admin">Admin</option>
+                  {roleOptions.map((role) => (
+                    <option key={role.id} value={role.name}>
+                      {role.name}
+                    </option>
+                  ))}
                 </select>
               </div>
+              {permissionCatalog.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-surface-700 mb-2">
+                    Permission overrides (grant)
+                  </label>
+                  <div className="max-h-40 overflow-y-auto rounded border border-surface-200 bg-surface-50 p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {permissionCatalog.map((permission) => (
+                      <label key={permission} className="flex items-center gap-2 text-sm text-surface-700">
+                        <input
+                          type="checkbox"
+                          checked={createOverrides[permission] === true}
+                          onChange={(event) =>
+                            setCreateOverrides((previous) => {
+                              const next = { ...previous };
+                              if (event.target.checked) {
+                                next[permission] = true;
+                              } else {
+                                delete next[permission];
+                              }
+                              return next;
+                            })
+                          }
+                        />
+                        <span>{permission}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setIsCreateOpen(false)}
+                  onClick={() => {
+                    setIsCreateOpen(false);
+                    setCreateOverrides({});
+                  }}
                   className="btn btn-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={createMutation.isPending}
+                  disabled={createMutation.isPending || !canCreateOperator}
                   className="btn btn-primary"
                 >
                   Create
@@ -281,7 +377,10 @@ export function Operators() {
       {/* Edit operator dialog */}
       <Dialog
         open={!!editOperator}
-        onClose={() => setEditOperator(null)}
+        onClose={() => {
+          setEditOperator(null);
+          setEditOverrides({});
+        }}
         className="relative z-50"
       >
         <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
@@ -292,7 +391,10 @@ export function Operators() {
                 Edit Operator
               </Dialog.Title>
               <button
-                onClick={() => setEditOperator(null)}
+                onClick={() => {
+                  setEditOperator(null);
+                  setEditOverrides({});
+                }}
                 className="text-surface-400 hover:text-surface-600"
               >
                 <X className="w-5 h-5" />
@@ -328,22 +430,56 @@ export function Operators() {
                   Role
                 </label>
                 <select name="role" defaultValue={editOperator?.role} required className="input">
-                  <option value="viewer">Viewer</option>
-                  <option value="operator">Operator</option>
-                  <option value="admin">Admin</option>
+                  {roleOptions.map((role) => (
+                    <option key={role.id} value={role.name}>
+                      {role.name}
+                    </option>
+                  ))}
                 </select>
               </div>
+              {permissionCatalog.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-surface-700 mb-2">
+                    Permission overrides
+                  </label>
+                  <div className="max-h-44 overflow-y-auto rounded border border-surface-200 bg-surface-50 p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {permissionCatalog.map((permission) => (
+                      <label key={permission} className="flex items-center gap-2 text-sm text-surface-700">
+                        <input
+                          type="checkbox"
+                          checked={editOverrides[permission] === true}
+                          onChange={(event) =>
+                            setEditOverrides((previous) => {
+                              const next = { ...previous };
+                              if (event.target.checked) {
+                                next[permission] = true;
+                              } else {
+                                delete next[permission];
+                              }
+                              return next;
+                            })
+                          }
+                        />
+                        <span>{permission}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setEditOperator(null)}
+                  onClick={() => {
+                    setEditOperator(null);
+                    setEditOverrides({});
+                  }}
                   className="btn btn-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={updateMutation.isPending}
+                  disabled={updateMutation.isPending || !canUpdateOperator}
                   className="btn btn-primary"
                 >
                   Save
@@ -379,7 +515,7 @@ export function Operators() {
               </button>
               <button
                 onClick={() => deleteId && deleteMutation.mutate(deleteId)}
-                disabled={deleteMutation.isPending}
+                disabled={deleteMutation.isPending || !canDeleteOperator}
                 className="btn btn-danger"
               >
                 Delete
