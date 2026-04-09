@@ -251,13 +251,13 @@ func (s *Server) probeDashboardObservability(
 	timeout time.Duration,
 ) dashboardObservabilityProbe {
 	result := dashboardObservabilityProbe{
-		Key:       endpoint.Key,
-		Label:     endpoint.Label,
-		URL:       endpoint.URL,
-		Status:    "offline",
+		Key:        endpoint.Key,
+		Label:      endpoint.Label,
+		URL:        endpoint.URL,
+		Status:     "offline",
 		StatusCode: 0,
-		Message:   "endpoint not configured",
-		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+		Message:    "endpoint not configured",
+		CheckedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if endpoint.URL == "" {

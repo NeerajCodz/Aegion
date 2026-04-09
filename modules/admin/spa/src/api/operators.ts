@@ -8,6 +8,7 @@ import type {
   DashboardConfig,
   ModuleHealthStatus,
   HealthState,
+  ObservabilityProbeStatus,
 } from '../types';
 
 const HEALTH_TIMEOUT_MS = 8000;
@@ -157,6 +158,11 @@ export const dashboardApi = {
       probeHealth('service-ready', 'Admin Readiness', '/health/ready'),
     ]);
     return probes;
+  },
+
+  getObservability: async (): Promise<ObservabilityProbeStatus[]> => {
+    const response = await apiClient.get<ObservabilityProbeStatus[]>('/admin/dashboard/observability');
+    return response.data;
   },
 };
 

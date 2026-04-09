@@ -79,6 +79,17 @@ export interface DashboardConfig {
   base_path: string;
 }
 
+export interface ObservabilityProbeStatus {
+  key: string;
+  label: string;
+  url: string;
+  status: HealthState;
+  status_code: number;
+  response_time_ms: number;
+  message: string;
+  checked_at: string;
+}
+
 export interface AuthState {
   operator: Operator | null;
   token: string | null;

@@ -293,6 +293,37 @@ System must degrade gracefully:
 
 ---
 
+## Aegion Docker Compose Stack (Grafana + Prometheus + OTel)
+
+This repository includes a full local observability stack in `deploy/docker-compose.dev.yml`:
+
+- OpenTelemetry Collector
+- Prometheus
+- Grafana
+- Tempo
+- Loki
+
+Run it with:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
+```
+
+Default local endpoints:
+
+- Grafana: `http://localhost:3000` (`admin` / `admin`)
+- Prometheus: `http://localhost:9090`
+- Tempo: `http://localhost:3200`
+- Loki: `http://localhost:3100`
+- OTel Collector health: `http://localhost:13133`
+
+Admin dashboard integration:
+
+- `GET /api/admin/dashboard/observability` returns stack probe health for Grafana, Prometheus, Tempo, Loki, and OTel Collector.
+- The Admin SPA telemetry tab renders this as the integrated observability matrix.
+
+---
+
 ## Key Principles
 
 * Separation of concerns (app vs Collector)
