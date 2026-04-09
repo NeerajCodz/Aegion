@@ -405,10 +405,8 @@ func (s *Store) ListOperators(ctx context.Context, opts ListOptions) ([]*Operato
 
 // CreateRole creates a new role.
 func (s *Store) CreateRole(ctx context.Context, role *Role) error {
-	permsJSON, err := json.Marshal(role.Permissions)
-	if err != nil {
-		return err
-	}
+	permsJSON, _ := json.Marshal(role.Permissions)
+	var err error
 
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO adm_roles (id, name, description, permissions, is_system, created_at, updated_at)
@@ -490,10 +488,7 @@ func (s *Store) UpdateRole(ctx context.Context, role *Role) error {
 		return ErrSystemRole
 	}
 
-	permsJSON, err := json.Marshal(role.Permissions)
-	if err != nil {
-		return err
-	}
+	permsJSON, _ := json.Marshal(role.Permissions)
 
 	result, err := s.db.Exec(ctx, `
 		UPDATE adm_roles

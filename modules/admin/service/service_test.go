@@ -132,6 +132,22 @@ func TestCreateOperatorCanGrantPermissionsBeyondActor(t *testing.T) {
 	assert.Equal(t, true, created.Permissions[PermRolesDelete])
 }
 
+func TestCreateOperatorRejectsNonBooleanOverrides(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	svc := New(mem, Config{})
+
+	_, err := svc.CreateOperator(
+		context.Background(),
+		actor.ID,
+		uuid.New(),
+		"admin",
+		map[string]interface{}{PermRolesDelete: "true"},
+		"10.0.0.1",
+	)
+	assert.ErrorIs(t, err, ErrInvalidPermission)
+}
+
 func TestGetOperatorAndGetOperatorByIdentityID(t *testing.T) {
 	mem := newMemoryStore()
 	actor := mem.addOperator("super_admin")
@@ -366,6 +382,21 @@ func TestMatchPermission(t *testing.T) {
 	assert.False(t, matchPermission(PermOperatorsRead, PermOperatorsDelete))
 }
 
+func TestAvailablePermissionsHelpers(t *testing.T) {
+	perms := AvailablePermissions()
+	assert.NotEmpty(t, perms)
+	assert.Contains(t, perms, PermOperatorsCreate)
+	assert.Contains(t, perms, PermRolesDelete)
+	assert.True(t, IsValidPermission(PermOperatorsRead))
+	assert.True(t, IsValidPermission(" "+PermOperatorsRead+" "))
+	assert.False(t, IsValidPermission("invalid:permission"))
+	assert.False(t, IsValidPermission(""))
+
+	mem := newMemoryStore()
+	svc := New(mem, Config{})
+	assert.Equal(t, perms, svc.AvailablePermissions())
+}
+
 func TestHasPermissionExplicitWildcardDeny(t *testing.T) {
 	mem := newMemoryStore()
 	svc := New(mem, Config{})
@@ -475,6 +506,15 @@ func TestDeleteRoleInUse(t *testing.T) {
 	assert.ErrorIs(t, err, ErrRoleInUse)
 }
 
+func TestDeleteRoleSystemRoleDenied(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	svc := New(mem, Config{})
+
+	err := svc.DeleteRole(context.Background(), actor.ID, "admin", "10.0.0.1")
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+}
+
 func TestCreateRoleValidation(t *testing.T) {
 	mem := newMemoryStore()
 	actor := mem.addOperator("super_admin")
@@ -488,6 +528,100 @@ func TestCreateRoleValidation(t *testing.T) {
 
 	_, err = svc.CreateRole(context.Background(), actor.ID, "custom_role", "bad", []string{"invalid:permission"}, "10.0.0.1")
 	assert.ErrorIs(t, err, ErrInvalidPermission)
+}
+
+func TestUpdateAndDeleteRoleStoreSystemErrors(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	mem.roles["custom_role"] = &store.Role{
+		ID:          uuid.New(),
+		Name:        "custom_role",
+		Description: "Custom",
+		Permissions: []string{PermIdentitiesRead},
+		IsSystem:    false,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	svc := New(mem, Config{})
+
+	mem.updateRoleErr = store.ErrSystemRole
+	_, err := svc.UpdateRole(
+		context.Background(),
+		actor.ID,
+		"custom_role",
+		nil,
+		[]string{PermIdentitiesRead},
+		"10.0.0.1",
+	)
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+
+	mem.updateRoleErr = nil
+	mem.deleteRoleErr = store.ErrSystemRole
+	err = svc.DeleteRole(context.Background(), actor.ID, "custom_role", "10.0.0.1")
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+func TestRoleMutationPermissionDenied(t *testing.T) {
+	mem := newMemoryStore()
+	viewer := mem.addOperator("viewer")
+	mem.roles["custom_role"] = &store.Role{
+		ID:          uuid.New(),
+		Name:        "custom_role",
+		Description: "Custom",
+		Permissions: []string{PermIdentitiesRead},
+		IsSystem:    false,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	svc := New(mem, Config{})
+
+	_, err := svc.CreateRole(context.Background(), viewer.ID, "support_team", "", []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+
+	_, err = svc.UpdateRole(context.Background(), viewer.ID, "custom_role", nil, []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+
+	err = svc.DeleteRole(context.Background(), viewer.ID, "custom_role", "10.0.0.1")
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+func TestRequireExistingRoleErrors(t *testing.T) {
+	mem := newMemoryStore()
+	svc := New(mem, Config{})
+
+	_, err := svc.requireExistingRole(context.Background(), "missing_role")
+	assert.ErrorIs(t, err, ErrInvalidRole)
+
+	mem.getRoleByNameErr = errors.New("db down")
+	_, err = svc.requireExistingRole(context.Background(), "admin")
+	assert.EqualError(t, err, "db down")
+}
+
+func TestUpdateRoleValidationAndLookupErrors(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	svc := New(mem, Config{})
+
+	_, err := svc.UpdateRole(context.Background(), actor.ID, "bad-role", nil, []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrInvalidRoleName)
+
+	_, err = svc.UpdateRole(context.Background(), actor.ID, "missing_role", nil, []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.ErrorIs(t, err, store.ErrRoleNotFound)
+
+	_, err = svc.UpdateRole(context.Background(), actor.ID, "admin", nil, []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+func TestDeleteRoleValidationAndLookupErrors(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	svc := New(mem, Config{})
+
+	err := svc.DeleteRole(context.Background(), actor.ID, "bad-role", "10.0.0.1")
+	assert.ErrorIs(t, err, ErrInvalidRoleName)
+
+	err = svc.DeleteRole(context.Background(), actor.ID, "missing_role", "10.0.0.1")
+	assert.ErrorIs(t, err, store.ErrRoleNotFound)
 }
 
 func TestGetRolePermissionDenied(t *testing.T) {
@@ -520,6 +654,134 @@ func TestListAuditLogsLimitBounds(t *testing.T) {
 	assert.Equal(t, 500, mem.lastAuditListOptions.Limit)
 }
 
+func TestCreateOperatorSuperAdminActorLookupError(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("operator")
+	actor.Permissions = map[string]interface{}{PermOperatorsCreate: true}
+	mem.updateOperator(actor)
+	mem.getOperatorErrOnCall[2] = errors.New("actor lookup failed")
+	svc := New(mem, Config{})
+
+	_, err := svc.CreateOperator(context.Background(), actor.ID, uuid.New(), "super_admin", nil, "10.0.0.1")
+	assert.EqualError(t, err, "actor lookup failed")
+}
+
+func TestUpdateOperatorSelfDemotionActorLookupError(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	mem.getOperatorErrOnCall[2] = errors.New("actor lookup failed")
+	svc := New(mem, Config{})
+
+	_, err := svc.UpdateOperator(context.Background(), actor.ID, actor.ID, "admin", nil, "10.0.0.1")
+	assert.EqualError(t, err, "actor lookup failed")
+}
+
+func TestUpdateOperatorSuperAdminActorLookupError(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	target := mem.addOperator("super_admin")
+	mem.getOperatorErrOnCall[3] = errors.New("actor lookup failed")
+	svc := New(mem, Config{})
+
+	_, err := svc.UpdateOperator(context.Background(), actor.ID, target.ID, "", nil, "10.0.0.1")
+	assert.EqualError(t, err, "actor lookup failed")
+}
+
+func TestDeleteOperatorSuperAdminActorLookupError(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	target := mem.addOperator("super_admin")
+	mem.getOperatorErrOnCall[3] = errors.New("actor lookup failed")
+	svc := New(mem, Config{})
+
+	err := svc.DeleteOperator(context.Background(), actor.ID, target.ID, "10.0.0.1")
+	assert.EqualError(t, err, "actor lookup failed")
+}
+
+func TestCreateRoleStoreError(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	mem.createRoleErr = errors.New("create role failed")
+	svc := New(mem, Config{})
+
+	_, err := svc.CreateRole(context.Background(), actor.ID, "support_team", "desc", []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.EqualError(t, err, "create role failed")
+}
+
+func TestUpdateRoleInvalidPermissionsAndStoreError(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	mem.roles["custom_role"] = &store.Role{
+		ID:          uuid.New(),
+		Name:        "custom_role",
+		Permissions: []string{PermIdentitiesRead},
+		IsSystem:    false,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	svc := New(mem, Config{})
+
+	_, err := svc.UpdateRole(context.Background(), actor.ID, "custom_role", nil, []string{"invalid:permission"}, "10.0.0.1")
+	assert.ErrorIs(t, err, ErrInvalidPermission)
+
+	mem.updateRoleErr = errors.New("update role failed")
+	_, err = svc.UpdateRole(context.Background(), actor.ID, "custom_role", nil, []string{PermIdentitiesRead}, "10.0.0.1")
+	assert.EqualError(t, err, "update role failed")
+}
+
+func TestDeleteRoleCountAndDeleteStoreErrors(t *testing.T) {
+	mem := newMemoryStore()
+	actor := mem.addOperator("super_admin")
+	mem.roles["custom_role"] = &store.Role{
+		ID:          uuid.New(),
+		Name:        "custom_role",
+		Permissions: []string{PermIdentitiesRead},
+		IsSystem:    false,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	svc := New(mem, Config{})
+
+	mem.countOperatorsByRoleErr = errors.New("count failed")
+	err := svc.DeleteRole(context.Background(), actor.ID, "custom_role", "10.0.0.1")
+	assert.EqualError(t, err, "count failed")
+
+	mem.countOperatorsByRoleErr = nil
+	mem.deleteRoleErr = errors.New("delete failed")
+	err = svc.DeleteRole(context.Background(), actor.ID, "custom_role", "10.0.0.1")
+	assert.EqualError(t, err, "delete failed")
+}
+
+func TestNormalizePermissionsDeduplicates(t *testing.T) {
+	perms, err := normalizePermissions([]string{PermSessionsRead, " " + PermSessionsRead + " ", PermIdentitiesRead})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{PermIdentitiesRead, PermSessionsRead}, perms)
+}
+
+func TestValidatePermissionOverridesInvalidPermissionKey(t *testing.T) {
+	err := validatePermissionOverrides(map[string]interface{}{"invalid:permission": true})
+	assert.ErrorIs(t, err, ErrInvalidPermission)
+}
+
+func TestEvaluateCapabilityByIdentityDenied(t *testing.T) {
+	mem := newMemoryStore()
+	viewer := mem.addOperator("viewer")
+	svc := New(mem, Config{})
+
+	err := svc.EvaluateCapabilityByIdentity(context.Background(), viewer.IdentityID, PermOperatorsDelete)
+	assert.ErrorIs(t, err, ErrPermissionDenied)
+}
+
+func TestGetEffectivePermissionsOperatorLookupError(t *testing.T) {
+	mem := newMemoryStore()
+	mem.getOperatorErr = errors.New("operator lookup failed")
+	svc := New(mem, Config{})
+
+	perms, err := svc.GetEffectivePermissions(context.Background(), uuid.New())
+	assert.Nil(t, perms)
+	assert.EqualError(t, err, "operator lookup failed")
+}
+
 func collectRoleNames(roles []*store.Role) []string {
 	names := make([]string, 0, len(roles))
 	for _, role := range roles {
@@ -538,28 +800,32 @@ type memoryStore struct {
 	lastRoleListOptions     store.ListOptions
 	lastAuditListOptions    store.ListOptions
 
-	createOperatorErr error
-	getOperatorErr    error
-	getByIdentityErr  error
-	updateOperatorErr error
-	deleteOperatorErr error
-	listOperatorsErr  error
-	listRolesErr      error
-	getRoleByNameErr  error
-	createRoleErr     error
-	updateRoleErr     error
-	deleteRoleErr     error
-	listAuditLogsErr  error
-	logActionErr      error
+	createOperatorErr       error
+	getOperatorErr          error
+	getOperatorErrOnCall    map[int]error
+	getOperatorCallCount    int
+	getByIdentityErr        error
+	updateOperatorErr       error
+	deleteOperatorErr       error
+	listOperatorsErr        error
+	listRolesErr            error
+	getRoleByNameErr        error
+	createRoleErr           error
+	updateRoleErr           error
+	deleteRoleErr           error
+	countOperatorsByRoleErr error
+	listAuditLogsErr        error
+	logActionErr            error
 }
 
 func newMemoryStore() *memoryStore {
 	mem := &memoryStore{
-		operators:           make(map[uuid.UUID]*store.Operator),
-		operatorsByIdentity: make(map[uuid.UUID]*store.Operator),
-		roles:               make(map[string]*store.Role),
-		auditLogs:           []*store.AuditLogEntry{},
-		apiKeysByPrefix:     make(map[string]*store.APIKey),
+		operators:            make(map[uuid.UUID]*store.Operator),
+		operatorsByIdentity:  make(map[uuid.UUID]*store.Operator),
+		roles:                make(map[string]*store.Role),
+		auditLogs:            []*store.AuditLogEntry{},
+		apiKeysByPrefix:      make(map[string]*store.APIKey),
+		getOperatorErrOnCall: make(map[int]error),
 	}
 
 	now := time.Now().UTC()
@@ -608,6 +874,10 @@ func (m *memoryStore) CreateOperator(ctx context.Context, op *store.Operator) er
 }
 
 func (m *memoryStore) GetOperator(ctx context.Context, id uuid.UUID) (*store.Operator, error) {
+	m.getOperatorCallCount++
+	if err, ok := m.getOperatorErrOnCall[m.getOperatorCallCount]; ok {
+		return nil, err
+	}
 	if m.getOperatorErr != nil {
 		return nil, m.getOperatorErr
 	}
@@ -738,6 +1008,9 @@ func (m *memoryStore) DeleteRole(ctx context.Context, id uuid.UUID) error {
 }
 
 func (m *memoryStore) CountOperatorsByRole(ctx context.Context, role string) (int64, error) {
+	if m.countOperatorsByRoleErr != nil {
+		return 0, m.countOperatorsByRoleErr
+	}
 	var count int64
 	for _, operator := range m.operators {
 		if operator.Role == role {

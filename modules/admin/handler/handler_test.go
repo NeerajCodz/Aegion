@@ -1683,6 +1683,45 @@ func TestListOperatorsSuccess(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "viewer@example.com")
 }
 
+func TestCreateAndUpdateOperatorInvalidPermissions(t *testing.T) {
+	op := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("create invalid permissions", func(t *testing.T) {
+		h := New(&fakeService{
+			createOperatorFn: func(ctx context.Context, actorID uuid.UUID, identityID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, service.ErrInvalidPermission
+			},
+			store: &fakeStore{},
+		})
+
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", bytes.NewBufferString(`{"identity_id":"`+uuid.NewString()+`","role":"admin","permissions":{"roles:delete":"true"}}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_permissions")
+	})
+
+	t.Run("update invalid permissions", func(t *testing.T) {
+		operatorID := uuid.NewString()
+		h := New(&fakeService{
+			updateOperatorFn: func(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID, role string, permissions map[string]interface{}, ipAddress string) (*store.Operator, error) {
+				return nil, service.ErrInvalidPermission
+			},
+			store: &fakeStore{},
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/operators/"+operatorID, bytes.NewBufferString(`{"permissions":{"roles:delete":"true"}}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", operatorID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		h.UpdateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_permissions")
+	})
+}
+
 func TestGetOperatorValidationAndErrors(t *testing.T) {
 	op := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 
@@ -1745,6 +1784,343 @@ func TestGetRoleErrorsAndSuccess(t *testing.T) {
 		h.GetRole(rec, req)
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "\"name\":\"admin\"")
+	})
+}
+
+func TestRoleMutationHandlers(t *testing.T) {
+	op := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	withRoleParam := func(req *http.Request, name string) *http.Request {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("name", name)
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	t.Run("list permissions", func(t *testing.T) {
+		h := New(&fakeService{
+			availablePermissionsFn: func() []string {
+				return []string{"operators:create", "roles:update"}
+			},
+		})
+		req := httptest.NewRequest(http.MethodGet, "/admin/roles/permissions", nil)
+		rec := httptest.NewRecorder()
+		h.ListPermissions(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "operators:create")
+	})
+
+	t.Run("create role success", func(t *testing.T) {
+		role := &store.Role{ID: uuid.New(), Name: "support_agent", Permissions: []string{"identities:read"}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		h := New(&fakeService{
+			createRoleFn: func(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error) {
+				assert.Equal(t, op.ID, actorID)
+				assert.Equal(t, "support_agent", name)
+				assert.Equal(t, []string{"identities:read"}, permissions)
+				return role, nil
+			},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString(`{"name":"support_agent","description":"Support","permissions":["identities:read"]}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusCreated, rec.Code)
+		assert.Contains(t, rec.Body.String(), "\"name\":\"support_agent\"")
+	})
+
+	t.Run("create role invalid permission", func(t *testing.T) {
+		h := New(&fakeService{
+			createRoleFn: func(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, service.ErrInvalidPermission
+			},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString(`{"name":"bad","permissions":["invalid"]}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_permissions")
+	})
+
+	t.Run("create role invalid body", func(t *testing.T) {
+		h := New(&fakeService{})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString("{"))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("create role unauthorized", func(t *testing.T) {
+		h := New(&fakeService{})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString(`{"name":"support_agent","permissions":[]}`))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("create role duplicate", func(t *testing.T) {
+		h := New(&fakeService{
+			createRoleFn: func(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, store.ErrDuplicateRole
+			},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString(`{"name":"support_agent","permissions":[]}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusConflict, rec.Code)
+	})
+
+	t.Run("create role permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			createRoleFn: func(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, service.ErrPermissionDenied
+			},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString(`{"name":"support_agent","permissions":[]}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("create role invalid role name", func(t *testing.T) {
+		h := New(&fakeService{
+			createRoleFn: func(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, service.ErrInvalidRoleName
+			},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString(`{"name":"bad-role","permissions":[]}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("create role internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			createRoleFn: func(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, errors.New("boom")
+			},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/admin/roles", bytes.NewBufferString(`{"name":"support_agent","permissions":[]}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.CreateRole(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+
+	t.Run("update role success", func(t *testing.T) {
+		role := &store.Role{ID: uuid.New(), Name: "support_agent", Permissions: []string{"audit:read"}, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		h := New(&fakeService{
+			updateRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error) {
+				assert.Equal(t, "support_agent", name)
+				assert.NotNil(t, description)
+				assert.Equal(t, []string{"audit:read"}, permissions)
+				return role, nil
+			},
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/support_agent", bytes.NewBufferString(`{"description":"Support","permissions":["audit:read"]}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "\"name\":\"support_agent\"")
+	})
+
+	t.Run("update role missing name", func(t *testing.T) {
+		h := New(&fakeService{})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("update role invalid body", func(t *testing.T) {
+		h := New(&fakeService{})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/support_agent", bytes.NewBufferString("{"))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("update role not found", func(t *testing.T) {
+		h := New(&fakeService{
+			updateRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, store.ErrRoleNotFound
+			},
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/support_agent", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("update role invalid role name", func(t *testing.T) {
+		h := New(&fakeService{
+			updateRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, service.ErrInvalidRoleName
+			},
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/support_agent", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("update role permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			updateRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, service.ErrPermissionDenied
+			},
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/support_agent", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("update role invalid permission", func(t *testing.T) {
+		h := New(&fakeService{
+			updateRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, service.ErrInvalidPermission
+			},
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/support_agent", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("update role internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			updateRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error) {
+				return nil, errors.New("boom")
+			},
+		})
+		req := httptest.NewRequest(http.MethodPatch, "/admin/roles/support_agent", bytes.NewBufferString(`{}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.UpdateRole(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+
+	t.Run("delete role role_in_use", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error {
+				return service.ErrRoleInUse
+			},
+		})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/support_agent", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusConflict, rec.Code)
+		assert.Contains(t, rec.Body.String(), "role_in_use")
+	})
+
+	t.Run("delete role missing name", func(t *testing.T) {
+		h := New(&fakeService{})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("delete role unauthorized", func(t *testing.T) {
+		h := New(&fakeService{})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/support_agent", nil)
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("delete role not found", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error {
+				return store.ErrRoleNotFound
+			},
+		})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/missing", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "missing")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("delete role permission denied", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error {
+				return service.ErrPermissionDenied
+			},
+		})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/support_agent", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
+	t.Run("delete role invalid role name", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error {
+				return service.ErrInvalidRoleName
+			},
+		})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/Bad-Name", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "Bad-Name")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("delete role internal error", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error {
+				return errors.New("boom")
+			},
+		})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/support_agent", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+
+	t.Run("delete role success", func(t *testing.T) {
+		h := New(&fakeService{
+			deleteRoleFn: func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error {
+				return nil
+			},
+		})
+		req := httptest.NewRequest(http.MethodDelete, "/admin/roles/support_agent", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		req = withRoleParam(req, "support_agent")
+		rec := httptest.NewRecorder()
+		h.DeleteRole(rec, req)
+		assert.Equal(t, http.StatusNoContent, rec.Code)
 	})
 }
 
