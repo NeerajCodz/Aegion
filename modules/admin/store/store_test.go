@@ -554,6 +554,39 @@ func TestDeleteOperator(t *testing.T) {
 	})
 }
 
+func TestCountOperatorsByRole(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					assert.Equal(t, "SELECT COUNT(*) FROM adm_operators WHERE role = $1", sql)
+					require.Len(t, args, 1)
+					assert.Equal(t, "admin", args[0])
+					return fakeRow{vals: []any{int64(3)}}
+				},
+			},
+		}
+
+		count, err := s.CountOperatorsByRole(context.Background(), "admin")
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), count)
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{err: errors.New("count failed")}
+				},
+			},
+		}
+
+		count, err := s.CountOperatorsByRole(context.Background(), "admin")
+		require.EqualError(t, err, "count failed")
+		assert.Equal(t, int64(0), count)
+	})
+}
+
 func TestListOperators(t *testing.T) {
 	opID := uuid.New()
 	identityID := uuid.New()
@@ -714,6 +747,21 @@ func TestRoleStoreMethods(t *testing.T) {
 		}
 		err := s.UpdateRole(context.Background(), role)
 		require.ErrorIs(t, err, ErrRoleNotFound)
+	})
+
+	t.Run("update role success", func(t *testing.T) {
+		s := &Store{
+			db: &fakeDB{
+				queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+					return fakeRow{vals: []any{false}}
+				},
+				execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				},
+			},
+		}
+		err := s.UpdateRole(context.Background(), role)
+		require.NoError(t, err)
 	})
 
 	t.Run("delete role system", func(t *testing.T) {
@@ -1035,6 +1083,14 @@ func TestHelpers(t *testing.T) {
 	assert.Equal(t, "9", itoa(9))
 	assert.Equal(t, "10", itoa(10))
 	assert.Equal(t, "12345", itoa(12345))
+
+	allowedSorts := map[string]string{
+		"created_at desc": "created_at DESC",
+		"created_at asc":  "created_at ASC",
+	}
+	assert.Equal(t, "created_at DESC", safeSortExpression("created_at desc", "fallback", allowedSorts))
+	assert.Equal(t, "fallback", safeSortExpression("bogus", "fallback", allowedSorts))
+	assert.Equal(t, "fallback", safeSortExpression("   ", "fallback", allowedSorts))
 }
 
 func TestGetOperatorByIdentityIDErrors(t *testing.T) {

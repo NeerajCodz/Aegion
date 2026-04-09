@@ -35,6 +35,66 @@ func TestGetEnv(t *testing.T) {
 	}
 }
 
+func TestGetEnvBoolAndDuration(t *testing.T) {
+	const boolKey = "AEGION_TEST_BOOL"
+	const durationKey = "AEGION_TEST_DURATION"
+	_ = os.Unsetenv(boolKey)
+	_ = os.Unsetenv(durationKey)
+
+	if got := getEnvBool(boolKey, true); !got {
+		t.Fatalf("expected default bool true")
+	}
+	if got := getEnvDuration(durationKey, 3*time.Second); got != 3*time.Second {
+		t.Fatalf("expected default duration 3s, got %v", got)
+	}
+
+	if err := os.Setenv(boolKey, "false"); err != nil {
+		t.Fatalf("setenv failed: %v", err)
+	}
+	if err := os.Setenv(durationKey, "7s"); err != nil {
+		t.Fatalf("setenv failed: %v", err)
+	}
+	defer func() {
+		_ = os.Unsetenv(boolKey)
+		_ = os.Unsetenv(durationKey)
+	}()
+
+	if got := getEnvBool(boolKey, true); got {
+		t.Fatalf("expected parsed bool false")
+	}
+	if got := getEnvDuration(durationKey, 3*time.Second); got != 7*time.Second {
+		t.Fatalf("expected parsed duration 7s, got %v", got)
+	}
+
+	if err := os.Setenv(boolKey, "not-bool"); err != nil {
+		t.Fatalf("setenv failed: %v", err)
+	}
+	if err := os.Setenv(durationKey, "not-duration"); err != nil {
+		t.Fatalf("setenv failed: %v", err)
+	}
+	if got := getEnvBool(boolKey, true); !got {
+		t.Fatalf("expected default bool on parse error")
+	}
+	if got := getEnvDuration(durationKey, 3*time.Second); got != 3*time.Second {
+		t.Fatalf("expected default duration on parse error, got %v", got)
+	}
+}
+
+func TestSafeInt32Bounds(t *testing.T) {
+	const maxInt32 = int(^uint32(0) >> 1)
+	const minInt32 = -maxInt32 - 1
+
+	if got := safeInt32(maxInt32 + 10); got != int32(maxInt32) {
+		t.Fatalf("expected clamp to maxInt32, got %d", got)
+	}
+	if got := safeInt32(minInt32 - 10); got != int32(minInt32) {
+		t.Fatalf("expected clamp to minInt32, got %d", got)
+	}
+	if got := safeInt32(42); got != 42 {
+		t.Fatalf("expected 42, got %d", got)
+	}
+}
+
 func TestLoadConfig_DefaultsAndEnvOverride(t *testing.T) {
 	tempDir := t.TempDir()
 	cfgPath := filepath.Join(tempDir, "admin.yaml")
