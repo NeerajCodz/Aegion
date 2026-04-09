@@ -37,6 +37,19 @@ type UpdateOperatorRequest struct {
 	Permissions map[string]interface{} `json:"permissions,omitempty"`
 }
 
+// CreateRoleRequest is the request body for creating a role.
+type CreateRoleRequest struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+}
+
+// UpdateRoleRequest is the request body for updating a role.
+type UpdateRoleRequest struct {
+	Description *string  `json:"description"`
+	Permissions []string `json:"permissions"`
+}
+
 // ListOperators handles GET /admin/operators
 func (h *Handler) ListOperators(w http.ResponseWriter, r *http.Request) {
 	operator := OperatorFromContext(r.Context())
@@ -62,7 +75,7 @@ func (h *Handler) ListOperators(w http.ResponseWriter, r *http.Request) {
 	data := make([]OperatorView, 0, len(operators))
 	for _, op := range operators {
 		profile, _ := h.service.Store().GetIdentityProfile(r.Context(), op.IdentityID)
-		data = append(data, operatorToView(op, profile))
+		data = append(data, operatorToView(op, profile, nil))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -110,7 +123,7 @@ func (h *Handler) GetOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, operatorToView(op, profile))
+	writeJSON(w, http.StatusOK, operatorToView(op, profile, nil))
 }
 
 // CreateOperator handles POST /admin/operators
@@ -167,7 +180,9 @@ func (h *Handler) CreateOperator(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrPermissionDenied):
 			writeError(w, http.StatusForbidden, "insufficient_permissions", "You do not have permission to create operators")
 		case errors.Is(err, service.ErrInvalidRole):
-			writeError(w, http.StatusBadRequest, "invalid_role", "Invalid role. Valid roles are: super_admin, admin, operator, viewer")
+			writeError(w, http.StatusBadRequest, "invalid_role", "Invalid or unknown role")
+		case errors.Is(err, service.ErrInvalidPermission):
+			writeError(w, http.StatusBadRequest, "invalid_permissions", "One or more operator permission overrides are invalid")
 		case errors.Is(err, store.ErrDuplicateOperator):
 			writeError(w, http.StatusConflict, "duplicate_operator", "An operator already exists for this identity")
 		default:
@@ -182,7 +197,7 @@ func (h *Handler) CreateOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, operatorToView(newOperator, profile))
+	writeJSON(w, http.StatusCreated, operatorToView(newOperator, profile, nil))
 }
 
 // UpdateOperator handles PATCH /admin/operators/{id}
@@ -218,7 +233,9 @@ func (h *Handler) UpdateOperator(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrSelfDemotion):
 			writeError(w, http.StatusForbidden, "self_demotion", "You cannot demote your own super_admin account")
 		case errors.Is(err, service.ErrInvalidRole):
-			writeError(w, http.StatusBadRequest, "invalid_role", "Invalid role. Valid roles are: super_admin, admin, operator, viewer")
+			writeError(w, http.StatusBadRequest, "invalid_role", "Invalid or unknown role")
+		case errors.Is(err, service.ErrInvalidPermission):
+			writeError(w, http.StatusBadRequest, "invalid_permissions", "One or more operator permission overrides are invalid")
 		case errors.Is(err, store.ErrOperatorNotFound):
 			writeError(w, http.StatusNotFound, "not_found", "Operator not found")
 		default:
@@ -240,7 +257,7 @@ func (h *Handler) UpdateOperator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, operatorToView(updatedOperator, profile))
+	writeJSON(w, http.StatusOK, operatorToView(updatedOperator, profile, nil))
 }
 
 // DeleteOperator handles DELETE /admin/operators/{id}
@@ -565,7 +582,149 @@ func (h *Handler) GetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]interface{}{
+	writeJSON(w, http.StatusOK, roleToResponse(role))
+}
+
+// ListPermissions handles GET /admin/roles/permissions
+func (h *Handler) ListPermissions(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"data": h.service.AvailablePermissions(),
+	})
+}
+
+// CreateRole handles POST /admin/roles
+func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	var req CreateRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	role, err := h.service.CreateRole(
+		r.Context(),
+		operator.ID,
+		req.Name,
+		req.Description,
+		req.Permissions,
+		IPAddressFromContext(r.Context()),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPermissionDenied):
+			writeError(w, http.StatusForbidden, "insufficient_permissions", "You do not have permission to create roles")
+		case errors.Is(err, service.ErrInvalidRoleName):
+			writeError(w, http.StatusBadRequest, "invalid_role_name", "Role name must be lowercase alphanumeric with underscores")
+		case errors.Is(err, service.ErrInvalidPermission):
+			writeError(w, http.StatusBadRequest, "invalid_permissions", "One or more permissions are invalid")
+		case errors.Is(err, store.ErrDuplicateRole):
+			writeError(w, http.StatusConflict, "conflict", "Role already exists")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create role")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, roleToResponse(role))
+}
+
+// UpdateRole handles PATCH /admin/roles/{name}
+func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "missing_name", "Role name is required")
+		return
+	}
+
+	var req UpdateRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	permissions := req.Permissions
+	if req.Permissions == nil {
+		permissions = nil
+	}
+
+	role, err := h.service.UpdateRole(
+		r.Context(),
+		operator.ID,
+		name,
+		req.Description,
+		permissions,
+		IPAddressFromContext(r.Context()),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPermissionDenied):
+			writeError(w, http.StatusForbidden, "insufficient_permissions", "You do not have permission to update this role")
+		case errors.Is(err, service.ErrInvalidRoleName):
+			writeError(w, http.StatusBadRequest, "invalid_role_name", "Role name must be lowercase alphanumeric with underscores")
+		case errors.Is(err, service.ErrInvalidPermission):
+			writeError(w, http.StatusBadRequest, "invalid_permissions", "One or more permissions are invalid")
+		case errors.Is(err, store.ErrRoleNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "Role not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update role")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, roleToResponse(role))
+}
+
+// DeleteRole handles DELETE /admin/roles/{name}
+func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	name := strings.TrimSpace(chi.URLParam(r, "name"))
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "missing_name", "Role name is required")
+		return
+	}
+
+	if err := h.service.DeleteRole(
+		r.Context(),
+		operator.ID,
+		name,
+		IPAddressFromContext(r.Context()),
+	); err != nil {
+		switch {
+		case errors.Is(err, service.ErrPermissionDenied):
+			writeError(w, http.StatusForbidden, "insufficient_permissions", "You do not have permission to delete this role")
+		case errors.Is(err, service.ErrInvalidRoleName):
+			writeError(w, http.StatusBadRequest, "invalid_role_name", "Role name must be lowercase alphanumeric with underscores")
+		case errors.Is(err, service.ErrRoleInUse):
+			writeError(w, http.StatusConflict, "role_in_use", "Role is assigned to one or more operators")
+		case errors.Is(err, store.ErrRoleNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "Role not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete role")
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func roleToResponse(role *store.Role) map[string]interface{} {
+	return map[string]interface{}{
 		"id":          role.ID.String(),
 		"name":        role.Name,
 		"description": role.Description,
@@ -574,5 +733,4 @@ func (h *Handler) GetRole(w http.ResponseWriter, r *http.Request) {
 		"created_at":  role.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		"updated_at":  role.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
-	writeJSON(w, http.StatusOK, resp)
 }

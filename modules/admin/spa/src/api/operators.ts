@@ -1,6 +1,7 @@
 import apiClient from './client';
 import type {
   Operator,
+  Role,
   PaginatedResponse,
   LoginCredentials,
   DashboardStats,
@@ -106,12 +107,28 @@ export const operatorsApi = {
     return response.data;
   },
 
-  create: async (data: Omit<Operator, 'id' | 'created_at' | 'last_login_at'> & { password: string }): Promise<Operator> => {
+  create: async (data: {
+    identity_id?: string;
+    email?: string;
+    name?: string;
+    password?: string;
+    role: string;
+    status?: string;
+    permissions?: Record<string, boolean>;
+  }): Promise<Operator> => {
     const response = await apiClient.post<Operator>('/admin/operators', data);
     return response.data;
   },
 
-  update: async (id: string, data: Partial<Operator>): Promise<Operator> => {
+  update: async (
+    id: string,
+    data: {
+      name?: string;
+      role?: string;
+      status?: string;
+      permissions?: Record<string, boolean>;
+    }
+  ): Promise<Operator> => {
     const response = await apiClient.patch<Operator>(`/admin/operators/${id}`, data);
     return response.data;
   },
@@ -122,6 +139,59 @@ export const operatorsApi = {
 
   resetPassword: async (id: string, newPassword: string): Promise<void> => {
     await apiClient.post(`/admin/operators/${id}/reset-password`, { password: newPassword });
+  },
+};
+
+export const rolesApi = {
+  list: async (page = 1, per_page = 100): Promise<PaginatedResponse<Role>> => {
+    const response = await apiClient.get<{
+      items: Role[];
+      pagination: {
+        page: number;
+        per_page: number;
+        total: number;
+        total_pages: number;
+      };
+    }>(
+      `/admin/roles?page=${page}&per_page=${per_page}`
+    );
+    return {
+      data: response.data.items ?? [],
+      total: response.data.pagination?.total ?? 0,
+      page: response.data.pagination?.page ?? page,
+      per_page: response.data.pagination?.per_page ?? per_page,
+      total_pages: response.data.pagination?.total_pages ?? 0,
+    };
+  },
+
+  get: async (name: string): Promise<Role> => {
+    const response = await apiClient.get<Role>(`/admin/roles/${encodeURIComponent(name)}`);
+    return response.data;
+  },
+
+  listPermissions: async (): Promise<string[]> => {
+    const response = await apiClient.get<{ data: string[] }>('/admin/roles/permissions');
+    return response.data.data ?? [];
+  },
+
+  create: async (payload: { name: string; description?: string; permissions: string[] }): Promise<Role> => {
+    const response = await apiClient.post<Role>('/admin/roles', payload);
+    return response.data;
+  },
+
+  update: async (
+    name: string,
+    payload: {
+      description?: string;
+      permissions?: string[];
+    }
+  ): Promise<Role> => {
+    const response = await apiClient.patch<Role>(`/admin/roles/${encodeURIComponent(name)}`, payload);
+    return response.data;
+  },
+
+  delete: async (name: string): Promise<void> => {
+    await apiClient.delete(`/admin/roles/${encodeURIComponent(name)}`);
   },
 };
 

@@ -3,10 +3,63 @@ package service
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
 )
+
+var permissionCatalog = []string{
+	PermAll,
+	PermIdentitiesRead,
+	PermIdentitiesWrite,
+	PermIdentitiesCreate,
+	PermIdentitiesUpdate,
+	PermIdentitiesDelete,
+	PermIdentitiesAll,
+	PermSessionsRead,
+	PermSessionsRevoke,
+	PermSessionsDelete,
+	PermSessionsAll,
+	PermConfigRead,
+	PermConfigWrite,
+	PermConfigUpdate,
+	PermConfigAll,
+	PermOperatorsRead,
+	PermOperatorsCreate,
+	PermOperatorsUpdate,
+	PermOperatorsDelete,
+	PermOperatorsAll,
+	PermRolesRead,
+	PermRolesCreate,
+	PermRolesUpdate,
+	PermRolesDelete,
+	PermRolesAll,
+	PermAPIKeysRead,
+	PermAPIKeysCreate,
+	PermAPIKeysDelete,
+	PermAPIKeysAll,
+	PermAuditRead,
+	PermAuditAll,
+	PermSchemasRead,
+	PermSchemasCreate,
+	PermSchemasUpdate,
+	PermSchemasDelete,
+	PermSchemasAll,
+	PermFlowsRead,
+	PermFlowsCreate,
+	PermFlowsUpdate,
+	PermFlowsDelete,
+	PermFlowsAll,
+}
+
+var validPermissionSet = func() map[string]struct{} {
+	set := make(map[string]struct{}, len(permissionCatalog))
+	for _, permission := range permissionCatalog {
+		set[permission] = struct{}{}
+	}
+	return set
+}()
 
 // Permission constants for admin operations.
 const (
@@ -99,6 +152,24 @@ var DefaultRolePermissions = map[string][]string{
 	},
 }
 
+// AvailablePermissions returns the complete set of assignable permissions.
+func AvailablePermissions() []string {
+	out := make([]string, 0, len(permissionCatalog))
+	out = append(out, permissionCatalog...)
+	sort.Strings(out)
+	return out
+}
+
+// IsValidPermission returns true when permission is recognized by the RBAC model.
+func IsValidPermission(permission string) bool {
+	permission = strings.TrimSpace(permission)
+	if permission == "" {
+		return false
+	}
+	_, ok := validPermissionSet[permission]
+	return ok
+}
+
 // EvaluateCapability checks if an operator has a specific permission.
 // Returns nil if the operator has the permission, or an error if not.
 func (s *Service) EvaluateCapability(ctx context.Context, operatorID uuid.UUID, permission string) error {
@@ -179,10 +250,19 @@ func (s *Service) GetEffectivePermissions(ctx context.Context, operatorID uuid.U
 
 // hasPermission checks if the operator has the specified permission.
 func (s *Service) hasPermission(role string, overrides map[string]interface{}, permission string) bool {
-	// Check individual overrides first (explicit deny)
+	// Explicit deny override always wins (exact and wildcard matches).
 	if granted, ok := overrides[permission]; ok {
 		if g, ok := granted.(bool); ok {
 			return g
+		}
+	}
+	for overridePerm, granted := range overrides {
+		g, ok := granted.(bool)
+		if !ok || g {
+			continue
+		}
+		if matchPermission(overridePerm, permission) {
+			return false
 		}
 	}
 

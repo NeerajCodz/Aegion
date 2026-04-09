@@ -26,10 +26,23 @@ export interface Operator {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'operator' | 'viewer';
+  role: string;
   status: 'active' | 'inactive';
+  permissions?: Record<string, boolean>;
+  effective_permissions?: string[];
   created_at: string;
+  updated_at?: string;
   last_login_at?: string;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SystemSettings {

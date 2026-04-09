@@ -3,11 +3,15 @@ import { Activity, AlertCircle, Trash2, Monitor, Smartphone } from 'lucide-react
 import { Dialog } from '@headlessui/react';
 import { useSessions, useRevokeSession } from '../hooks/useSessions';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '../hooks/useAuth';
+import { operatorHasPermission } from '../lib/permissions';
 
 export function Sessions() {
   const [page, setPage] = useState(1);
   const [revokeId, setRevokeId] = useState<string | null>(null);
   const perPage = 20;
+  const { operator } = useAuth();
+  const canRevokeSessions = operatorHasPermission(operator, 'sessions:delete');
 
   const { data, isLoading, error } = useSessions({
     page,
@@ -18,6 +22,9 @@ export function Sessions() {
 
   const handleRevoke = async () => {
     if (revokeId) {
+      if (!canRevokeSessions) {
+        return;
+      }
       await revokeMutation.mutateAsync(revokeId);
       setRevokeId(null);
     }
@@ -142,9 +149,15 @@ export function Sessions() {
                       <td className="px-4 py-4 text-right">
                         <button
                           onClick={() => setRevokeId(session.id)}
-                          disabled={session.is_current}
+                          disabled={session.is_current || !canRevokeSessions}
                           className="btn btn-secondary p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
-                          title={session.is_current ? 'Cannot revoke current session' : 'Revoke session'}
+                          title={
+                            session.is_current
+                              ? 'Cannot revoke current session'
+                              : !canRevokeSessions
+                              ? 'Missing sessions:delete permission'
+                              : 'Revoke session'
+                          }
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -209,7 +222,7 @@ export function Sessions() {
               </button>
               <button
                 onClick={handleRevoke}
-                disabled={revokeMutation.isPending}
+                disabled={revokeMutation.isPending || !canRevokeSessions}
                 className="btn btn-danger"
               >
                 Revoke

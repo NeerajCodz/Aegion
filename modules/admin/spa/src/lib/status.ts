@@ -19,14 +19,16 @@ export function mfaVariant(enabled: boolean): BadgeVariant {
 
 export function operatorRoleVariant(role: string): BadgeVariant {
   switch (role) {
-    case "admin":
+    case "super_admin":
       return "destructive"
-    case "operator":
+    case "admin":
       return "warning"
-    case "viewer":
+    case "operator":
       return "info"
-    default:
+    case "viewer":
       return "secondary"
+    default:
+      return "outline"
   }
 }
 

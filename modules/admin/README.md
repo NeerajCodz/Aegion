@@ -85,32 +85,38 @@ All admin API endpoints are mounted at `/api/admin/*` and require authentication
 #### Authentication
 - `POST /api/admin/auth/login` - Authenticate admin user
 - `POST /api/admin/auth/logout` - Logout admin user
-- `GET /api/admin/auth/profile` - Get current user profile
+- `GET /api/admin/auth/me` - Get current user profile and effective permissions
 
 #### User Management
-- `GET /api/admin/users` - List users with pagination
-- `GET /api/admin/users/{id}` - Get specific user
-- `PUT /api/admin/users/{id}` - Update user
-- `DELETE /api/admin/users/{id}` - Delete user
-- `POST /api/admin/users/{id}/disable` - Disable user account
-- `POST /api/admin/users/{id}/enable` - Enable user account
+- `GET /api/admin/identities` - List identities with pagination
+- `GET /api/admin/identities/{id}` - Get specific identity
+- `PATCH /api/admin/identities/{id}` - Update identity
+- `DELETE /api/admin/identities/{id}` - Delete identity
+- `GET /api/admin/identities/{id}/sessions` - List sessions for an identity
+- `DELETE /api/admin/identities/{id}/sessions` - Revoke all sessions for an identity
 
 #### Session Management
 - `GET /api/admin/sessions` - List active sessions
 - `DELETE /api/admin/sessions/{id}` - Terminate session
-- `POST /api/admin/sessions/cleanup` - Clean expired sessions
 
 #### Operator Management
 - `GET /api/admin/operators` - List administrative users
 - `POST /api/admin/operators` - Create new operator
-- `PUT /api/admin/operators/{id}` - Update operator
+- `PATCH /api/admin/operators/{id}` - Update operator
 - `DELETE /api/admin/operators/{id}` - Delete operator
-- `PUT /api/admin/operators/{id}/permissions` - Update permissions
+
+#### Role Management
+- `GET /api/admin/roles` - List roles
+- `GET /api/admin/roles/{name}` - Get role by name
+- `GET /api/admin/roles/permissions` - List assignable RBAC permissions
+- `POST /api/admin/roles` - Create custom role
+- `PATCH /api/admin/roles/{name}` - Update custom role
+- `DELETE /api/admin/roles/{name}` - Delete custom role (if unassigned)
 
 #### Audit & Monitoring
 - `GET /api/admin/audit` - View audit logs
-- `GET /api/admin/stats` - System statistics
-- `GET /api/admin/metrics` - Performance metrics
+- `GET /api/admin/dashboard/stats` - System statistics
+- `GET /api/admin/dashboard/observability` - Observability stack health probes
 
 ### Web Interface
 The SPA is served at `/admin/*` and provides a complete administrative interface.

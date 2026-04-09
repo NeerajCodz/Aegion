@@ -20,6 +20,7 @@ import { Bar, BarChart, CartesianGrid, XAxis } from "recharts"
 import { identitiesApi } from "../api/identities"
 import { dashboardApi, operatorsApi } from "../api/operators"
 import { sessionsApi } from "../api/sessions"
+import { useAuth } from "../hooks/useAuth"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -37,6 +38,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { healthStatusVariant, identityStatusVariant, operatorRoleVariant, operatorStatusVariant } from "@/lib/status"
+import { operatorHasPermission } from "@/lib/permissions"
 
 const formatRelativeTime = (iso: string): string => {
   const value = new Date(iso).getTime()
@@ -82,6 +84,9 @@ const getRiskBadgeVariant = (score: number): "success" | "warning" | "destructiv
 }
 
 export function Dashboard() {
+  const { operator } = useAuth()
+  const canReadConfig = operatorHasPermission(operator, "config:read")
+
   const statsQuery = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: dashboardApi.getStats,
@@ -92,6 +97,7 @@ export function Dashboard() {
   const configQuery = useQuery({
     queryKey: ["dashboard-config"],
     queryFn: dashboardApi.getConfig,
+    enabled: canReadConfig,
     staleTime: 5 * 60 * 1000,
   })
 

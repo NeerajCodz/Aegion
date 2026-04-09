@@ -89,7 +89,8 @@ func (s *Server) setupRouter() chi.Router {
 
 	// Admin API routes
 	r.Route("/api/admin", func(r chi.Router) {
-		r.Get("/dashboard/config", s.handleDashboardConfig)
+		r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigRead)).
+			Get("/dashboard/config", s.handleDashboardConfig)
 		r.Group(func(r chi.Router) {
 			r.Use(security.RateLimitAdmin)
 			r.Use(security.CSRFProtection)

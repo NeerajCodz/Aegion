@@ -255,6 +255,7 @@ func TestRequirePermissionDenied(t *testing.T) {
 type fakeService struct {
 	store                     service.Store
 	getOperatorByIdentityIDFn func(ctx context.Context, identityID uuid.UUID) (*store.Operator, error)
+	getEffectivePermissionsFn func(ctx context.Context, operatorID uuid.UUID) ([]string, error)
 	evaluateCapabilityFn      func(ctx context.Context, operatorID uuid.UUID, permission string) error
 	listOperatorsFn           func(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Operator, int64, error)
 	getOperatorFn             func(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID) (*store.Operator, error)
@@ -263,6 +264,10 @@ type fakeService struct {
 	deleteOperatorFn          func(ctx context.Context, actorID uuid.UUID, operatorID uuid.UUID, ipAddress string) error
 	listRolesFn               func(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Role, int64, error)
 	getRoleFn                 func(ctx context.Context, actorID uuid.UUID, name string) (*store.Role, error)
+	createRoleFn              func(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error)
+	updateRoleFn              func(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error)
+	deleteRoleFn              func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error
+	availablePermissionsFn    func() []string
 	listAuditLogsFn           func(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error)
 }
 
@@ -282,6 +287,13 @@ func (f *fakeService) GetOperatorByIdentityID(ctx context.Context, identityID uu
 		return f.getOperatorByIdentityIDFn(ctx, identityID)
 	}
 	return nil, store.ErrOperatorNotFound
+}
+
+func (f *fakeService) GetEffectivePermissions(ctx context.Context, operatorID uuid.UUID) ([]string, error) {
+	if f.getEffectivePermissionsFn != nil {
+		return f.getEffectivePermissionsFn(ctx, operatorID)
+	}
+	return []string{}, nil
 }
 
 func (f *fakeService) ListOperators(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Operator, int64, error) {
@@ -331,6 +343,34 @@ func (f *fakeService) GetRole(ctx context.Context, actorID uuid.UUID, name strin
 		return f.getRoleFn(ctx, actorID, name)
 	}
 	return nil, store.ErrRoleNotFound
+}
+
+func (f *fakeService) CreateRole(ctx context.Context, actorID uuid.UUID, name, description string, permissions []string, ipAddress string) (*store.Role, error) {
+	if f.createRoleFn != nil {
+		return f.createRoleFn(ctx, actorID, name, description, permissions, ipAddress)
+	}
+	return nil, nil
+}
+
+func (f *fakeService) UpdateRole(ctx context.Context, actorID uuid.UUID, name string, description *string, permissions []string, ipAddress string) (*store.Role, error) {
+	if f.updateRoleFn != nil {
+		return f.updateRoleFn(ctx, actorID, name, description, permissions, ipAddress)
+	}
+	return nil, nil
+}
+
+func (f *fakeService) DeleteRole(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error {
+	if f.deleteRoleFn != nil {
+		return f.deleteRoleFn(ctx, actorID, name, ipAddress)
+	}
+	return nil
+}
+
+func (f *fakeService) AvailablePermissions() []string {
+	if f.availablePermissionsFn != nil {
+		return f.availablePermissionsFn()
+	}
+	return []string{}
 }
 
 func (f *fakeService) ListAuditLogs(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error) {
@@ -390,6 +430,22 @@ func (f *fakeStore) ListRoles(ctx context.Context, opts store.ListOptions) ([]*s
 
 func (f *fakeStore) GetRoleByName(ctx context.Context, name string) (*store.Role, error) {
 	return nil, store.ErrRoleNotFound
+}
+
+func (f *fakeStore) CreateRole(ctx context.Context, role *store.Role) error {
+	return nil
+}
+
+func (f *fakeStore) UpdateRole(ctx context.Context, role *store.Role) error {
+	return nil
+}
+
+func (f *fakeStore) DeleteRole(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (f *fakeStore) CountOperatorsByRole(ctx context.Context, role string) (int64, error) {
+	return 0, nil
 }
 
 func (f *fakeStore) ListAuditLogs(ctx context.Context, filter store.AuditFilter, opts store.ListOptions) ([]*store.AuditLogEntry, int64, error) {
