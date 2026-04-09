@@ -20,6 +20,7 @@ import (
 	admin "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/security"
+	"github.com/aegion/aegion/modules/admin/service"
 )
 
 // DBPinger is an interface for DB health checking
@@ -52,6 +53,23 @@ type Endpoint struct {
 	Path string `json:"path"`
 }
 
+type dashboardObservabilityEndpoint struct {
+	Key   string
+	Label string
+	URL   string
+}
+
+type dashboardObservabilityProbe struct {
+	Key            string `json:"key"`
+	Label          string `json:"label"`
+	URL            string `json:"url"`
+	Status         string `json:"status"`
+	StatusCode     int    `json:"status_code"`
+	ResponseTimeMS int64  `json:"response_time_ms"`
+	Message        string `json:"message"`
+	CheckedAt      string `json:"checked_at"`
+}
+
 func (s *Server) setupRouter() chi.Router {
 	s.ensureRoutingAssets()
 	r := chi.NewRouter()
@@ -76,6 +94,8 @@ func (s *Server) setupRouter() chi.Router {
 			r.Use(security.RateLimitAdmin)
 			r.Use(security.CSRFProtection)
 			r.Use(security.SecurityAudit)
+			r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermAuditRead)).
+				Get("/dashboard/observability", s.handleDashboardObservability)
 			s.Handler.RegisterRoutes(r)
 		})
 	})
@@ -191,6 +211,86 @@ func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"base_path": s.adminPath,
 	})
+}
+
+func (s *Server) handleDashboardObservability(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if !s.Config.Observability.Enabled {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode([]dashboardObservabilityProbe{})
+		return
+	}
+
+	timeout := s.Config.Observability.ProbeTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	results := make([]dashboardObservabilityProbe, 0, 5)
+	for _, endpoint := range s.dashboardObservabilityEndpoints() {
+		results = append(results, s.probeDashboardObservability(r.Context(), endpoint, timeout))
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) dashboardObservabilityEndpoints() []dashboardObservabilityEndpoint {
+	return []dashboardObservabilityEndpoint{
+		{Key: "otel-collector", Label: "OTel Collector", URL: strings.TrimSpace(s.Config.Observability.Endpoints.OTelCollector)},
+		{Key: "prometheus", Label: "Prometheus", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Prometheus)},
+		{Key: "grafana", Label: "Grafana", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Grafana)},
+		{Key: "tempo", Label: "Tempo", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Tempo)},
+		{Key: "loki", Label: "Loki", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Loki)},
+	}
+}
+
+func (s *Server) probeDashboardObservability(
+	ctx context.Context,
+	endpoint dashboardObservabilityEndpoint,
+	timeout time.Duration,
+) dashboardObservabilityProbe {
+	result := dashboardObservabilityProbe{
+		Key:       endpoint.Key,
+		Label:     endpoint.Label,
+		URL:       endpoint.URL,
+		Status:    "offline",
+		StatusCode: 0,
+		Message:   "endpoint not configured",
+		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if endpoint.URL == "" {
+		return result
+	}
+
+	started := time.Now()
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.URL, nil)
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+
+	resp, err := client.Do(req)
+	result.ResponseTimeMS = time.Since(started).Milliseconds()
+	if err != nil {
+		result.Message = err.Error()
+		return result
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	result.StatusCode = resp.StatusCode
+	result.Message = resp.Status
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		result.Status = "healthy"
+		return result
+	}
+
+	result.Status = "degraded"
+	return result
 }
 
 func normalizeAdminPath(adminPath string) string {

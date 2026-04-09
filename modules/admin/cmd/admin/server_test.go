@@ -554,3 +554,82 @@ func TestSecurityHeaders_InDevMode(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 }
+
+func TestHandleDashboardObservabilityDisabled(t *testing.T) {
+	s := &Server{
+		Config: &Config{},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/observability", nil)
+	rec := httptest.NewRecorder()
+	s.handleDashboardObservability(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var probes []dashboardObservabilityProbe
+	if err := json.NewDecoder(rec.Body).Decode(&probes); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(probes) != 0 {
+		t.Fatalf("expected 0 probes when disabled, got %d", len(probes))
+	}
+}
+
+func TestHandleDashboardObservability(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	defer healthy.Close()
+
+	degraded := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"degraded"}`))
+	}))
+	defer degraded.Close()
+
+	s := &Server{
+		Config: &Config{},
+	}
+	s.Config.Observability.Enabled = true
+	s.Config.Observability.ProbeTimeout = 200 * time.Millisecond
+	s.Config.Observability.Endpoints.OTelCollector = healthy.URL
+	s.Config.Observability.Endpoints.Prometheus = degraded.URL
+	s.Config.Observability.Endpoints.Grafana = "http://127.0.0.1:1"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/dashboard/observability", nil)
+	rec := httptest.NewRecorder()
+	s.handleDashboardObservability(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var probes []dashboardObservabilityProbe
+	if err := json.NewDecoder(rec.Body).Decode(&probes); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(probes) != 5 {
+		t.Fatalf("expected 5 probes, got %d", len(probes))
+	}
+
+	statusByKey := make(map[string]dashboardObservabilityProbe, len(probes))
+	for _, probe := range probes {
+		statusByKey[probe.Key] = probe
+	}
+
+	if got := statusByKey["otel-collector"]; got.Status != "healthy" || got.StatusCode != http.StatusOK {
+		t.Fatalf("expected healthy otel collector probe, got status=%q code=%d", got.Status, got.StatusCode)
+	}
+	if got := statusByKey["prometheus"]; got.Status != "degraded" || got.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected degraded prometheus probe, got status=%q code=%d", got.Status, got.StatusCode)
+	}
+	if got := statusByKey["grafana"]; got.Status != "offline" || got.StatusCode != 0 {
+		t.Fatalf("expected offline grafana probe, got status=%q code=%d", got.Status, got.StatusCode)
+	}
+	if got := statusByKey["tempo"]; got.Status != "offline" || got.Message != "endpoint not configured" {
+		t.Fatalf("expected offline tempo probe due missing endpoint, got status=%q message=%q", got.Status, got.Message)
+	}
+}

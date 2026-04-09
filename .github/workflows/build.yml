@@ -81,7 +81,7 @@ jobs:
         with:
           context: .
           file: build/Dockerfile.base
-          push: ${{ github.event_name != 'pull_request' && github.ref_name == 'main' }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.push_image == 'true')) }}
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
           cache-from: type=gha
@@ -92,7 +92,7 @@ jobs:
         with:
           context: .
           file: build/Dockerfile.base-runtime
-          push: ${{ github.event_name != 'pull_request' && github.ref_name == 'main' }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.push_image == 'true')) }}
           tags: ${{ steps.meta-runtime.outputs.tags }}
           labels: ${{ steps.meta-runtime.outputs.labels }}
           cache-from: type=gha
@@ -152,19 +152,19 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@v7
-        if: matrix.platform == 'linux/amd64' || (github.event_name != 'pull_request' && github.ref_name == 'main')
+        if: matrix.platform == 'linux/amd64' || (github.event_name != 'pull_request' && (github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.push_image == 'true')))
         with:
           context: .
           file: build/Dockerfile.core
           platforms: ${{ matrix.platform }}
-          push: ${{ github.event_name != 'pull_request' && github.ref_name == 'main' }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.push_image == 'true')) }}
           tags: ${{ env.REGISTRY }}/${{ steps.image-prefix.outputs.image_prefix }}/core:${{ github.sha }}-${{ steps.platform.outputs.tag }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ github.sha }}
-            BASE_IMAGE=golang:1.25.8-bookworm
+            BASE_IMAGE=golang:1.25.9-bookworm
             RUNTIME_IMAGE=debian:bookworm-slim
 
   # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Activity, AlertCircle, Trash2, Monitor, Smartphone } from 'lucide-react';
 import { Dialog } from '@headlessui/react';
 import { useSessions, useRevokeSession } from '../hooks/useSessions';
+import { Badge } from '@/components/ui/badge';
 
 export function Sessions() {
   const [page, setPage] = useState(1);
@@ -119,7 +120,7 @@ export function Sessions() {
                               {parseUserAgent(session.user_agent)}
                             </p>
                             {session.is_current && (
-                              <span className="badge badge-info">Current</span>
+                              <Badge variant="info">Current</Badge>
                             )}
                           </div>
                         </div>

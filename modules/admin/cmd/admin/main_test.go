@@ -82,6 +82,12 @@ admin:
 	if cfg.Database.MaxConns != 25 || cfg.Database.MinConns != 5 {
 		t.Fatalf("expected database defaults max/min 25/5, got %d/%d", cfg.Database.MaxConns, cfg.Database.MinConns)
 	}
+	if cfg.Observability.ProbeTimeout != 5*time.Second {
+		t.Fatalf("expected observability probe timeout default 5s, got %v", cfg.Observability.ProbeTimeout)
+	}
+	if cfg.Observability.Endpoints.Grafana != "http://grafana:3000/api/health" {
+		t.Fatalf("expected default grafana endpoint, got %q", cfg.Observability.Endpoints.Grafana)
+	}
 }
 
 func TestLoadConfig_ExpandEnvInFile(t *testing.T) {
@@ -122,6 +128,52 @@ admin:
 	}
 	if cfg.Admin.Path != "/console" {
 		t.Fatalf("expected configured admin path /console, got %q", cfg.Admin.Path)
+	}
+}
+
+func TestLoadConfig_ObservabilityEnvOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "admin-observability.yaml")
+
+	configYAML := strings.TrimSpace(`
+database:
+  url: postgres://localhost:5432/aegion
+server:
+  address: 127.0.0.1
+  port: 8082
+`)
+	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	if err := os.Setenv("AEGION_ADMIN_OBSERVABILITY_ENABLED", "true"); err != nil {
+		t.Fatalf("setenv failed: %v", err)
+	}
+	if err := os.Setenv("AEGION_ADMIN_OBSERVABILITY_PROBE_TIMEOUT", "2s"); err != nil {
+		t.Fatalf("setenv failed: %v", err)
+	}
+	if err := os.Setenv("AEGION_ADMIN_OBS_PROMETHEUS_URL", "http://obs-prom:9090/-/healthy"); err != nil {
+		t.Fatalf("setenv failed: %v", err)
+	}
+	defer func() {
+		_ = os.Unsetenv("AEGION_ADMIN_OBSERVABILITY_ENABLED")
+		_ = os.Unsetenv("AEGION_ADMIN_OBSERVABILITY_PROBE_TIMEOUT")
+		_ = os.Unsetenv("AEGION_ADMIN_OBS_PROMETHEUS_URL")
+	}()
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+
+	if !cfg.Observability.Enabled {
+		t.Fatal("expected observability enabled from env override")
+	}
+	if cfg.Observability.ProbeTimeout != 2*time.Second {
+		t.Fatalf("expected probe timeout 2s from env override, got %v", cfg.Observability.ProbeTimeout)
+	}
+	if cfg.Observability.Endpoints.Prometheus != "http://obs-prom:9090/-/healthy" {
+		t.Fatalf("expected prometheus endpoint override, got %q", cfg.Observability.Endpoints.Prometheus)
 	}
 }
 

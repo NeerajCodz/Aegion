@@ -8,6 +8,14 @@ export interface IdentityFilters {
   per_page?: number;
 }
 
+interface RawIdentity {
+  id: string | number;
+  state?: string;
+  created_at: string;
+  updated_at: string;
+  traits?: Record<string, unknown>;
+}
+
 interface BackendPaginationResponse<T> {
   items: T[];
   pagination: {
@@ -18,10 +26,19 @@ interface BackendPaginationResponse<T> {
   };
 }
 
-const mapIdentity = (raw: any): Identity => ({
+const getTraitValue = (traits: Record<string, unknown> | undefined, key: string): string | undefined => {
+  const value = traits?.[key];
+  return typeof value === 'string' ? value : undefined;
+};
+
+const mapIdentity = (raw: RawIdentity): Identity => ({
   id: String(raw.id),
-  email: String(raw?.traits?.email ?? ''),
-  display_name: String(raw?.traits?.display_name ?? raw?.traits?.name ?? raw?.traits?.email ?? ''),
+  email: getTraitValue(raw.traits, 'email') ?? '',
+  display_name:
+    getTraitValue(raw.traits, 'display_name') ??
+    getTraitValue(raw.traits, 'name') ??
+    getTraitValue(raw.traits, 'email') ??
+    '',
   avatar_url: undefined,
   status: raw.state === 'blocked' ? 'suspended' : raw.state === 'inactive' ? 'pending' : 'active',
   mfa_enabled: false,
@@ -39,7 +56,7 @@ export const identitiesApi = {
     if (filters.page) params.append('page', filters.page.toString());
     if (filters.per_page) params.append('per_page', filters.per_page.toString());
     
-    const response = await apiClient.get<BackendPaginationResponse<any>>(`/admin/identities?${params}`);
+    const response = await apiClient.get<BackendPaginationResponse<RawIdentity>>(`/admin/identities?${params}`);
     return {
       data: response.data.items.map(mapIdentity),
       total: response.data.pagination.total,
@@ -50,12 +67,12 @@ export const identitiesApi = {
   },
 
   get: async (id: string): Promise<Identity> => {
-    const response = await apiClient.get<any>(`/admin/identities/${id}`);
+    const response = await apiClient.get<RawIdentity>(`/admin/identities/${id}`);
     return mapIdentity(response.data);
   },
 
   update: async (id: string, data: Partial<Identity>): Promise<Identity> => {
-    const payload: any = {};
+    const payload: { traits?: Record<string, unknown>; state?: string } = {};
     if (data.display_name) {
       payload.traits = { display_name: data.display_name, name: data.display_name };
     }
@@ -65,7 +82,7 @@ export const identitiesApi = {
         data.status === 'pending' ? 'inactive' :
         'active';
     }
-    const response = await apiClient.patch<any>(`/admin/identities/${id}`, payload);
+    const response = await apiClient.patch<RawIdentity>(`/admin/identities/${id}`, payload);
     return mapIdentity(response.data);
   },
 

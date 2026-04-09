@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from 'react';
+import { useState, useCallback, createContext, useContext, type ReactNode } from 'react';
 import type { AuthState, Operator, LoginCredentials } from '../types';
 import { authApi } from '../api/operators';
 
@@ -10,33 +10,41 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AuthState>({
-    operator: null,
-    token: null,
-    isAuthenticated: false,
-  });
-  const [isLoading, setIsLoading] = useState(true);
+const defaultAuthState: AuthState = {
+  operator: null,
+  token: null,
+  isAuthenticated: false,
+};
 
-  useEffect(() => {
-    const token = localStorage.getItem('aegion_admin_token');
-    const operatorStr = localStorage.getItem('aegion_admin_operator');
-    
-    if (token && operatorStr) {
-      try {
-        const operator = JSON.parse(operatorStr) as Operator;
-        setState({
-          operator,
-          token,
-          isAuthenticated: true,
-        });
-      } catch {
-        localStorage.removeItem('aegion_admin_token');
-        localStorage.removeItem('aegion_admin_operator');
-      }
-    }
-    setIsLoading(false);
-  }, []);
+const readStoredAuthState = (): AuthState => {
+  if (typeof window === 'undefined') {
+    return defaultAuthState;
+  }
+
+  const token = localStorage.getItem('aegion_admin_token');
+  const operatorStr = localStorage.getItem('aegion_admin_operator');
+
+  if (!token || !operatorStr) {
+    return defaultAuthState;
+  }
+
+  try {
+    const operator = JSON.parse(operatorStr) as Operator;
+    return {
+      operator,
+      token,
+      isAuthenticated: true,
+    };
+  } catch {
+    localStorage.removeItem('aegion_admin_token');
+    localStorage.removeItem('aegion_admin_operator');
+    return defaultAuthState;
+  }
+};
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<AuthState>(() => readStoredAuthState());
+  const isLoading = false;
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     const { token, operator } = await authApi.login(credentials);

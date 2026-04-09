@@ -7,19 +7,19 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-surface-50">
+    <div className="min-h-screen bg-background">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       
       <div className="lg:pl-64">
         {/* Mobile header */}
-        <header className="lg:hidden sticky top-0 z-30 flex items-center h-16 px-4 bg-white border-b border-surface-200">
+        <header className="lg:hidden sticky top-0 z-30 flex items-center h-16 px-4 bg-card border-b border-border">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-2 -ml-2 text-surface-500 hover:text-surface-700"
+            className="p-2 -ml-2 text-muted-foreground hover:text-foreground"
           >
             <Menu className="w-6 h-6" />
           </button>
-          <div className="ml-4 text-lg font-semibold text-surface-900">Aegion Admin</div>
+          <div className="ml-4 text-lg font-semibold text-foreground">Aegion Admin</div>
         </header>
 
         {/* Main content */}

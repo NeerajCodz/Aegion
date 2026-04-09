@@ -201,7 +201,7 @@ jobs:
     name: Generate Changelog
     runs-on: ubuntu-latest
     outputs:
-      changelog: ${{ steps.changelog.outputs.changelog }}
+      changelog: ${{ steps.changelog.outputs.changelog || steps.fallback.outputs.changelog }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
