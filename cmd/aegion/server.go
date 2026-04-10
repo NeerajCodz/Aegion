@@ -168,7 +168,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	} else if len(cfg.Config.Secrets.Cipher) > 0 {
 		internalSecret = cfg.Config.Secrets.Cipher[0]
 	} else {
-		internalSecret = "dev-internal-secret-change-me-32chars"
+		return nil, errors.New("internal auth secret is not configured")
 	}
 
 	tokenGen, err := authtoken.NewGenerator(authtoken.GeneratorConfig{

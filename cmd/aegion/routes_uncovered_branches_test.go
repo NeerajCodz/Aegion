@@ -67,7 +67,7 @@ func TestFlowSubmitAndInternalUIAdditionalBranches(t *testing.T) {
 	t.Run("form parse failure surfaces bad request", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/submit", strings.NewReader("flow_id=%zz&csrf_token=x"))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		if _, _, err := parseFlowSubmitPayload(req); err == nil {
+		if _, _, err := parseFlowSubmitPayload(httptest.NewRecorder(), req); err == nil {
 			t.Fatal("expected parse form error")
 		}
 	})

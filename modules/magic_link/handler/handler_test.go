@@ -433,7 +433,7 @@ func TestHandler_HandleSendVerificationCode(t *testing.T) {
 		svc := &MockService{}
 		svc.On("SendVerificationCode", mock.Anything, "user@example.com", identityID).Return(nil).Once()
 
-		h := New(svc)
+		h := New(svc, WithLegacyIdentityHeaderAuth(true))
 		req := httptest.NewRequest(http.MethodPost, "/verification/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
 		req.Header.Set("X-User-ID", identityID.String())
 		rec := httptest.NewRecorder()
@@ -445,9 +445,53 @@ func TestHandler_HandleSendVerificationCode(t *testing.T) {
 		assert.Contains(t, resp.Message, "verification")
 		svc.AssertExpectations(t)
 	})
+
+	t.Run("rejects unsigned identity header by default", func(t *testing.T) {
+		identityID := uuid.New()
+		h := New(&MockService{})
+		req := httptest.NewRequest(http.MethodPost, "/verification/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		req.Header.Set("X-User-ID", identityID.String())
+		rec := httptest.NewRecorder()
+
+		h.HandleSendVerificationCode(rec, req)
+
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("accepts signed session headers", func(t *testing.T) {
+		identityID := uuid.New()
+		sessionID := uuid.New()
+		secret := []byte("0123456789abcdef0123456789abcdef")
+		svc := &MockService{}
+		svc.On("SendVerificationCode", mock.Anything, "user@example.com", identityID).Return(nil).Once()
+
+		h := New(svc, WithSessionHeaderSecret(secret))
+		req := httptest.NewRequest(http.MethodPost, "/verification/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
+		coresession.InjectHeaders(req, &coresession.Session{
+			ID:         sessionID,
+			IdentityID: identityID,
+			AAL:        coresession.AAL1,
+		}, secret)
+		rec := httptest.NewRecorder()
+
+		h.HandleSendVerificationCode(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		svc.AssertExpectations(t)
+	})
 }
 
 func TestHandler_HandleSendRecoveryCode(t *testing.T) {
+	t.Run("rejects unknown fields", func(t *testing.T) {
+		h := New(&MockService{})
+		req := httptest.NewRequest(http.MethodPost, "/recovery/send", bytes.NewBufferString(`{"email":"user@example.com","extra":"x"}`))
+		rec := httptest.NewRecorder()
+
+		h.HandleSendRecoveryCode(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
 	t.Run("unknown identity still returns success", func(t *testing.T) {
 		svc := &MockService{}
 		identityStore := &mockIdentityStore{}
