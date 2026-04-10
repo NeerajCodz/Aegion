@@ -65,6 +65,9 @@ func validMainConfig() *config.Config {
 	cfg.Server.IdleTimeout = config.Duration(30 * time.Second)
 	cfg.Log.Level = "error"
 	cfg.Log.Format = "json"
+	cfg.Secrets.Internal = []string{"dev-internal-secret-change-me-32chars"}
+	cfg.Secrets.Cookie = []string{"dev-cookie-secret-change-me-32chars"}
+	cfg.Secrets.Cipher = []string{"dev-cipher-secret-change-me-32chars"}
 	return cfg
 }
 

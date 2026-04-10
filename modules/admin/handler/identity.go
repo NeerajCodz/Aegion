@@ -143,7 +143,7 @@ func (h *Handler) UpdateIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateIdentityRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
@@ -223,7 +223,7 @@ func (h *Handler) SearchIdentities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SearchIdentitiesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}

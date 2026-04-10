@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/aegion/aegion/modules/magic_link/service"
 	"github.com/aegion/aegion/modules/magic_link/store"
 )
+
+const maxJSONBodyBytes int64 = 1 << 20
 
 // Service defines the magic link service behavior needed by handlers.
 type Service interface {
@@ -57,11 +60,31 @@ func WithSessionManager(sessionManager SessionManager) Option {
 	}
 }
 
+// WithSessionHeaderSecret enables verification of signed session context headers.
+func WithSessionHeaderSecret(secret []byte) Option {
+	return func(h *Handler) {
+		if len(secret) == 0 {
+			h.sessionHeaderSecret = nil
+			return
+		}
+		h.sessionHeaderSecret = append([]byte(nil), secret...)
+	}
+}
+
+// WithLegacyIdentityHeaderAuth controls whether unsigned identity header fallback is allowed.
+func WithLegacyIdentityHeaderAuth(enabled bool) Option {
+	return func(h *Handler) {
+		h.allowLegacyIdentityHeaderAuth = enabled
+	}
+}
+
 // Handler handles magic link HTTP requests.
 type Handler struct {
-	service        Service
-	identityStore  IdentityStore
-	sessionManager SessionManager
+	service                       Service
+	identityStore                 IdentityStore
+	sessionManager                SessionManager
+	sessionHeaderSecret           []byte
+	allowLegacyIdentityHeaderAuth bool
 }
 
 // New creates a new magic link handler.
@@ -108,11 +131,12 @@ type SuccessResponse struct {
 // HandleSendLoginCode handles requests to send a magic link/OTP for login.
 func (h *Handler) HandleSendLoginCode(w http.ResponseWriter, r *http.Request) {
 	var req SendCodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
 
+	req.Email = strings.TrimSpace(req.Email)
 	if req.Email == "" {
 		h.writeError(w, http.StatusBadRequest, "missing_email", "Email is required")
 		return
@@ -131,11 +155,13 @@ func (h *Handler) HandleSendLoginCode(w http.ResponseWriter, r *http.Request) {
 // HandleVerifyCode handles verification of an OTP code.
 func (h *Handler) HandleVerifyCode(w http.ResponseWriter, r *http.Request) {
 	var req VerifyCodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
 
+	req.Email = strings.TrimSpace(req.Email)
+	req.Code = strings.TrimSpace(req.Code)
 	if req.Email == "" || req.Code == "" {
 		h.writeError(w, http.StatusBadRequest, "missing_fields", "Email and code are required")
 		return
@@ -203,17 +229,18 @@ func (h *Handler) HandleVerifyMagicLink(w http.ResponseWriter, r *http.Request) 
 // HandleSendVerificationCode handles requests to send a verification code.
 func (h *Handler) HandleSendVerificationCode(w http.ResponseWriter, r *http.Request) {
 	var req SendCodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
 
+	req.Email = strings.TrimSpace(req.Email)
 	if req.Email == "" {
 		h.writeError(w, http.StatusBadRequest, "missing_email", "Email is required")
 		return
 	}
 
-	identityID, err := identityIDFromRequest(r)
+	identityID, err := h.identityIDFromRequest(r)
 	if err != nil {
 		h.writeError(w, http.StatusUnauthorized, "unauthorized", "Active session required")
 		return
@@ -230,11 +257,12 @@ func (h *Handler) HandleSendVerificationCode(w http.ResponseWriter, r *http.Requ
 // HandleSendRecoveryCode handles requests to send a recovery code.
 func (h *Handler) HandleSendRecoveryCode(w http.ResponseWriter, r *http.Request) {
 	var req SendCodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
 
+	req.Email = strings.TrimSpace(req.Email)
 	if req.Email == "" {
 		h.writeError(w, http.StatusBadRequest, "missing_email", "Email is required")
 		return
@@ -345,8 +373,24 @@ func (h *Handler) writeJSONSuccess(w http.ResponseWriter, resp SuccessResponse) 
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
-	for _, header := range []string{"X-User-ID", "X-Aegion-Session-Identity-ID"} {
+func (h *Handler) identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
+	if sessionCtx := coresession.GetContext(r.Context()); sessionCtx != nil && sessionCtx.IdentityID != uuid.Nil {
+		return sessionCtx.IdentityID, nil
+	}
+
+	if len(h.sessionHeaderSecret) > 0 && hasSignedSessionContextHeaders(r) {
+		sessionCtx, err := coresession.VerifyHeaders(r, h.sessionHeaderSecret)
+		if err != nil || sessionCtx == nil || sessionCtx.IdentityID == uuid.Nil {
+			return uuid.Nil, errors.New("invalid signed session context")
+		}
+		return sessionCtx.IdentityID, nil
+	}
+
+	if !h.allowLegacyIdentityHeaderAuth {
+		return uuid.Nil, errors.New("identity context missing")
+	}
+
+	for _, header := range []string{"X-Aegion-Session-Identity-ID", "X-Aegion-Identity-ID", "X-User-ID"} {
 		raw := strings.TrimSpace(r.Header.Get(header))
 		if raw == "" {
 			continue
@@ -358,6 +402,15 @@ func identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
 		return id, nil
 	}
 	return uuid.Nil, errors.New("identity header missing")
+}
+
+func hasSignedSessionContextHeaders(r *http.Request) bool {
+	for _, suffix := range []string{"Session-ID", "Identity-ID", "AAL", "Signature"} {
+		if strings.TrimSpace(r.Header.Get(coresession.HeaderPrefix+suffix)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func requestIP(r *http.Request) string {
@@ -375,6 +428,20 @@ func requestIP(r *http.Request) string {
 		return strings.Trim(host, "[]")
 	}
 	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra struct{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		return errors.New("invalid request body")
+	}
+	return nil
 }
 
 // handleServiceError converts service errors to HTTP responses.

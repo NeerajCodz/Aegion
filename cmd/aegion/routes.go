@@ -30,6 +30,7 @@ const (
 	systemConfigKeyProxy  = "proxy.settings"
 	adminModuleID         = "admin"
 	coreModuleID          = "core"
+	maxJSONBodyBytes      = 1 << 20
 )
 
 type runtimePolicySettings struct {
@@ -560,7 +561,7 @@ type flowSubmitPayload struct {
 }
 
 func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expectedType flows.FlowType) {
-	flowID, csrfToken, err := parseFlowSubmitPayload(r)
+	flowID, csrfToken, err := parseFlowSubmitPayload(w, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid flow submission payload", err)
 		return
@@ -603,12 +604,25 @@ func (s *Server) writeFlowValidationError(w http.ResponseWriter, err error) {
 	}
 }
 
-func parseFlowSubmitPayload(r *http.Request) (uuid.UUID, string, error) {
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("request body must contain a single JSON object")
+	}
+	return nil
+}
+
+func parseFlowSubmitPayload(w http.ResponseWriter, r *http.Request) (uuid.UUID, string, error) {
 	var payload flowSubmitPayload
 	contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
 
 	if contentType == "application/json" {
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		if err := decodeJSONBody(w, r, &payload); err != nil {
 			return uuid.Nil, "", err
 		}
 	} else {
@@ -717,7 +731,7 @@ func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleModuleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registry.RegistrationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
@@ -754,7 +768,7 @@ func (s *Server) handleModuleRegister(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleModuleDeregister(w http.ResponseWriter, r *http.Request) {
 	var req registry.DeregistrationRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
@@ -1008,7 +1022,7 @@ func (s *Server) handleInternalFailFlow(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Error string `json:"error"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
@@ -1029,6 +1043,7 @@ func (s *Server) handleInternalUpdateFlowUI(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	rawBody, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
@@ -1199,7 +1214,7 @@ func (s *Server) handleAdminListIdentities(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleAdminCreateIdentity(w http.ResponseWriter, r *http.Request) {
 	var req adminCreateIdentityRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
@@ -1306,7 +1321,7 @@ func (s *Server) handleAdminUpdateIdentity(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req adminUpdateIdentityRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
 		return
 	}
@@ -1966,14 +1981,8 @@ func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	var req runtimeConfigPatchRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body", err)
-		return
-	}
-	if err := dec.Decode(&struct{}{}); err != io.EOF {
-		writeError(w, http.StatusBadRequest, "invalid request body", errors.New("request body must contain a single JSON object"))
 		return
 	}
 	if req.Policy == nil && req.Proxy == nil {

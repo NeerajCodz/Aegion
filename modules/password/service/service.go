@@ -3,7 +3,7 @@ package service
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- HIBP k-anonymity protocol requires SHA-1 prefix hashing.
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -322,7 +322,7 @@ func (s *Service) checkSimilarity(password, identifier string) error {
 // checkHIBP checks password against Have I Been Pwned API using k-anonymity.
 func (s *Service) checkHIBP(ctx context.Context, password string) error {
 	// SHA-1 hash of password
-	hash := sha1.Sum([]byte(password))
+	hash := sha1.Sum([]byte(password)) // #nosec G401 -- HIBP API requires SHA-1 range query prefixes.
 	hashStr := strings.ToUpper(hex.EncodeToString(hash[:]))
 
 	prefix := hashStr[:5]

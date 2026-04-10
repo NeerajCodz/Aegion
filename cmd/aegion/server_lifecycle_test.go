@@ -235,6 +235,9 @@ func TestNewServerInitializesCoreComponents(t *testing.T) {
 			Enabled: false,
 			Path:    "/aegion",
 		},
+		Secrets: config.SecretsConfig{
+			Internal: []string{"dev-internal-secret-change-me-32chars"},
+		},
 	}
 
 	server, err := NewServer(context.Background(), &ServerConfig{
@@ -288,6 +291,9 @@ func TestNewServerInitializesPolicyCheckerWhenEnabled(t *testing.T) {
 			Enabled:      true,
 			DefaultModel: "rbac",
 			RBAC:         config.PolicyRBACConfig{Enabled: true},
+		},
+		Secrets: config.SecretsConfig{
+			Internal: []string{"dev-internal-secret-change-me-32chars"},
 		},
 	}
 

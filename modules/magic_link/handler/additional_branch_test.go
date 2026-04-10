@@ -81,7 +81,7 @@ func TestHandleSendVerificationCode_AdditionalBranches(t *testing.T) {
 	identityID := uuid.New()
 	svc := &MockService{}
 	svc.On("SendVerificationCode", mock.Anything, "user@example.com", identityID).Return(errors.New("send failed")).Once()
-	h = New(svc)
+	h = New(svc, WithLegacyIdentityHeaderAuth(true))
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/self-service/verification/methods/link/send", mustJSON(t, SendCodeRequest{Email: "user@example.com"}))
 	req.Header.Set("X-User-ID", identityID.String())

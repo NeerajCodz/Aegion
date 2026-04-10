@@ -24,7 +24,7 @@ func TestParseFlowSubmitPayloadVariants(t *testing.T) {
 	t.Run("json body flow_id and csrf token", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/submit", bytes.NewBufferString(`{"flow_id":"`+flowID.String()+`","csrf_token":"csrf"}`))
 		req.Header.Set("Content-Type", "application/json")
-		gotFlowID, csrf, err := parseFlowSubmitPayload(req)
+		gotFlowID, csrf, err := parseFlowSubmitPayload(httptest.NewRecorder(), req)
 		if err != nil {
 			t.Fatalf("parseFlowSubmitPayload failed: %v", err)
 		}
@@ -37,7 +37,7 @@ func TestParseFlowSubmitPayloadVariants(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/submit", bytes.NewBufferString("flow="+flowID.String()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("X-CSRF-Token", "csrf-from-header")
-		gotFlowID, csrf, err := parseFlowSubmitPayload(req)
+		gotFlowID, csrf, err := parseFlowSubmitPayload(httptest.NewRecorder(), req)
 		if err != nil {
 			t.Fatalf("parseFlowSubmitPayload failed: %v", err)
 		}
@@ -49,7 +49,7 @@ func TestParseFlowSubmitPayloadVariants(t *testing.T) {
 	t.Run("query fallback for flow and id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/submit?flow="+flowID.String(), nil)
 		req.Header.Set("X-CSRF-Token", "csrf-query")
-		gotFlowID, csrf, err := parseFlowSubmitPayload(req)
+		gotFlowID, csrf, err := parseFlowSubmitPayload(httptest.NewRecorder(), req)
 		if err != nil {
 			t.Fatalf("parseFlowSubmitPayload failed: %v", err)
 		}
@@ -61,24 +61,24 @@ func TestParseFlowSubmitPayloadVariants(t *testing.T) {
 	t.Run("invalid and missing payloads return errors", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/submit", bytes.NewBufferString("{"))
 		req.Header.Set("Content-Type", "application/json")
-		if _, _, err := parseFlowSubmitPayload(req); err == nil {
+		if _, _, err := parseFlowSubmitPayload(httptest.NewRecorder(), req); err == nil {
 			t.Fatal("expected invalid json error")
 		}
 
 		req = httptest.NewRequest(http.MethodPost, "/submit", nil)
 		req.Header.Set("X-CSRF-Token", "csrf")
-		if _, _, err := parseFlowSubmitPayload(req); err == nil {
+		if _, _, err := parseFlowSubmitPayload(httptest.NewRecorder(), req); err == nil {
 			t.Fatal("expected missing flow id error")
 		}
 
 		req = httptest.NewRequest(http.MethodPost, "/submit?flow=not-a-uuid", nil)
 		req.Header.Set("X-CSRF-Token", "csrf")
-		if _, _, err := parseFlowSubmitPayload(req); err == nil {
+		if _, _, err := parseFlowSubmitPayload(httptest.NewRecorder(), req); err == nil {
 			t.Fatal("expected invalid flow id error")
 		}
 
 		req = httptest.NewRequest(http.MethodPost, "/submit?flow="+flowID.String(), nil)
-		if _, _, err := parseFlowSubmitPayload(req); err == nil {
+		if _, _, err := parseFlowSubmitPayload(httptest.NewRecorder(), req); err == nil {
 			t.Fatal("expected missing csrf token error")
 		}
 	})

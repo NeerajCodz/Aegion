@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/aegion/aegion/modules/password/service"
 )
+
+const maxJSONBodyBytes int64 = 1 << 20
 
 // Service defines the password service behavior needed by handlers.
 type Service interface {
@@ -51,11 +54,31 @@ func WithSessionManager(sessionManager SessionManager) Option {
 	}
 }
 
+// WithSessionHeaderSecret enables verification of signed session context headers.
+func WithSessionHeaderSecret(secret []byte) Option {
+	return func(h *Handler) {
+		if len(secret) == 0 {
+			h.sessionHeaderSecret = nil
+			return
+		}
+		h.sessionHeaderSecret = append([]byte(nil), secret...)
+	}
+}
+
+// WithLegacyIdentityHeaderAuth controls whether unsigned identity header fallback is allowed.
+func WithLegacyIdentityHeaderAuth(enabled bool) Option {
+	return func(h *Handler) {
+		h.allowLegacyIdentityHeaderAuth = enabled
+	}
+}
+
 // Handler handles password authentication HTTP requests.
 type Handler struct {
-	service        Service
-	identityStore  IdentityStore
-	sessionManager SessionManager
+	service                       Service
+	identityStore                 IdentityStore
+	sessionManager                SessionManager
+	sessionHeaderSecret           []byte
+	allowLegacyIdentityHeaderAuth bool
 }
 
 // New creates a new password handler.
@@ -114,7 +137,7 @@ type SuccessResponse struct {
 // HandleRegistration handles password registration.
 func (h *Handler) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
@@ -166,17 +189,18 @@ func (h *Handler) HandleRegistration(w http.ResponseWriter, r *http.Request) {
 // HandleLogin handles password login.
 func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
 
-	if req.Identifier == "" || req.Password == "" {
+	identifier := strings.TrimSpace(req.Identifier)
+	if identifier == "" || req.Password == "" {
 		h.writeError(w, http.StatusBadRequest, "missing_credentials", "Identifier and password are required")
 		return
 	}
 
-	identityID, err := h.service.Verify(r.Context(), req.Identifier, req.Password)
+	identityID, err := h.service.Verify(r.Context(), identifier, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			// Use generic error to prevent account enumeration
@@ -201,14 +225,14 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 // HandleChangePassword handles password change.
 func (h *Handler) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
-	identityID, err := identityIDFromRequest(r)
+	identityID, err := h.identityIDFromRequest(r)
 	if err != nil {
 		h.writeError(w, http.StatusUnauthorized, "unauthorized", "Session required")
 		return
 	}
 
 	var req ChangePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
 	}
@@ -298,9 +322,21 @@ func (h *Handler) createSession(ctx context.Context, w http.ResponseWriter, r *h
 	return nil
 }
 
-func identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
+func (h *Handler) identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
 	if sessionCtx := coresession.GetContext(r.Context()); sessionCtx != nil && sessionCtx.IdentityID != uuid.Nil {
 		return sessionCtx.IdentityID, nil
+	}
+
+	if len(h.sessionHeaderSecret) > 0 && hasSignedSessionContextHeaders(r) {
+		sessionCtx, err := coresession.VerifyHeaders(r, h.sessionHeaderSecret)
+		if err != nil || sessionCtx == nil || sessionCtx.IdentityID == uuid.Nil {
+			return uuid.Nil, errors.New("invalid signed session context")
+		}
+		return sessionCtx.IdentityID, nil
+	}
+
+	if !h.allowLegacyIdentityHeaderAuth {
+		return uuid.Nil, errors.New("identity context missing")
 	}
 
 	for _, header := range []string{"X-Aegion-Session-Identity-ID", "X-Aegion-Identity-ID", "X-User-ID"} {
@@ -318,6 +354,15 @@ func identityIDFromRequest(r *http.Request) (uuid.UUID, error) {
 	return uuid.Nil, errors.New("identity header missing")
 }
 
+func hasSignedSessionContextHeaders(r *http.Request) bool {
+	for _, suffix := range []string{"Session-ID", "Identity-ID", "AAL", "Signature"} {
+		if strings.TrimSpace(r.Header.Get(coresession.HeaderPrefix+suffix)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func requestIP(r *http.Request) string {
 	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
 		parts := strings.Split(xff, ",")
@@ -333,4 +378,18 @@ func requestIP(r *http.Request) string {
 		return strings.Trim(host, "[]")
 	}
 	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra struct{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		return errors.New("invalid request body")
+	}
+	return nil
 }

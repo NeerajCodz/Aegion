@@ -609,7 +609,7 @@ func TestHandler_HandleChangePassword(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := &MockService{}
-			handler := &Handler{service: service}
+			handler := New(service, WithLegacyIdentityHeaderAuth(true))
 
 			tt.setupMocks(service)
 
@@ -735,7 +735,7 @@ func TestHandler_EdgeCases(t *testing.T) {
 
 	t.Run("malformed UUID in header", func(t *testing.T) {
 		service := &MockService{}
-		handler := &Handler{service: service}
+		handler := New(service, WithLegacyIdentityHeaderAuth(true))
 
 		body := ChangePasswordRequest{
 			OldPassword: "old",
@@ -800,7 +800,7 @@ func TestHandler_EdgeCases(t *testing.T) {
 
 	t.Run("change password accepts X-User-ID header", func(t *testing.T) {
 		service := &MockService{}
-		handler := &Handler{service: service}
+		handler := New(service, WithLegacyIdentityHeaderAuth(true))
 		identityID := uuid.New()
 
 		body := ChangePasswordRequest{
@@ -842,6 +842,66 @@ func TestHandler_EdgeCases(t *testing.T) {
 		handler.HandleChangePassword(recorder, req)
 		assert.Equal(t, http.StatusOK, recorder.Code)
 		service.AssertExpectations(t)
+	})
+
+	t.Run("change password rejects unsigned identity headers by default", func(t *testing.T) {
+		service := &MockService{}
+		handler := New(service)
+		identityID := uuid.New()
+
+		body := ChangePasswordRequest{
+			OldPassword: "oldpassword",
+			NewPassword: "newpassword",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", identityID.String())
+		recorder := httptest.NewRecorder()
+
+		handler.HandleChangePassword(recorder, req)
+		assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+	})
+
+	t.Run("change password accepts signed session headers", func(t *testing.T) {
+		service := &MockService{}
+		secret := []byte("0123456789abcdef0123456789abcdef")
+		handler := New(service, WithSessionHeaderSecret(secret))
+		identityID := uuid.New()
+		sessionID := uuid.New()
+
+		body := ChangePasswordRequest{
+			OldPassword: "oldpassword",
+			NewPassword: "newpassword",
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		service.On("ChangePassword", mock.Anything, identityID, "oldpassword", "newpassword").Return(nil).Once()
+
+		req := httptest.NewRequest(http.MethodPost, "/change-password", bytes.NewReader(bodyBytes))
+		req.Header.Set("Content-Type", "application/json")
+		coresession.InjectHeaders(req, &coresession.Session{
+			ID:         sessionID,
+			IdentityID: identityID,
+			AAL:        coresession.AAL1,
+		}, secret)
+		recorder := httptest.NewRecorder()
+
+		handler.HandleChangePassword(recorder, req)
+		assert.Equal(t, http.StatusOK, recorder.Code)
+		service.AssertExpectations(t)
+	})
+
+	t.Run("registration rejects unknown fields", func(t *testing.T) {
+		service := &MockService{}
+		handler := New(service)
+		req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"traits":{"email":"user@example.com","x":"y"},"password":"SecurePass123!"}`))
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		handler.HandleRegistration(recorder, req)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	})
 }
 

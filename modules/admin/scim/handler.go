@@ -4,6 +4,7 @@ package scim
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+const maxSCIMJSONBodyBytes int64 = 1 << 20
 
 // Handler handles SCIM 2.0 HTTP requests.
 type Handler struct {
@@ -229,7 +232,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 // CreateUser handles POST /Users.
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var user SCIMUser
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+	if err := h.decodeJSONBody(w, r, &user); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalidSyntax", "Invalid JSON")
 		return
 	}
@@ -257,7 +260,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var user SCIMUser
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+	if err := h.decodeJSONBody(w, r, &user); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalidSyntax", "Invalid JSON")
 		return
 	}
@@ -281,7 +284,7 @@ func (h *Handler) PatchUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var patchReq PatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&patchReq); err != nil {
+	if err := h.decodeJSONBody(w, r, &patchReq); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalidSyntax", "Invalid JSON")
 		return
 	}
@@ -369,7 +372,7 @@ func (h *Handler) GetGroup(w http.ResponseWriter, r *http.Request) {
 // CreateGroup handles POST /Groups.
 func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	var group SCIMGroup
-	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
+	if err := h.decodeJSONBody(w, r, &group); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalidSyntax", "Invalid JSON")
 		return
 	}
@@ -397,7 +400,7 @@ func (h *Handler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var group SCIMGroup
-	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
+	if err := h.decodeJSONBody(w, r, &group); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalidSyntax", "Invalid JSON")
 		return
 	}
@@ -421,7 +424,7 @@ func (h *Handler) PatchGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var patchReq PatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&patchReq); err != nil {
+	if err := h.decodeJSONBody(w, r, &patchReq); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalidSyntax", "Invalid JSON")
 		return
 	}
@@ -475,6 +478,19 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, data interface{})
 	w.Header().Set("Content-Type", "application/scim+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+func (h *Handler) decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSCIMJSONBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("request body must contain a single JSON object")
+	}
+	return nil
 }
 
 // writeError writes a SCIM error response.

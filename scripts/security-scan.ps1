@@ -3,11 +3,15 @@
 # Runs comprehensive security scans on codebase and containers
 # =============================================================================
 
+param(
+    [bool]$FailOnIssues = $true
+)
+
 $ErrorActionPreference = "Continue"
 
 $script:IssuesFound = 0
 $script:ScansRun = 0
-$script:FailOnIssues = $true
+$script:FailOnIssues = $FailOnIssues
 $script:GosecVersion = if ($env:AEGION_GOSEC_VERSION) { $env:AEGION_GOSEC_VERSION } else { "v2.25.0" }
 $script:GovulncheckVersion = if ($env:AEGION_GOVULNCHECK_VERSION) { $env:AEGION_GOVULNCHECK_VERSION } else { "v1.1.4" }
 
@@ -16,9 +20,9 @@ if ($env:AEGION_SECURITY_SCAN_FAIL_ON_ISSUES -and $env:AEGION_SECURITY_SCAN_FAIL
 }
 
 function Write-Section { param($Title) Write-Host "`n=== $Title ===" -ForegroundColor Cyan }
-function Write-Issue { param($Message) Write-Host "⚠ $Message" -ForegroundColor Yellow; $script:IssuesFound++ }
-function Write-Pass { param($Message) Write-Host "✓ $Message" -ForegroundColor Green }
-function Write-Info { param($Message) Write-Host "ℹ $Message" -ForegroundColor Blue }
+function Write-Issue { param($Message) Write-Host "[WARN] $Message" -ForegroundColor Yellow; $script:IssuesFound++ }
+function Write-Pass { param($Message) Write-Host "[PASS] $Message" -ForegroundColor Green }
+function Write-Info { param($Message) Write-Host "[INFO] $Message" -ForegroundColor Blue }
 
 # Check if a command exists
 function Test-Command {
@@ -317,10 +321,10 @@ function Main {
     Write-Host "Scans run: $($script:ScansRun)" -ForegroundColor Cyan
     
     if ($script:IssuesFound -eq 0) {
-        Write-Host "✓ No security issues found!" -ForegroundColor Green
+        Write-Host "[PASS] No security issues found!" -ForegroundColor Green
         exit 0
     } else {
-        Write-Host "⚠ Found $($script:IssuesFound) potential security issues" -ForegroundColor Yellow
+        Write-Host "[WARN] Found $($script:IssuesFound) potential security issues" -ForegroundColor Yellow
         if ($script:FailOnIssues) {
             Write-Host "Failing scan (set AEGION_SECURITY_SCAN_FAIL_ON_ISSUES=false to override)." -ForegroundColor Yellow
             exit 1

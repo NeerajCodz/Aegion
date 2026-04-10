@@ -247,10 +247,21 @@ func run(args []string, deps mainDeps) int {
 		}()
 	}
 
+	maxOpenConns, err := safeInt32(cfg.Database.MaxOpenConns, "database.max_open_connections")
+	if err != nil {
+		_, _ = fmt.Fprintf(deps.stderr, "Invalid configuration: %v\n", err)
+		return 1
+	}
+	maxIdleConns, err := safeInt32(cfg.Database.MaxIdleConns, "database.max_idle_connections")
+	if err != nil {
+		_, _ = fmt.Fprintf(deps.stderr, "Invalid configuration: %v\n", err)
+		return 1
+	}
+
 	db, err := deps.connectDB(ctx, database.Config{
 		URL:             cfg.Database.URL,
-		MaxOpenConns:    int32(cfg.Database.MaxOpenConns),
-		MaxIdleConns:    int32(cfg.Database.MaxIdleConns),
+		MaxOpenConns:    maxOpenConns,
+		MaxIdleConns:    maxIdleConns,
 		ConnMaxLifetime: cfg.Database.ConnMaxLifetime.Duration(),
 		ConnMaxIdleTime: cfg.Database.ConnMaxIdleTime.Duration(),
 	})
@@ -408,4 +419,15 @@ func asConcreteServer(s runtimeServer) *Server {
 	}
 	// Test doubles can still drive lifecycle with a minimal shell server.
 	return &Server{}
+}
+
+func safeInt32(value int, field string) (int32, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("%s must be >= 0", field)
+	}
+	const maxInt32 = int64(1<<31 - 1)
+	if int64(value) > maxInt32 {
+		return 0, fmt.Errorf("%s exceeds int32 range", field)
+	}
+	return int32(value), nil
 }

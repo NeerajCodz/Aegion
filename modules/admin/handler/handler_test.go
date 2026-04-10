@@ -1134,6 +1134,25 @@ func TestLoginInvalidJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestLoginRejectsUnknownFields(t *testing.T) {
+	h := New(&fakeService{store: &fakeStore{}})
+	req := httptest.NewRequest(http.MethodPost, "/admin/auth/login", bytes.NewBufferString(`{"email":"admin@example.com","password":"secret","extra":true}`))
+	rec := httptest.NewRecorder()
+
+	h.Login(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_request")
+}
+
+func TestDecodeJSONBodyRejectsTrailingPayload(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/admin/auth/login", bytes.NewBufferString(`{"email":"admin@example.com","password":"secret"}{"x":1}`))
+	rec := httptest.NewRecorder()
+	var payload authLoginRequest
+
+	err := decodeJSONBody(rec, req, &payload)
+	require.Error(t, err)
+}
+
 func TestLoginInvalidCredentials(t *testing.T) {
 	storeStub := &fakeStore{
 		authenticateFn: func(ctx context.Context, email, password string) (*store.Operator, error) {
@@ -3413,6 +3432,17 @@ func TestCreateOperatorErrors(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), "invalid_request")
 	})
 
+	t.Run("unknown field", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		body := bytes.NewBufferString(`{"identity_id":"` + uuid.NewString() + `","role":"admin","unexpected":true}`)
+		req := httptest.NewRequest(http.MethodPost, "/admin/operators", body)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.CreateOperator(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_request")
+	})
+
 	t.Run("missing role", func(t *testing.T) {
 		h := New(&fakeService{store: &fakeStore{}})
 		rec := httptest.NewRecorder()
@@ -4214,6 +4244,17 @@ func TestIdentityHandlersAdditionalPaths(t *testing.T) {
 		req = withRouteParam(req, "id", identityID.String())
 		h.UpdateIdentity(rec, req)
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("update identity unknown field", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/admin/identities/"+identityID.String(), bytes.NewBufferString(`{"traits":{"name":"x"},"unexpected":true}`))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "id", identityID.String())
+		h.UpdateIdentity(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "invalid_request")
 	})
 
 	t.Run("update identity not found", func(t *testing.T) {
