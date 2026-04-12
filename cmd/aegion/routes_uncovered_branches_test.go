@@ -615,7 +615,7 @@ func TestRuntimeConfigAndMetricsAdditionalBranches(t *testing.T) {
 			UpstreamTimeout:         "10s",
 			IdentitySignatureHeader: "X-Aegion-Signature",
 			SignedIdentityHeaders:   []string{"X-User-ID", "x-user-id", "X-User-Session-ID"},
-			IdentitySigningSecret:   "0123456789abcdef",
+			IdentitySigningSecret:   "example-signing-secret",
 		}); err != nil {
 			t.Fatalf("expected duplicate signed headers to normalize without error, got %v", err)
 		}

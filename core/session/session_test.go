@@ -2,9 +2,11 @@ package session
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -394,8 +396,15 @@ func TestManager_SignVerifyToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Sign token
 			signed := manager.signToken(tt.token)
-			assert.Contains(t, signed, ".")
-			assert.Contains(t, signed, tt.token)
+			parts := strings.Split(signed, ".")
+			require.Len(t, parts, 4)
+			assert.Equal(t, "v1", parts[0])
+			decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
+			require.NoError(t, err)
+			assert.Equal(t, tt.token, string(decoded))
+			_, err = strconv.ParseInt(parts[2], 10, 64)
+			require.NoError(t, err)
+			assert.Regexp(t, "^[0-9a-f]{64}$", parts[3])
 
 			// Verify signed token
 			verified, err := manager.verifySignedToken(signed)
@@ -460,7 +469,15 @@ func TestManager_SetCookie(t *testing.T) {
 
 	cookie := cookies[0]
 	assert.Equal(t, manager.cookieConfig.Name, cookie.Name)
-	assert.Contains(t, cookie.Value, "test-session-token")
+	parts := strings.Split(cookie.Value, ".")
+	require.Len(t, parts, 4)
+	assert.Equal(t, "v1", parts[0])
+	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	assert.Equal(t, "test-session-token", string(decoded))
+	_, err = strconv.ParseInt(parts[2], 10, 64)
+	require.NoError(t, err)
+	assert.Regexp(t, "^[0-9a-f]{64}$", parts[3])
 	assert.Equal(t, manager.cookieConfig.Path, cookie.Path)
 	assert.Equal(t, manager.cookieConfig.Domain, cookie.Domain)
 	assert.Equal(t, manager.cookieConfig.SameSite, cookie.SameSite)
@@ -1117,13 +1134,19 @@ func TestManager_SignedTokenFormat(t *testing.T) {
 	token := "test-token"
 	signed := manager.signToken(token)
 
-	// Should contain exactly one dot
+	// Should contain version, encoded payload, timestamp, and signature
 	parts := strings.Split(signed, ".")
-	assert.Len(t, parts, 2)
-	assert.Equal(t, token, parts[0])
+	require.Len(t, parts, 4)
+	assert.Equal(t, "v1", parts[0])
 
-	// Signature part should be hex-encoded (64 chars for SHA256)
-	signature := parts[1]
+	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
+	require.NoError(t, err)
+	assert.Equal(t, token, string(decoded))
+
+	_, err = strconv.ParseInt(parts[2], 10, 64)
+	require.NoError(t, err)
+
+	signature := parts[3]
 	assert.Regexp(t, "^[0-9a-f]+$", signature)
 	assert.Equal(t, 64, len(signature)) // SHA256 = 32 bytes = 64 hex chars
 }
@@ -1497,12 +1520,11 @@ func TestManager_Token_EmptySecret(t *testing.T) {
 	token := "test-token"
 	signed := manager.signToken(token)
 
-	assert.NotEmpty(t, signed)
-	assert.Contains(t, signed, ".")
+	assert.Empty(t, signed)
 
 	verified, err := manager.verifySignedToken(signed)
-	assert.NoError(t, err)
-	assert.Equal(t, token, verified)
+	assert.Error(t, err)
+	assert.Equal(t, "", verified)
 }
 
 func TestManager_Token_LongSecret(t *testing.T) {
@@ -1540,13 +1562,6 @@ func TestManager_Token_SpecialCharacters(t *testing.T) {
 	for _, token := range tokens {
 		signed := manager.signToken(token)
 		verified, err := manager.verifySignedToken(signed)
-
-		if strings.Contains(token, ".") {
-			assert.Error(t, err, "expected token with dot to be invalid: %s", token)
-			assert.Equal(t, "", verified)
-			continue
-		}
-
 		assert.NoError(t, err, "failed to verify token: %s", token)
 		assert.Equal(t, token, verified)
 	}

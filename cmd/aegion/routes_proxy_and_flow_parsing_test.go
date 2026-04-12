@@ -300,7 +300,7 @@ func TestHandleAdminGetConfig_WithHookedRuntimeRows(t *testing.T) {
 			}}
 		case systemConfigKeyProxy:
 			return adminTestRow{scanFn: func(dest ...any) error {
-				*(dest[0].(*[]byte)) = []byte(`{"enabled":true,"upstream_timeout":"15s","preserve_host":true,"strip_inbound_identity_headers":true,"identity_signing_secret":"0123456789abcdef","identity_signature_header":"X-Sig","signed_identity_headers":["X-User-ID"]}`)
+				*(dest[0].(*[]byte)) = []byte(`{"enabled":true,"upstream_timeout":"15s","preserve_host":true,"strip_inbound_identity_headers":true,"identity_signing_secret":"example-signing-secret","identity_signature_header":"X-Sig","signed_identity_headers":["X-User-ID"]}`)
 				return nil
 			}}
 		default:

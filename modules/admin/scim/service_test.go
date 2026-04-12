@@ -949,7 +949,7 @@ func TestValidateTokenNotFound(t *testing.T) {
 	service := NewService(mockStore, nil)
 	ctx := context.Background()
 
-	tokenString := "aegion_scim_1234567890abcdefghijklmn"
+	tokenString := "aegion_scim_exampletokenvaluefortests"
 	prefix := tokenString[12:24] // "1234567890ab"
 
 	mockStore.On("GetSCIMTokenByPrefix", ctx, prefix).Return(nil, fmt.Errorf("not found"))
@@ -973,7 +973,7 @@ func TestValidateInactiveToken(t *testing.T) {
 
 	mockStore.On("GetSCIMTokenByPrefix", ctx, mock.Anything).Return(inactiveToken, nil)
 
-	_, err := service.ValidateToken(ctx, "aegion_scim_1234567890abcdefghijklmn")
+	_, err := service.ValidateToken(ctx, "aegion_scim_exampletokenvaluefortests")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "token is inactive")
@@ -994,7 +994,7 @@ func TestValidateExpiredToken(t *testing.T) {
 
 	mockStore.On("GetSCIMTokenByPrefix", ctx, mock.Anything).Return(expiredToken, nil)
 
-	_, err := service.ValidateToken(ctx, "aegion_scim_1234567890abcdefghijklmn")
+	_, err := service.ValidateToken(ctx, "aegion_scim_exampletokenvaluefortests")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "token has expired")

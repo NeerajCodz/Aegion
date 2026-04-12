@@ -184,12 +184,12 @@ func TestRequireAdminAPIKeySuccess(t *testing.T) {
 		UpdatedAt:  time.Now().UTC(),
 	}
 
-	prefix := "123456789012"
+	prefix := "examplekey01"
 	apiKey := &store.APIKey{
 		ID:         uuid.New(),
 		OperatorID: operatorID,
 		KeyPrefix:  prefix,
-		KeyHash:    store.HashAPIKeyToken("aegion_12345678901234567890"),
+		KeyHash:    store.HashAPIKeyToken("aegion_examplekey01_not_a_real_token"),
 		CreatedAt:  time.Now().UTC(),
 		UpdatedAt:  time.Now().UTC(),
 	}
@@ -201,7 +201,7 @@ func TestRequireAdminAPIKeySuccess(t *testing.T) {
 
 	h := New(&fakeService{store: storeStub})
 	req := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
-	req.Header.Set("Authorization", "Bearer aegion_12345678901234567890")
+	req.Header.Set("Authorization", "Bearer aegion_examplekey01_not_a_real_token")
 	rec := httptest.NewRecorder()
 
 	handler := h.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1490,7 +1490,7 @@ func TestRequireAdminNotOperator(t *testing.T) {
 func TestRequireAdminAPIKeyPrefixNotFound(t *testing.T) {
 	h := New(&fakeService{store: &fakeStore{apiKeysByPrefix: map[string]*store.APIKey{}}})
 	req := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
-	req.Header.Set("Authorization", "Bearer aegion_12345678901234567890")
+	req.Header.Set("Authorization", "Bearer aegion_examplekey01_not_a_real_token")
 	rec := httptest.NewRecorder()
 
 	handler := h.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1512,17 +1512,17 @@ func TestRequireAdminAPIKeyHashMismatch(t *testing.T) {
 	key := &store.APIKey{
 		ID:         uuid.New(),
 		OperatorID: opID,
-		KeyPrefix:  "123456789012",
+		KeyPrefix:  "examplekey01",
 		KeyHash:    store.HashAPIKeyToken("aegion_different_token_value"),
 		CreatedAt:  time.Now().UTC(),
 		UpdatedAt:  time.Now().UTC(),
 	}
 	h := New(&fakeService{store: &fakeStore{
 		operators:       map[uuid.UUID]*store.Operator{opID: operator},
-		apiKeysByPrefix: map[string]*store.APIKey{"123456789012": key},
+		apiKeysByPrefix: map[string]*store.APIKey{"examplekey01": key},
 	}})
 	req := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
-	req.Header.Set("Authorization", "Bearer aegion_12345678901234567890")
+	req.Header.Set("Authorization", "Bearer aegion_examplekey01_not_a_real_token")
 	rec := httptest.NewRecorder()
 
 	handler := h.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1542,11 +1542,11 @@ func TestRequireAdminAPIKeyExpired(t *testing.T) {
 		UpdatedAt:  time.Now().UTC(),
 	}
 	expired := time.Now().UTC().Add(-time.Hour)
-	token := "aegion_12345678901234567890"
+	token := "aegion_examplekey01_not_a_real_token"
 	key := &store.APIKey{
 		ID:         uuid.New(),
 		OperatorID: opID,
-		KeyPrefix:  "123456789012",
+		KeyPrefix:  "examplekey01",
 		KeyHash:    store.HashAPIKeyToken(token),
 		ExpiresAt:  &expired,
 		CreatedAt:  time.Now().UTC(),
@@ -1554,7 +1554,7 @@ func TestRequireAdminAPIKeyExpired(t *testing.T) {
 	}
 	h := New(&fakeService{store: &fakeStore{
 		operators:       map[uuid.UUID]*store.Operator{opID: operator},
-		apiKeysByPrefix: map[string]*store.APIKey{"123456789012": key},
+		apiKeysByPrefix: map[string]*store.APIKey{"examplekey01": key},
 	}})
 	req := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -1568,18 +1568,18 @@ func TestRequireAdminAPIKeyExpired(t *testing.T) {
 }
 
 func TestRequireAdminAPIKeyOperatorMissing(t *testing.T) {
-	token := "aegion_12345678901234567890"
+	token := "aegion_examplekey01_not_a_real_token"
 	key := &store.APIKey{
 		ID:         uuid.New(),
 		OperatorID: uuid.New(),
-		KeyPrefix:  "123456789012",
+		KeyPrefix:  "examplekey01",
 		KeyHash:    store.HashAPIKeyToken(token),
 		CreatedAt:  time.Now().UTC(),
 		UpdatedAt:  time.Now().UTC(),
 	}
 	h := New(&fakeService{store: &fakeStore{
 		operators:       map[uuid.UUID]*store.Operator{},
-		apiKeysByPrefix: map[string]*store.APIKey{"123456789012": key},
+		apiKeysByPrefix: map[string]*store.APIKey{"examplekey01": key},
 	}})
 	req := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

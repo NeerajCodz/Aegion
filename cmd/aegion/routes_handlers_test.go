@@ -610,6 +610,7 @@ func TestModuleProxyHandler(t *testing.T) {
 	})
 
 	t.Run("proxy can trust forwarded headers when explicitly enabled", func(t *testing.T) {
+		t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 		s.cfg.Proxy.TrustForwardedHeaders = true
 		defer func() {
 			s.cfg.Proxy.TrustForwardedHeaders = false

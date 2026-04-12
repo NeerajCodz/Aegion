@@ -3,6 +3,7 @@ package authtoken
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -141,15 +142,16 @@ func TestGenerator_Generate(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotEmpty(t, token)
 
-			// Verify token format: 3 parts separated by dots
+			// Verify token format: version, module id, timestamp, signature
 			parts := strings.Split(token, TokenSeparator)
-			assert.Len(t, parts, 3)
-
-			// Verify each part is valid base64
-			for i, part := range parts {
-				_, err := base64.RawURLEncoding.DecodeString(part)
-				assert.NoError(t, err, "part %d should be valid base64", i)
-			}
+			require.Len(t, parts, 4)
+			assert.Equal(t, "v1", parts[0])
+			decodedModuleID, err := base64.RawURLEncoding.DecodeString(parts[1])
+			require.NoError(t, err)
+			assert.Equal(t, tt.moduleID, string(decodedModuleID))
+			_, err = strconv.ParseInt(parts[2], 10, 64)
+			require.NoError(t, err)
+			assert.Regexp(t, "^[0-9a-f]{64}$", parts[3])
 
 			// Verify token can be validated
 			validatedToken, err := gen.Validate(token)
@@ -198,25 +200,25 @@ func TestGenerator_Validate(t *testing.T) {
 		},
 		{
 			name:      "invalid base64 in module ID",
-			token:     "invalid_base64!.dGVzdA.dGVzdA",
-			wantErr:   ErrInvalidToken,
-			wantValid: false,
-		},
-		{
-			name:      "invalid base64 in timestamp",
-			token:     "dGVzdA.invalid_base64!.dGVzdA",
-			wantErr:   ErrInvalidToken,
-			wantValid: false,
-		},
-		{
-			name:      "invalid base64 in signature",
-			token:     "dGVzdA.dGVzdA.invalid_base64!",
+			token:     "v1.invalid_base64!.32503680000000.signature",
 			wantErr:   ErrInvalidToken,
 			wantValid: false,
 		},
 		{
 			name:      "invalid timestamp format",
-			token:     base64.RawURLEncoding.EncodeToString([]byte("test")) + "." + base64.RawURLEncoding.EncodeToString([]byte("invalid-timestamp")) + "." + base64.RawURLEncoding.EncodeToString([]byte("signature")),
+			token:     "v1." + base64.RawURLEncoding.EncodeToString([]byte("test")) + ".invalid-timestamp.signature",
+			wantErr:   ErrInvalidToken,
+			wantValid: false,
+		},
+		{
+			name:      "invalid signature hex",
+			token:     "v1." + base64.RawURLEncoding.EncodeToString([]byte("test")) + ".32503680000000.invalid_base64!",
+			wantErr:   ErrInvalidToken,
+			wantValid: false,
+		},
+		{
+			name:      "wrong token version",
+			token:     "v2." + base64.RawURLEncoding.EncodeToString([]byte("test")) + ".32503680000000.signature",
 			wantErr:   ErrInvalidToken,
 			wantValid: false,
 		},
@@ -483,13 +485,13 @@ func TestBuildPayload(t *testing.T) {
 			name:      "simple module ID",
 			moduleID:  "password",
 			timestamp: timestamp,
-			expected:  "password:2023-01-01T12:00:00.123456789Z",
+			expected:  "internal_token\nv1\n1672574400123\ncGFzc3dvcmQ",
 		},
 		{
 			name:      "complex module ID",
 			moduleID:  "magic_link-test",
 			timestamp: timestamp,
-			expected:  "magic_link-test:2023-01-01T12:00:00.123456789Z",
+			expected:  "internal_token\nv1\n1672574400123\nbWFnaWNfbGluay10ZXN0",
 		},
 	}
 
