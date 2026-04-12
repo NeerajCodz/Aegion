@@ -3,15 +3,13 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/secrettoken"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -787,22 +785,12 @@ func (s *Store) UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error {
 
 // HashAPIKeyToken hashes a full API key/token for safe storage.
 func HashAPIKeyToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return base64.StdEncoding.EncodeToString(sum[:])
+	return secrettoken.Hash(token)
 }
 
 // ValidateAPIKeyToken verifies a token against a stored hash in constant time.
 func ValidateAPIKeyToken(token, expectedHash string) bool {
-	if token == "" || expectedHash == "" {
-		return false
-	}
-
-	actual := HashAPIKeyToken(token)
-	if len(actual) != len(expectedHash) {
-		return false
-	}
-
-	return subtle.ConstantTimeCompare([]byte(actual), []byte(expectedHash)) == 1
+	return secrettoken.Validate(token, expectedHash)
 }
 
 // DeleteAPIKey removes an API key.
