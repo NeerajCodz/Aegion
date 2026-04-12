@@ -165,15 +165,12 @@ func TestModuleProxyHelpers(t *testing.T) {
 		}
 
 		s.cfg.Proxy.IdentitySigningSecret = "configured-signing-secret"
-		if got := string(s.proxyIdentitySigningSecret("  override-signing-secret  ")); got != "override-signing-secret" {
-			t.Fatalf("expected override signing secret, got %q", got)
-		}
-		if got := string(s.proxyIdentitySigningSecret("")); got != "configured-signing-secret" {
+		if got := string(s.proxyIdentitySigningSecret()); got != "configured-signing-secret" {
 			t.Fatalf("expected configured signing secret, got %q", got)
 		}
 		s.cfg.Proxy.IdentitySigningSecret = ""
 		s.cfg.Secrets.Internal = []string{"internal-signing-secret"}
-		if got := string(s.proxyIdentitySigningSecret("")); got != "internal-signing-secret" {
+		if got := string(s.proxyIdentitySigningSecret()); got != "internal-signing-secret" {
 			t.Fatalf("expected internal signing secret fallback, got %q", got)
 		}
 	})
@@ -327,5 +324,9 @@ func TestHandleAdminGetConfig_WithHookedRuntimeRows(t *testing.T) {
 	}
 	if body["proxy"] == nil || body["policy"] == nil {
 		t.Fatalf("expected policy and proxy sections, got %v", body)
+	}
+	proxy := body["proxy"].(map[string]any)
+	if proxy["identity_signing_secret_set"] != false {
+		t.Fatalf("expected legacy stored runtime secret to be ignored in responses, got %v", proxy["identity_signing_secret_set"])
 	}
 }

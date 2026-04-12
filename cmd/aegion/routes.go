@@ -56,7 +56,6 @@ type runtimeProxySettings struct {
 	PreserveHost                bool     `json:"preserve_host"`
 	TrustForwardedHeaders       bool     `json:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders bool     `json:"strip_inbound_identity_headers"`
-	IdentitySigningSecret       string   `json:"identity_signing_secret,omitempty"`
 	IdentitySignatureHeader     string   `json:"identity_signature_header"`
 	SignedIdentityHeaders       []string `json:"signed_identity_headers"`
 }
@@ -116,7 +115,6 @@ type runtimeProxySettingsPatch struct {
 	PreserveHost                *bool     `json:"preserve_host"`
 	TrustForwardedHeaders       *bool     `json:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders *bool     `json:"strip_inbound_identity_headers"`
-	IdentitySigningSecret       *string   `json:"identity_signing_secret"`
 	IdentitySignatureHeader     *string   `json:"identity_signature_header"`
 	SignedIdentityHeaders       *[]string `json:"signed_identity_headers"`
 }
@@ -900,7 +898,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		PreserveHost:                proxySettings.PreserveHost,
 		TrustForwardedHeaders:       proxySettings.TrustForwardedHeaders,
 		StripInboundIdentityHeaders: proxySettings.StripInboundIdentityHeaders,
-		IdentitySigningSecret:       s.proxyIdentitySigningSecret(proxySettings.IdentitySigningSecret),
+		IdentitySigningSecret:       s.proxyIdentitySigningSecret(),
 		IdentitySignatureHeader:     proxySettings.IdentitySignatureHeader,
 		SignedIdentityHeaders:       proxySettings.SignedIdentityHeaders,
 		PolicyChecker:               checker,
@@ -917,6 +915,10 @@ func (s *Server) moduleProxyRuntimeSettings(ctx context.Context) (runtimeProxySe
 	if err != nil {
 		s.log.Warn().Err(err).Msg("failed to load runtime proxy config, using bootstrap defaults")
 		proxySettings = defaultRuntimeProxySettings(s.cfg)
+	}
+	if err := s.ensureRuntimeProxySigning(proxySettings); err != nil {
+		s.log.Warn().Err(err).Msg("runtime proxy config missing signing secret, forcing identity header stripping")
+		proxySettings.StripInboundIdentityHeaders = true
 	}
 
 	policySettings, err := s.loadRuntimePolicySettings(ctx)
@@ -953,10 +955,7 @@ func (s *Server) sessionSecretForProxy() []byte {
 	return nil
 }
 
-func (s *Server) proxyIdentitySigningSecret(override string) []byte {
-	if secret := strings.TrimSpace(override); secret != "" {
-		return []byte(secret)
-	}
+func (s *Server) proxyIdentitySigningSecret() []byte {
 	if secret := strings.TrimSpace(s.cfg.Proxy.IdentitySigningSecret); secret != "" {
 		return []byte(secret)
 	}
@@ -1982,7 +1981,7 @@ func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {
 	resp.Proxy.PreserveHost = proxySettings.PreserveHost
 	resp.Proxy.TrustForwardedHeaders = proxySettings.TrustForwardedHeaders
 	resp.Proxy.StripInboundIdentityHeaders = proxySettings.StripInboundIdentityHeaders
-	resp.Proxy.IdentitySigningSecretSet = strings.TrimSpace(proxySettings.IdentitySigningSecret) != ""
+	resp.Proxy.IdentitySigningSecretSet = len(s.proxyIdentitySigningSecret()) > 0
 	resp.Proxy.IdentitySignatureHeader = proxySettings.IdentitySignatureHeader
 	resp.Proxy.SignedIdentityHeaders = append([]string(nil), proxySettings.SignedIdentityHeaders...)
 
@@ -2027,6 +2026,10 @@ func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request)
 		}
 		next, err := applyRuntimeProxyPatch(current, req.Proxy)
 		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid proxy runtime config patch", err)
+			return
+		}
+		if err := s.ensureRuntimeProxySigning(next); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid proxy runtime config patch", err)
 			return
 		}
@@ -2145,7 +2148,6 @@ func defaultRuntimeProxySettings(cfg *platformconfig.Config) runtimeProxySetting
 	settings.PreserveHost = cfg.Proxy.PreserveHost
 	settings.TrustForwardedHeaders = cfg.Proxy.TrustForwardedHeaders
 	settings.StripInboundIdentityHeaders = cfg.Proxy.StripInboundIdentityHeaders
-	settings.IdentitySigningSecret = strings.TrimSpace(cfg.Proxy.IdentitySigningSecret)
 
 	if timeout := cfg.Proxy.UpstreamTimeout.Duration().String(); timeout != "" && timeout != "0s" {
 		settings.UpstreamTimeout = timeout
@@ -2203,9 +2205,6 @@ func applyRuntimeProxyPatch(current runtimeProxySettings, patch *runtimeProxySet
 	}
 	if patch.StripInboundIdentityHeaders != nil {
 		next.StripInboundIdentityHeaders = *patch.StripInboundIdentityHeaders
-	}
-	if patch.IdentitySigningSecret != nil {
-		next.IdentitySigningSecret = strings.TrimSpace(*patch.IdentitySigningSecret)
 	}
 	if patch.IdentitySignatureHeader != nil {
 		next.IdentitySignatureHeader = strings.TrimSpace(*patch.IdentitySignatureHeader)
@@ -2331,17 +2330,20 @@ func validateRuntimeProxySettings(settings runtimeProxySettings) error {
 	}
 	settings.SignedIdentityHeaders = normalized
 
-	if strings.TrimSpace(settings.IdentitySigningSecret) != "" && len(settings.IdentitySigningSecret) < 16 {
-		return errors.New("identity_signing_secret must be at least 16 characters when set")
-	}
-
-	if !settings.StripInboundIdentityHeaders && strings.TrimSpace(settings.IdentitySigningSecret) == "" {
-		return errors.New("identity_signing_secret is required when strip_inbound_identity_headers is disabled")
-	}
 	if isRuntimeProductionEnvironment() && !settings.StripInboundIdentityHeaders {
 		return errors.New("strip_inbound_identity_headers cannot be disabled in production")
 	}
 
+	return nil
+}
+
+func (s *Server) ensureRuntimeProxySigning(settings runtimeProxySettings) error {
+	if settings.StripInboundIdentityHeaders {
+		return nil
+	}
+	if len(s.proxyIdentitySigningSecret()) == 0 {
+		return errors.New("bootstrap proxy identity signing secret is required when strip_inbound_identity_headers is disabled")
+	}
 	return nil
 }
 

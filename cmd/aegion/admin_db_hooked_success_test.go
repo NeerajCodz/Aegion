@@ -201,7 +201,6 @@ func TestHandleAdminUpdateConfig_WithDatabaseHooks(t *testing.T) {
 				"upstream_timeout":               "45s",
 				"preserve_host":                  true,
 				"strip_inbound_identity_headers": true,
-				"identity_signing_secret":        "example-signing-secret",
 				"identity_signature_header":      "X-Proxy-Sig",
 				"signed_identity_headers":        []string{"X-User-ID", "X-User-Session-ID"},
 			},
@@ -222,6 +221,12 @@ func TestHandleAdminUpdateConfig_WithDatabaseHooks(t *testing.T) {
 		proxy := body["proxy"].(map[string]any)
 		if proxy["upstream_timeout"] != "45s" {
 			t.Fatalf("expected patched upstream timeout 45s, got %v", proxy["upstream_timeout"])
+		}
+		if proxy["identity_signing_secret_set"] != false {
+			t.Fatalf("expected runtime config response to avoid persisted signing secrets, got %v", proxy["identity_signing_secret_set"])
+		}
+		if strings.Contains(string(configRows[systemConfigKeyProxy]), "identity_signing_secret") {
+			t.Fatalf("expected persisted proxy runtime config to exclude identity signing secret, got %s", string(configRows[systemConfigKeyProxy]))
 		}
 	})
 

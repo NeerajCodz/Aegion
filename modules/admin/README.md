@@ -23,7 +23,6 @@ The admin module is configured through YAML files and environment variables.
 | `AEGION_CONFIG_PATH` | Path to configuration file | `aegion.yaml` |
 | `DATABASE_URL` | PostgreSQL connection string | - |
 | `AEGION_LOG_PRETTY` | Enable pretty logging | `false` |
-| `AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH` | Allow trusted legacy `X-Aegion-Session-Identity-ID` header auth | `false` |
 | `AEGION_ADMIN_TRUST_FORWARDED_HEADERS` | Trust `X-Forwarded-For` and `X-Real-IP` for client IP derivation | `false` |
 | `AEGION_ADMIN_OBSERVABILITY_ENABLED` | Enable dashboard observability backend probes | `false` |
 | `AEGION_ADMIN_OBSERVABILITY_PROBE_TIMEOUT` | Probe timeout duration (Go duration format) | `5s` |
@@ -193,7 +192,7 @@ The admin module includes its own migration system for admin-specific tables.
 ## Security Considerations
 
 - All admin endpoints require authentication and proper authorization
-- Legacy `X-Aegion-Session-Identity-ID` header auth is disabled by default and should only be enabled for trusted internal traffic
+- Admin authentication requires an API key or stronger upstream trust boundary; raw identity headers are not accepted
 - Forwarded client-IP headers are disabled by default and should only be enabled behind a trusted reverse proxy
 - RBAC (Role-Based Access Control) with fine-grained permissions
 - Audit logging for all administrative actions

@@ -218,7 +218,6 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 			PreserveHost:                true,
 			TrustForwardedHeaders:       true,
 			StripInboundIdentityHeaders: true,
-			IdentitySigningSecret:       "  keep-secret-value  ",
 			IdentitySignatureHeader:     "X-Proxy-Sig",
 			SignedIdentityHeaders:       []string{"X-User-ID"},
 		},
@@ -229,9 +228,6 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 	}
 	if proxySettings.UpstreamTimeout != "12s" {
 		t.Fatalf("expected upstream timeout 12s, got %q", proxySettings.UpstreamTimeout)
-	}
-	if proxySettings.IdentitySigningSecret != "keep-secret-value" {
-		t.Fatalf("expected identity signing secret to be trimmed, got %q", proxySettings.IdentitySigningSecret)
 	}
 	if proxySettings.IdentitySignatureHeader != "X-Proxy-Sig" {
 		t.Fatalf("expected identity signature header from config, got %q", proxySettings.IdentitySignatureHeader)
@@ -244,7 +240,6 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 		UpstreamTimeout:         "45s",
 		IdentitySignatureHeader: " X-Test-Sig ",
 		SignedIdentityHeaders:   []string{"X-User-ID", "X-User-Session-ID"},
-		IdentitySigningSecret:   "example-signing-secret",
 	}
 	if err := validateRuntimeProxySettings(base); err != nil {
 		t.Fatalf("expected valid proxy settings, got %v", err)
@@ -284,26 +279,11 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 			want: "signed_identity_headers cannot contain empty values",
 		},
 		{
-			name: "short identity signing secret",
-			mutate: func(s *runtimeProxySettings) {
-				s.IdentitySigningSecret = "too-short"
-			},
-			want: "identity_signing_secret must be at least 16 characters when set",
-		},
-		{
 			name: "trust forwarded headers without cidrs",
 			mutate: func(s *runtimeProxySettings) {
 				s.TrustForwardedHeaders = true
 			},
 			want: "trusted proxy CIDRs are required when trust_forwarded_headers is enabled",
-		},
-		{
-			name: "missing signing secret when stripping disabled",
-			mutate: func(s *runtimeProxySettings) {
-				s.StripInboundIdentityHeaders = false
-				s.IdentitySigningSecret = ""
-			},
-			want: "identity_signing_secret is required when strip_inbound_identity_headers is disabled",
 		},
 		{
 			name: "production cannot disable strip inbound identity headers",
@@ -333,7 +313,6 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 		PreserveHost:                boolPtr(true),
 		TrustForwardedHeaders:       boolPtr(true),
 		StripInboundIdentityHeaders: boolPtr(true),
-		IdentitySigningSecret:       stringPtr("  example-signing-secret  "),
 		IdentitySignatureHeader:     stringPtr(" X-Patched-Sig "),
 		SignedIdentityHeaders:       &headers,
 	}
@@ -346,9 +325,6 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 	}
 	if next.UpstreamTimeout != "60s" {
 		t.Fatalf("expected upstream timeout patch to be applied, got %q", next.UpstreamTimeout)
-	}
-	if next.IdentitySigningSecret != "example-signing-secret" {
-		t.Fatalf("expected trimmed identity signing secret, got %q", next.IdentitySigningSecret)
 	}
 	if next.IdentitySignatureHeader != "X-Patched-Sig" {
 		t.Fatalf("expected trimmed signature header, got %q", next.IdentitySignatureHeader)
@@ -364,6 +340,17 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 	}
 	if _, err := applyRuntimeProxyPatch(defaults, badPatch); err == nil {
 		t.Fatalf("expected invalid proxy patch to be rejected")
+	}
+
+	s := newTestServer(t)
+	stripDisabled := defaults
+	stripDisabled.StripInboundIdentityHeaders = false
+	if err := s.ensureRuntimeProxySigning(stripDisabled); err == nil {
+		t.Fatalf("expected strip-disabled runtime config without bootstrap signing secret to be rejected")
+	}
+	s.cfg.Proxy.IdentitySigningSecret = "bootstrap-signing-secret"
+	if err := s.ensureRuntimeProxySigning(stripDisabled); err != nil {
+		t.Fatalf("expected bootstrap signing secret to satisfy strip-disabled runtime config: %v", err)
 	}
 }
 
