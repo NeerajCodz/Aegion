@@ -221,8 +221,8 @@ func TestSignHeaders(t *testing.T) {
 	sig2 := signHeaders(headers2, secret)
 	assert.NotEqual(t, sig1a, sig2, "different headers should produce different signatures")
 
-	// Signature should be deterministic and hex-encoded
-	assert.Regexp(t, "^[0-9a-f]{64}$", sig1a, "signature should be 64-char hex string")
+	// Signature should be deterministic and use the versioned envelope format
+	assert.Regexp(t, "^v1;t=0;s=[0-9a-f]{64}$", sig1a, "signature should be a versioned envelope")
 }
 
 func TestWithSession(t *testing.T) {
@@ -662,9 +662,7 @@ func TestSignHeaders_HexFormat(t *testing.T) {
 
 	sig := signHeaders(headers, secret)
 
-	// SHA256 = 32 bytes = 64 hex characters
-	assert.Len(t, sig, 64)
-	assert.Regexp(t, "^[0-9a-f]+$", sig)
+	assert.Regexp(t, "^v1;t=0;s=[0-9a-f]{64}$", sig)
 }
 
 func TestWithSession_ContextValue(t *testing.T) {

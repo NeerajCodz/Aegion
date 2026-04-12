@@ -3,17 +3,15 @@ package session
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/secrettoken"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -502,28 +500,18 @@ func (m *Manager) generateToken() (string, error) {
 }
 
 func (m *Manager) signToken(token string) string {
-	mac := hmac.New(sha256.New, m.cookieSecret)
-	mac.Write([]byte(token))
-	sig := hex.EncodeToString(mac.Sum(nil))
-	return token + "." + sig
+	signed, err := platformcrypto.SignSessionCookieValue(m.cookieSecret, token, m.now())
+	if err != nil {
+		return ""
+	}
+	return signed
 }
 
 func (m *Manager) verifySignedToken(signed string) (string, error) {
-	parts := strings.SplitN(signed, ".", 2)
-	if len(parts) != 2 {
+	token, err := platformcrypto.VerifySessionCookieValue(m.cookieSecret, signed, m.lifespan, m.now())
+	if err != nil {
 		return "", ErrSessionInvalid
 	}
-
-	token, sig := parts[0], parts[1]
-
-	mac := hmac.New(sha256.New, m.cookieSecret)
-	mac.Write([]byte(token))
-	expected := hex.EncodeToString(mac.Sum(nil))
-
-	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		return "", ErrSessionInvalid
-	}
-
 	return token, nil
 }
 

@@ -2,9 +2,6 @@ package router
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +16,7 @@ import (
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
@@ -372,27 +369,17 @@ func (p *ModuleProxy) injectIdentityHeaders(req *http.Request) {
 		return
 	}
 
-	timestamp := p.now().Unix()
-	canonical := p.canonicalIdentityHeaders(req)
-	payload := strconv.FormatInt(timestamp, 10) + "." + canonical
+	signed, err := platformcrypto.SignIdentityHeaders(p.config.IdentitySigningSecret, req.Header, p.config.SignedIdentityHeaders, p.now())
+	if err != nil || signed == "" {
+		req.Header.Del(p.config.IdentitySignatureHeader)
+		return
+	}
 
-	mac := hmac.New(sha256.New, p.config.IdentitySigningSecret)
-	_, _ = mac.Write([]byte(payload))
-	signature := hex.EncodeToString(mac.Sum(nil))
-
-	req.Header.Set(p.config.IdentitySignatureHeader, fmt.Sprintf("t=%d,v1=%s", timestamp, signature))
+	req.Header.Set(p.config.IdentitySignatureHeader, signed)
 }
 
 func (p *ModuleProxy) canonicalIdentityHeaders(req *http.Request) string {
-	parts := make([]string, 0, len(p.config.SignedIdentityHeaders))
-	for _, header := range p.config.SignedIdentityHeaders {
-		header = strings.TrimSpace(header)
-		if header == "" {
-			continue
-		}
-		parts = append(parts, strings.ToLower(header)+":"+strings.TrimSpace(req.Header.Get(header)))
-	}
-	return strings.Join(parts, "\n")
+	return string(platformcrypto.CanonicalHeaderPayload(req.Header, p.config.SignedIdentityHeaders))
 }
 
 // addForwardedHeaders adds X-Forwarded-* headers.

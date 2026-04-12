@@ -201,7 +201,7 @@ func TestHandleAdminUpdateConfig_WithDatabaseHooks(t *testing.T) {
 				"upstream_timeout":               "45s",
 				"preserve_host":                  true,
 				"strip_inbound_identity_headers": true,
-				"identity_signing_secret":        "0123456789abcdef",
+				"identity_signing_secret":        "example-signing-secret",
 				"identity_signature_header":      "X-Proxy-Sig",
 				"signed_identity_headers":        []string{"X-User-ID", "X-User-Session-ID"},
 			},

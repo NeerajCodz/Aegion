@@ -244,7 +244,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 		UpstreamTimeout:         "45s",
 		IdentitySignatureHeader: " X-Test-Sig ",
 		SignedIdentityHeaders:   []string{"X-User-ID", "X-User-Session-ID"},
-		IdentitySigningSecret:   "0123456789abcdef",
+		IdentitySigningSecret:   "example-signing-secret",
 	}
 	if err := validateRuntimeProxySettings(base); err != nil {
 		t.Fatalf("expected valid proxy settings, got %v", err)
@@ -309,7 +309,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 		PreserveHost:                boolPtr(true),
 		TrustForwardedHeaders:       boolPtr(true),
 		StripInboundIdentityHeaders: boolPtr(true),
-		IdentitySigningSecret:       stringPtr("  0123456789abcdef  "),
+		IdentitySigningSecret:       stringPtr("  example-signing-secret  "),
 		IdentitySignatureHeader:     stringPtr(" X-Patched-Sig "),
 		SignedIdentityHeaders:       &headers,
 	}
@@ -323,7 +323,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 	if next.UpstreamTimeout != "60s" {
 		t.Fatalf("expected upstream timeout patch to be applied, got %q", next.UpstreamTimeout)
 	}
-	if next.IdentitySigningSecret != "0123456789abcdef" {
+	if next.IdentitySigningSecret != "example-signing-secret" {
 		t.Fatalf("expected trimmed identity signing secret, got %q", next.IdentitySigningSecret)
 	}
 	if next.IdentitySignatureHeader != "X-Patched-Sig" {

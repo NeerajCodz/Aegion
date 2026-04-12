@@ -632,7 +632,7 @@ security:
     http_only: true
   
   # CSRF protection
-  csrf_secret: "32-character-csrf-key"
+  csrf_secret: "<set-a-32-byte-csrf-secret>"
   
   # Rate limiting
   rate_limiting:

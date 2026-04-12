@@ -2,16 +2,11 @@ package router
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +16,7 @@ import (
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
 
@@ -193,14 +189,16 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 		t.Fatalf("expected signed identity header")
 	}
 
-	expectedCanonical := "x-user-id:" + sess.IdentityID.String() + "\n" +
-		"x-user-session-id:" + sess.ID.String() + "\n" +
-		"x-user-aal:"
-	payload := strconv.FormatInt(1742912521, 10) + "." + expectedCanonical
-	mac := hmac.New(sha256.New, []byte("identity-signing-secret"))
-	_, _ = mac.Write([]byte(payload))
-	expectedSig := hex.EncodeToString(mac.Sum(nil))
-	if req.Header.Get("X-Aegion-Signature") != fmt.Sprintf("t=%d,v1=%s", 1742912521, expectedSig) {
+	expectedSig, err := platformcrypto.SignIdentityHeaders(
+		[]byte("identity-signing-secret"),
+		req.Header,
+		proxy.config.SignedIdentityHeaders,
+		time.Unix(1742912521, 0).UTC(),
+	)
+	if err != nil {
+		t.Fatalf("failed to compute expected signature: %v", err)
+	}
+	if req.Header.Get("X-Aegion-Signature") != expectedSig {
 		t.Fatalf("unexpected signature header: %q", req.Header.Get("X-Aegion-Signature"))
 	}
 }

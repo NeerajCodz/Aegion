@@ -188,7 +188,7 @@ func TestLoad_EnvironmentVariableExpansion(t *testing.T) {
 	if err := os.Setenv("TEST_DB_URL", "postgres://env-user:env-pass@env-host/env-db"); err != nil {
 		t.Fatalf("failed to set TEST_DB_URL: %v", err)
 	}
-	if err := os.Setenv("TEST_SECRET", "environment-secret-32-characters-long"); err != nil {
+	if err := os.Setenv("TEST_SECRET", "example-app-secret-for-tests"); err != nil {
 		t.Fatalf("failed to set TEST_SECRET: %v", err)
 	}
 	defer func() {
@@ -218,7 +218,7 @@ secrets:
 	require.NoError(t, err)
 
 	assert.Equal(t, "postgres://env-user:env-pass@env-host/env-db", cfg.Database.URL)
-	assert.Equal(t, "environment-secret-32-characters-long", cfg.Secrets.Cookie[0])
+	assert.Equal(t, "example-app-secret-for-tests", cfg.Secrets.Cookie[0])
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
@@ -781,27 +781,27 @@ func TestConfig_Validate_ProductionTLSAndProxyTrustRequirements(t *testing.T) {
 
 func TestLoad_ProductionConfigConformance(t *testing.T) {
 	env := map[string]string{
-		"AEGION_ENV":                         "production",
-		"AEGION_MODULE_PASSWORD_VERSION":     "v1.0.0",
-		"AEGION_MODULE_MAGIC_LINK_VERSION":   "v1.0.0",
-		"AEGION_MODULE_ADMIN_VERSION":        "v1.0.0",
-		"AEGION_MODULE_POLICY_VERSION":       "v1.0.0",
-		"AEGION_MODULE_PROXY_VERSION":        "v1.0.0",
-		"AEGION_MODULE_REGISTRY":             "ghcr.io/aegion",
-		"AEGION_CORS_ORIGIN":                 "https://example.com",
-		"AEGION_DATABASE_URL":                "postgres://user:pass@localhost/db?sslmode=require",
-		"AEGION_REDIS_URL":                   "redis://localhost:6379",
-		"AEGION_SECRET_COOKIE_1":             "cookie-secret-32-characters-long!!",
-		"AEGION_SECRET_CIPHER_1":             "cipher-secret-32-characters-long!!",
-		"AEGION_SECRET_INTERNAL_1":           "internal-secret-32-characters-long",
-		"AEGION_OPERATOR_EMAIL":              "admin@example.com",
-		"AEGION_OPERATOR_PASSWORD":           "StrongBootstrapPassword#2026",
-		"AEGION_SMTP_HOST":                   "smtp.example.com",
-		"AEGION_SMTP_FROM_ADDRESS":           "noreply@example.com",
-		"AEGION_SMTP_USERNAME":               "smtp-user",
-		"AEGION_SMTP_PASSWORD":               "smtp-password",
-		"AEGION_TLS_CERT_FILE":               "/etc/ssl/cert.pem",
-		"AEGION_TLS_KEY_FILE":                "/etc/ssl/key.pem",
+		"AEGION_ENV":                       "production",
+		"AEGION_MODULE_PASSWORD_VERSION":   "v1.0.0",
+		"AEGION_MODULE_MAGIC_LINK_VERSION": "v1.0.0",
+		"AEGION_MODULE_ADMIN_VERSION":      "v1.0.0",
+		"AEGION_MODULE_POLICY_VERSION":     "v1.0.0",
+		"AEGION_MODULE_PROXY_VERSION":      "v1.0.0",
+		"AEGION_MODULE_REGISTRY":           "ghcr.io/aegion",
+		"AEGION_CORS_ORIGIN":               "https://example.com",
+		"AEGION_DATABASE_URL":              "postgres://user:pass@localhost/db?sslmode=require",
+		"AEGION_REDIS_URL":                 "redis://localhost:6379",
+		"AEGION_SECRET_COOKIE_1":           "cookie-secret-32-characters-long!!",
+		"AEGION_SECRET_CIPHER_1":           "cipher-secret-32-characters-long!!",
+		"AEGION_SECRET_INTERNAL_1":         "internal-secret-32-characters-long",
+		"AEGION_OPERATOR_EMAIL":            "admin@example.com",
+		"AEGION_OPERATOR_PASSWORD":         "StrongBootstrapPassword#2026",
+		"AEGION_SMTP_HOST":                 "smtp.example.com",
+		"AEGION_SMTP_FROM_ADDRESS":         "noreply@example.com",
+		"AEGION_SMTP_USERNAME":             "smtp-user",
+		"AEGION_SMTP_PASSWORD":             "smtp-password",
+		"AEGION_TLS_CERT_FILE":             "/etc/ssl/cert.pem",
+		"AEGION_TLS_KEY_FILE":              "/etc/ssl/key.pem",
 	}
 	for key, value := range env {
 		t.Setenv(key, value)

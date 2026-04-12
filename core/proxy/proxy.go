@@ -2,9 +2,7 @@ package proxy
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +19,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/session"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 )
 
@@ -386,29 +384,15 @@ func (p *Proxy) signIdentityHeaders(req *http.Request) {
 		return
 	}
 
-	var canonicalHeaders []string
-	for _, header := range p.identityHeaders() {
-		value := strings.TrimSpace(req.Header.Get(header))
-		if value == "" {
-			continue
-		}
-		canonicalHeaders = append(canonicalHeaders, strings.ToLower(header)+":"+value)
-	}
-	if len(canonicalHeaders) == 0 {
-		return
-	}
-	sort.Strings(canonicalHeaders)
-
-	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
-	payload := timestamp + "." + strings.Join(canonicalHeaders, "\n")
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(payload))
-
 	signatureHeader := p.config.IdentitySignatureHeader
 	if signatureHeader == "" {
 		signatureHeader = "X-Aegion-Signature"
 	}
-	req.Header.Set(signatureHeader, "t="+timestamp+",v1="+hex.EncodeToString(mac.Sum(nil)))
+	signed, err := platformcrypto.SignIdentityHeaders([]byte(secret), req.Header, p.identityHeaders(), time.Now().UTC())
+	if err != nil || signed == "" {
+		return
+	}
+	req.Header.Set(signatureHeader, signed)
 }
 
 func (p *Proxy) identityHeaders() []string {
