@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/smtp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -141,12 +142,21 @@ func New(cfg Config) *Courier {
 
 // QueueEmail queues an email for delivery.
 func (c *Courier) QueueEmail(ctx context.Context, recipient, subject, body string, opts ...QueueOption) (*Message, error) {
+	normalizedRecipient, err := sanitizeSMTPHeaderValue(recipient, "recipient", true)
+	if err != nil {
+		return nil, err
+	}
+	normalizedSubject, err := sanitizeSMTPHeaderValue(subject, "subject", false)
+	if err != nil {
+		return nil, err
+	}
+
 	msg := &Message{
 		ID:        uuid.New(),
 		Type:      MessageTypeEmail,
 		Status:    StatusQueued,
-		Recipient: recipient,
-		Subject:   subject,
+		Recipient: normalizedRecipient,
+		Subject:   normalizedSubject,
 		Body:      body,
 		CreatedAt: c.now(),
 		UpdatedAt: c.now(),
@@ -158,7 +168,7 @@ func (c *Courier) QueueEmail(ctx context.Context, recipient, subject, body strin
 
 	templateDataJSON, _ := json.Marshal(msg.TemplateData)
 
-	_, err := c.execStmt(ctx, `
+	_, err = c.execStmt(ctx, `
 		INSERT INTO core_courier_messages (
 			id, type, status, recipient, subject, body,
 			template_id, template_data, idempotency_key,
@@ -301,7 +311,23 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 
 // sendEmail sends an email via SMTP.
 func (c *Courier) sendEmail(to, subject, body string) error {
-	from := fmt.Sprintf("%s <%s>", c.smtp.FromName, c.smtp.FromAddress)
+	normalizedTo, err := sanitizeSMTPHeaderValue(to, "recipient", true)
+	if err != nil {
+		return err
+	}
+	normalizedSubject, err := sanitizeSMTPHeaderValue(subject, "subject", false)
+	if err != nil {
+		return err
+	}
+	normalizedFromAddress, err := sanitizeSMTPHeaderValue(c.smtp.FromAddress, "from address", true)
+	if err != nil {
+		return err
+	}
+	normalizedFromName, err := sanitizeSMTPHeaderValue(c.smtp.FromName, "from name", true)
+	if err != nil {
+		return err
+	}
+	from := fmt.Sprintf("%s <%s>", normalizedFromName, normalizedFromAddress)
 
 	msg := fmt.Sprintf("From: %s\r\n"+
 		"To: %s\r\n"+
@@ -310,7 +336,7 @@ func (c *Courier) sendEmail(to, subject, body string) error {
 		"Content-Type: text/html; charset=\"utf-8\"\r\n"+
 		"\r\n"+
 		"%s",
-		from, to, subject, body)
+		from, normalizedTo, normalizedSubject, body)
 
 	addr := fmt.Sprintf("%s:%d", c.smtp.Host, c.smtp.Port)
 
@@ -319,7 +345,18 @@ func (c *Courier) sendEmail(to, subject, body string) error {
 		auth = smtp.PlainAuth("", c.smtp.Username, c.smtp.Password, c.smtp.Host)
 	}
 
-	return smtp.SendMail(addr, auth, c.smtp.FromAddress, []string{to}, []byte(msg))
+	return smtp.SendMail(addr, auth, normalizedFromAddress, []string{normalizedTo}, []byte(msg))
+}
+
+func sanitizeSMTPHeaderValue(value, field string, required bool) (string, error) {
+	normalized := strings.TrimSpace(value)
+	if strings.ContainsAny(normalized, "\r\n") {
+		return "", fmt.Errorf("invalid %s: newline characters are not allowed", field)
+	}
+	if required && normalized == "" {
+		return "", fmt.Errorf("invalid %s: value is required", field)
+	}
+	return normalized, nil
 }
 
 // sendSMS sends an SMS (placeholder - would integrate with SMS gateway).
