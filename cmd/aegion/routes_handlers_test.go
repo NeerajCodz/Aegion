@@ -1954,6 +1954,15 @@ func TestHandleAdminUpdateConfig_ValidationAndDBErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("strip-disabled proxy config requires bootstrap signing secret", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"proxy":{"strip_inbound_identity_headers":false}}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
 	t.Run("valid payload without db", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"policy":{"enabled":true,"rbac":{"enabled":true}}}`))

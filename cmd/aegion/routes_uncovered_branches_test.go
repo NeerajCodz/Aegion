@@ -616,7 +616,6 @@ func TestRuntimeConfigAndMetricsAdditionalBranches(t *testing.T) {
 			UpstreamTimeout:         "10s",
 			IdentitySignatureHeader: "X-Aegion-Signature",
 			SignedIdentityHeaders:   []string{"X-User-ID", "x-user-id", "X-User-Session-ID"},
-			IdentitySigningSecret:   "example-signing-secret",
 		}); err != nil {
 			t.Fatalf("expected duplicate signed headers to normalize without error, got %v", err)
 		}
@@ -675,7 +674,6 @@ func TestRuntimeConfigAndMetricsAdditionalBranches(t *testing.T) {
 				"strip_inbound_identity_headers": true,
 				"identity_signature_header":      "X-Aegion-Signature",
 				"signed_identity_headers":        []string{"X-User-ID", "X-User-Session-ID"},
-				"identity_signing_secret":        "example-signing-secret",
 				"trust_forwarded_headers":        false,
 			},
 		}))
@@ -698,7 +696,6 @@ func TestRuntimeConfigAndMetricsAdditionalBranches(t *testing.T) {
 				"strip_inbound_identity_headers": true,
 				"identity_signature_header":      "X-Aegion-Signature",
 				"signed_identity_headers":        []string{"X-User-ID", "X-User-Session-ID"},
-				"identity_signing_secret":        "example-signing-secret",
 				"trust_forwarded_headers":        false,
 			},
 		}))
