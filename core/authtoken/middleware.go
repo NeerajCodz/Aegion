@@ -3,6 +3,7 @@ package authtoken
 import (
 	"context"
 	"net/http"
+	"path"
 
 	"github.com/rs/zerolog"
 )
@@ -34,14 +35,33 @@ type MiddlewareConfig struct {
 func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 	skipPaths := make(map[string]bool)
 	for _, p := range cfg.SkipPaths {
-		skipPaths[p] = true
+		normalized := path.Clean(p)
+		if normalized == "." {
+			normalized = "/"
+		}
+		skipPaths[normalized] = true
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			currentPath := path.Clean(r.URL.Path)
+			if currentPath == "." {
+				currentPath = "/"
+			}
 			// Skip configured paths
-			if skipPaths[r.URL.Path] {
+			if skipPaths[currentPath] {
 				next.ServeHTTP(w, r)
+				return
+			}
+
+			if cfg.Generator == nil {
+				if cfg.Logger != nil {
+					cfg.Logger.Error().
+						Str("path", r.URL.Path).
+						Str("method", r.Method).
+						Msg("internal auth generator unavailable")
+				}
+				http.Error(w, "internal auth unavailable", http.StatusServiceUnavailable)
 				return
 			}
 

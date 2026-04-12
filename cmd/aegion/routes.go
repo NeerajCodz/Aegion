@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +23,7 @@ import (
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 )
 
 const (
@@ -31,6 +32,8 @@ const (
 	adminModuleID         = "admin"
 	coreModuleID          = "core"
 	maxJSONBodyBytes      = 1 << 20
+	defaultFlowRateLimit  = 60
+	defaultFlowRateWindow = time.Minute
 )
 
 type runtimePolicySettings struct {
@@ -177,6 +180,10 @@ func SetupRoutes(s *Server) chi.Router {
 // setupSelfServiceRoutes configures self-service flow endpoints.
 func setupSelfServiceRoutes(r chi.Router, s *Server) {
 	r.Route("/self-service", func(r chi.Router) {
+		if limitCfg, ok := selfServiceRateLimitConfig(s.cfg); ok {
+			r.Use(router.RateLimitWithTrustProxy(limitCfg, s.cfg.Proxy.TrustForwardedHeaders))
+		}
+
 		// Login flow
 		r.Route("/login", func(r chi.Router) {
 			r.Get("/browser", s.handleInitLoginBrowser)
@@ -217,6 +224,35 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Post("/", s.handleSubmitVerification)
 		})
 	})
+}
+
+func selfServiceRateLimitConfig(cfg *platformconfig.Config) (router.RateLimitConfig, bool) {
+	limit := router.RateLimitConfig{
+		Enabled:           true,
+		RequestsPerSecond: float64(defaultFlowRateLimit) / defaultFlowRateWindow.Seconds(),
+		Burst:             defaultFlowRateLimit,
+	}
+	if cfg == nil {
+		return limit, true
+	}
+
+	rule := cfg.Security.RateLimits.API
+	if rule.Requests <= 0 || time.Duration(rule.Period) <= 0 {
+		rule = cfg.Security.RateLimits.Global
+	}
+	if rule.Requests > 0 && time.Duration(rule.Period) > 0 {
+		seconds := time.Duration(rule.Period).Seconds()
+		if seconds <= 0 {
+			return router.RateLimitConfig{}, false
+		}
+		return router.RateLimitConfig{
+			Enabled:           true,
+			RequestsPerSecond: float64(rule.Requests) / seconds,
+			Burst:             rule.Requests,
+		}, true
+	}
+
+	return limit, true
 }
 
 // setupModuleRoutes configures internal module communication endpoints.
@@ -947,33 +983,7 @@ func extractRequestIP(r *http.Request) string {
 }
 
 func extractRequestIPWithTrust(r *http.Request, trustForwardedHeaders bool) string {
-	if r == nil {
-		return ""
-	}
-
-	if trustForwardedHeaders {
-		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				candidate := strings.TrimSpace(parts[0])
-				if candidate != "" {
-					return candidate
-				}
-			}
-		}
-		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
-		}
-	}
-	addr := strings.TrimSpace(r.RemoteAddr)
-	if addr == "" {
-		return ""
-	}
-	host, _, err := net.SplitHostPort(addr)
-	if err == nil {
-		return strings.Trim(host, "[]")
-	}
-	return strings.Trim(addr, "[]")
+	return trustedproxy.ClientIP(r, trustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS")
 }
 
 // Internal flow handlers
@@ -2305,6 +2315,10 @@ func validateRuntimeProxySettings(settings runtimeProxySettings) error {
 		return errors.New("upstream_timeout must be a valid duration")
 	}
 
+	if settings.TrustForwardedHeaders && strings.TrimSpace(os.Getenv("AEGION_TRUSTED_PROXY_CIDRS")) == "" {
+		return errors.New("trusted proxy CIDRs are required when trust_forwarded_headers is enabled")
+	}
+
 	settings.IdentitySignatureHeader = strings.TrimSpace(settings.IdentitySignatureHeader)
 	if settings.IdentitySignatureHeader == "" {
 		return errors.New("identity_signature_header cannot be empty")
@@ -2334,7 +2348,24 @@ func validateRuntimeProxySettings(settings runtimeProxySettings) error {
 		return errors.New("identity_signing_secret must be at least 16 characters when set")
 	}
 
+	if !settings.StripInboundIdentityHeaders && strings.TrimSpace(settings.IdentitySigningSecret) == "" {
+		return errors.New("identity_signing_secret is required when strip_inbound_identity_headers is disabled")
+	}
+	if isRuntimeProductionEnvironment() && !settings.StripInboundIdentityHeaders {
+		return errors.New("strip_inbound_identity_headers cannot be disabled in production")
+	}
+
 	return nil
+}
+
+func isRuntimeProductionEnvironment() bool {
+	for _, key := range []string{"AEGION_ENV", "AEGION_ENVIRONMENT"} {
+		env := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if env == "production" || env == "prod" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleAdminSystemHealth(w http.ResponseWriter, r *http.Request) {

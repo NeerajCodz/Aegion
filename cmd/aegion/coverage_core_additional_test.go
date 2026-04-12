@@ -290,6 +290,29 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 			},
 			want: "identity_signing_secret must be at least 16 characters when set",
 		},
+		{
+			name: "trust forwarded headers without cidrs",
+			mutate: func(s *runtimeProxySettings) {
+				s.TrustForwardedHeaders = true
+			},
+			want: "trusted proxy CIDRs are required when trust_forwarded_headers is enabled",
+		},
+		{
+			name: "missing signing secret when stripping disabled",
+			mutate: func(s *runtimeProxySettings) {
+				s.StripInboundIdentityHeaders = false
+				s.IdentitySigningSecret = ""
+			},
+			want: "identity_signing_secret is required when strip_inbound_identity_headers is disabled",
+		},
+		{
+			name: "production cannot disable strip inbound identity headers",
+			mutate: func(s *runtimeProxySettings) {
+				t.Setenv("AEGION_ENV", "production")
+				s.StripInboundIdentityHeaders = false
+			},
+			want: "strip_inbound_identity_headers cannot be disabled in production",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -303,6 +326,7 @@ func TestRuntimeProxyHelpers(t *testing.T) {
 	}
 
 	headers := []string{"X-User-ID", "X-User-Session-ID"}
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 	patch := &runtimeProxySettingsPatch{
 		Enabled:                     boolPtr(true),
 		UpstreamTimeout:             stringPtr("60s"),

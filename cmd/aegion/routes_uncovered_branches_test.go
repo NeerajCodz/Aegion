@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/aegion/aegion/core/flows"
+	platformconfig "github.com/aegion/aegion/internal/platform/config"
 )
 
 type errReadCloser struct{}
@@ -646,6 +647,7 @@ func TestRuntimeConfigAndMetricsAdditionalBranches(t *testing.T) {
 
 	t.Run("handle admin update config runtime load/save error branches", func(t *testing.T) {
 		s := newHookedServer(t)
+		t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 
 		s.dbQueryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return adminTestRow{scanFn: func(dest ...any) error { return errors.New("load failed") }}
@@ -667,7 +669,15 @@ func TestRuntimeConfigAndMetricsAdditionalBranches(t *testing.T) {
 		}
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", mustJSONBody(t, map[string]any{
-			"proxy": map[string]any{"enabled": true},
+			"proxy": map[string]any{
+				"enabled":                        true,
+				"upstream_timeout":               "30s",
+				"strip_inbound_identity_headers": true,
+				"identity_signature_header":      "X-Aegion-Signature",
+				"signed_identity_headers":        []string{"X-User-ID", "X-User-Session-ID"},
+				"identity_signing_secret":        "example-signing-secret",
+				"trust_forwarded_headers":        false,
+			},
 		}))
 		s.handleAdminUpdateConfig(rec, req)
 		if rec.Code != http.StatusInternalServerError {
@@ -682,7 +692,15 @@ func TestRuntimeConfigAndMetricsAdditionalBranches(t *testing.T) {
 		}
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", mustJSONBody(t, map[string]any{
-			"proxy": map[string]any{"enabled": true},
+			"proxy": map[string]any{
+				"enabled":                        true,
+				"upstream_timeout":               "30s",
+				"strip_inbound_identity_headers": true,
+				"identity_signature_header":      "X-Aegion-Signature",
+				"signed_identity_headers":        []string{"X-User-ID", "X-User-Session-ID"},
+				"identity_signing_secret":        "example-signing-secret",
+				"trust_forwarded_headers":        false,
+			},
 		}))
 		s.handleAdminUpdateConfig(rec, req)
 		if rec.Code != http.StatusInternalServerError {
@@ -775,4 +793,74 @@ func TestReadAllFailureInInternalUpdateFlowUI(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected %d for body read failure, got %d", http.StatusBadRequest, rec.Code)
 	}
+}
+
+func TestSelfServiceRateLimitConfigAndMiddleware(t *testing.T) {
+	t.Run("config selection falls back from API to global to defaults", func(t *testing.T) {
+		cfg := &platformconfig.Config{}
+
+		selected, ok := selfServiceRateLimitConfig(cfg)
+		if !ok {
+			t.Fatal("expected default self-service rate limit config")
+		}
+		if selected.Burst != defaultFlowRateLimit {
+			t.Fatalf("expected default burst %d, got %d", defaultFlowRateLimit, selected.Burst)
+		}
+
+		cfg.Security.RateLimits.Global.Requests = 7
+		cfg.Security.RateLimits.Global.Period = platformconfig.Duration(14 * time.Second)
+		selected, ok = selfServiceRateLimitConfig(cfg)
+		if !ok || selected.Burst != 7 {
+			t.Fatalf("expected global rule selection, got %+v (ok=%v)", selected, ok)
+		}
+		if selected.RequestsPerSecond != 0.5 {
+			t.Fatalf("expected 0.5 rps from global rule, got %f", selected.RequestsPerSecond)
+		}
+
+		cfg.Security.RateLimits.API.Requests = 9
+		cfg.Security.RateLimits.API.Period = platformconfig.Duration(9 * time.Second)
+		selected, ok = selfServiceRateLimitConfig(cfg)
+		if !ok || selected.Burst != 9 {
+			t.Fatalf("expected API rule to override global, got %+v (ok=%v)", selected, ok)
+		}
+		if selected.RequestsPerSecond != 1 {
+			t.Fatalf("expected 1 rps from API rule, got %f", selected.RequestsPerSecond)
+		}
+	})
+
+	t.Run("middleware limits per source and honors trusted forwarded headers", func(t *testing.T) {
+		s := newTestServer(t)
+		s.cfg.Security.RateLimits.API.Requests = 1
+		s.cfg.Security.RateLimits.API.Period = platformconfig.Duration(time.Minute)
+		s.cfg.Proxy.TrustForwardedHeaders = true
+		t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
+		rt := SetupRoutes(s)
+
+		req1 := httptest.NewRequest(http.MethodGet, "/api/v1/self-service/login/flows?id=not-a-uuid", nil)
+		req1.RemoteAddr = "198.51.100.25:1234"
+		req1.Header.Set("X-Forwarded-For", "203.0.113.10")
+		rec1 := httptest.NewRecorder()
+		rt.ServeHTTP(rec1, req1)
+		if rec1.Code != http.StatusBadRequest {
+			t.Fatalf("expected first request to reach handler, got %d", rec1.Code)
+		}
+
+		req2 := httptest.NewRequest(http.MethodGet, "/api/v1/self-service/login/flows?id=not-a-uuid", nil)
+		req2.RemoteAddr = "198.51.100.25:1235"
+		req2.Header.Set("X-Forwarded-For", "203.0.113.11")
+		rec2 := httptest.NewRecorder()
+		rt.ServeHTTP(rec2, req2)
+		if rec2.Code != http.StatusBadRequest {
+			t.Fatalf("expected distinct trusted forwarded client to bypass prior bucket, got %d", rec2.Code)
+		}
+
+		req3 := httptest.NewRequest(http.MethodGet, "/api/v1/self-service/login/flows?id=not-a-uuid", nil)
+		req3.RemoteAddr = "198.51.100.25:1236"
+		req3.Header.Set("X-Forwarded-For", "203.0.113.11")
+		rec3 := httptest.NewRecorder()
+		rt.ServeHTTP(rec3, req3)
+		if rec3.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected second request for same trusted forwarded client to be throttled, got %d", rec3.Code)
+		}
+	})
 }

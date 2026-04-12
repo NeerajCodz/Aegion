@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +27,8 @@ const (
 	// ContainerPrefix is prepended to module IDs for container names
 	ContainerPrefix = "aegion_"
 	// DefaultStopTimeout is the default graceful shutdown timeout
-	DefaultStopTimeout = 30 * time.Second
+	DefaultStopTimeout       = 30 * time.Second
+	allowRemoteDockerHostEnv = "AEGION_ALLOW_REMOTE_DOCKER_HOST"
 )
 
 var newDockerEngineClient = func() (*client.Client, error) {
@@ -68,6 +71,10 @@ type ContainerInfo struct {
 
 // NewDockerClient creates a new Docker client wrapper.
 func NewDockerClient() (*DockerClient, error) {
+	if err := validateDockerHostSafety(); err != nil {
+		return nil, err
+	}
+
 	cli, err := newDockerEngineClient()
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
@@ -91,6 +98,32 @@ func NewDockerClient() (*DockerClient, error) {
 	d.imageInspectFn = cli.ImageInspect
 	d.imagePullFn = cli.ImagePull
 	return d, nil
+}
+
+func validateDockerHostSafety() error {
+	host := strings.ToLower(strings.TrimSpace(os.Getenv("DOCKER_HOST")))
+	if host == "" || strings.HasPrefix(host, "unix://") || strings.HasPrefix(host, "npipe://") || strings.HasPrefix(host, "ssh://") {
+		return nil
+	}
+	if !strings.HasPrefix(host, "tcp://") {
+		return fmt.Errorf("unsupported DOCKER_HOST scheme: %s", strings.TrimSpace(os.Getenv("DOCKER_HOST")))
+	}
+	if !parseBoolEnv(allowRemoteDockerHostEnv) {
+		return fmt.Errorf("remote DOCKER_HOST over tcp requires %s=true", allowRemoteDockerHostEnv)
+	}
+	if !parseBoolEnv("DOCKER_TLS_VERIFY") {
+		return errors.New("DOCKER_TLS_VERIFY must be enabled for remote DOCKER_HOST")
+	}
+	return nil
+}
+
+func parseBoolEnv(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // Close closes the Docker client.

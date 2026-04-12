@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/aegion/aegion/internal/platform/secrettoken"
 )
 
 type stubSessionRow struct {
@@ -524,11 +526,14 @@ func TestManager_GetFromRequest_WithSeams(t *testing.T) {
 		return &stubSessionRows{}, nil
 	}
 	m.queryRowFn = func(_ context.Context, _ string, args ...interface{}) pgx.Row {
-		token := args[len(args)-1].(string)
-		switch token {
-		case "cookie-token", "bearer-token", "header-token":
+		if len(args) != 2 {
+			return stubSessionRow{err: pgx.ErrNoRows}
+		}
+		tokenHash, _ := args[0].(string)
+		switch tokenHash {
+		case secrettoken.Hash("cookie-token"), secrettoken.Hash("bearer-token"), secrettoken.Hash("header-token"):
 			return stubSessionRow{values: []interface{}{
-				sid, token, iid, AAL1, now, now.Add(time.Hour), now, "logout", []DeviceInfo{}, true, false, nil, now, now,
+				sid, "", iid, AAL1, now, now.Add(time.Hour), now, "", []DeviceInfo{}, true, false, nil, now, now,
 			}}
 		default:
 			return stubSessionRow{err: pgx.ErrNoRows}
