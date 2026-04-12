@@ -2046,11 +2046,7 @@ func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySe
 	}
 
 	var raw []byte
-	err := s.queryRow(ctx, `
-		SELECT value
-		FROM core_system_config
-		WHERE key = $1
-	`, systemConfigKeyPolicy).Scan(&raw)
+	err := s.queryRow(ctx, sqlSelectSystemConfigByKey, systemConfigKeyPolicy).Scan(&raw)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return settings, nil
@@ -2077,11 +2073,7 @@ func (s *Server) loadRuntimeProxySettings(ctx context.Context) (runtimeProxySett
 	}
 
 	var raw []byte
-	err := s.queryRow(ctx, `
-		SELECT value
-		FROM core_system_config
-		WHERE key = $1
-	`, systemConfigKeyProxy).Scan(&raw)
+	err := s.queryRow(ctx, sqlSelectSystemConfigByKey, systemConfigKeyProxy).Scan(&raw)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return settings, nil
@@ -2239,12 +2231,7 @@ func (s *Server) saveRuntimeConfig(ctx context.Context, key string, value interf
 		return err
 	}
 
-	_, err = s.exec(ctx, `
-		INSERT INTO core_system_config (key, value, updated_at)
-		VALUES ($1, $2::jsonb, NOW())
-		ON CONFLICT (key)
-		DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, key, string(raw))
+	_, err = s.exec(ctx, sqlUpsertSystemConfig, key, string(raw))
 	return err
 }
 
