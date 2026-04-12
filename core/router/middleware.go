@@ -3,13 +3,13 @@ package router
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -21,6 +21,7 @@ type contextKey string
 const (
 	contextKeyRequestID   contextKey = "aegion.request_id"
 	contextKeyRequestTime contextKey = "aegion.request_time"
+	coreTrustedProxyEnvVar contextKey = "AEGION_TRUSTED_PROXY_CIDRS"
 )
 
 // RequestID middleware generates or extracts a unique request ID.
@@ -376,40 +377,7 @@ func getClientIP(r *http.Request) string {
 }
 
 func getClientIPWithTrust(r *http.Request, trustProxy bool) string {
-	if r == nil {
-		return ""
-	}
-
-	if trustProxy {
-		// Check X-Forwarded-For header
-		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-			ips := strings.Split(xff, ",")
-			for _, ip := range ips {
-				ip = strings.TrimSpace(ip)
-				if ip != "" {
-					return ip
-				}
-			}
-		}
-
-		// Check X-Real-IP header
-		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
-		}
-	}
-
-	// Fall back to RemoteAddr
-	addr := strings.TrimSpace(r.RemoteAddr)
-	if addr == "" {
-		return ""
-	}
-
-	host, _, err := net.SplitHostPort(addr)
-	if err == nil {
-		return strings.Trim(host, "[]")
-	}
-
-	return strings.Trim(addr, "[]")
+	return trustedproxy.ClientIP(r, trustProxy, string(coreTrustedProxyEnvVar))
 }
 
 func timeToSeconds(seconds int) string {

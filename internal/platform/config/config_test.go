@@ -244,6 +244,27 @@ invalid: yaml: content:
 	assert.Contains(t, err.Error(), "failed to parse config file")
 }
 
+func TestLoad_RejectsUnknownFields(t *testing.T) {
+	content := `
+database:
+  url: postgres://user:pass@localhost/db
+secrets:
+  cookie: ["cookie-secret-32-characters-long!!"]
+  cipher: ["cipher-secret-32-characters-long!!"]
+  internal: ["internal-secret-32-characters-long"]
+server:
+  unexpected_flag: true
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "unknown.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0o644))
+
+	_, err := Load(configPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "field unexpected_flag not found")
+}
+
 func TestApplyDefaults(t *testing.T) {
 	cfg := &Config{}
 	applyDefaults(cfg)
@@ -715,6 +736,94 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestConfig_Validate_ProductionTLSAndProxyTrustRequirements(t *testing.T) {
+	t.Setenv("AEGION_ENV", "production")
+	t.Setenv("AEGION_ENVIRONMENT", "")
+
+	base := &Config{
+		Database: DatabaseConfig{
+			URL: "postgres://user:pass@localhost/db?sslmode=require",
+		},
+		Secrets: SecretsConfig{
+			Cookie:   []string{"cookie-secret-32-characters-long!!"},
+			Cipher:   []string{"cipher-secret-32-characters-long!!"},
+			Internal: []string{"internal-secret-32-characters-long"},
+		},
+		Sessions: SessionsConfig{
+			Cookie: CookieConfig{
+				Secure:   true,
+				HTTPOnly: true,
+			},
+		},
+		Log: LogConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Operator: OperatorConfig{
+			Password: "StrongBootstrapPassword#2026",
+		},
+	}
+
+	missingTLS := *base
+	missingTLS.Server.TLS.Enabled = true
+	err := missingTLS.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "server.tls.cert_file and server.tls.key_file are required")
+
+	missingProxyCIDRs := *base
+	missingProxyCIDRs.Proxy.TrustForwardedHeaders = true
+	err = missingProxyCIDRs.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "proxy.trusted_proxy_cidrs is required")
+}
+
+func TestLoad_ProductionConfigConformance(t *testing.T) {
+	env := map[string]string{
+		"AEGION_ENV":                         "production",
+		"AEGION_MODULE_PASSWORD_VERSION":     "v1.0.0",
+		"AEGION_MODULE_MAGIC_LINK_VERSION":   "v1.0.0",
+		"AEGION_MODULE_ADMIN_VERSION":        "v1.0.0",
+		"AEGION_MODULE_POLICY_VERSION":       "v1.0.0",
+		"AEGION_MODULE_PROXY_VERSION":        "v1.0.0",
+		"AEGION_MODULE_REGISTRY":             "ghcr.io/aegion",
+		"AEGION_CORS_ORIGIN":                 "https://example.com",
+		"AEGION_DATABASE_URL":                "postgres://user:pass@localhost/db?sslmode=require",
+		"AEGION_REDIS_URL":                   "redis://localhost:6379",
+		"AEGION_SECRET_COOKIE_1":             "cookie-secret-32-characters-long!!",
+		"AEGION_SECRET_CIPHER_1":             "cipher-secret-32-characters-long!!",
+		"AEGION_SECRET_INTERNAL_1":           "internal-secret-32-characters-long",
+		"AEGION_OPERATOR_EMAIL":              "admin@example.com",
+		"AEGION_OPERATOR_PASSWORD":           "StrongBootstrapPassword#2026",
+		"AEGION_SMTP_HOST":                   "smtp.example.com",
+		"AEGION_SMTP_FROM_ADDRESS":           "noreply@example.com",
+		"AEGION_SMTP_USERNAME":               "smtp-user",
+		"AEGION_SMTP_PASSWORD":               "smtp-password",
+		"AEGION_TLS_CERT_FILE":               "/etc/ssl/cert.pem",
+		"AEGION_TLS_KEY_FILE":                "/etc/ssl/key.pem",
+	}
+	for key, value := range env {
+		t.Setenv(key, value)
+	}
+
+	cfg, err := Load(filepath.Join("..", "..", "..", "configs", "aegion.production.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, cfg.Validate())
+
+	assert.True(t, cfg.Server.TLS.Enabled)
+	assert.Equal(t, "/etc/ssl/cert.pem", cfg.Server.TLS.CertFile)
+	assert.Equal(t, "1.2", cfg.Server.TLS.MinVersion)
+	assert.True(t, cfg.Cache.TLSEnabled == false)
+	assert.True(t, cfg.Log.IncludeRequestID)
+	assert.Contains(t, cfg.Log.RedactFields, "token")
+	assert.Equal(t, "__Host-aegion_session", cfg.Sessions.Cookie.Name)
+	assert.Equal(t, 5, cfg.Sessions.MaxPerUser)
+	assert.True(t, cfg.Security.CSRF.Enabled)
+	assert.Equal(t, "__Host-aegion_csrf", cfg.Security.CSRF.CookieName)
+	assert.True(t, cfg.Admin.RequireReauth)
+	assert.Equal(t, Duration(5*time.Minute), cfg.Admin.ReauthTimeout)
+	assert.Equal(t, "/metrics", cfg.Observability.Metrics.Path)
 }
 
 func TestConfig_StructFields(t *testing.T) {

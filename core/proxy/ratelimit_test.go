@@ -210,6 +210,7 @@ func TestRateLimiter_GenerateKeys_TrustForwardedHeadersToggle(t *testing.T) {
 		ByIP:                  true,
 		TrustForwardedHeaders: true,
 	}, NewMemoryStore())
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "192.168.1.0/24")
 	keys = withTrust.generateKeys(req)
 	assert.Equal(t, []string{"ip:203.0.113.50"}, keys)
 }
@@ -357,6 +358,9 @@ func TestGetClientIP(t *testing.T) {
 
 			for key, value := range tt.headers {
 				req.Header.Set(key, value)
+			}
+			if req.Header.Get("X-Forwarded-For") != "" || req.Header.Get("X-Real-IP") != "" || req.Header.Get("CF-Connecting-IP") != "" {
+				t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "10.0.0.0/8,127.0.0.0/8")
 			}
 
 			ip := getClientIP(req)
@@ -699,6 +703,7 @@ func TestGetRemoteIP(t *testing.T) {
 
 // TestGetClientIP_XForwardedFor tests X-Forwarded-For header priority
 func TestGetClientIP_XForwardedFor(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "192.168.1.0/24")
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "192.168.1.100:12345"
 	req.Header.Set("X-Forwarded-For", "10.0.0.1")
@@ -709,6 +714,7 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 
 // TestGetClientIP_XForwardedFor_Multiple tests X-Forwarded-For with multiple IPs
 func TestGetClientIP_XForwardedFor_Multiple(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "192.168.1.0/24")
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "192.168.1.100:12345"
 	req.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")

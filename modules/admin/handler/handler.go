@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -19,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
 )
@@ -319,34 +319,7 @@ func buildPaginationMeta(page, perPage int, total int64) PaginationMeta {
 
 // getClientIP extracts the client IP address from request.
 func getClientIP(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-
-	if allowAdminForwardedHeaders() {
-		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				if candidate := strings.TrimSpace(parts[0]); candidate != "" {
-					return candidate
-				}
-			}
-		}
-
-		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
-		}
-	}
-
-	addr := strings.TrimSpace(r.RemoteAddr)
-	if addr == "" {
-		return ""
-	}
-	host, _, err := net.SplitHostPort(addr)
-	if err == nil {
-		return host
-	}
-	return addr
+	return trustedproxy.ClientIP(r, allowAdminForwardedHeaders(), "AEGION_ADMIN_TRUSTED_PROXY_CIDRS")
 }
 
 func allowAdminForwardedHeaders() bool {

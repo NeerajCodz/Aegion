@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -48,6 +50,13 @@ type Config struct {
 		ReadTimeout  time.Duration `yaml:"read_timeout"`
 		WriteTimeout time.Duration `yaml:"write_timeout"`
 		IdleTimeout  time.Duration `yaml:"idle_timeout"`
+		TLS          struct {
+			Enabled      bool   `yaml:"enabled"`
+			CertFile     string `yaml:"cert_file"`
+			KeyFile      string `yaml:"key_file"`
+			ClientCAFile string `yaml:"client_ca_file"`
+			MinVersion   string `yaml:"min_version"`
+		} `yaml:"tls"`
 	} `yaml:"server"`
 	Admin struct {
 		Enabled          bool          `yaml:"enabled"`
@@ -283,13 +292,26 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
+	if cfg.Server.TLS.Enabled {
+		tlsConfig, err := buildTLSConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		httpServer.TLSConfig = tlsConfig
+	}
 
 	go func() {
 		log.Info().
 			Str("address", httpServer.Addr).
 			Msg("Starting HTTP server")
 
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if cfg.Server.TLS.Enabled {
+			err = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+		} else {
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("Failed to start HTTP server")
 		}
 	}()
@@ -469,6 +491,11 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	cfg.Server.ReadTimeout = superCfg.Server.ReadTimeout.Duration()
 	cfg.Server.WriteTimeout = superCfg.Server.WriteTimeout.Duration()
 	cfg.Server.IdleTimeout = superCfg.Server.IdleTimeout.Duration()
+	cfg.Server.TLS.Enabled = superCfg.Server.TLS.Enabled
+	cfg.Server.TLS.CertFile = superCfg.Server.TLS.CertFile
+	cfg.Server.TLS.KeyFile = superCfg.Server.TLS.KeyFile
+	cfg.Server.TLS.ClientCAFile = superCfg.Server.TLS.ClientCAFile
+	cfg.Server.TLS.MinVersion = superCfg.Server.TLS.MinVersion
 
 	cfg.Admin.Enabled = superCfg.Admin.Enabled
 	cfg.Admin.Path = superCfg.Admin.Path
@@ -504,6 +531,39 @@ func safeInt32(value int) int32 {
 	default:
 		return int32(value)
 	}
+}
+
+func buildTLSConfig(cfg *Config) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	switch strings.TrimSpace(cfg.Server.TLS.MinVersion) {
+	case "", "1.2":
+		tlsConfig.MinVersion = tls.VersionTLS12
+	case "1.3":
+		tlsConfig.MinVersion = tls.VersionTLS13
+	default:
+		return nil, fmt.Errorf("unsupported tls min_version %q", cfg.Server.TLS.MinVersion)
+	}
+
+	if strings.TrimSpace(cfg.Server.TLS.ClientCAFile) == "" {
+		return tlsConfig, nil
+	}
+
+	caPEM, err := os.ReadFile(cfg.Server.TLS.ClientCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tls client CA file: %w", err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, errors.New("failed to parse tls client CA file")
+	}
+
+	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+	tlsConfig.ClientCAs = pool
+	return tlsConfig, nil
 }
 
 func setupLogger(logConfig LogConfig) {
