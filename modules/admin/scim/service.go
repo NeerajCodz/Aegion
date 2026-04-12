@@ -4,8 +4,6 @@ package scim
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -16,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/core/registry"
+	"github.com/aegion/aegion/internal/platform/secrettoken"
 )
 
 // Service provides SCIM 2.0 operations.
@@ -621,8 +620,7 @@ func (s *Service) CreateSCIMToken(ctx context.Context, name, description string,
 	token := s.config.TokenPrefix + base64.RawURLEncoding.EncodeToString(tokenBytes)
 
 	// Hash token for storage
-	hash := sha256.Sum256([]byte(token))
-	tokenHash := base64.StdEncoding.EncodeToString(hash[:])
+	tokenHash := secrettoken.Hash(token)
 
 	// Generate prefix for lookup.
 	prefix, err := s.tokenLookupPrefix(token)
@@ -674,10 +672,7 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*SCIMToken, 
 	}
 
 	// Validate token hash
-	hash := sha256.Sum256([]byte(token))
-	tokenHash := base64.StdEncoding.EncodeToString(hash[:])
-
-	if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(scimToken.TokenHash)) != 1 {
+	if !secrettoken.Validate(token, scimToken.TokenHash) {
 		return nil, ErrTokenInvalid
 	}
 

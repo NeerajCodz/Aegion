@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/platform/secrettoken"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -28,6 +29,8 @@ var (
 	ErrCodeUsed     = errors.New("code already used")
 	ErrRateLimited  = errors.New("rate limit exceeded")
 )
+
+const tokenLookupPrefixLength = secrettoken.DefaultLookupPrefixLength
 
 // CodeType represents the type of magic link/OTP code.
 type CodeType string
@@ -132,11 +135,15 @@ func (s *Store) Create(ctx context.Context, recipient string, codeType CodeType,
 		CreatedAt:  time.Now().UTC(),
 	}
 
+	codeHash := secrettoken.Hash(code.Code)
+	tokenHash := secrettoken.Hash(code.Token)
+	tokenPrefix := secrettoken.Prefix(code.Token, tokenLookupPrefixLength)
+
 	err = s.withObservedQuery(ctx, "INSERT", dbTableCodes, func(queryCtx context.Context) error {
 		_, execErr := s.db.Exec(queryCtx, `
-		INSERT INTO ml_codes (id, identity_id, recipient, type, code, token, used, expires_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	`, code.ID, code.IdentityID, code.Recipient, code.Type, code.Code, code.Token, code.Used, code.ExpiresAt, code.CreatedAt)
+		INSERT INTO ml_codes (id, identity_id, recipient, type, code, code_hash, token, token_hash, token_prefix, used, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	`, code.ID, code.IdentityID, code.Recipient, code.Type, nil, codeHash, nil, tokenHash, tokenPrefix, code.Used, code.ExpiresAt, code.CreatedAt)
 		return execErr
 	})
 
@@ -150,15 +157,17 @@ func (s *Store) Create(ctx context.Context, recipient string, codeType CodeType,
 // GetByCode retrieves a code by OTP code and recipient.
 func (s *Store) GetByCode(ctx context.Context, recipient string, otpCode string, codeType CodeType) (*Code, error) {
 	code := &Code{}
+	codeHash := secrettoken.Hash(otpCode)
 
 	err := s.withObservedQuery(ctx, "SELECT", dbTableCodes, func(queryCtx context.Context) error {
 		return s.db.QueryRow(queryCtx, `
-		SELECT id, identity_id, recipient, type, code, token, used, used_at, expires_at, created_at
+		SELECT id, identity_id, recipient, type, COALESCE(code, ''), COALESCE(token, ''), used, used_at, expires_at, created_at
 		FROM ml_codes
-		WHERE recipient = $1 AND code = $2 AND type = $3 AND used = FALSE
+		WHERE recipient = $1 AND type = $2 AND used = FALSE
+		  AND (code_hash = $3 OR code = $4)
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, recipient, otpCode, codeType).Scan(
+	`, recipient, codeType, codeHash, otpCode).Scan(
 			&code.ID, &code.IdentityID, &code.Recipient, &code.Type,
 			&code.Code, &code.Token, &code.Used, &code.UsedAt,
 			&code.ExpiresAt, &code.CreatedAt,
@@ -171,6 +180,7 @@ func (s *Store) GetByCode(ctx context.Context, recipient string, otpCode string,
 		}
 		return nil, err
 	}
+	code.Code = otpCode
 
 	if time.Now().UTC().After(code.ExpiresAt) {
 		return nil, ErrCodeExpired
@@ -182,13 +192,21 @@ func (s *Store) GetByCode(ctx context.Context, recipient string, otpCode string,
 // GetByToken retrieves a code by magic link token.
 func (s *Store) GetByToken(ctx context.Context, token string) (*Code, error) {
 	code := &Code{}
+	tokenHash := secrettoken.Hash(token)
+	tokenPrefix := secrettoken.Prefix(token, tokenLookupPrefixLength)
 
 	err := s.withObservedQuery(ctx, "SELECT", dbTableCodes, func(queryCtx context.Context) error {
 		return s.db.QueryRow(queryCtx, `
-		SELECT id, identity_id, recipient, type, code, token, used, used_at, expires_at, created_at
+		SELECT id, identity_id, recipient, type, COALESCE(code, ''), COALESCE(token, ''), used, used_at, expires_at, created_at
 		FROM ml_codes
-		WHERE token = $1 AND used = FALSE
-	`, token).Scan(
+		WHERE used = FALSE
+		  AND (
+			(token_hash = $1 AND token_prefix = $2)
+			OR token = $3
+		  )
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, tokenHash, tokenPrefix, token).Scan(
 			&code.ID, &code.IdentityID, &code.Recipient, &code.Type,
 			&code.Code, &code.Token, &code.Used, &code.UsedAt,
 			&code.ExpiresAt, &code.CreatedAt,
@@ -201,6 +219,7 @@ func (s *Store) GetByToken(ctx context.Context, token string) (*Code, error) {
 		}
 		return nil, err
 	}
+	code.Token = token
 
 	if time.Now().UTC().After(code.ExpiresAt) {
 		return nil, ErrCodeExpired

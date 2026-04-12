@@ -524,7 +524,7 @@ func TestManager_GetFromRequest_WithSeams(t *testing.T) {
 		return &stubSessionRows{}, nil
 	}
 	m.queryRowFn = func(_ context.Context, _ string, args ...interface{}) pgx.Row {
-		token := args[0].(string)
+		token := args[len(args)-1].(string)
 		switch token {
 		case "cookie-token", "bearer-token", "header-token":
 			return stubSessionRow{values: []interface{}{
