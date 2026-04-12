@@ -828,6 +828,7 @@ func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
 }
 
 func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 	cfg := DefaultConfig()
 	cfg.TrustForwardedHeaders = true
 	proxy := newProxyForTest(t, cfg, nil, zerolog.New(zerolog.NewTestWriter(t)))

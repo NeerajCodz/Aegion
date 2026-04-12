@@ -206,6 +206,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 }
 
 func TestModuleProxyAddForwardedHeadersTrustForwardedHeaders(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID:                    "admin",
 		TrustForwardedHeaders:       true,

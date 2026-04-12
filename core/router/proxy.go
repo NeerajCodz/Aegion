@@ -20,6 +20,7 @@ import (
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
 
@@ -400,63 +401,29 @@ func (p *ModuleProxy) addForwardedHeaders(req, originalReq *http.Request) {
 		return
 	}
 
-	clientIP := remoteIPFromAddr(originalReq.RemoteAddr)
-	if clientIP == "" && p.config.TrustForwardedHeaders {
-		clientIP = getClientIP(originalReq)
-	}
-
-	if p.config.TrustForwardedHeaders {
-		if prior := strings.TrimSpace(originalReq.Header.Get("X-Forwarded-For")); prior != "" {
-			if clientIP != "" {
-				req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
-			} else {
-				req.Header.Set("X-Forwarded-For", prior)
-			}
-		} else if clientIP != "" {
-			req.Header.Set("X-Forwarded-For", clientIP)
-		}
-
-		if proto := strings.TrimSpace(originalReq.Header.Get("X-Forwarded-Proto")); proto != "" {
-			req.Header.Set("X-Forwarded-Proto", proto)
-		} else if originalReq.TLS != nil {
-			req.Header.Set("X-Forwarded-Proto", "https")
-		} else {
-			req.Header.Set("X-Forwarded-Proto", "http")
-		}
-
-		if host := strings.TrimSpace(originalReq.Header.Get("X-Forwarded-Host")); host != "" {
-			req.Header.Set("X-Forwarded-Host", host)
-		} else {
-			req.Header.Set("X-Forwarded-Host", originalReq.Host)
-		}
-		return
-	}
-
+	clientIP := trustedproxy.RemoteIP(originalReq.RemoteAddr)
 	if clientIP == "" {
+		clientIP = trustedproxy.ClientIP(originalReq, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS")
+	}
+
+	if prior := trustedproxy.PriorForwardedFor(originalReq, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"); prior != "" {
+		if clientIP != "" {
+			req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
+		} else {
+			req.Header.Set("X-Forwarded-For", prior)
+		}
+	} else if clientIP == "" {
 		req.Header.Del("X-Forwarded-For")
 	} else {
 		req.Header.Set("X-Forwarded-For", clientIP)
 	}
 
-	if originalReq.TLS != nil {
-		req.Header.Set("X-Forwarded-Proto", "https")
-	} else {
-		req.Header.Set("X-Forwarded-Proto", "http")
-	}
-
-	req.Header.Set("X-Forwarded-Host", originalReq.Host)
+	req.Header.Set("X-Forwarded-Proto", trustedproxy.ForwardedProto(originalReq, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"))
+	req.Header.Set("X-Forwarded-Host", trustedproxy.ForwardedHost(originalReq, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"))
 }
 
 func remoteIPFromAddr(remoteAddr string) string {
-	remoteAddr = strings.TrimSpace(remoteAddr)
-	if remoteAddr == "" {
-		return ""
-	}
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err == nil {
-		return strings.Trim(host, "[]")
-	}
-	return strings.Trim(remoteAddr, "[]")
+	return trustedproxy.RemoteIP(remoteAddr)
 }
 
 // getModuleEndpoint retrieves the HTTP endpoint for a module.

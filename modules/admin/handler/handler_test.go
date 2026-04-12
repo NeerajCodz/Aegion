@@ -64,6 +64,7 @@ func TestGetClientIP(t *testing.T) {
 
 	t.Run("trusts forwarded headers when enabled", func(t *testing.T) {
 		t.Setenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS", "true")
+		t.Setenv("AEGION_ADMIN_TRUSTED_PROXY_CIDRS", "192.0.2.0/24")
 		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 		req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
 		req.RemoteAddr = "192.0.2.10:12345"
@@ -100,9 +101,7 @@ func TestRequireAdminInvalidIdentity(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
-func TestRequireAdminWithIdentity(t *testing.T) {
-	t.Setenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH", "true")
-
+func TestRequireAdminRejectsSessionIdentityHeader(t *testing.T) {
 	operator := &store.Operator{
 		ID:         uuid.New(),
 		IdentityID: uuid.New(),
@@ -123,14 +122,11 @@ func TestRequireAdminWithIdentity(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler := h.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		op := OperatorFromContext(r.Context())
-		assert.NotNil(t, op)
-		assert.Equal(t, operator.ID, op.ID)
 		w.WriteHeader(http.StatusOK)
 	}))
 
 	handler.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestRequireAdminRejectsSessionIdentityHeaderByDefault(t *testing.T) {
@@ -791,6 +787,7 @@ func TestAdminHandler_ConfigAndLoginAdditionalBranches(t *testing.T) {
 		assert.Equal(t, "203.0.113.9", getClientIP(req))
 
 		t.Setenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS", "true")
+		t.Setenv("AEGION_ADMIN_TRUSTED_PROXY_CIDRS", "203.0.113.0/24")
 		req = httptest.NewRequest(http.MethodGet, "/admin", nil)
 		req.Header.Set("X-Forwarded-For", "5.5.5.5")
 		req.RemoteAddr = "203.0.113.9:8080"
@@ -798,6 +795,7 @@ func TestAdminHandler_ConfigAndLoginAdditionalBranches(t *testing.T) {
 
 		req = httptest.NewRequest(http.MethodGet, "/admin", nil)
 		req.Header.Set("X-Real-IP", "9.9.9.9")
+		req.RemoteAddr = "203.0.113.9:8080"
 		assert.Equal(t, "9.9.9.9", getClientIP(req))
 	})
 
@@ -1473,8 +1471,6 @@ func TestRequirePermissionAllowed(t *testing.T) {
 }
 
 func TestRequireAdminNotOperator(t *testing.T) {
-	t.Setenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH", "true")
-
 	h := New(&fakeService{
 		getOperatorByIdentityIDFn: func(ctx context.Context, identityID uuid.UUID) (*store.Operator, error) {
 			return nil, errors.New("not operator")
@@ -1488,7 +1484,7 @@ func TestRequireAdminNotOperator(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	handler.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusForbidden, rec.Code)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestRequireAdminAPIKeyPrefixNotFound(t *testing.T) {
