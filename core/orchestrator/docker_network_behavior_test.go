@@ -172,7 +172,38 @@ func TestNewDockerClient_WithSeam(t *testing.T) {
 	orig := newDockerEngineClient
 	t.Cleanup(func() { newDockerEngineClient = orig })
 
+	t.Run("rejects remote tcp docker host by default", func(t *testing.T) {
+		t.Setenv("DOCKER_HOST", "tcp://127.0.0.1:2375")
+		t.Setenv(allowRemoteDockerHostEnv, "")
+		t.Setenv("DOCKER_TLS_VERIFY", "")
+		if _, err := NewDockerClient(); err == nil || !strings.Contains(err.Error(), "requires "+allowRemoteDockerHostEnv+"=true") {
+			t.Fatalf("expected explicit remote host override requirement, got %v", err)
+		}
+	})
+
+	t.Run("rejects remote tcp docker host without tls verify", func(t *testing.T) {
+		t.Setenv("DOCKER_HOST", "tcp://127.0.0.1:2376")
+		t.Setenv(allowRemoteDockerHostEnv, "true")
+		t.Setenv("DOCKER_TLS_VERIFY", "0")
+		if _, err := NewDockerClient(); err == nil || !strings.Contains(err.Error(), "DOCKER_TLS_VERIFY must be enabled") {
+			t.Fatalf("expected TLS verification requirement, got %v", err)
+		}
+	})
+
+	t.Run("allows remote tcp docker host with explicit override and tls verify", func(t *testing.T) {
+		t.Setenv("DOCKER_HOST", "tcp://127.0.0.1:2376")
+		t.Setenv(allowRemoteDockerHostEnv, "true")
+		t.Setenv("DOCKER_TLS_VERIFY", "1")
+		newDockerEngineClient = func() (*client.Client, error) { return &client.Client{}, nil }
+		if _, err := NewDockerClient(); err != nil {
+			t.Fatalf("expected remote tcp docker host with safeguards to be allowed, got %v", err)
+		}
+	})
+
 	t.Run("creation error", func(t *testing.T) {
+		t.Setenv("DOCKER_HOST", "")
+		t.Setenv(allowRemoteDockerHostEnv, "")
+		t.Setenv("DOCKER_TLS_VERIFY", "")
 		newDockerEngineClient = func() (*client.Client, error) { return nil, errors.New("dial failed") }
 		if _, err := NewDockerClient(); err == nil || !strings.Contains(err.Error(), "creating docker client") {
 			t.Fatalf("expected wrapped docker client creation error, got %v", err)

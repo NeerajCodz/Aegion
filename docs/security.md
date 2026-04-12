@@ -185,6 +185,18 @@ After `login_max_attempts` (default 10) consecutive failures per IP, the IP is l
 
 All configurable at runtime in system config.
 
+### Docker orchestrator compensating controls
+
+The module orchestrator now applies strict Docker host safety checks before initializing the Docker client:
+
+- `DOCKER_HOST=tcp://...` is **blocked by default**.
+- Remote Docker hosts over TCP require:
+  - `AEGION_ALLOW_REMOTE_DOCKER_HOST=true`
+  - `DOCKER_TLS_VERIFY=1`
+- Local transports (`unix://`, `npipe://`, `ssh://`) remain allowed without this override.
+
+This is a compensating control for known upstream Docker client advisories until patched upstream releases are available.
+
 ### CSRF protection
 
 Double-submit cookie pattern. X-CSRF-Token header required on all mutations. Token rotated after every successful mutation response.

@@ -282,13 +282,11 @@ func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 			   is_impersonation, impersonator_id, created_at, updated_at
 		FROM core_sessions
 		WHERE active = TRUE
-		  AND (
-			(token_hash = $1 AND token_prefix = $2)
-			OR token = $3
-		  )
+		  AND token_hash = $1
+		  AND token_prefix = $2
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, tokenHash, tokenPrefix, token).Scan(
+	`, tokenHash, tokenPrefix).Scan(
 		&session.ID, &session.Token, &session.IdentityID, &session.AAL,
 		&session.IssuedAt, &session.ExpiresAt, &session.AuthenticatedAt,
 		&session.LogoutToken, &session.Devices, &session.Active,

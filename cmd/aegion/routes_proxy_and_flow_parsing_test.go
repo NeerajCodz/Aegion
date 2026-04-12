@@ -183,6 +183,8 @@ func TestModuleProxyHelpers(t *testing.T) {
 			t.Fatalf("expected empty IP for nil request, got %q", got)
 		}
 
+		t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
+
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "198.51.100.99:443"
 		req.Header.Set("X-Forwarded-For", "198.51.100.10, 198.51.100.11")
@@ -224,6 +226,10 @@ func TestModuleProxyHelpers(t *testing.T) {
 		if ctx != baseCtx {
 			t.Fatal("expected unchanged context when forwarded headers are not trusted")
 		}
+
+		req = httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "198.51.100.30:443"
+		req.Header.Set("X-Forwarded-For", "198.51.100.20")
 		ctx = withModuleProxyRequestContextWithTrust(baseCtx, req, true)
 		if ctx == baseCtx {
 			t.Fatal("expected derived context when trusted request ip is available")
