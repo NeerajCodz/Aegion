@@ -81,7 +81,7 @@ func TestRegisterRoutes(t *testing.T) {
 
 	t.Run("authentication finish", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/passkeys/authentication/finish", strings.NewReader(`{"identity_id":"id-1","challenge":"c2","credential_id":"cred-1"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/passkeys/authentication/finish", strings.NewReader(`{"identity_id":"id-1","challenge":"c2","credential_id":"cred-1","signature":"sig","sign_count":1}`))
 		req.Header.Set("Content-Type", "application/json")
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {

@@ -78,6 +78,18 @@ func (s *Store) GetCredential(credentialID string) (Credential, error) {
 	return credential, nil
 }
 
+func (s *Store) UpdateCredentialSignCount(credentialID string, signCount uint32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	credential, ok := s.credentials[credentialID]
+	if !ok {
+		return ErrCredentialNotFound
+	}
+	credential.SignCount = signCount
+	s.credentials[credentialID] = credential
+	return nil
+}
+
 func (s *Store) ListCredentialsByIdentity(identityID string) []Credential {
 	s.mu.Lock()
 	defer s.mu.Unlock()
