@@ -6,35 +6,53 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/social/service"
+	"github.com/aegion/aegion/modules/social/store"
 )
 
 const maxJSONBodyBytes int64 = 1 << 20
 
+type Config struct {
+	ManagementToken string
+}
+
 type SocialService interface {
-	ListProviders() []string
+	ListProviders(ctx context.Context) ([]store.Provider, error)
 	StartAuth(ctx context.Context, provider, redirectTo string) (*service.StartAuthResponse, error)
 	CompleteAuth(ctx context.Context, provider, stateID, code string) (*service.CallbackResult, error)
+	ListConfiguredProviders(ctx context.Context, includeDisabled bool) ([]store.Provider, error)
+	GetProvider(ctx context.Context, slug string) (*store.Provider, error)
+	UpsertProvider(ctx context.Context, req service.ProviderUpsertRequest) (*store.Provider, error)
+	DeleteProvider(ctx context.Context, slug string) error
 }
 
-// Handler exposes HTTP routes for the social login module.
 type Handler struct {
-	svc SocialService
+	svc             SocialService
+	managementToken string
 }
 
-// New creates a new social handler.
-func New(svc SocialService) *Handler {
-	return &Handler{svc: svc}
+func New(svc SocialService, cfgOverride ...Config) *Handler {
+	cfg := Config{}
+	if len(cfgOverride) > 0 {
+		cfg = cfgOverride[0]
+	}
+	return &Handler{
+		svc:             svc,
+		managementToken: strings.TrimSpace(cfg.ManagementToken),
+	}
 }
 
-// RegisterRoutes registers module routes on the provided mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	if mux == nil {
 		return
 	}
 	mux.HandleFunc("/api/v1/social/providers", h.handleProviders)
+	mux.HandleFunc("/api/v1/social/admin/providers", h.handleAdminProviders)
+	mux.HandleFunc("/api/v1/social/admin/providers/", h.handleAdminProvider)
 	mux.HandleFunc("/api/v1/social/", h.handleSocialPath)
 	mux.HandleFunc("/self-service/social/", h.handleSocialPath)
 }
@@ -44,7 +62,12 @@ func (h *Handler) handleProviders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": h.svc.ListProviders()})
+	providers, err := h.svc.ListProviders(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list providers")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
 }
 
 func (h *Handler) handleSocialPath(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +77,6 @@ func (h *Handler) handleSocialPath(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.Trim(r.URL.Path, "/")
 	segments := strings.Split(path, "/")
-	// /api/v1/social/{provider}/{action} OR /self-service/social/{provider}/{action}
 	if len(segments) < 4 {
 		writeError(w, http.StatusNotFound, "route not found")
 		return
@@ -89,7 +111,7 @@ func (h *Handler) handleStart(w http.ResponseWriter, r *http.Request, provider s
 	resp, err := h.svc.StartAuth(r.Context(), provider, req.RedirectTo)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrProviderUnsupported):
+		case errors.Is(err, service.ErrProviderUnsupported), errors.Is(err, service.ErrProviderMisconfig):
 			writeError(w, http.StatusBadRequest, "provider is not configured")
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to start social auth")
@@ -100,12 +122,26 @@ func (h *Handler) handleStart(w http.ResponseWriter, r *http.Request, provider s
 }
 
 func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, provider string) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	stateID := strings.TrimSpace(r.URL.Query().Get("state"))
-	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if r.Method == http.MethodPost {
+		if err := r.ParseForm(); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid callback payload")
+			return
+		}
+	}
+
+	stateID := strings.TrimSpace(firstNonEmpty(
+		r.URL.Query().Get("state"),
+		r.FormValue("state"),
+	))
+	code := strings.TrimSpace(firstNonEmpty(
+		r.URL.Query().Get("code"),
+		r.FormValue("code"),
+	))
+
 	resp, err := h.svc.CompleteAuth(r.Context(), provider, stateID, code)
 	if err != nil {
 		switch {
@@ -116,7 +152,123 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, provide
 		}
 		return
 	}
+
+	if !acceptsJSON(r) && strings.TrimSpace(resp.RedirectTo) != "" {
+		redirectTo := withQuery(resp.RedirectTo, map[string]string{
+			"social_provider": resp.Provider,
+			"identity_id":     resp.IdentityID,
+			"social_status":   "authenticated",
+		})
+		http.Redirect(w, r, redirectTo, http.StatusSeeOther)
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) handleAdminProviders(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagementAuth(w, r) {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		providers, err := h.svc.ListConfiguredProviders(r.Context(), true)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list providers")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"providers": providers})
+	case http.MethodPost:
+		var req service.ProviderUpsertRequest
+		if err := decodeJSONBody(w, r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		provider, err := h.svc.UpsertProvider(r.Context(), req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "failed to save provider")
+			return
+		}
+		writeJSON(w, http.StatusOK, provider)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h *Handler) handleAdminProvider(w http.ResponseWriter, r *http.Request) {
+	if !h.requireManagementAuth(w, r) {
+		return
+	}
+
+	slug := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/v1/social/admin/providers/"))
+	if slug == "" {
+		writeError(w, http.StatusNotFound, "route not found")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		provider, err := h.svc.GetProvider(r.Context(), slug)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "provider not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, provider)
+	case http.MethodDelete:
+		if err := h.svc.DeleteProvider(r.Context(), slug); err != nil {
+			writeError(w, http.StatusNotFound, "provider not found")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (h *Handler) requireManagementAuth(w http.ResponseWriter, r *http.Request) bool {
+	if strings.TrimSpace(h.managementToken) == "" {
+		writeError(w, http.StatusServiceUnavailable, "provider management is disabled")
+		return false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if token == "" {
+		writeError(w, http.StatusUnauthorized, "missing management token")
+		return false
+	}
+	if !platformcrypto.ConstantTimeCompare([]byte(token), []byte(h.managementToken)) {
+		writeError(w, http.StatusUnauthorized, "invalid management token")
+		return false
+	}
+	return true
+}
+
+func acceptsJSON(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Accept"))), "application/json")
+}
+
+func withQuery(target string, additions map[string]string) string {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return target
+	}
+	query := parsed.Query()
+	for key, value := range additions {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		query.Set(key, value)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {

@@ -1,74 +1,120 @@
 package store
 
 import (
+	"context"
 	"errors"
-	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
-	ErrStateNotFound = errors.New("state not found")
-	ErrStateExpired  = errors.New("state expired")
+	ErrStateNotFound    = errors.New("state not found")
+	ErrStateExpired     = errors.New("state expired")
+	ErrProviderNotFound = errors.New("provider not found")
 )
 
-// AuthState tracks pending social login state.
+type Protocol string
+
+const (
+	ProtocolOIDC  Protocol = "oidc"
+	ProtocolOAuth Protocol = "oauth2"
+)
+
+type AuthStyle string
+
+const (
+	AuthStyleClientSecretPost  AuthStyle = "client_secret_post"
+	AuthStyleClientSecretBasic AuthStyle = "client_secret_basic"
+)
+
+type PKCEMethod string
+
+const (
+	PKCENone  PKCEMethod = "none"
+	PKCES256  PKCEMethod = "S256"
+	PKCEPlain PKCEMethod = "plain"
+)
+
+type ClaimSource string
+
+const (
+	ClaimSourceUserInfo   ClaimSource = "userinfo"
+	ClaimSourceIDToken    ClaimSource = "id_token"
+	ClaimSourceGitHubUser ClaimSource = "github_user"
+)
+
+type ClaimMapping struct {
+	Subject       string `json:"subject"`
+	Email         string `json:"email"`
+	EmailVerified string `json:"email_verified"`
+	Name          string `json:"name"`
+	Picture       string `json:"picture"`
+}
+
+type Provider struct {
+	ID                 uuid.UUID         `json:"id"`
+	Slug               string            `json:"slug"`
+	DisplayName        string            `json:"display_name"`
+	Preset             string            `json:"preset"`
+	Protocol           Protocol          `json:"protocol"`
+	Issuer             string            `json:"issuer,omitempty"`
+	DiscoveryURL       string            `json:"discovery_url,omitempty"`
+	AuthorizeEndpoint  string            `json:"authorize_endpoint,omitempty"`
+	TokenEndpoint      string            `json:"token_endpoint,omitempty"`
+	UserInfoEndpoint   string            `json:"userinfo_endpoint,omitempty"`
+	JWKSURI            string            `json:"jwks_uri,omitempty"`
+	Scopes             []string          `json:"scopes,omitempty"`
+	ClaimMapping       ClaimMapping      `json:"claim_mapping"`
+	ExtraAuthParams    map[string]string `json:"extra_auth_params,omitempty"`
+	PKCEMethod         PKCEMethod        `json:"pkce_method"`
+	AuthStyle          AuthStyle         `json:"auth_style"`
+	ClaimSource        ClaimSource       `json:"claim_source"`
+	Enabled            bool              `json:"enabled"`
+	TrustEmailVerified bool              `json:"trust_email_verified"`
+	RedirectURI        string            `json:"redirect_uri"`
+	ClientID           string            `json:"client_id,omitempty"`
+	ClientSecret       string            `json:"-"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+}
+
+func (p Provider) Sanitized() Provider {
+	p.ClientSecret = ""
+	return p
+}
+
 type AuthState struct {
-	ID         string
-	Provider   string
-	RedirectTo string
-	ExpiresAt  time.Time
+	ID           string
+	ProviderSlug string
+	RedirectTo   string
+	Nonce        string
+	PKCEVerifier string
+	ExpiresAt    time.Time
 }
 
-// SocialProfile stores normalized social profile data.
 type SocialProfile struct {
-	Provider      string
-	ProviderUser  string
-	Email         string
-	EmailVerified bool
-	Name          string
-	PictureURL    string
+	Provider      string                 `json:"provider"`
+	ProviderUser  string                 `json:"provider_user"`
+	Email         string                 `json:"email,omitempty"`
+	EmailVerified bool                   `json:"email_verified"`
+	Name          string                 `json:"name,omitempty"`
+	PictureURL    string                 `json:"picture_url,omitempty"`
+	RawClaims     map[string]interface{} `json:"raw_claims,omitempty"`
 }
 
-// Store handles social module persistence concerns.
-type Store struct {
-	mu      sync.Mutex
-	states  map[string]AuthState
-	profile map[string]SocialProfile
+type IdentityLinkResult struct {
+	IdentityID uuid.UUID `json:"identity_id"`
+	Created    bool      `json:"created"`
+	Linked     bool      `json:"linked"`
 }
 
-// New creates a new social store.
-func New() *Store {
-	return &Store{
-		states:  make(map[string]AuthState),
-		profile: make(map[string]SocialProfile),
-	}
-}
-
-// SaveState stores a state nonce with expiry.
-func (s *Store) SaveState(state AuthState) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.states[state.ID] = state
-}
-
-// ConsumeState loads and invalidates a state nonce.
-func (s *Store) ConsumeState(stateID string) (AuthState, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	state, ok := s.states[stateID]
-	if !ok {
-		return AuthState{}, ErrStateNotFound
-	}
-	delete(s.states, stateID)
-	if time.Now().UTC().After(state.ExpiresAt) {
-		return AuthState{}, ErrStateExpired
-	}
-	return state, nil
-}
-
-// UpsertProfile upserts social profile by provider user key.
-func (s *Store) UpsertProfile(profile SocialProfile) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.profile[profile.Provider+":"+profile.ProviderUser] = profile
+type Repository interface {
+	ListProviders(ctx context.Context, includeDisabled bool) ([]Provider, error)
+	GetProviderBySlug(ctx context.Context, slug string) (*Provider, error)
+	UpsertProvider(ctx context.Context, provider Provider) (*Provider, error)
+	DeleteProvider(ctx context.Context, slug string) error
+	SaveState(ctx context.Context, state AuthState) error
+	ConsumeState(ctx context.Context, stateID string) (AuthState, error)
+	ResolveIdentity(ctx context.Context, provider Provider, profile SocialProfile) (*IdentityLinkResult, error)
 }

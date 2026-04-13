@@ -25,10 +25,10 @@ func TestModuleConfig(t *testing.T) {
 	if cfg.Module != "social" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9006" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
-	if len(cfg.Capabilities) != 1 || cfg.Capabilities[0] != "oauth2_social_login" {
+	if len(cfg.Capabilities) != 2 || cfg.Capabilities[0] != "oauth2_social_login" || cfg.Capabilities[1] != "social_provider_registry" {
 		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
 	}
-	if len(cfg.Routes) != 2 || cfg.Routes[0] != "/self-service/social/*" || cfg.Routes[1] != "/api/v1/social/*" {
+	if len(cfg.Routes) != 3 || cfg.Routes[0] != "/self-service/social/*" || cfg.Routes[1] != "/api/v1/social/*" || cfg.Routes[2] != "/api/v1/social/admin/*" {
 		t.Fatalf("unexpected routes: %#v", cfg.Routes)
 	}
 	if len(cfg.GRPCServices) != 1 || cfg.GRPCServices[0] != "social.SocialEngine" {
