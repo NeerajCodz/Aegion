@@ -1750,10 +1750,64 @@ func TestSessionHandlers(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 		s.handleJWKS(rec, req)
 
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+}
+
+func TestOIDCRootRoutesProxyToOAuth2Module(t *testing.T) {
+	s := newTestServer(t)
+
+	var gotDiscoveryPath string
+	var gotJWKSPath string
+	var gotUserInfoPath string
+	var gotUserInfoAuthz string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			gotDiscoveryPath = r.URL.Path
+			writeJSON(w, http.StatusOK, map[string]any{"issuer": "https://issuer.example"})
+		case "/.well-known/jwks.json":
+			gotJWKSPath = r.URL.Path
+			writeJSON(w, http.StatusOK, map[string]any{"keys": []map[string]string{{"kid": "key-1"}}})
+		case "/oidc/userinfo":
+			gotUserInfoPath = r.URL.Path
+			gotUserInfoAuthz = r.Header.Get("Authorization")
+			writeJSON(w, http.StatusOK, map[string]any{"sub": "user-1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	registerTestModule(t, s, "oauth2", registry.EndpointHTTP, upstream.URL)
+	if err := s.registry.UpdateStatus("oauth2", registry.StatusHealthy); err != nil {
+		t.Fatalf("failed to set oauth2 module healthy: %v", err)
+	}
+
+	router := SetupRoutes(s)
+
+	t.Run("discovery proxied from root path", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
+		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
+		if gotDiscoveryPath != "/.well-known/openid-configuration" {
+			t.Fatalf("unexpected upstream discovery path: %q", gotDiscoveryPath)
+		}
+	})
 
+	t.Run("jwks proxied from root path", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
 		var body map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("failed to parse response: %v", err)
@@ -1762,8 +1816,27 @@ func TestSessionHandlers(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected keys array in response")
 		}
-		if len(keys) != 0 {
-			t.Fatalf("expected empty keyset, got %v", keys)
+		if len(keys) != 1 {
+			t.Fatalf("expected single key from oauth2 module, got %v", keys)
+		}
+		if gotJWKSPath != "/.well-known/jwks.json" {
+			t.Fatalf("unexpected upstream jwks path: %q", gotJWKSPath)
+		}
+	})
+
+	t.Run("userinfo proxied to oauth2 module path", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/oauth2/userinfo", nil)
+		req.Header.Set("Authorization", "Bearer test-token")
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+		if gotUserInfoPath != "/oidc/userinfo" {
+			t.Fatalf("unexpected upstream userinfo path: %q", gotUserInfoPath)
+		}
+		if gotUserInfoAuthz != "Bearer test-token" {
+			t.Fatalf("expected authorization header to be forwarded, got %q", gotUserInfoAuthz)
 		}
 	})
 }
