@@ -64,6 +64,10 @@ type stubRouteSessionManager struct {
 	session *session.Session
 	getErr  error
 
+	createErr      error
+	created        []*session.Session
+	setCookieCount int
+
 	revokeErr   error
 	revokedIDs  []uuid.UUID
 	clearCookie int
@@ -79,9 +83,35 @@ func (s *stubRouteSessionManager) GetFromRequest(ctx context.Context, r *http.Re
 	return nil, session.ErrSessionNotFound
 }
 
+func (s *stubRouteSessionManager) Create(ctx context.Context, identityID uuid.UUID, method session.AuthMethod, device session.DeviceInfo) (*session.Session, error) {
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+	created := &session.Session{
+		ID:         uuid.New(),
+		IdentityID: identityID,
+		AAL:        session.AAL1,
+		Active:     true,
+		Devices:    []session.DeviceInfo{device},
+		AuthMethods: []session.SessionAuthMethod{
+			{
+				Method: method,
+			},
+		},
+	}
+	s.created = append(s.created, created)
+	s.session = created
+	return created, nil
+}
+
 func (s *stubRouteSessionManager) Revoke(ctx context.Context, sessionID uuid.UUID) error {
 	s.revokedIDs = append(s.revokedIDs, sessionID)
 	return s.revokeErr
+}
+
+func (s *stubRouteSessionManager) SetCookie(w http.ResponseWriter, sess *session.Session) {
+	s.setCookieCount++
+	s.session = sess
 }
 
 func (s *stubRouteSessionManager) ClearCookie(w http.ResponseWriter) {
