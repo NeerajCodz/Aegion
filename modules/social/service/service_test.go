@@ -7,65 +7,107 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/aegion/aegion/modules/social/store"
 )
 
-func testService(t *testing.T) *Service {
-	t.Helper()
-	return New(store.New(), Config{
-		Google: ProviderConfig{
-			ClientID:     "google-client",
-			ClientSecret: "google-secret",
-			RedirectURI:  "https://app.example.com/social/google/callback",
-		},
-		GitHub: ProviderConfig{
-			ClientID:     "github-client",
-			ClientSecret: "github-secret",
-			RedirectURI:  "https://app.example.com/social/github/callback",
-		},
-		StateTTL: time.Minute,
-	})
-}
-
 func TestListProviders(t *testing.T) {
-	svc := testService(t)
-	providers := svc.ListProviders()
+	svc := New(store.New())
+	if _, err := svc.UpsertProvider(context.Background(), ProviderUpsertRequest{
+		Preset:             "google",
+		ClientID:           "google-client",
+		ClientSecret:       "google-secret",
+		RedirectURI:        "https://app.example.com/social/google/callback",
+		Enabled:            true,
+		TrustEmailVerified: true,
+	}); err != nil {
+		t.Fatalf("UpsertProvider failed: %v", err)
+	}
+	if _, err := svc.UpsertProvider(context.Background(), ProviderUpsertRequest{
+		Preset:             "github",
+		ClientID:           "github-client",
+		ClientSecret:       "github-secret",
+		RedirectURI:        "https://app.example.com/social/github/callback",
+		Enabled:            true,
+		TrustEmailVerified: true,
+	}); err != nil {
+		t.Fatalf("UpsertProvider failed: %v", err)
+	}
+
+	providers, err := svc.ListProviders(context.Background())
+	if err != nil {
+		t.Fatalf("ListProviders failed: %v", err)
+	}
 	if len(providers) != 2 {
 		t.Fatalf("expected 2 providers, got %d", len(providers))
+	}
+	if providers[0].ClientSecret != "" {
+		t.Fatal("expected provider secrets to be redacted")
 	}
 }
 
 func TestStartAuth(t *testing.T) {
-	svc := testService(t)
+	var upstreamURL string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 upstreamURL,
+				"authorization_endpoint": upstreamURL + "/authorize",
+				"token_endpoint":         upstreamURL + "/token",
+				"userinfo_endpoint":      upstreamURL + "/userinfo",
+				"jwks_uri":               upstreamURL + "/jwks",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	upstreamURL = upstream.URL
+	defer upstream.Close()
+
+	svc := New(store.New()).WithHTTPClient(upstream.Client())
+	if _, err := svc.UpsertProvider(context.Background(), ProviderUpsertRequest{
+		Preset:             "google",
+		DiscoveryURL:       upstream.URL + "/.well-known/openid-configuration",
+		ClientID:           "google-client",
+		ClientSecret:       "google-secret",
+		RedirectURI:        "https://app.example.com/social/google/callback",
+		Enabled:            true,
+		TrustEmailVerified: true,
+	}); err != nil {
+		t.Fatalf("UpsertProvider failed: %v", err)
+	}
+
 	resp, err := svc.StartAuth(context.Background(), "google", "/dashboard")
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Fatalf("StartAuth failed: %v", err)
 	}
 	if resp.Provider != "google" {
 		t.Fatalf("unexpected provider: %s", resp.Provider)
 	}
-	if !strings.Contains(resp.AuthURL, "accounts.google.com") {
-		t.Fatalf("expected google auth url, got %s", resp.AuthURL)
+	if !strings.Contains(resp.AuthURL, "/authorize") {
+		t.Fatalf("expected authorize endpoint, got %s", resp.AuthURL)
 	}
-	if resp.State == "" {
-		t.Fatal("expected generated state")
+	if !strings.Contains(resp.AuthURL, "code_challenge=") {
+		t.Fatalf("expected PKCE challenge in auth url, got %s", resp.AuthURL)
 	}
 }
 
-func TestCompleteAuth(t *testing.T) {
-	tokenCalled := false
-	userCalled := false
+func TestCompleteAuthOIDCUserInfo(t *testing.T) {
+	var upstreamURL string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 upstreamURL,
+				"authorization_endpoint": upstreamURL + "/authorize",
+				"token_endpoint":         upstreamURL + "/token",
+				"userinfo_endpoint":      upstreamURL + "/userinfo",
+				"jwks_uri":               upstreamURL + "/jwks",
+			})
 		case "/token":
-			tokenCalled = true
-			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "token-1"})
 		case "/userinfo":
-			userCalled = true
-			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"sub":            "google-user-1",
 				"email":          "user@example.com",
@@ -77,30 +119,35 @@ func TestCompleteAuth(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
+	upstreamURL = upstream.URL
 	defer upstream.Close()
 
-	svc := testService(t).WithEndpoints(OAuthEndpoints{
-		GoogleAuthorize: upstream.URL + "/authorize",
-		GoogleToken:     upstream.URL + "/token",
-		GoogleUserInfo:  upstream.URL + "/userinfo",
-		GitHubAuthorize: upstream.URL + "/gh-authorize",
-		GitHubToken:     upstream.URL + "/gh-token",
-		GitHubUser:      upstream.URL + "/gh-user",
-	})
+	svc := New(store.New()).WithHTTPClient(upstream.Client())
+	if _, err := svc.UpsertProvider(context.Background(), ProviderUpsertRequest{
+		Preset:             "google",
+		DiscoveryURL:       upstream.URL + "/.well-known/openid-configuration",
+		ClientID:           "google-client",
+		ClientSecret:       "google-secret",
+		RedirectURI:        "https://app.example.com/social/google/callback",
+		Enabled:            true,
+		TrustEmailVerified: true,
+	}); err != nil {
+		t.Fatalf("UpsertProvider failed: %v", err)
+	}
 
 	start, err := svc.StartAuth(context.Background(), "google", "/after-login")
 	if err != nil {
-		t.Fatalf("start auth failed: %v", err)
+		t.Fatalf("StartAuth failed: %v", err)
 	}
 	result, err := svc.CompleteAuth(context.Background(), "google", start.State, "code-1")
 	if err != nil {
-		t.Fatalf("complete auth failed: %v", err)
-	}
-	if !tokenCalled || !userCalled {
-		t.Fatal("expected token exchange and userinfo calls")
+		t.Fatalf("CompleteAuth failed: %v", err)
 	}
 	if result.Profile.ProviderUser != "google-user-1" {
 		t.Fatalf("unexpected provider user: %s", result.Profile.ProviderUser)
+	}
+	if result.IdentityID == "" {
+		t.Fatal("expected linked identity id")
 	}
 	if result.RedirectTo != "/after-login" {
 		t.Fatalf("unexpected redirect target: %s", result.RedirectTo)
