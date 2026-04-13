@@ -144,6 +144,9 @@ func SetupRoutes(s *Server) chi.Router {
 	r.Get("/.well-known/jwks.json", s.handleJWKS)
 	r.Get("/oauth2/userinfo", s.handleOAuth2UserInfo)
 	r.Post("/oauth2/userinfo", s.handleOAuth2UserInfo)
+	r.Get("/self-service/login/methods/link/verify", s.handleMagicLinkLoginVerify)
+	r.Get("/self-service/recovery/methods/link/verify", s.handleMagicLinkRecoveryVerify)
+	r.Get("/self-service/verification/methods/link/verify", s.handleMagicLinkVerificationVerify)
 
 	// Public API routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -193,6 +196,7 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/browser", s.handleInitLoginBrowser)
 			r.Get("/api", s.handleInitLoginAPI)
 			r.Get("/flows", s.handleGetLoginFlow)
+			r.Get("/methods/link/verify", s.handleMagicLinkLoginVerify)
 			r.Post("/", s.handleSubmitLogin)
 		})
 
@@ -209,6 +213,7 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/browser", s.handleInitRecoveryBrowser)
 			r.Get("/api", s.handleInitRecoveryAPI)
 			r.Get("/flows", s.handleGetRecoveryFlow)
+			r.Get("/methods/link/verify", s.handleMagicLinkRecoveryVerify)
 			r.Post("/", s.handleSubmitRecovery)
 		})
 
@@ -225,6 +230,7 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/browser", s.handleInitVerificationBrowser)
 			r.Get("/api", s.handleInitVerificationAPI)
 			r.Get("/flows", s.handleGetVerificationFlow)
+			r.Get("/methods/link/verify", s.handleMagicLinkVerificationVerify)
 			r.Post("/", s.handleSubmitVerification)
 		})
 	})
@@ -601,13 +607,13 @@ type flowSubmitPayload struct {
 }
 
 func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expectedType flows.FlowType) {
-	flowID, csrfToken, err := parseFlowSubmitPayload(w, r)
+	input, err := parseFlowSubmitRequest(w, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid flow submission payload", err)
 		return
 	}
 
-	flow, err := s.flowService.ValidateFlow(r.Context(), flowID, csrfToken)
+	flow, err := s.flowService.ValidateFlow(r.Context(), input.FlowID, input.CSRFToken)
 	if err != nil {
 		s.writeFlowValidationError(w, err)
 		return
@@ -617,16 +623,35 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		return
 	}
 
-	if err := s.flowService.CompleteFlow(r.Context(), flowID); err != nil {
+	var result *flowExecutionResult
+	if s.selfServiceAuthEnabled() {
+		result, err = s.executeFlowSubmission(r.Context(), w, r, flow, input)
+		if err != nil {
+			s.writeFlowExecutionError(w, err)
+			return
+		}
+	}
+
+	if err := s.flowService.CompleteFlow(r.Context(), input.FlowID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	response := map[string]string{
 		"status":    "completed",
-		"flow_id":   flowID.String(),
+		"flow_id":   input.FlowID.String(),
 		"flow_type": string(expectedType),
-	})
+	}
+	if result != nil {
+		if result.Status != "" {
+			response["status"] = result.Status
+		}
+		if result.Message != "" {
+			response["message"] = result.Message
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) writeFlowValidationError(w http.ResponseWriter, err error) {
@@ -655,57 +680,6 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) err
 		return errors.New("request body must contain a single JSON object")
 	}
 	return nil
-}
-
-func parseFlowSubmitPayload(w http.ResponseWriter, r *http.Request) (uuid.UUID, string, error) {
-	var payload flowSubmitPayload
-	contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
-
-	if contentType == "application/json" {
-		if err := decodeJSONBody(w, r, &payload); err != nil {
-			return uuid.Nil, "", err
-		}
-	} else {
-		if err := r.ParseForm(); err != nil {
-			return uuid.Nil, "", err
-		}
-		payload.FlowID = r.Form.Get("flow_id")
-		payload.Flow = r.Form.Get("flow")
-		payload.ID = r.Form.Get("id")
-		payload.CSRFToken = r.Form.Get("csrf_token")
-	}
-
-	flowValue := strings.TrimSpace(payload.FlowID)
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(payload.Flow)
-	}
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(payload.ID)
-	}
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(r.URL.Query().Get("flow"))
-	}
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(r.URL.Query().Get("id"))
-	}
-	if flowValue == "" {
-		return uuid.Nil, "", errors.New("missing flow id")
-	}
-
-	flowID, err := uuid.Parse(flowValue)
-	if err != nil {
-		return uuid.Nil, "", err
-	}
-
-	csrfToken := strings.TrimSpace(payload.CSRFToken)
-	if csrfToken == "" {
-		csrfToken = strings.TrimSpace(r.Header.Get("X-CSRF-Token"))
-	}
-	if csrfToken == "" {
-		return uuid.Nil, "", errors.New("missing csrf token")
-	}
-
-	return flowID, csrfToken, nil
 }
 
 // Session handlers
