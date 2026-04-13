@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -138,6 +140,10 @@ func SetupRoutes(s *Server) chi.Router {
 	r.Get("/health", s.handleHealth)
 	r.Get("/health/ready", s.handleReady)
 	r.Get("/health/live", s.handleLive)
+	r.Get("/.well-known/openid-configuration", s.handleOIDCDiscovery)
+	r.Get("/.well-known/jwks.json", s.handleJWKS)
+	r.Get("/oauth2/userinfo", s.handleOAuth2UserInfo)
+	r.Post("/oauth2/userinfo", s.handleOAuth2UserInfo)
 
 	// Public API routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -756,9 +762,80 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"keys": []map[string]interface{}{},
-	})
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	s.proxyOAuth2Endpoint(w, r, "/.well-known/jwks.json")
+}
+
+func (s *Server) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	s.proxyOAuth2Endpoint(w, r, "/.well-known/openid-configuration")
+}
+
+func (s *Server) handleOAuth2UserInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	s.proxyOAuth2Endpoint(w, r, "/oidc/userinfo")
+}
+
+func (s *Server) proxyOAuth2Endpoint(w http.ResponseWriter, r *http.Request, modulePath string) {
+	target, err := s.oauth2EndpointURL(modulePath)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "oauth2 module unavailable", err)
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	baseDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		baseDirector(req)
+		req.URL.Path = modulePath
+		req.URL.RawPath = ""
+		req.URL.RawQuery = r.URL.RawQuery
+		req.Host = target.Host
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
+		writeError(w, http.StatusBadGateway, "oauth2 upstream unavailable", proxyErr)
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+func (s *Server) oauth2EndpointURL(modulePath string) (*url.URL, error) {
+	module, err := s.registry.GetModule("oauth2")
+	if err != nil {
+		return nil, err
+	}
+	if module.Status != registry.StatusHealthy && module.Status != registry.StatusStarting {
+		return nil, errors.New("oauth2 module is not healthy")
+	}
+
+	for _, endpoint := range module.Endpoints {
+		if endpoint.Type != registry.EndpointHTTP {
+			continue
+		}
+		parsed, parseErr := url.Parse(strings.TrimSpace(endpoint.URL))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return nil, errors.New("oauth2 module endpoint must use http or https")
+		}
+		if parsed.Host == "" {
+			return nil, errors.New("oauth2 module endpoint is missing host")
+		}
+		parsed.Path = modulePath
+		parsed.RawPath = ""
+		return parsed, nil
+	}
+
+	return nil, errors.New("oauth2 module has no HTTP endpoint")
 }
 
 // Module registration handlers
