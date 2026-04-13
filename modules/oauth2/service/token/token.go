@@ -96,6 +96,25 @@ type TokenResponse struct {
 	Scope        string  `json:"scope,omitempty"`
 }
 
+// IntrospectionRequest represents an RFC 7662 token introspection request.
+type IntrospectionRequest struct {
+	Token        string
+	ClientID     string
+	ClientSecret string
+}
+
+// IntrospectionResponse represents an RFC 7662 token introspection response.
+type IntrospectionResponse struct {
+	Active    bool     `json:"active"`
+	ClientID  string   `json:"client_id,omitempty"`
+	Subject   string   `json:"sub,omitempty"`
+	Scope     string   `json:"scope,omitempty"`
+	ExpiresAt int64    `json:"exp,omitempty"`
+	Issuer    string   `json:"iss,omitempty"`
+	Audience  []string `json:"aud,omitempty"`
+	TokenType string   `json:"token_type,omitempty"`
+}
+
 // ExchangeAuthorizationCode exchanges an authorization code for tokens.
 func (s *TokenService) ExchangeAuthorizationCode(ctx context.Context, req *TokenRequest) (*TokenResponse, error) {
 	if req == nil {
@@ -301,6 +320,71 @@ func (s *TokenService) ExchangeDeviceCode(ctx context.Context, req *DeviceCodeTo
 	)
 }
 
+// IntrospectToken returns token metadata for active access tokens.
+func (s *TokenService) IntrospectToken(ctx context.Context, req *IntrospectionRequest) (*IntrospectionResponse, error) {
+	if req == nil || strings.TrimSpace(req.Token) == "" || strings.TrimSpace(req.ClientID) == "" {
+		return nil, ErrInvalidRequest
+	}
+
+	client, err := s.store.GetClient(ctx, req.ClientID)
+	if err != nil {
+		return nil, ErrInvalidClient
+	}
+	if err := authenticateClient(client, req.ClientSecret); err != nil {
+		return nil, err
+	}
+
+	accessToken, err := s.resolveAccessTokenForIntrospection(ctx, req.Token)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return &IntrospectionResponse{Active: false}, nil
+		}
+		return nil, err
+	}
+
+	if accessToken.Revoked || time.Now().UTC().After(accessToken.ExpiresAt) {
+		return &IntrospectionResponse{Active: false}, nil
+	}
+
+	return &IntrospectionResponse{
+		Active:    true,
+		ClientID:  accessToken.ClientID,
+		Subject:   accessToken.Subject,
+		Scope:     strings.Join(accessToken.Scopes, " "),
+		ExpiresAt: accessToken.ExpiresAt.Unix(),
+		Issuer:    accessToken.Issuer,
+		Audience:  append([]string(nil), accessToken.Audience...),
+		TokenType: "Bearer",
+	}, nil
+}
+
+type accessTokenReader interface {
+	GetAccessToken(ctx context.Context, jti string) (*store.AccessToken, error)
+}
+
+type accessTokenSignatureReader interface {
+	GetAccessTokenBySignature(ctx context.Context, signature string) (*store.AccessToken, error)
+}
+
+func (s *TokenService) resolveAccessTokenForIntrospection(ctx context.Context, token string) (*store.AccessToken, error) {
+	reader, ok := s.store.(accessTokenReader)
+	if ok {
+		accessToken, err := reader.GetAccessToken(ctx, token)
+		if err == nil {
+			return accessToken, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+
+	sigReader, ok := s.store.(accessTokenSignatureReader)
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return sigReader.GetAccessTokenBySignature(ctx, accessTokenSignature(token))
+}
+
 // issueTokens issues a complete token set (access, refresh, ID).
 func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, identityID, sessionID string, scopes, audience []string, nonce *string, acr string, amr []string, authTime time.Time) (*TokenResponse, error) {
 	now := time.Now().UTC()
@@ -331,6 +415,7 @@ func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, id
 	// Store access token metadata
 	accessToken := &store.AccessToken{
 		JTI:        accessJTI,
+		Signature:  stringPointer(accessTokenSignature(accessTokenJWT)),
 		ClientID:   client.ID,
 		IdentityID: identityID,
 		SessionID:  sessionID,
@@ -427,6 +512,15 @@ func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, id
 	}
 
 	return resp, nil
+}
+
+func accessTokenSignature(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func stringPointer(v string) *string {
+	return &v
 }
 
 // RevokeToken revokes an access or refresh token.

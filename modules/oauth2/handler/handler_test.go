@@ -15,6 +15,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/service/device"
 	"github.com/aegion/aegion/modules/oauth2/service/grants"
+	"github.com/aegion/aegion/modules/oauth2/service/introspection"
 	"github.com/aegion/aegion/modules/oauth2/service/oidc"
 	"github.com/aegion/aegion/modules/oauth2/service/revocation"
 	tokenSvc "github.com/aegion/aegion/modules/oauth2/service/token"
@@ -60,6 +61,11 @@ func TestOAuth2Handler_MethodGuards(t *testing.T) {
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/oidc/userinfo", nil)
 	h.HandleUserInfo(rec, req)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/oauth2/introspect", nil)
+	h.HandleIntrospect(rec, req)
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
@@ -121,6 +127,54 @@ func TestOAuth2Handler_UserInfo(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "\"sub\"")
 	})
+}
+
+func TestOAuth2Handler_HandleIntrospect(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+
+	storeMock := &handlerTokenStore{
+		client: &store.Client{
+			ID:                      "client-1",
+			TokenEndpointAuthMethod: "client_secret_post",
+			SecretHash:              ptrString(string(hash)),
+		},
+		accessToken: &store.AccessToken{
+			JTI:       "at-jti-1",
+			ClientID:  "client-1",
+			Subject:   "identity-1",
+			Scopes:    []string{"openid", "profile"},
+			Issuer:    "https://issuer.example.com",
+			Audience:  []string{"api"},
+			ExpiresAt: time.Now().UTC().Add(time.Minute),
+		},
+	}
+
+	introspectSvc := introspection.NewService(tokenSvc.NewTokenService(storeMock, &tokenSvc.MockJWTSigner{}, "https://issuer.example.com"))
+	h := (&OAuth2Handler{}).WithIntrospectionService(introspectSvc)
+
+	form := url.Values{}
+	form.Set("token", "at-jti-1")
+	form.Set("client_id", "client-1")
+	form.Set("client_secret", "secret")
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/introspect", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.HandleIntrospect(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"active":true`)
+	assert.Contains(t, rec.Body.String(), `"client_id":"client-1"`)
+
+	bad := httptest.NewRecorder()
+	badReq := httptest.NewRequest(http.MethodPost, "/oauth2/introspect", strings.NewReader(url.Values{
+		"token":         []string{"at-jti-1"},
+		"client_id":     []string{"client-1"},
+		"client_secret": []string{"wrong"},
+	}.Encode()))
+	badReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.HandleIntrospect(bad, badReq)
+	assert.Equal(t, http.StatusUnauthorized, bad.Code)
 }
 
 func TestHandlerHelpers(t *testing.T) {
@@ -255,6 +309,7 @@ type handlerTokenStore struct {
 	client       *store.Client
 	authCode     *store.AuthCode
 	refreshToken *store.RefreshToken
+	accessToken  *store.AccessToken
 }
 
 func (s *handlerTokenStore) GetClient(ctx context.Context, id string) (*store.Client, error) {
@@ -301,6 +356,18 @@ func (s *handlerTokenStore) RevokeRefreshTokensBySession(ctx context.Context, se
 }
 func (s *handlerTokenStore) RevokeAccessTokensBySession(ctx context.Context, sessionID string) (int64, error) {
 	return 1, nil
+}
+func (s *handlerTokenStore) GetAccessToken(ctx context.Context, jti string) (*store.AccessToken, error) {
+	if s.accessToken != nil && s.accessToken.JTI == jti {
+		return s.accessToken, nil
+	}
+	return nil, store.ErrNotFound
+}
+func (s *handlerTokenStore) GetAccessTokenBySignature(ctx context.Context, signature string) (*store.AccessToken, error) {
+	if s.accessToken != nil && s.accessToken.Signature != nil && *s.accessToken.Signature == signature {
+		return s.accessToken, nil
+	}
+	return nil, store.ErrNotFound
 }
 
 type handlerGrantStore struct {
