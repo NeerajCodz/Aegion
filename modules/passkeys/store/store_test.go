@@ -52,4 +52,14 @@ func TestCredentialLifecycle(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("expected one credential, got %d", len(list))
 	}
+	if err := s.UpdateCredentialSignCount("cred-1", 7); err != nil {
+		t.Fatalf("expected sign count update success, got %v", err)
+	}
+	updated, err := s.GetCredential("cred-1")
+	if err != nil {
+		t.Fatalf("expected credential retrieval success, got %v", err)
+	}
+	if updated.SignCount != 7 {
+		t.Fatalf("unexpected sign count: %d", updated.SignCount)
+	}
 }

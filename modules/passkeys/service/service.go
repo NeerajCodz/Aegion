@@ -1,9 +1,14 @@
 package service
 
 import (
+	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,9 +16,11 @@ import (
 )
 
 var (
-	ErrInvalidIdentity  = errors.New("identity_id is required")
-	ErrInvalidChallenge = errors.New("challenge is invalid")
+	ErrInvalidIdentity   = errors.New("identity_id is required")
+	ErrInvalidChallenge  = errors.New("challenge is invalid")
 	ErrInvalidCredential = errors.New("credential is invalid")
+	ErrInvalidSignature  = errors.New("webauthn signature invalid")
+	ErrSignCountReplay   = errors.New("webauthn sign count replay detected")
 )
 
 type Config struct {
@@ -29,6 +36,7 @@ type ChallengeStore interface {
 	UpsertCredential(credential store.Credential)
 	GetCredential(credentialID string) (store.Credential, error)
 	ListCredentialsByIdentity(identityID string) []store.Credential
+	UpdateCredentialSignCount(credentialID string, signCount uint32) error
 }
 
 type Service struct {
@@ -60,6 +68,8 @@ type AuthenticationFinishRequest struct {
 	IdentityID   string `json:"identity_id"`
 	Challenge    string `json:"challenge"`
 	CredentialID string `json:"credential_id"`
+	Signature    string `json:"signature"`
+	SignCount    uint32 `json:"sign_count"`
 }
 
 func New(challengeStore ChallengeStore, cfg Config) *Service {
@@ -111,6 +121,9 @@ func (s *Service) FinishRegistration(req *RegistrationFinishRequest) error {
 	if strings.TrimSpace(req.Challenge) == "" || strings.TrimSpace(req.CredentialID) == "" || strings.TrimSpace(req.PublicKey) == "" {
 		return ErrInvalidCredential
 	}
+	if _, err := parseCredentialPublicKey(req.PublicKey); err != nil {
+		return ErrInvalidCredential
+	}
 	challenge, err := s.store.ConsumeChallenge(req.Challenge)
 	if err != nil {
 		return ErrInvalidChallenge
@@ -122,6 +135,7 @@ func (s *Service) FinishRegistration(req *RegistrationFinishRequest) error {
 		ID:         req.CredentialID,
 		IdentityID: req.IdentityID,
 		PublicKey:  req.PublicKey,
+		SignCount:  0,
 		CreatedAt:  time.Now().UTC(),
 	})
 	return nil
@@ -158,7 +172,7 @@ func (s *Service) FinishAuthentication(req *AuthenticationFinishRequest) error {
 	if req == nil || strings.TrimSpace(req.IdentityID) == "" {
 		return ErrInvalidIdentity
 	}
-	if strings.TrimSpace(req.CredentialID) == "" || strings.TrimSpace(req.Challenge) == "" {
+	if strings.TrimSpace(req.CredentialID) == "" || strings.TrimSpace(req.Challenge) == "" || strings.TrimSpace(req.Signature) == "" {
 		return ErrInvalidCredential
 	}
 	challenge, err := s.store.ConsumeChallenge(req.Challenge)
@@ -175,6 +189,20 @@ func (s *Service) FinishAuthentication(req *AuthenticationFinishRequest) error {
 	if credential.IdentityID != req.IdentityID {
 		return ErrInvalidCredential
 	}
+	if req.SignCount <= credential.SignCount {
+		return ErrSignCountReplay
+	}
+
+	publicKey, err := parseCredentialPublicKey(credential.PublicKey)
+	if err != nil {
+		return ErrInvalidCredential
+	}
+	if err := verifyAssertionSignature(publicKey, req.IdentityID, req.CredentialID, req.Challenge, req.Signature); err != nil {
+		return err
+	}
+	if err := s.store.UpdateCredentialSignCount(req.CredentialID, req.SignCount); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -184,4 +212,36 @@ func randomChallenge() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func parseCredentialPublicKey(pemEncoded string) (*ecdsa.PublicKey, error) {
+	block, _ := pem.Decode([]byte(strings.TrimSpace(pemEncoded)))
+	if block == nil {
+		return nil, errors.New("invalid public key pem")
+	}
+	pubAny, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	pub, ok := pubAny.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, errors.New("unsupported public key type")
+	}
+	return pub, nil
+}
+
+func verifyAssertionSignature(pub *ecdsa.PublicKey, identityID, credentialID, challenge, signatureB64 string) error {
+	signature, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(signatureB64))
+	if err != nil {
+		signature, err = base64.StdEncoding.DecodeString(strings.TrimSpace(signatureB64))
+		if err != nil {
+			return ErrInvalidSignature
+		}
+	}
+	message := fmt.Sprintf("%s:%s:%s", strings.TrimSpace(identityID), strings.TrimSpace(credentialID), strings.TrimSpace(challenge))
+	digest := sha256.Sum256([]byte(message))
+	if !ecdsa.VerifyASN1(pub, digest[:], signature) {
+		return ErrInvalidSignature
+	}
+	return nil
 }
