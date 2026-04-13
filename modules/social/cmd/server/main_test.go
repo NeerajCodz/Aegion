@@ -21,7 +21,7 @@ func TestDefaultListenAddr(t *testing.T) {
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9006")
+	cfg := moduleConfig("127.0.0.1:9006", nil)
 	if cfg.Module != "social" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9006" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
@@ -61,5 +61,8 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 
 	if captured.Module != "social" || captured.ListenAddr != "127.0.0.1:19006" {
 		t.Fatalf("main did not pass expected config: %+v", captured)
+	}
+	if captured.RegisterHTTPRoutes == nil {
+		t.Fatal("expected social http route registrar to be set")
 	}
 }
