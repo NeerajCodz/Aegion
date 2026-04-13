@@ -479,6 +479,9 @@ func newOAuth2SigningKeyPair() (*platformjwt.KeyPair, error) {
 
 	switch {
 	case privateKeyB64 == "" && publicKeyB64 == "":
+		if isProductionEnvironment() {
+			return nil, errors.New("production requires static OAuth2 signing keys via AEGION_OAUTH2_SIGNING_PRIVATE_KEY_B64 and AEGION_OAUTH2_SIGNING_PUBLIC_KEY_B64")
+		}
 		keyPair, err := platformjwt.GenerateECKeyPair(keyID)
 		if err != nil {
 			return nil, fmt.Errorf("generate signing key pair: %w", err)
@@ -637,4 +640,15 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func isProductionEnvironment() bool {
+	for _, key := range []string{"AEGION_ENV", "APP_ENV", "ENV"} {
+		value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		switch value {
+		case "prod", "production":
+			return true
+		}
+	}
+	return false
 }
