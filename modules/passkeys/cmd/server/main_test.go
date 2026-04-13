@@ -21,7 +21,7 @@ func TestDefaultListenAddr(t *testing.T) {
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9004")
+	cfg := moduleConfig("127.0.0.1:9004", nil)
 	if cfg.Module != "passkeys" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9004" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
@@ -61,5 +61,8 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 
 	if captured.Module != "passkeys" || captured.ListenAddr != "127.0.0.1:19004" {
 		t.Fatalf("main did not pass expected config: %+v", captured)
+	}
+	if captured.RegisterHTTPRoutes == nil {
+		t.Fatal("expected passkeys route registrar to be set")
 	}
 }
