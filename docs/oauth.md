@@ -377,11 +377,24 @@ oauth2:
 
 ## OIDC discovery
 
-All three endpoints are served by core's routing layer (assembled from oauth2 module data):
+Core now exposes the root OIDC contract and proxies to the oauth2 module:
 
 - `GET /.well-known/openid-configuration` — full OIDC provider metadata document
 - `GET /.well-known/jwks.json` — public key set for local token verification
-- `GET /oauth2/userinfo` — identity traits for the authenticated user (requires `openid` scope, valid access token)
+- `GET /oauth2/userinfo` (also supports POST) — identity traits for the authenticated user (requires `openid` scope, valid access token)
+
+OAuth2 token introspection is available from the oauth2 module endpoint:
+
+- `POST /oauth2/introspect` — RFC 7662 introspection response (`active`, `scope`, `client_id`, etc.); requires client authentication
+
+### Signing key runtime requirement
+
+In non-production environments, oauth2 may generate ephemeral signing keys for local development.  
+In production (`AEGION_ENV=production`), oauth2 startup requires static signing keys:
+
+- `AEGION_OAUTH2_SIGNING_PRIVATE_KEY_B64`
+- `AEGION_OAUTH2_SIGNING_PUBLIC_KEY_B64`
+- optional `AEGION_OAUTH2_SIGNING_KEY_ID`
 
 ### Userinfo response shape
 
