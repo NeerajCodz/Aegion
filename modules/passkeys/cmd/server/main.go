@@ -3,8 +3,15 @@ package main
 import (
 	"flag"
 	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/modules/passkeys/handler"
+	"github.com/aegion/aegion/modules/passkeys/service"
+	"github.com/aegion/aegion/modules/passkeys/store"
 )
 
 const (
@@ -19,7 +26,15 @@ func defaultListenAddr() string {
 	return moduleserver.EnvOrDefault(listenAddrEnv, defaultListen)
 }
 
-func moduleConfig(listenAddr string) moduleserver.Config {
+func passkeyConfig() service.Config {
+	return service.Config{
+		RPID:         strings.TrimSpace(os.Getenv("AEGION_PASSKEYS_RP_ID")),
+		RPOrigin:     strings.TrimSpace(os.Getenv("AEGION_PASSKEYS_RP_ORIGIN")),
+		ChallengeTTL: 5 * time.Minute,
+	}
+}
+
+func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)) moduleserver.Config {
 	return moduleserver.Config{
 		Module:       "passkeys",
 		Version:      moduleVersion,
@@ -31,6 +46,7 @@ func moduleConfig(listenAddr string) moduleserver.Config {
 			"session.created",
 			"identity.deleted",
 		},
+		RegisterHTTPRoutes: registerHTTPRoutes,
 	}
 }
 
@@ -38,7 +54,9 @@ func main() {
 	listenAddr := flag.String("listen", defaultListenAddr(), "HTTP listen address")
 	flag.Parse()
 
-	err := runModuleServer(moduleConfig(*listenAddr))
+	passkeySvc := service.New(store.New(), passkeyConfig())
+	h := handler.New(passkeySvc)
+	err := runModuleServer(moduleConfig(*listenAddr, h.RegisterRoutes))
 	if err != nil {
 		log.Fatal(err)
 	}
