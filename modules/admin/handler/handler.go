@@ -21,6 +21,8 @@ import (
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
+	socialservice "github.com/aegion/aegion/modules/social/service"
+	socialstore "github.com/aegion/aegion/modules/social/store"
 )
 
 const maxJSONBodyBytes int64 = 1 << 20
@@ -52,6 +54,13 @@ type Service interface {
 	ListAuditLogs(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error)
 }
 
+type SocialProviderManager interface {
+	ListConfiguredProviders(ctx context.Context, includeDisabled bool) ([]socialstore.Provider, error)
+	GetProvider(ctx context.Context, slug string) (*socialstore.Provider, error)
+	UpsertProvider(ctx context.Context, req socialservice.ProviderUpsertRequest) (*socialstore.Provider, error)
+	DeleteProvider(ctx context.Context, slug string) error
+}
+
 // HandlerConfig holds handler configuration.
 type HandlerConfig struct {
 	SessionTokenExpiry time.Duration // Session token expiry (default: 8 hours)
@@ -61,6 +70,7 @@ type HandlerConfig struct {
 	APIKeyPrefixLen    int           // Lookup prefix chars after token prefix (default: 12)
 	APIKeyEntropyBytes int           // Random token entropy bytes (default: 32)
 	Logger             *slog.Logger  // Structured logger (default: slog.Default)
+	SocialProviders    SocialProviderManager
 }
 
 // DefaultHandlerConfig returns default handler configuration.
@@ -109,10 +119,11 @@ type SystemSettingsResponse struct {
 
 // Handler handles admin HTTP requests.
 type Handler struct {
-	service Service
-	db      dbQuerier
-	config  HandlerConfig
-	log     *slog.Logger
+	service         Service
+	db              dbQuerier
+	config          HandlerConfig
+	log             *slog.Logger
+	socialProviders SocialProviderManager
 }
 
 // New creates a new admin handler.
@@ -144,7 +155,12 @@ func New(svc Service, cfgOverride ...HandlerConfig) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{service: svc, config: cfg, log: logger.With("component", "admin.handler")}
+	return &Handler{
+		service:         svc,
+		config:          cfg,
+		log:             logger.With("component", "admin.handler"),
+		socialProviders: cfg.SocialProviders,
+	}
 }
 
 func (h *Handler) dbConn() dbQuerier {
@@ -216,6 +232,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/stats", h.DashboardStats)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/overview", h.IntegrationOverview)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/social/providers", h.ListSocialProviders)
+		r.With(RequirePermission(h, service.PermConfigUpdate)).Post("/integrations/social/providers", h.UpsertSocialProvider)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/social/providers/{slug}", h.GetSocialProvider)
+		r.With(RequirePermission(h, service.PermConfigUpdate)).Delete("/integrations/social/providers/{slug}", h.DeleteSocialProvider)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/sso/connections", h.ListSSOConnections)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Post("/integrations/sso/connections", h.UpsertSSOConnection)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Delete("/integrations/sso/connections/{slug}", h.DeleteSSOConnection)

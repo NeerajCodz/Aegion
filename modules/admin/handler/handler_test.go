@@ -24,6 +24,8 @@ import (
 
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
+	socialservice "github.com/aegion/aegion/modules/social/service"
+	socialstore "github.com/aegion/aegion/modules/social/store"
 )
 
 func TestParsePaginationDefaults(t *testing.T) {
@@ -265,6 +267,41 @@ type fakeService struct {
 	deleteRoleFn              func(ctx context.Context, actorID uuid.UUID, name string, ipAddress string) error
 	availablePermissionsFn    func() []string
 	listAuditLogsFn           func(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error)
+}
+
+type fakeSocialProviderManager struct {
+	listConfiguredProvidersFn func(ctx context.Context, includeDisabled bool) ([]socialstore.Provider, error)
+	getProviderFn             func(ctx context.Context, slug string) (*socialstore.Provider, error)
+	upsertProviderFn          func(ctx context.Context, req socialservice.ProviderUpsertRequest) (*socialstore.Provider, error)
+	deleteProviderFn          func(ctx context.Context, slug string) error
+}
+
+func (f *fakeSocialProviderManager) ListConfiguredProviders(ctx context.Context, includeDisabled bool) ([]socialstore.Provider, error) {
+	if f.listConfiguredProvidersFn != nil {
+		return f.listConfiguredProvidersFn(ctx, includeDisabled)
+	}
+	return nil, nil
+}
+
+func (f *fakeSocialProviderManager) GetProvider(ctx context.Context, slug string) (*socialstore.Provider, error) {
+	if f.getProviderFn != nil {
+		return f.getProviderFn(ctx, slug)
+	}
+	return nil, socialstore.ErrProviderNotFound
+}
+
+func (f *fakeSocialProviderManager) UpsertProvider(ctx context.Context, req socialservice.ProviderUpsertRequest) (*socialstore.Provider, error) {
+	if f.upsertProviderFn != nil {
+		return f.upsertProviderFn(ctx, req)
+	}
+	return nil, errors.New("upsert not implemented")
+}
+
+func (f *fakeSocialProviderManager) DeleteProvider(ctx context.Context, slug string) error {
+	if f.deleteProviderFn != nil {
+		return f.deleteProviderFn(ctx, slug)
+	}
+	return socialstore.ErrProviderNotFound
 }
 
 func (f *fakeService) Store() service.Store {
@@ -4758,6 +4795,94 @@ func TestIntegrationHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), `"count":1`)
 		assert.Contains(t, rec.Body.String(), `"slug":"google"`)
+	})
+
+	t.Run("social provider upsert success", func(t *testing.T) {
+		manager := &fakeSocialProviderManager{
+			upsertProviderFn: func(ctx context.Context, req socialservice.ProviderUpsertRequest) (*socialstore.Provider, error) {
+				assert.Equal(t, "google", req.Slug)
+				assert.Equal(t, "Google", req.DisplayName)
+				assert.Equal(t, "client-id", req.ClientID)
+				assert.Equal(t, "super-secret", req.ClientSecret)
+				return &socialstore.Provider{
+					ID:                 uuid.New(),
+					Slug:               req.Slug,
+					DisplayName:        req.DisplayName,
+					Preset:             req.Preset,
+					Protocol:           req.Protocol,
+					ClientID:           req.ClientID,
+					RedirectURI:        req.RedirectURI,
+					Enabled:            req.Enabled,
+					TrustEmailVerified: req.TrustEmailVerified,
+				}, nil
+			},
+		}
+		h := New(&fakeService{store: &fakeStore{}}, HandlerConfig{SocialProviders: manager})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/integrations/social/providers", strings.NewReader(`{
+			"slug":"google",
+			"display_name":"Google",
+			"preset":"google",
+			"protocol":"oidc",
+			"redirect_uri":"https://example.com/callback",
+			"client_id":"client-id",
+			"client_secret":"super-secret",
+			"enabled":true,
+			"trust_email_verified":true
+		}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.UpsertSocialProvider(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"slug":"google"`)
+		assert.NotContains(t, rec.Body.String(), "super-secret")
+	})
+
+	t.Run("social provider get success", func(t *testing.T) {
+		manager := &fakeSocialProviderManager{
+			getProviderFn: func(ctx context.Context, slug string) (*socialstore.Provider, error) {
+				return &socialstore.Provider{
+					ID:          uuid.New(),
+					Slug:        slug,
+					DisplayName: "Google",
+					Protocol:    socialstore.ProtocolOIDC,
+					Enabled:     true,
+				}, nil
+			},
+		}
+		h := New(&fakeService{store: &fakeStore{}}, HandlerConfig{SocialProviders: manager})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/integrations/social/providers/google", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "slug", "google")
+		h.GetSocialProvider(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"slug":"google"`)
+	})
+
+	t.Run("social provider delete not found", func(t *testing.T) {
+		manager := &fakeSocialProviderManager{
+			deleteProviderFn: func(ctx context.Context, slug string) error {
+				return socialstore.ErrProviderNotFound
+			},
+		}
+		h := New(&fakeService{store: &fakeStore{}}, HandlerConfig{SocialProviders: manager})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/integrations/social/providers/missing", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = withRouteParam(req, "slug", "missing")
+		h.DeleteSocialProvider(rec, req)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("social provider management unavailable", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/integrations/social/providers", strings.NewReader(`{"slug":"google"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.UpsertSocialProvider(rec, req)
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	})
 
 	t.Run("proxy routes list query error", func(t *testing.T) {
