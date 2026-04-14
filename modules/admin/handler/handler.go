@@ -214,6 +214,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 		// Dashboard and system settings
 		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/stats", h.DashboardStats)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/overview", h.IntegrationOverview)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/social/providers", h.ListSocialProviders)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/sso/connections", h.ListSSOConnections)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/proxy/upstreams", h.ListProxyUpstreams)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/proxy/routes", h.ListProxyRoutes)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/settings", h.GetSettings)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Patch("/settings", h.UpdateSettings)
 	})
