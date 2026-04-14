@@ -1,1 +1,1 @@
--- Initial CLI module scaffold rollback (no-op).
+DROP TABLE IF EXISTS cli_command_runs;
