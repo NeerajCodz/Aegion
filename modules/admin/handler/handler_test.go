@@ -731,6 +731,18 @@ func assignScanDest(dest any, val any) error {
 		}
 		*d = v
 		return nil
+	case **string:
+		if val == nil {
+			*d = nil
+			return nil
+		}
+		v, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("expected string value for *string, got %T", val)
+		}
+		cp := v
+		*d = &cp
+		return nil
 	case *int:
 		switch v := val.(type) {
 		case int:
@@ -783,6 +795,13 @@ func assignScanDest(dest any, val any) error {
 		default:
 			return fmt.Errorf("expected []byte/string value, got %T", val)
 		}
+	case *[]string:
+		v, ok := val.([]string)
+		if !ok {
+			return fmt.Errorf("expected []string value, got %T", val)
+		}
+		*d = append((*d)[:0], v...)
+		return nil
 	case *time.Time:
 		v, ok := val.(time.Time)
 		if !ok {
@@ -4751,6 +4770,10 @@ func TestIntegrationHandlers(t *testing.T) {
 					return fakeRow{vals: []any{int64(6)}}
 				case strings.Contains(sql, "adm_scim_tokens"):
 					return fakeRow{vals: []any{int64(7)}}
+				case strings.Contains(sql, "FROM oa2_clients"):
+					return fakeRow{vals: []any{int64(8)}}
+				case strings.Contains(sql, "FROM ("):
+					return fakeRow{vals: []any{int64(9)}}
 				default:
 					return fakeRow{err: errors.New("unexpected query")}
 				}
@@ -4763,6 +4786,8 @@ func TestIntegrationHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), `"social_providers":2`)
 		assert.Contains(t, rec.Body.String(), `"proxy_routes":6`)
+		assert.Contains(t, rec.Body.String(), `"oauth2_clients":8`)
+		assert.Contains(t, rec.Body.String(), `"oauth2_tokens":9`)
 	})
 
 	t.Run("overview internal error", func(t *testing.T) {
@@ -4810,6 +4835,10 @@ func TestIntegrationHandlers(t *testing.T) {
 					return fakeRow{vals: []any{int64(9)}}
 				case strings.Contains(sql, "FROM adm_scim_tokens"):
 					return fakeRow{vals: []any{int64(10)}}
+				case strings.Contains(sql, "FROM oa2_clients"):
+					return fakeRow{vals: []any{int64(12)}}
+				case strings.Contains(sql, "SELECT COUNT(*) FROM ("):
+					return fakeRow{vals: []any{int64(13)}}
 				case strings.Contains(sql, "FROM adm_ip_bans"):
 					return fakeRow{vals: []any{int64(2)}}
 				case strings.Contains(sql, "FROM adm_audit_logs"):
@@ -4828,6 +4857,7 @@ func TestIntegrationHandlers(t *testing.T) {
 		assert.Contains(t, rec.Body.String(), `"admin_operators":1`)
 		assert.Contains(t, rec.Body.String(), `"ip_bans":2`)
 		assert.Contains(t, rec.Body.String(), `"has_scim_token":true`)
+		assert.Contains(t, rec.Body.String(), `"has_oauth2_client":true`)
 	})
 
 	t.Run("social preset list success", func(t *testing.T) {
@@ -5081,6 +5111,88 @@ func TestIntegrationHandlers(t *testing.T) {
 		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
 		h.UpsertSocialProvider(rec, req)
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	})
+
+	t.Run("oauth2 clients list success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{
+					{"oa2_app", "Example App", nil, []string{"https://example.com/callback"}, []string{"authorization_code"}, []string{"code"}, []string{"openid"}, "client_secret_basic", true, true, true, time.Now().UTC(), time.Now().UTC()},
+				}}, nil
+			},
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/oauth2/clients", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListOAuth2Clients(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"name":"Example App"`)
+		assert.Contains(t, rec.Body.String(), `"count":1`)
+	})
+
+	t.Run("oauth2 client create success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				if strings.Contains(sql, "INSERT INTO oa2_clients") {
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				}
+				return pgconn.CommandTag{}, errors.New("unexpected exec")
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/oauth2/clients", strings.NewReader(`{
+			"name":"Example App",
+			"redirect_uris":["https://example.com/callback"],
+			"grant_types":["authorization_code"],
+			"response_types":["code"],
+			"scopes":["openid","profile"],
+			"token_endpoint_auth_method":"client_secret_basic"
+		}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.CreateOAuth2Client(rec, req)
+		assert.Equal(t, http.StatusCreated, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"name":"Example App"`)
+		assert.Contains(t, rec.Body.String(), `"client_secret":"`)
+	})
+
+	t.Run("oauth2 token revoke success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "FROM oa2_access_tokens WHERE jti = $1"):
+					return fakeRow{vals: []any{"at_1", nil, "oa2_app", "identity-1", "session-1", []string{"openid"}, []string{"aud1"}, "issuer", "subject", []byte(`{"role":"user"}`), false, nil, time.Now().UTC().Add(time.Hour), time.Now().UTC()}}
+				default:
+					return fakeRow{err: errors.New("unexpected query")}
+				}
+			},
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				if strings.Contains(sql, "UPDATE oa2_access_tokens SET revoked = true") || strings.Contains(sql, "INSERT INTO oa2_token_revocations") {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				}
+				return pgconn.CommandTag{}, errors.New("unexpected exec")
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/oauth2/tokens/revoke", strings.NewReader(`{
+			"token_type":"access_token",
+			"id":"at_1",
+			"reason":"admin_revocation"
+		}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.RevokeOAuth2Token(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"revoked":true`)
+		assert.Contains(t, rec.Body.String(), `"token_type":"access_token"`)
 	})
 
 	t.Run("proxy routes list query error", func(t *testing.T) {
