@@ -197,6 +197,8 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/api", s.handleInitLoginAPI)
 			r.Get("/flows", s.handleGetLoginFlow)
 			r.Get("/methods/link/verify", s.handleMagicLinkLoginVerify)
+			r.Post("/methods/passkey/start", s.handleStartLoginPasskey)
+			r.Post("/methods/passkey/finish", s.handleFinishLoginPasskey)
 			r.Post("/", s.handleSubmitLogin)
 		})
 
@@ -222,6 +224,11 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/browser", s.handleInitSettingsBrowser)
 			r.Get("/api", s.handleInitSettingsAPI)
 			r.Get("/flows", s.handleGetSettingsFlow)
+			r.Post("/methods/totp/start", s.handleStartSettingsTOTPEnrollment)
+			r.Post("/methods/totp/finish", s.handleFinishSettingsTOTPEnrollment)
+			r.Post("/methods/backup-codes/regenerate", s.handleRegenerateSettingsBackupCodes)
+			r.Post("/methods/passkey/start", s.handleStartSettingsPasskeyRegistration)
+			r.Post("/methods/passkey/finish", s.handleFinishSettingsPasskeyRegistration)
 			r.Post("/", s.handleSubmitSettings)
 		})
 
@@ -632,12 +639,28 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		}
 	}
 
+	if result != nil && result.KeepFlowActive {
+		response := map[string]any{
+			"status":    result.Status,
+			"flow_id":   input.FlowID.String(),
+			"flow_type": string(expectedType),
+		}
+		if result.Message != "" {
+			response["message"] = result.Message
+		}
+		if result.FlowPayload != nil {
+			response["flow"] = result.FlowPayload
+		}
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+
 	if err := s.flowService.CompleteFlow(r.Context(), input.FlowID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
 		return
 	}
 
-	response := map[string]string{
+	response := map[string]any{
 		"status":    "completed",
 		"flow_id":   input.FlowID.String(),
 		"flow_type": string(expectedType),

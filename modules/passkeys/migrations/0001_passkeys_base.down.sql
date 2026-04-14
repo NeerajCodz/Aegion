@@ -1,1 +1,2 @@
--- Initial passkeys module scaffold rollback (no-op).
+DROP TABLE IF EXISTS passkey_challenges;
+DROP TABLE IF EXISTS passkey_credentials;

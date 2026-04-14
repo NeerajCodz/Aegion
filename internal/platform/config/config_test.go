@@ -336,6 +336,15 @@ func TestApplyDefaults(t *testing.T) {
 	assert.False(t, cfg.Proxy.TrustForwardedHeaders)
 	assert.Equal(t, "X-Aegion-Signature", cfg.Proxy.IdentitySignatureHeader)
 	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}, cfg.Proxy.SignedIdentityHeaders)
+
+	// MFA / passkey defaults
+	assert.Equal(t, "Aegion", cfg.MFA.Issuer)
+	assert.Equal(t, 6, cfg.MFA.CodeDigits)
+	assert.Equal(t, Duration(30*time.Second), cfg.MFA.CodePeriod)
+	assert.Equal(t, 12, cfg.MFA.BackupCodeCount)
+	assert.Equal(t, "aegion_mfa_trusted_device", cfg.MFA.TrustedDeviceCookieName)
+	assert.Equal(t, Duration(5*time.Minute), cfg.Passkeys.ChallengeTTL)
+	assert.Equal(t, 20, cfg.Passkeys.AllowedCredentials)
 }
 
 func TestApplyDefaults_DoesNotOverrideExisting(t *testing.T) {
@@ -584,6 +593,54 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: "",
 		},
+		{
+			name: "requires rp id when passkeys enabled",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!"},
+					Cipher:   []string{"cipher-secret-32-characters-long!!"},
+					Internal: []string{"internal-secret-32-characters-long"},
+				},
+				Passkeys: PasskeysConfig{
+					Enabled:  true,
+					RPOrigin: "https://example.com",
+				},
+			},
+			wantErr: "passkeys.rp_id is required when passkeys are enabled",
+		},
+		{
+			name: "requires rp origin when passkeys enabled",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!"},
+					Cipher:   []string{"cipher-secret-32-characters-long!!"},
+					Internal: []string{"internal-secret-32-characters-long"},
+				},
+				Passkeys: PasskeysConfig{
+					Enabled: true,
+					RPID:    "example.com",
+				},
+			},
+			wantErr: "passkeys.rp_origin is required when passkeys are enabled",
+		},
+		{
+			name: "rejects unsupported mfa digits",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!"},
+					Cipher:   []string{"cipher-secret-32-characters-long!!"},
+					Internal: []string{"internal-secret-32-characters-long"},
+				},
+				MFA: MFAConfig{
+					Enabled:    true,
+					CodeDigits: 7,
+				},
+			},
+			wantErr: "mfa.code_digits must be 6 or 8 when mfa is enabled",
+		},
 	}
 
 	for _, tt := range tests {
@@ -722,6 +779,19 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 				return &c
 			}(),
 			wantErr: "module_versions.password must be pinned in production",
+		},
+		{
+			name: "requires https passkey origin in production",
+			cfg: func() *Config {
+				c := *valid
+				c.Passkeys = PasskeysConfig{
+					Enabled:  true,
+					RPID:     "example.com",
+					RPOrigin: "http://example.com",
+				}
+				return &c
+			}(),
+			wantErr: "passkeys.rp_origin must use https in production",
 		},
 	}
 

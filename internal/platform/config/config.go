@@ -16,23 +16,25 @@ import (
 type Config struct {
 	XTimeouts      map[string]any      `yaml:"x-timeouts"`
 	XRateLimits    map[string]any      `yaml:"x-rate-limits"`
-	ModuleVersions map[string]string `yaml:"module_versions"`
-	ModuleRegistry ModuleRegistry    `yaml:"module_registry"`
-	Server         ServerConfig      `yaml:"server"`
-	Database       DatabaseConfig    `yaml:"database"`
-	Cache          CacheConfig       `yaml:"cache"`
-	Secrets        SecretsConfig     `yaml:"secrets"`
-	Log            LogConfig         `yaml:"log"`
-	Operator       OperatorConfig    `yaml:"operator"`
-	Courier        CourierConfig     `yaml:"courier"`
-	Sessions       SessionsConfig    `yaml:"sessions"`
-	Identity       IdentityConfig    `yaml:"identity"`
-	Security       SecurityConfig    `yaml:"security"`
-	Password       PasswordConfig    `yaml:"password"`
-	MagicLink      MagicLinkConfig   `yaml:"magic_link"`
-	Admin          AdminConfig       `yaml:"admin"`
-	Policy         PolicyConfig      `yaml:"policy"`
-	Proxy          ProxyConfig       `yaml:"proxy"`
+	ModuleVersions map[string]string   `yaml:"module_versions"`
+	ModuleRegistry ModuleRegistry      `yaml:"module_registry"`
+	Server         ServerConfig        `yaml:"server"`
+	Database       DatabaseConfig      `yaml:"database"`
+	Cache          CacheConfig         `yaml:"cache"`
+	Secrets        SecretsConfig       `yaml:"secrets"`
+	Log            LogConfig           `yaml:"log"`
+	Operator       OperatorConfig      `yaml:"operator"`
+	Courier        CourierConfig       `yaml:"courier"`
+	Sessions       SessionsConfig      `yaml:"sessions"`
+	Identity       IdentityConfig      `yaml:"identity"`
+	Security       SecurityConfig      `yaml:"security"`
+	Password       PasswordConfig      `yaml:"password"`
+	MagicLink      MagicLinkConfig     `yaml:"magic_link"`
+	MFA            MFAConfig           `yaml:"mfa"`
+	Passkeys       PasskeysConfig      `yaml:"passkeys"`
+	Admin          AdminConfig         `yaml:"admin"`
+	Policy         PolicyConfig        `yaml:"policy"`
+	Proxy          ProxyConfig         `yaml:"proxy"`
 	Observability  ObservabilityConfig `yaml:"observability"`
 }
 
@@ -259,6 +261,28 @@ type MagicLinkConfig struct {
 	RecoveryRateLimit int      `yaml:"recovery_rate_limit"`
 }
 
+// MFAConfig configures built-in multi-factor authentication behavior.
+type MFAConfig struct {
+	Enabled                 bool     `yaml:"enabled"`
+	Issuer                  string   `yaml:"issuer"`
+	EnrollmentTTL           Duration `yaml:"enrollment_ttl"`
+	CodeDigits              int      `yaml:"code_digits"`
+	CodePeriod              Duration `yaml:"code_period"`
+	AllowedTimeWindows      int      `yaml:"allowed_time_windows"`
+	BackupCodeCount         int      `yaml:"backup_code_count"`
+	TrustedDeviceLifespan   Duration `yaml:"trusted_device_lifespan"`
+	TrustedDeviceCookieName string   `yaml:"trusted_device_cookie_name"`
+}
+
+// PasskeysConfig configures built-in passkey support.
+type PasskeysConfig struct {
+	Enabled            bool     `yaml:"enabled"`
+	RPID               string   `yaml:"rp_id"`
+	RPOrigin           string   `yaml:"rp_origin"`
+	ChallengeTTL       Duration `yaml:"challenge_ttl"`
+	AllowedCredentials int      `yaml:"allowed_credentials"`
+}
+
 // AdminConfig configures the admin module.
 type AdminConfig struct {
 	Enabled               bool            `yaml:"enabled"`
@@ -480,6 +504,36 @@ func applyDefaults(cfg *Config) {
 	if cfg.MagicLink.RecoveryRateLimit == 0 {
 		cfg.MagicLink.RecoveryRateLimit = 3
 	}
+	if cfg.MFA.Issuer == "" {
+		cfg.MFA.Issuer = "Aegion"
+	}
+	if cfg.MFA.EnrollmentTTL == 0 {
+		cfg.MFA.EnrollmentTTL = Duration(10 * time.Minute)
+	}
+	if cfg.MFA.CodeDigits == 0 {
+		cfg.MFA.CodeDigits = 6
+	}
+	if cfg.MFA.CodePeriod == 0 {
+		cfg.MFA.CodePeriod = Duration(30 * time.Second)
+	}
+	if cfg.MFA.AllowedTimeWindows == 0 {
+		cfg.MFA.AllowedTimeWindows = 1
+	}
+	if cfg.MFA.BackupCodeCount == 0 {
+		cfg.MFA.BackupCodeCount = 12
+	}
+	if cfg.MFA.TrustedDeviceLifespan == 0 {
+		cfg.MFA.TrustedDeviceLifespan = Duration(30 * 24 * time.Hour)
+	}
+	if cfg.MFA.TrustedDeviceCookieName == "" {
+		cfg.MFA.TrustedDeviceCookieName = "aegion_mfa_trusted_device"
+	}
+	if cfg.Passkeys.ChallengeTTL == 0 {
+		cfg.Passkeys.ChallengeTTL = Duration(5 * time.Minute)
+	}
+	if cfg.Passkeys.AllowedCredentials == 0 {
+		cfg.Passkeys.AllowedCredentials = 20
+	}
 	if cfg.Admin.Path == "" {
 		cfg.Admin.Path = "/aegion"
 	}
@@ -663,6 +717,22 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("internal secret must be at least 32 characters")
 		}
 	}
+	if c.MFA.Enabled {
+		if c.MFA.CodeDigits != 6 && c.MFA.CodeDigits != 8 {
+			return fmt.Errorf("mfa.code_digits must be 6 or 8 when mfa is enabled")
+		}
+		if c.MFA.AllowedTimeWindows < 0 {
+			return fmt.Errorf("mfa.allowed_time_windows must be greater than or equal to 0")
+		}
+	}
+	if c.Passkeys.Enabled {
+		if strings.TrimSpace(c.Passkeys.RPID) == "" {
+			return fmt.Errorf("passkeys.rp_id is required when passkeys are enabled")
+		}
+		if strings.TrimSpace(c.Passkeys.RPOrigin) == "" {
+			return fmt.Errorf("passkeys.rp_origin is required when passkeys are enabled")
+		}
+	}
 
 	if !isProductionEnvironment() {
 		return nil
@@ -692,6 +762,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Proxy.TrustForwardedHeaders && len(c.Proxy.TrustedProxyCIDRs) == 0 {
 		return fmt.Errorf("proxy.trusted_proxy_cidrs is required when proxy.trust_forwarded_headers is enabled")
+	}
+	if c.Passkeys.Enabled && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Passkeys.RPOrigin)), "https://") {
+		return fmt.Errorf("passkeys.rp_origin must use https in production")
 	}
 	if containsPlaceholderValue(c.Operator.Password) {
 		return fmt.Errorf("operator.password must be rotated before production")

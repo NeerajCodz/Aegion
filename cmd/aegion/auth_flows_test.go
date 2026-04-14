@@ -7,13 +7,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/session"
 	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
+	mfaservice "github.com/aegion/aegion/modules/mfa/service"
 )
 
 type stubPasswordFlowService struct {
@@ -135,6 +138,99 @@ func (s *stubMagicLinkFlowService) VerifyRecoveryCode(ctx context.Context, email
 	return s.verifyCodeIdentityID, s.verifyCodeErr
 }
 
+type stubMFAFlowService struct {
+	hasFactor                bool
+	hasFactorErr             error
+	validateTrustedDevice    bool
+	validateTrustedDeviceErr error
+	trustedDeviceToken       string
+	trustedDeviceExpiry      time.Time
+	trustedDeviceErr         error
+	verifyTOTPErr            error
+	verifyBackupErr          error
+	regeneratedBackupCodes   []string
+	regenerateBackupCodesErr error
+	startResp                any
+	finishResp               any
+	startCalls               []struct {
+		IdentityID  string
+		AccountName string
+	}
+	validateTrustedDeviceCalls []struct {
+		IdentityID string
+		Token      string
+	}
+	rememberCalls []struct {
+		IdentityID string
+		Label      string
+	}
+	verifyTOTPCodes   []string
+	verifyBackupCodes []string
+}
+
+func (s *stubMFAFlowService) StartTOTPEnrollment(ctx context.Context, identityID, accountName string) (*mfaservice.TOTPEnrollmentStartResponse, error) {
+	s.startCalls = append(s.startCalls, struct {
+		IdentityID  string
+		AccountName string
+	}{IdentityID: identityID, AccountName: accountName})
+	if resp, ok := s.startResp.(*mfaservice.TOTPEnrollmentStartResponse); ok {
+		return resp, nil
+	}
+	return &mfaservice.TOTPEnrollmentStartResponse{}, nil
+}
+
+func (s *stubMFAFlowService) CompleteTOTPEnrollment(ctx context.Context, req *mfaservice.TOTPEnrollmentFinishRequest) (*mfaservice.TOTPEnrollmentFinishResponse, error) {
+	if resp, ok := s.finishResp.(*mfaservice.TOTPEnrollmentFinishResponse); ok {
+		return resp, nil
+	}
+	return &mfaservice.TOTPEnrollmentFinishResponse{}, nil
+}
+
+func (s *stubMFAFlowService) VerifyTOTP(ctx context.Context, identityID, code string) error {
+	s.verifyTOTPCodes = append(s.verifyTOTPCodes, code)
+	return s.verifyTOTPErr
+}
+
+func (s *stubMFAFlowService) VerifyBackupCode(ctx context.Context, identityID, code string) error {
+	s.verifyBackupCodes = append(s.verifyBackupCodes, code)
+	return s.verifyBackupErr
+}
+
+func (s *stubMFAFlowService) HasEnrolledFactor(ctx context.Context, identityID string) (bool, error) {
+	return s.hasFactor, s.hasFactorErr
+}
+
+func (s *stubMFAFlowService) RegenerateBackupCodes(ctx context.Context, identityID string) ([]string, error) {
+	if s.regeneratedBackupCodes != nil {
+		return s.regeneratedBackupCodes, s.regenerateBackupCodesErr
+	}
+	return []string{"AAAA-BBBB-CCCC"}, s.regenerateBackupCodesErr
+}
+
+func (s *stubMFAFlowService) RememberTrustedDevice(ctx context.Context, identityID, label string) (string, time.Time, error) {
+	s.rememberCalls = append(s.rememberCalls, struct {
+		IdentityID string
+		Label      string
+	}{IdentityID: identityID, Label: label})
+	return s.trustedDeviceToken, s.trustedDeviceExpiry, s.trustedDeviceErr
+}
+
+func (s *stubMFAFlowService) ValidateTrustedDevice(ctx context.Context, identityID, token string) (bool, error) {
+	s.validateTrustedDeviceCalls = append(s.validateTrustedDeviceCalls, struct {
+		IdentityID string
+		Token      string
+	}{IdentityID: identityID, Token: token})
+	return s.validateTrustedDevice, s.validateTrustedDeviceErr
+}
+
+func (s *stubMFAFlowService) RevokeTrustedDevice(ctx context.Context, identityID, token string) error {
+	return nil
+}
+
+func (s *stubMFAFlowService) ResetIdentity(ctx context.Context, identityID string) error {
+	return nil
+}
+
 func TestHandleSubmitLoginExecutesPasswordAuthentication(t *testing.T) {
 	s, store := newFlowServer(t)
 	auth := &stubPasswordFlowService{verifyID: uuid.New()}
@@ -176,6 +272,160 @@ func TestHandleSubmitLoginExecutesPasswordAuthentication(t *testing.T) {
 	}
 	if body["status"] != "authenticated" {
 		t.Fatalf("expected authenticated status, got %q", body["status"])
+	}
+}
+
+func TestHandleSubmitLoginRequiresMFAChallengeWhenFactorEnrolled(t *testing.T) {
+	s, store := newFlowServer(t)
+	auth := &stubPasswordFlowService{verifyID: uuid.New()}
+	mfa := &stubMFAFlowService{hasFactor: true}
+	sm := &stubRouteSessionManager{}
+	s.passwordAuth = auth
+	s.mfaAuth = mfa
+	s.sessionManager = sm
+	s.cfg.MFA.TrustedDeviceCookieName = "aegion_mfa_trusted_device"
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+		"flow_id":    flow.ID.String(),
+		"csrf_token": flow.CSRFToken,
+		"identifier": "person@example.com",
+		"password":   "correct horse battery staple",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	s.handleSubmitLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if len(sm.created) != 0 {
+		t.Fatalf("expected no session before MFA, got %+v", sm.created)
+	}
+	if got := store.flows[flow.ID].State; got != flows.StateActive {
+		t.Fatalf("expected flow to stay active, got %s", got)
+	}
+	if pending, ok := store.flows[flow.ID].GetContext("pending_login_identity_id"); !ok || pending != auth.verifyID.String() {
+		t.Fatalf("expected pending login identity context, got %v (ok=%v)", pending, ok)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "mfa_required" {
+		t.Fatalf("expected mfa_required status, got %v", body["status"])
+	}
+	if _, ok := body["flow"].(map[string]any); !ok {
+		t.Fatalf("expected flow payload in response, got %+v", body)
+	}
+}
+
+func TestHandleSubmitLoginCompletesPendingMFAChallenge(t *testing.T) {
+	s, store := newFlowServer(t)
+	sm := &stubRouteSessionManager{}
+	mfa := &stubMFAFlowService{
+		hasFactor:           true,
+		trustedDeviceToken:  "trusted-device-token",
+		trustedDeviceExpiry: time.Now().UTC().Add(24 * time.Hour),
+	}
+	s.passwordAuth = &stubPasswordFlowService{verifyID: uuid.New()}
+	s.mfaAuth = mfa
+	s.sessionManager = sm
+	s.cfg.MFA.TrustedDeviceCookieName = "aegion_mfa_trusted_device"
+	s.cfg.Sessions.Cookie.Path = "/"
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+	flow.AddContext("pending_login_identity_id", s.passwordAuth.(*stubPasswordFlowService).verifyID.String())
+	flow.AddContext("pending_login_method", string(session.AuthMethodPassword))
+	if err := s.flowService.UpdateFlow(context.Background(), flow); err != nil {
+		t.Fatalf("update login flow: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+		"flow_id":         flow.ID.String(),
+		"csrf_token":      flow.CSRFToken,
+		"totp_code":       "123456",
+		"remember_device": "true",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	s.handleSubmitLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if len(mfa.verifyTOTPCodes) != 1 || mfa.verifyTOTPCodes[0] != "123456" {
+		t.Fatalf("expected TOTP verification call, got %+v", mfa.verifyTOTPCodes)
+	}
+	if len(sm.created) != 1 {
+		t.Fatalf("expected session to be created after MFA, got %+v", sm.created)
+	}
+	if len(sm.addedAuthMethods) != 1 || sm.addedAuthMethods[0] != session.AuthMethodTOTP {
+		t.Fatalf("expected TOTP auth method upgrade, got %+v", sm.addedAuthMethods)
+	}
+	if len(mfa.rememberCalls) != 1 {
+		t.Fatalf("expected remembered device call, got %+v", mfa.rememberCalls)
+	}
+	if got := store.flows[flow.ID].State; got != flows.StateCompleted {
+		t.Fatalf("expected flow to complete, got %s", got)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 || cookies[0].Name != "aegion_mfa_trusted_device" {
+		t.Fatalf("expected trusted device cookie, got %+v", cookies)
+	}
+}
+
+func TestHandleSubmitLoginUsesTrustedDeviceToBypassPrompt(t *testing.T) {
+	s, store := newFlowServer(t)
+	auth := &stubPasswordFlowService{verifyID: uuid.New()}
+	mfa := &stubMFAFlowService{
+		hasFactor:             true,
+		validateTrustedDevice: true,
+	}
+	sm := &stubRouteSessionManager{}
+	s.passwordAuth = auth
+	s.mfaAuth = mfa
+	s.sessionManager = sm
+	s.cfg.MFA.TrustedDeviceCookieName = "aegion_mfa_trusted_device"
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
+		"flow_id":    flow.ID.String(),
+		"csrf_token": flow.CSRFToken,
+		"identifier": "person@example.com",
+		"password":   "correct horse battery staple",
+	}))
+	req.AddCookie(&http.Cookie{Name: "aegion_mfa_trusted_device", Value: "trusted-token"})
+	req.Header.Set("Content-Type", "application/json")
+	s.handleSubmitLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if len(mfa.validateTrustedDeviceCalls) != 1 || mfa.validateTrustedDeviceCalls[0].Token != "trusted-token" {
+		t.Fatalf("expected trusted device validation, got %+v", mfa.validateTrustedDeviceCalls)
+	}
+	if len(sm.created) != 1 {
+		t.Fatalf("expected session creation with trusted device, got %+v", sm.created)
+	}
+	if len(sm.addedAuthMethods) != 1 || sm.addedAuthMethods[0] != session.AuthMethodTOTP {
+		t.Fatalf("expected trusted-device AAL2 upgrade, got %+v", sm.addedAuthMethods)
+	}
+	if got := store.flows[flow.ID].State; got != flows.StateCompleted {
+		t.Fatalf("expected flow to complete, got %s", got)
 	}
 }
 
@@ -287,7 +537,9 @@ func TestHandleMagicLinkRecoveryVerifyCreatesResetFlow(t *testing.T) {
 func TestHandleSubmitSettingsUsesRecoveryReset(t *testing.T) {
 	s, store := newFlowServer(t)
 	passwords := &stubPasswordFlowService{}
+	sm := &stubRouteSessionManager{}
 	s.passwordAuth = passwords
+	s.sessionManager = sm
 
 	identityID := uuid.New()
 	flow, err := s.flowService.CreateSettingsFlow(context.Background(), "http://example.com/settings", identityID)
@@ -317,6 +569,9 @@ func TestHandleSubmitSettingsUsesRecoveryReset(t *testing.T) {
 	}
 	if len(passwords.changes) != 0 {
 		t.Fatalf("expected no change-password call during recovery reset, got %+v", passwords.changes)
+	}
+	if len(sm.revokedIdentityIDs) != 1 || sm.revokedIdentityIDs[0] != identityID {
+		t.Fatalf("expected identity sessions to be revoked, got %+v", sm.revokedIdentityIDs)
 	}
 	if got := store.flows[flow.ID].State; got != flows.StateCompleted {
 		t.Fatalf("expected completed flow, got %s", got)

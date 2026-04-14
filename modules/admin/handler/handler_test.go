@@ -2887,9 +2887,15 @@ func TestIdentityHandlersExtendedPaths(t *testing.T) {
 
 	t.Run("reset mfa success", func(t *testing.T) {
 		h := New(&fakeService{store: &fakeStore{}})
+		execSQL := make([]string, 0, 5)
 		h.db = &fakeDB{
-			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-				return pgconn.NewCommandTag("UPDATE 2"), nil
+			beginFn: func(ctx context.Context) (pgx.Tx, error) {
+				return &fakeTx{
+					execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+						execSQL = append(execSQL, strings.TrimSpace(sql))
+						return pgconn.NewCommandTag("UPDATE 1"), nil
+					},
+				}, nil
 			},
 		}
 		rec := httptest.NewRecorder()
@@ -2898,6 +2904,12 @@ func TestIdentityHandlersExtendedPaths(t *testing.T) {
 		req = withRouteParam(req, "id", identityID.String())
 		h.ResetIdentityMFA(rec, req)
 		assert.Equal(t, http.StatusNoContent, rec.Code)
+		require.Len(t, execSQL, 5)
+		assert.Contains(t, execSQL[0], "UPDATE core_sessions")
+		assert.Contains(t, execSQL[1], "DELETE FROM mfa_enrollments")
+		assert.Contains(t, execSQL[2], "DELETE FROM mfa_backup_codes")
+		assert.Contains(t, execSQL[3], "DELETE FROM mfa_totp_factors")
+		assert.Contains(t, execSQL[4], "DELETE FROM mfa_trusted_devices")
 	})
 }
 
@@ -3271,8 +3283,12 @@ func TestResetIdentityMFAErrors(t *testing.T) {
 	t.Run("db error", func(t *testing.T) {
 		h := New(&fakeService{store: &fakeStore{}})
 		h.db = &fakeDB{
-			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-				return pgconn.NewCommandTag(""), errors.New("db error")
+			beginFn: func(ctx context.Context) (pgx.Tx, error) {
+				return &fakeTx{
+					execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+						return pgconn.NewCommandTag(""), errors.New("db error")
+					},
+				}, nil
 			},
 		}
 		rec := httptest.NewRecorder()
