@@ -15,6 +15,7 @@ import (
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
 	"github.com/aegion/aegion/modules/social/handler"
+	"github.com/aegion/aegion/modules/social/providers/catalog"
 	"github.com/aegion/aegion/modules/social/service"
 	"github.com/aegion/aegion/modules/social/store"
 )
@@ -133,7 +134,7 @@ func deriveCipherKey() ([]byte, error) {
 }
 
 func bootstrapEnvProviders(ctx context.Context, svc *service.Service) error {
-	for _, slug := range []string{"google", "github", "apple", "microsoft", "gitlab", "roblox"} {
+	for _, slug := range catalog.Names() {
 		req := envProviderRequest(slug)
 		if req == nil {
 			continue
