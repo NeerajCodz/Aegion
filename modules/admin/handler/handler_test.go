@@ -4810,6 +4810,8 @@ func TestIntegrationHandlers(t *testing.T) {
 					return fakeRow{vals: []any{int64(9)}}
 				case strings.Contains(sql, "FROM adm_scim_tokens"):
 					return fakeRow{vals: []any{int64(10)}}
+				case strings.Contains(sql, "FROM adm_ip_bans"):
+					return fakeRow{vals: []any{int64(2)}}
 				case strings.Contains(sql, "FROM adm_audit_logs"):
 					return fakeRow{vals: []any{int64(11)}}
 				default:
@@ -4824,6 +4826,7 @@ func TestIntegrationHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), `"operators":2`)
 		assert.Contains(t, rec.Body.String(), `"admin_operators":1`)
+		assert.Contains(t, rec.Body.String(), `"ip_bans":2`)
 		assert.Contains(t, rec.Body.String(), `"has_scim_token":true`)
 	})
 
@@ -4915,6 +4918,63 @@ func TestIntegrationHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), `"action":"proxy.route.updated"`)
 		assert.Contains(t, rec.Body.String(), `"total_items":1`)
+	})
+
+	t.Run("list ip bans success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		expiresAt := time.Now().UTC().Add(2 * time.Hour)
+		h.db = &fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{
+					{uuid.New(), "203.0.113.0/24", "credential stuffing", uuid.NewString(), time.Now().UTC(), time.Now().UTC(), expiresAt},
+				}}, nil
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/security/ip-bans", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListIPBans(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"cidr":"203.0.113.0/24"`)
+		assert.Contains(t, rec.Body.String(), `"active":true`)
+	})
+
+	t.Run("upsert ip ban success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{vals: []any{uuid.New(), operator.ID.String(), time.Now().UTC(), time.Now().UTC(), nil}}
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/security/ip-bans", strings.NewReader(`{
+			"cidr":"198.51.100.10",
+			"reason":"abuse"
+		}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		h.UpsertIPBan(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"cidr":"198.51.100.10/32"`)
+		assert.Contains(t, rec.Body.String(), `"reason":"abuse"`)
+	})
+
+	t.Run("delete ip ban success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("DELETE 1"), nil
+			},
+		}
+		banID := uuid.New()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/admin/security/ip-bans/"+banID.String(), nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyIPAddress, "127.0.0.1"))
+		req = withRouteParam(req, "id", banID.String())
+		h.DeleteIPBan(rec, req)
+		assert.Equal(t, http.StatusNoContent, rec.Code)
 	})
 
 	t.Run("social providers list success", func(t *testing.T) {

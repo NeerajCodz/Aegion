@@ -51,6 +51,11 @@ var permissionCatalog = []string{
 	PermFlowsUpdate,
 	PermFlowsDelete,
 	PermFlowsAll,
+	PermSecurityRead,
+	PermSecurityCreate,
+	PermSecurityUpdate,
+	PermSecurityDelete,
+	PermSecurityAll,
 }
 
 var validPermissionSet = func() map[string]struct{} {
@@ -123,6 +128,13 @@ const (
 	PermFlowsUpdate = "flows:update"
 	PermFlowsDelete = "flows:delete"
 	PermFlowsAll    = "flows:*"
+
+	// Security controls permissions
+	PermSecurityRead   = "security:read"
+	PermSecurityCreate = "security:create"
+	PermSecurityUpdate = "security:update"
+	PermSecurityDelete = "security:delete"
+	PermSecurityAll    = "security:*"
 )
 
 // DefaultRolePermissions defines the default permissions for each role.
@@ -136,6 +148,7 @@ var DefaultRolePermissions = map[string][]string{
 		PermAuditRead,
 		PermOperatorsRead,
 		PermRolesRead,
+		PermSecurityAll,
 	},
 	"operator": {
 		PermIdentitiesRead,
@@ -143,6 +156,7 @@ var DefaultRolePermissions = map[string][]string{
 		PermSessionsRead,
 		PermSessionsDelete,
 		PermAuditRead,
+		PermSecurityRead,
 	},
 	"viewer": {
 		PermIdentitiesRead,
