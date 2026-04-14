@@ -4779,6 +4779,144 @@ func TestIntegrationHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
 
+	t.Run("setup status success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "FROM adm_operators WHERE role IN"):
+					return fakeRow{vals: []any{int64(1)}}
+				case strings.Contains(sql, "FROM adm_operators"):
+					return fakeRow{vals: []any{int64(2)}}
+				case strings.Contains(sql, "FROM adm_roles"):
+					return fakeRow{vals: []any{int64(3)}}
+				case strings.Contains(sql, "FROM adm_api_keys"):
+					return fakeRow{vals: []any{int64(4)}}
+				case strings.Contains(sql, "FROM soc_providers WHERE enabled = true"):
+					return fakeRow{vals: []any{int64(1)}}
+				case strings.Contains(sql, "FROM soc_providers"):
+					return fakeRow{vals: []any{int64(5)}}
+				case strings.Contains(sql, "FROM soc_identity_links"):
+					return fakeRow{vals: []any{int64(6)}}
+				case strings.Contains(sql, "FROM sso_connections WHERE enabled = true"):
+					return fakeRow{vals: []any{int64(1)}}
+				case strings.Contains(sql, "FROM sso_connections"):
+					return fakeRow{vals: []any{int64(7)}}
+				case strings.Contains(sql, "FROM proxy_upstreams"):
+					return fakeRow{vals: []any{int64(8)}}
+				case strings.Contains(sql, "FROM proxy_routes WHERE enabled = true"):
+					return fakeRow{vals: []any{int64(2)}}
+				case strings.Contains(sql, "FROM proxy_routes"):
+					return fakeRow{vals: []any{int64(9)}}
+				case strings.Contains(sql, "FROM adm_scim_tokens"):
+					return fakeRow{vals: []any{int64(10)}}
+				case strings.Contains(sql, "FROM adm_audit_logs"):
+					return fakeRow{vals: []any{int64(11)}}
+				default:
+					return fakeRow{err: errors.New("unexpected query")}
+				}
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/setup/status", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.SetupStatus(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"operators":2`)
+		assert.Contains(t, rec.Body.String(), `"admin_operators":1`)
+		assert.Contains(t, rec.Body.String(), `"has_scim_token":true`)
+	})
+
+	t.Run("social preset list success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/integrations/social/presets", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListSocialPresets(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"count":`)
+		assert.Contains(t, rec.Body.String(), `"slug":"google"`)
+		assert.NotContains(t, rec.Body.String(), `"client_id":`)
+	})
+
+	t.Run("rbac summary success", func(t *testing.T) {
+		adminRole := &store.Role{
+			ID:          uuid.New(),
+			Name:        "admin",
+			Description: "Admin",
+			Permissions: []string{"config:update", "identities:*"},
+			IsSystem:    true,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		}
+		viewerRole := &store.Role{
+			ID:          uuid.New(),
+			Name:        "viewer",
+			Description: "Viewer",
+			Permissions: []string{"audit:read"},
+			IsSystem:    true,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		}
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listRolesFn: func(ctx context.Context, actorID uuid.UUID, limit, offset int) ([]*store.Role, int64, error) {
+				return []*store.Role{adminRole, viewerRole}, 2, nil
+			},
+			availablePermissionsFn: func() []string {
+				return []string{"config:update", "audit:read", "identities:*"}
+			},
+		})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				if strings.Contains(sql, "FROM adm_operators WHERE role = $1") {
+					roleName, _ := args[0].(string)
+					if roleName == "admin" {
+						return fakeRow{vals: []any{int64(2)}}
+					}
+					return fakeRow{vals: []any{int64(1)}}
+				}
+				return fakeRow{err: errors.New("unexpected query")}
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/rbac/summary", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.RBACSummary(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"available_permissions"`)
+		assert.Contains(t, rec.Body.String(), `"name":"admin"`)
+		assert.Contains(t, rec.Body.String(), `"operator_ids":2`)
+	})
+
+	t.Run("activity feed success", func(t *testing.T) {
+		entryOperatorID := uuid.New()
+		h := New(&fakeService{
+			store: &fakeStore{},
+			listAuditLogsFn: func(ctx context.Context, actorID uuid.UUID, filter store.AuditFilter, limit, offset int) ([]*store.AuditLogEntry, int64, error) {
+				return []*store.AuditLogEntry{
+					{
+						ID:           uuid.New(),
+						OperatorID:   &entryOperatorID,
+						Action:       "proxy.route.updated",
+						ResourceType: "proxy_route",
+						ResourceID:   "route-1",
+						Details:      map[string]interface{}{"enabled": true},
+						IPAddress:    "127.0.0.1",
+						CreatedAt:    time.Now().UTC(),
+					},
+				}, 1, nil
+			},
+		})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/logs/activity?per_page=100", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ActivityFeed(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"action":"proxy.route.updated"`)
+		assert.Contains(t, rec.Body.String(), `"total_items":1`)
+	})
+
 	t.Run("social providers list success", func(t *testing.T) {
 		h := New(&fakeService{store: &fakeStore{}})
 		h.db = &fakeDB{

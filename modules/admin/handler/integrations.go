@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/modules/admin/service"
+	adminstore "github.com/aegion/aegion/modules/admin/store"
+	"github.com/aegion/aegion/modules/social/providers/catalog"
 	socialservice "github.com/aegion/aegion/modules/social/service"
 	socialstore "github.com/aegion/aegion/modules/social/store"
 	"github.com/go-chi/chi/v5"
@@ -22,6 +26,68 @@ type IntegrationOverviewResponse struct {
 	SCIMTokens      int64 `json:"scim_tokens"`
 }
 
+type SetupStatusResponse struct {
+	Operators         int64 `json:"operators"`
+	Roles             int64 `json:"roles"`
+	APIKeys           int64 `json:"api_keys"`
+	SocialProviders   int64 `json:"social_providers"`
+	SocialEnabled     int64 `json:"social_enabled"`
+	SocialLinks       int64 `json:"social_links"`
+	SSOConnections    int64 `json:"sso_connections"`
+	SSOEnabled        int64 `json:"sso_enabled"`
+	ProxyUpstreams    int64 `json:"proxy_upstreams"`
+	ProxyRoutes       int64 `json:"proxy_routes"`
+	ProxyEnabled      int64 `json:"proxy_enabled"`
+	SCIMTokens        int64 `json:"scim_tokens"`
+	AuditEvents24h    int64 `json:"audit_events_24h"`
+	AdminOperators    int64 `json:"admin_operators"`
+	HasAdminOperator  bool  `json:"has_admin_operator"`
+	HasSocialProvider bool  `json:"has_social_provider"`
+	HasSSOConnection  bool  `json:"has_sso_connection"`
+	HasProxyRoute     bool  `json:"has_proxy_route"`
+	HasSCIMToken      bool  `json:"has_scim_token"`
+}
+
+type SocialPresetView struct {
+	Slug               string                   `json:"slug"`
+	DisplayName        string                   `json:"display_name"`
+	Preset             string                   `json:"preset"`
+	Protocol           socialstore.Protocol     `json:"protocol"`
+	Issuer             string                   `json:"issuer,omitempty"`
+	DiscoveryURL       string                   `json:"discovery_url,omitempty"`
+	AuthorizeEndpoint  string                   `json:"authorize_endpoint,omitempty"`
+	TokenEndpoint      string                   `json:"token_endpoint,omitempty"`
+	UserInfoEndpoint   string                   `json:"userinfo_endpoint,omitempty"`
+	JWKSURI            string                   `json:"jwks_uri,omitempty"`
+	Scopes             []string                 `json:"scopes,omitempty"`
+	ClaimMapping       socialstore.ClaimMapping `json:"claim_mapping"`
+	ExtraAuthParams    map[string]string        `json:"extra_auth_params,omitempty"`
+	PKCEMethod         socialstore.PKCEMethod   `json:"pkce_method"`
+	AuthStyle          socialstore.AuthStyle    `json:"auth_style"`
+	ClaimSource        socialstore.ClaimSource  `json:"claim_source"`
+	TrustEmailVerified bool                     `json:"trust_email_verified"`
+}
+
+type RoleSummary struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+	IsSystem    bool     `json:"is_system"`
+	OperatorIDs int64    `json:"operator_ids"`
+}
+
+type ActivityItem struct {
+	ID           string                 `json:"id"`
+	OperatorID   *string                `json:"operator_id,omitempty"`
+	Action       string                 `json:"action"`
+	ResourceType string                 `json:"resource_type"`
+	ResourceID   string                 `json:"resource_id"`
+	Details      map[string]interface{} `json:"details,omitempty"`
+	IPAddress    string                 `json:"ip_address"`
+	CreatedAt    time.Time              `json:"created_at"`
+}
+
 func (h *Handler) IntegrationOverview(w http.ResponseWriter, r *http.Request) {
 	if OperatorFromContext(r.Context()) == nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -29,32 +95,200 @@ func (h *Handler) IntegrationOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var resp IntegrationOverviewResponse
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM soc_providers`).Scan(&resp.SocialProviders); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM soc_providers`, &resp.SocialProviders); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load social provider count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM soc_identity_links`).Scan(&resp.SocialLinks); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM soc_identity_links`, &resp.SocialLinks); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load social link count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM sso_connections`).Scan(&resp.SSOConnections); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM sso_connections`, &resp.SSOConnections); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load SSO connection count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM proxy_upstreams`).Scan(&resp.ProxyUpstreams); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM proxy_upstreams`, &resp.ProxyUpstreams); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load proxy upstream count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM proxy_routes`).Scan(&resp.ProxyRoutes); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM proxy_routes`, &resp.ProxyRoutes); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load proxy route count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM adm_scim_tokens`).Scan(&resp.SCIMTokens); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM adm_scim_tokens`, &resp.SCIMTokens); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load SCIM token count")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	var resp SetupStatusResponse
+	queries := []struct {
+		sql    string
+		target *int64
+	}{
+		{`SELECT COUNT(*) FROM adm_operators`, &resp.Operators},
+		{`SELECT COUNT(*) FROM adm_roles`, &resp.Roles},
+		{`SELECT COUNT(*) FROM adm_api_keys`, &resp.APIKeys},
+		{`SELECT COUNT(*) FROM soc_providers`, &resp.SocialProviders},
+		{`SELECT COUNT(*) FROM soc_providers WHERE enabled = true`, &resp.SocialEnabled},
+		{`SELECT COUNT(*) FROM soc_identity_links`, &resp.SocialLinks},
+		{`SELECT COUNT(*) FROM sso_connections`, &resp.SSOConnections},
+		{`SELECT COUNT(*) FROM sso_connections WHERE enabled = true`, &resp.SSOEnabled},
+		{`SELECT COUNT(*) FROM proxy_upstreams`, &resp.ProxyUpstreams},
+		{`SELECT COUNT(*) FROM proxy_routes`, &resp.ProxyRoutes},
+		{`SELECT COUNT(*) FROM proxy_routes WHERE enabled = true`, &resp.ProxyEnabled},
+		{`SELECT COUNT(*) FROM adm_scim_tokens`, &resp.SCIMTokens},
+		{`SELECT COUNT(*) FROM adm_audit_logs WHERE created_at >= NOW() - INTERVAL '24 hours'`, &resp.AuditEvents24h},
+	}
+	for _, query := range queries {
+		if err := h.countValue(r, query.sql, query.target); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load setup status")
+			return
+		}
+	}
+	if err := h.countValue(r, `SELECT COUNT(*) FROM adm_operators WHERE role IN ('super_admin', 'admin')`, &resp.AdminOperators); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load admin operator status")
+		return
+	}
+
+	resp.HasAdminOperator = resp.AdminOperators > 0
+	resp.HasSocialProvider = resp.SocialProviders > 0
+	resp.HasSSOConnection = resp.SSOConnections > 0
+	resp.HasProxyRoute = resp.ProxyRoutes > 0
+	resp.HasSCIMToken = resp.SCIMTokens > 0
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ListSocialPresets(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	presets := catalog.All()
+	items := make([]SocialPresetView, 0, len(presets))
+	for _, provider := range presets {
+		items = append(items, SocialPresetView{
+			Slug:               provider.Slug,
+			DisplayName:        provider.DisplayName,
+			Preset:             provider.Preset,
+			Protocol:           provider.Protocol,
+			Issuer:             provider.Issuer,
+			DiscoveryURL:       provider.DiscoveryURL,
+			AuthorizeEndpoint:  provider.AuthorizeEndpoint,
+			TokenEndpoint:      provider.TokenEndpoint,
+			UserInfoEndpoint:   provider.UserInfoEndpoint,
+			JWKSURI:            provider.JWKSURI,
+			Scopes:             append([]string(nil), provider.Scopes...),
+			ClaimMapping:       provider.ClaimMapping,
+			ExtraAuthParams:    provider.ExtraAuthParams,
+			PKCEMethod:         provider.PKCEMethod,
+			AuthStyle:          provider.AuthStyle,
+			ClaimSource:        provider.ClaimSource,
+			TrustEmailVerified: provider.TrustEmailVerified,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"presets": items,
+		"count":   len(items),
+	})
+}
+
+func (h *Handler) RBACSummary(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	roles, _, err := h.service.ListRoles(r.Context(), operator.ID, h.config.MaxPageSize, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load RBAC summary")
+		return
+	}
+
+	available := h.service.AvailablePermissions()
+	sort.Strings(available)
+	roleItems := make([]RoleSummary, 0, len(roles))
+	for _, role := range roles {
+		var count int64
+		if err := h.countValue(r, `SELECT COUNT(*) FROM adm_operators WHERE role = $1`, &count, role.Name); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load RBAC summary")
+			return
+		}
+		perms := append([]string(nil), role.Permissions...)
+		sort.Strings(perms)
+		roleItems = append(roleItems, RoleSummary{
+			ID:          role.ID.String(),
+			Name:        role.Name,
+			Description: role.Description,
+			Permissions: perms,
+			IsSystem:    role.IsSystem,
+			OperatorIDs: count,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"available_permissions": available,
+		"default_roles":         service.DefaultRolePermissions,
+		"roles":                 roleItems,
+		"count":                 len(roleItems),
+	})
+}
+
+func (h *Handler) ActivityFeed(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	page, perPage, offset := h.parsePagination(r)
+	if perPage > 50 {
+		perPage = 50
+	}
+
+	entries, total, err := h.service.ListAuditLogs(r.Context(), operator.ID, adminstore.AuditFilter{}, perPage, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load activity feed")
+		return
+	}
+
+	items := make([]ActivityItem, 0, len(entries))
+	for _, entry := range entries {
+		var operatorID *string
+		if entry.OperatorID != nil {
+			id := entry.OperatorID.String()
+			operatorID = &id
+		}
+		items = append(items, ActivityItem{
+			ID:           entry.ID.String(),
+			OperatorID:   operatorID,
+			Action:       entry.Action,
+			ResourceType: entry.ResourceType,
+			ResourceID:   entry.ResourceID,
+			Details:      entry.Details,
+			IPAddress:    entry.IPAddress,
+			CreatedAt:    entry.CreatedAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items":       items,
+		"count":       len(items),
+		"pagination":  buildPaginationMeta(page, perPage, total),
+		"total_items": total,
+	})
 }
 
 func (h *Handler) ListSocialProviders(w http.ResponseWriter, r *http.Request) {
@@ -597,4 +831,8 @@ func (h *Handler) listGenericRows(w http.ResponseWriter, r *http.Request, query 
 		envelope: items,
 		"count":  len(items),
 	})
+}
+
+func (h *Handler) countValue(r *http.Request, sql string, target *int64, args ...interface{}) error {
+	return h.dbConn().QueryRow(r.Context(), sql, args...).Scan(target)
 }

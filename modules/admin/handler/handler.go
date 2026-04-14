@@ -230,7 +230,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 		// Dashboard and system settings
 		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/stats", h.DashboardStats)
+		r.With(RequirePermission(h, service.PermAuditRead)).Get("/logs/activity", h.ActivityFeed)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/setup/status", h.SetupStatus)
+		r.With(RequirePermission(h, service.PermRolesRead)).Get("/rbac/summary", h.RBACSummary)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/overview", h.IntegrationOverview)
+		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/social/presets", h.ListSocialPresets)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/social/providers", h.ListSocialProviders)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Post("/integrations/social/providers", h.UpsertSocialProvider)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/social/providers/{slug}", h.GetSocialProvider)
