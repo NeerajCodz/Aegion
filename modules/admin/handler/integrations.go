@@ -2,10 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	socialservice "github.com/aegion/aegion/modules/social/service"
+	socialstore "github.com/aegion/aegion/modules/social/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -60,6 +63,138 @@ func (h *Handler) ListSocialProviders(w http.ResponseWriter, r *http.Request) {
 		FROM soc_providers
 		ORDER BY display_name ASC, slug ASC
 	`, []string{"slug", "display_name", "preset", "protocol", "enabled", "redirect_uri", "created_at", "updated_at"}, "providers")
+}
+
+type SocialProviderRequest struct {
+	Slug               string                   `json:"slug"`
+	DisplayName        string                   `json:"display_name"`
+	Preset             string                   `json:"preset"`
+	Protocol           socialstore.Protocol     `json:"protocol"`
+	Issuer             string                   `json:"issuer"`
+	DiscoveryURL       string                   `json:"discovery_url"`
+	AuthorizeEndpoint  string                   `json:"authorize_endpoint"`
+	TokenEndpoint      string                   `json:"token_endpoint"`
+	UserInfoEndpoint   string                   `json:"userinfo_endpoint"`
+	JWKSURI            string                   `json:"jwks_uri"`
+	Scopes             []string                 `json:"scopes"`
+	ClaimMapping       socialstore.ClaimMapping `json:"claim_mapping"`
+	ExtraAuthParams    map[string]string        `json:"extra_auth_params"`
+	PKCEMethod         socialstore.PKCEMethod   `json:"pkce_method"`
+	AuthStyle          socialstore.AuthStyle    `json:"auth_style"`
+	ClaimSource        socialstore.ClaimSource  `json:"claim_source"`
+	Enabled            bool                     `json:"enabled"`
+	TrustEmailVerified bool                     `json:"trust_email_verified"`
+	RedirectURI        string                   `json:"redirect_uri"`
+	ClientID           string                   `json:"client_id"`
+	ClientSecret       string                   `json:"client_secret,omitempty"`
+}
+
+func (h *Handler) GetSocialProvider(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h.socialProviders == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Social provider management is not configured")
+		return
+	}
+	slug := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "slug")))
+	if slug == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "slug is required")
+		return
+	}
+	provider, err := h.socialProviders.GetProvider(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, socialstore.ErrProviderNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Social provider not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load social provider")
+		return
+	}
+	writeJSON(w, http.StatusOK, provider)
+}
+
+func (h *Handler) UpsertSocialProvider(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h.socialProviders == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Social provider management is not configured")
+		return
+	}
+	var req SocialProviderRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+	req.Slug = strings.ToLower(strings.TrimSpace(req.Slug))
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	req.Preset = strings.ToLower(strings.TrimSpace(req.Preset))
+	req.Issuer = strings.TrimSpace(req.Issuer)
+	req.DiscoveryURL = strings.TrimSpace(req.DiscoveryURL)
+	req.AuthorizeEndpoint = strings.TrimSpace(req.AuthorizeEndpoint)
+	req.TokenEndpoint = strings.TrimSpace(req.TokenEndpoint)
+	req.UserInfoEndpoint = strings.TrimSpace(req.UserInfoEndpoint)
+	req.JWKSURI = strings.TrimSpace(req.JWKSURI)
+	req.RedirectURI = strings.TrimSpace(req.RedirectURI)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	req.ClientSecret = strings.TrimSpace(req.ClientSecret)
+
+	provider, err := h.socialProviders.UpsertProvider(r.Context(), socialservice.ProviderUpsertRequest{
+		Slug:               req.Slug,
+		DisplayName:        req.DisplayName,
+		Preset:             req.Preset,
+		Protocol:           req.Protocol,
+		Issuer:             req.Issuer,
+		DiscoveryURL:       req.DiscoveryURL,
+		AuthorizeEndpoint:  req.AuthorizeEndpoint,
+		TokenEndpoint:      req.TokenEndpoint,
+		UserInfoEndpoint:   req.UserInfoEndpoint,
+		JWKSURI:            req.JWKSURI,
+		Scopes:             req.Scopes,
+		ClaimMapping:       req.ClaimMapping,
+		ExtraAuthParams:    req.ExtraAuthParams,
+		PKCEMethod:         req.PKCEMethod,
+		AuthStyle:          req.AuthStyle,
+		ClaimSource:        req.ClaimSource,
+		Enabled:            req.Enabled,
+		TrustEmailVerified: req.TrustEmailVerified,
+		RedirectURI:        req.RedirectURI,
+		ClientID:           req.ClientID,
+		ClientSecret:       req.ClientSecret,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Failed to save social provider")
+		return
+	}
+	writeJSON(w, http.StatusOK, provider)
+}
+
+func (h *Handler) DeleteSocialProvider(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h.socialProviders == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Social provider management is not configured")
+		return
+	}
+	slug := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "slug")))
+	if slug == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "slug is required")
+		return
+	}
+	if err := h.socialProviders.DeleteProvider(r.Context(), slug); err != nil {
+		if errors.Is(err, socialstore.ErrProviderNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Social provider not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete social provider")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) ListSSOConnections(w http.ResponseWriter, r *http.Request) {

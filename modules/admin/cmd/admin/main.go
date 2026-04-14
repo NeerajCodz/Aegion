@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -31,6 +32,8 @@ import (
 	"github.com/aegion/aegion/modules/admin/scim"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
+	socialservice "github.com/aegion/aegion/modules/social/service"
+	socialstore "github.com/aegion/aegion/modules/social/store"
 )
 
 type LogConfig struct {
@@ -84,6 +87,9 @@ type Config struct {
 		ServiceURL string `yaml:"service_url"`
 		APIKey     string `yaml:"api_key"`
 	} `yaml:"core"`
+	Secrets struct {
+		Cipher []string `yaml:"cipher"`
+	} `yaml:"secrets"`
 	Observability struct {
 		Enabled      bool          `yaml:"enabled"`
 		ProbeTimeout time.Duration `yaml:"probe_timeout"`
@@ -271,6 +277,15 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 	adminService := service.New(adminStore, service.Config{
 		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
+	var socialProviders handler.SocialProviderManager
+	if len(cfg.Secrets.Cipher) > 0 && strings.TrimSpace(cfg.Secrets.Cipher[0]) != "" {
+		sum := sha256.Sum256([]byte(strings.TrimSpace(cfg.Secrets.Cipher[0])))
+		socialRepo, err := socialstore.NewPostgres(db, sum[:])
+		if err != nil {
+			return nil, fmt.Errorf("initialize social provider manager: %w", err)
+		}
+		socialProviders = socialservice.New(socialRepo)
+	}
 	adminHandler := handler.New(adminService, handler.HandlerConfig{
 		SessionTokenExpiry: cfg.Admin.SessionLifespan,
 		DefaultPageSize:    cfg.Admin.DefaultPageSize,
@@ -278,6 +293,7 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		APIKeyPrefix:       cfg.Admin.APIKeyPrefix,
 		APIKeyPrefixLen:    cfg.Admin.APIKeyPrefixLen,
 		APIKeyEntropyBytes: cfg.Admin.APIKeyEntropy,
+		SocialProviders:    socialProviders,
 	})
 	var scimService *scim.Service
 	var scimHandler *scim.Handler
@@ -533,6 +549,7 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	cfg.Admin.SCIM.DefaultPageSize = superCfg.Admin.SCIM.DefaultPageSize
 	cfg.Admin.SCIM.MaxPageSize = superCfg.Admin.SCIM.MaxPageSize
 	cfg.Admin.SCIM.TokenLastUsedUpdateTimeout = superCfg.Admin.SCIM.TokenLastUsedUpdateTimeout.Duration()
+	cfg.Secrets.Cipher = append([]string(nil), superCfg.Secrets.Cipher...)
 
 	cfg.Log.Level = superCfg.Log.Level
 	cfg.Log.Format = superCfg.Log.Format
