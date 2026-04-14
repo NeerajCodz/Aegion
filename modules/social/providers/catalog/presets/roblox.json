@@ -1,0 +1,20 @@
+{
+  "slug": "roblox",
+  "display_name": "Roblox",
+  "preset": "roblox",
+  "protocol": "oidc",
+  "discovery_url": "https://apis.roblox.com/oauth/.well-known/openid-configuration",
+  "scopes": ["openid", "profile", "email"],
+  "claim_mapping": {
+    "subject": "sub",
+    "email": "email",
+    "email_verified": "email_verified|verified",
+    "name": "name|preferred_username",
+    "picture": "picture"
+  },
+  "pkce_method": "S256",
+  "auth_style": "client_secret_post",
+  "claim_source": "userinfo",
+  "enabled": false,
+  "trust_email_verified": true
+}

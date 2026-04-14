@@ -1,0 +1,20 @@
+{
+  "slug": "gitlab",
+  "display_name": "GitLab",
+  "preset": "gitlab",
+  "protocol": "oidc",
+  "discovery_url": "https://gitlab.com/.well-known/openid-configuration",
+  "scopes": ["openid", "profile", "email"],
+  "claim_mapping": {
+    "subject": "sub",
+    "email": "email",
+    "email_verified": "email_verified",
+    "name": "name|nickname",
+    "picture": "picture"
+  },
+  "pkce_method": "S256",
+  "auth_style": "client_secret_post",
+  "claim_source": "userinfo",
+  "enabled": false,
+  "trust_email_verified": true
+}
