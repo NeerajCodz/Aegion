@@ -4687,3 +4687,90 @@ func TestOperatorHandler_AdditionalCoveragePaths(t *testing.T) {
 		assert.Equal(t, 20, gotLimit)
 	})
 }
+
+func TestIntegrationHandlers(t *testing.T) {
+	operator := &store.Operator{
+		ID:         uuid.New(),
+		IdentityID: uuid.New(),
+		Role:       "admin",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	t.Run("overview success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "soc_providers"):
+					return fakeRow{vals: []any{int64(2)}}
+				case strings.Contains(sql, "soc_identity_links"):
+					return fakeRow{vals: []any{int64(3)}}
+				case strings.Contains(sql, "sso_connections"):
+					return fakeRow{vals: []any{int64(4)}}
+				case strings.Contains(sql, "proxy_upstreams"):
+					return fakeRow{vals: []any{int64(5)}}
+				case strings.Contains(sql, "proxy_routes"):
+					return fakeRow{vals: []any{int64(6)}}
+				case strings.Contains(sql, "adm_scim_tokens"):
+					return fakeRow{vals: []any{int64(7)}}
+				default:
+					return fakeRow{err: errors.New("unexpected query")}
+				}
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/integrations/overview", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.IntegrationOverview(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"social_providers":2`)
+		assert.Contains(t, rec.Body.String(), `"proxy_routes":6`)
+	})
+
+	t.Run("overview internal error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				return fakeRow{err: errors.New("db down")}
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/integrations/overview", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.IntegrationOverview(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+
+	t.Run("social providers list success", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return &fakeRows{data: [][]any{
+					{"google", "Google", "google", "oidc", true, "https://example.com/callback", time.Now().UTC(), time.Now().UTC()},
+				}}, nil
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/integrations/social/providers", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListSocialProviders(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"count":1`)
+		assert.Contains(t, rec.Body.String(), `"slug":"google"`)
+	})
+
+	t.Run("proxy routes list query error", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = &fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				return nil, errors.New("query failed")
+			},
+		}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/admin/integrations/proxy/routes", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.ListProxyRoutes(rec, req)
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	})
+}
