@@ -649,6 +649,16 @@ func (s *Service) CreateSCIMToken(ctx context.Context, name, description string,
 	return scimToken, token, nil
 }
 
+// ListSCIMTokens returns all configured SCIM tokens.
+func (s *Service) ListSCIMTokens(ctx context.Context) ([]*SCIMToken, error) {
+	return s.store.ListSCIMTokens(ctx)
+}
+
+// DeleteSCIMToken removes an existing SCIM token.
+func (s *Service) DeleteSCIMToken(ctx context.Context, id uuid.UUID) error {
+	return s.store.DeleteSCIMToken(ctx, id)
+}
+
 // ValidateToken validates a SCIM API token and returns the token info.
 func (s *Service) ValidateToken(ctx context.Context, token string) (*SCIMToken, error) {
 	prefix, err := s.tokenLookupPrefix(token)
