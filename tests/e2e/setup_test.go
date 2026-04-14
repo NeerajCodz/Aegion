@@ -21,14 +21,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+const e2eDatabaseURLEnv = "AEGION_E2E_DATABASE_URL"
 
 // TestSuite holds the shared test infrastructure
 type TestSuite struct {
-	Container  *postgres.PostgresContainer
 	Pool       *pgxpool.Pool
 	Server     *httptest.Server
 	Router     chi.Router
@@ -48,27 +46,9 @@ func SetupTestSuite(t *testing.T) *TestSuite {
 
 	suiteOnce.Do(func() {
 		ctx := context.Background()
-
-		// Start PostgreSQL container
-		container, err := postgres.Run(ctx,
-			"postgres:16-alpine",
-			postgres.WithDatabase("aegion_test"),
-			postgres.WithUsername("aegion"),
-			postgres.WithPassword("aegion_test_password"),
-			testcontainers.WithWaitStrategy(
-				wait.ForLog("database system is ready to accept connections").
-					WithOccurrence(2).
-					WithStartupTimeout(30*time.Second),
-			),
-		)
-		if err != nil {
-			t.Fatalf("Failed to start PostgreSQL container: %v", err)
-		}
-
-		// Get connection string
-		connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-		if err != nil {
-			t.Fatalf("Failed to get connection string: %v", err)
+		connStr := strings.TrimSpace(os.Getenv(e2eDatabaseURLEnv))
+		if connStr == "" {
+			t.Skipf("%s is not set", e2eDatabaseURLEnv)
 		}
 
 		// Create connection pool
@@ -83,8 +63,7 @@ func SetupTestSuite(t *testing.T) *TestSuite {
 		}
 
 		suite = &TestSuite{
-			Container: container,
-			Pool:      pool,
+			Pool: pool,
 			HTTPClient: &http.Client{
 				Timeout: 30 * time.Second,
 				CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -113,12 +92,6 @@ func TeardownTestSuite(t *testing.T) {
 
 	if suite.Pool != nil {
 		suite.Pool.Close()
-	}
-
-	if suite.Container != nil {
-		if err := suite.Container.Terminate(ctx); err != nil {
-			t.Errorf("Failed to terminate container: %v", err)
-		}
 	}
 }
 

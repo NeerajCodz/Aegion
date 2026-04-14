@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -15,6 +17,8 @@ import (
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/sso/store"
+	"github.com/beevik/etree"
+	dsig "github.com/russellhaering/goxmldsig"
 )
 
 var (
@@ -518,6 +522,9 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 			return nil, ErrInvalidSAMLResponse
 		}
 	}
+	if err := verifySAMLSignature(decoded, connection, now); err != nil {
+		return nil, ErrInvalidSAMLResponse
+	}
 	var envelope samlResponseEnvelope
 	if err := xml.Unmarshal(decoded, &envelope); err != nil {
 		return nil, ErrInvalidSAMLResponse
@@ -564,6 +571,112 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 		return nil, ErrInvalidSAMLResponse
 	}
 	return result, nil
+}
+
+func verifySAMLSignature(decoded []byte, connection *store.Connection, now time.Time) error {
+	if connection == nil || strings.TrimSpace(connection.CertificatePEM) == "" {
+		return nil
+	}
+	certs, err := parseCertificates(connection.CertificatePEM)
+	if err != nil {
+		return err
+	}
+	if err := verifyCertificateChain(certs, now); err != nil {
+		return err
+	}
+	doc := etree.NewDocument()
+	if err := doc.ReadFromBytes(decoded); err != nil {
+		return err
+	}
+	store := &dsig.MemoryX509CertificateStore{Roots: certs}
+	ctx := dsig.NewDefaultValidationContext(store)
+	ctx.Clock = dsig.NewFakeClockAt(now)
+	if _, err := ctx.Validate(doc.Root()); err == nil {
+		return nil
+	}
+	assertion := findElementByLocalName(doc.Root(), "Assertion")
+	if assertion == nil {
+		return ErrInvalidSAMLResponse
+	}
+	_, err = ctx.Validate(assertion)
+	return err
+}
+
+func parseCertificates(pemBundle string) ([]*x509.Certificate, error) {
+	var certs []*x509.Certificate
+	data := []byte(pemBundle)
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		certs = append(certs, cert)
+	}
+	if len(certs) == 0 {
+		return nil, ErrInvalidSAMLResponse
+	}
+	return certs, nil
+}
+
+func verifyCertificateChain(certs []*x509.Certificate, now time.Time) error {
+	if len(certs) == 0 {
+		return ErrInvalidSAMLResponse
+	}
+	for _, cert := range certs {
+		if now.Before(cert.NotBefore.Add(-2*time.Minute)) || !now.Before(cert.NotAfter.Add(2*time.Minute)) {
+			return ErrInvalidSAMLResponse
+		}
+	}
+	if len(certs) == 1 {
+		// SAML operators often pin the IdP signing certificate directly rather
+		// than supplying a browser-style CA trust chain.
+		return nil
+	}
+	leaf := certs[0]
+	roots, _ := x509.SystemCertPool()
+	if roots == nil {
+		roots = x509.NewCertPool()
+	}
+	intermediates := x509.NewCertPool()
+	for i, cert := range certs[1:] {
+		if cert.IsCA || i == len(certs[1:])-1 {
+			roots.AddCert(cert)
+		} else {
+			intermediates.AddCert(cert)
+		}
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		CurrentTime:   now,
+		Roots:         roots,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func findElementByLocalName(root *etree.Element, localName string) *etree.Element {
+	if root == nil {
+		return nil
+	}
+	if strings.EqualFold(root.Tag, localName) {
+		return root
+	}
+	for _, child := range root.ChildElements() {
+		if found := findElementByLocalName(child, localName); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 func newSAMLRequestID() string {
