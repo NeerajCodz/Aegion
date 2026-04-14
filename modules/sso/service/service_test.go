@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aegion/aegion/modules/sso/store"
 )
@@ -120,7 +121,7 @@ func TestCompleteAuthFromSAMLResponse(t *testing.T) {
 	_, err := svc.UpsertConnection(ctx, ConnectionUpsertRequest{
 		Slug:        "acme",
 		DisplayName: "Acme",
-		EntityID:    "urn:acme:test",
+		EntityID:    "urn:test:idp",
 		SSOURL:      "https://idp.example.com/sso",
 		AttributeMapping: store.AttributeMapping{
 			Subject:     "subject",
@@ -136,7 +137,12 @@ func TestCompleteAuthFromSAMLResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start auth: %v", err)
 	}
-	xmlResponse := `<Response><Issuer>urn:test:idp</Issuer><Assertion><Subject><NameID>sub-xml</NameID></Subject><AttributeStatement><Attribute Name="email"><AttributeValue>xml@example.com</AttributeValue></Attribute><Attribute Name="display_name"><AttributeValue>XML User</AttributeValue></Attribute></AttributeStatement></Assertion></Response>`
+	state, err := svc.verifyRelayState(start.RelayState)
+	if err != nil {
+		t.Fatalf("verify relay state: %v", err)
+	}
+	expires := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339)
+	xmlResponse := `<Response InResponseTo="` + state.RequestID + `"><Issuer>urn:test:idp</Issuer><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Issuer>urn:test:idp</Issuer><Subject><NameID>sub-xml</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="` + state.RequestID + `" NotOnOrAfter="` + expires + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + expires + `"/><AttributeStatement><Attribute Name="email"><AttributeValue>xml@example.com</AttributeValue></Attribute><Attribute Name="display_name"><AttributeValue>XML User</AttributeValue></Attribute></AttributeStatement></Assertion></Response>`
 	result, err := svc.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", map[string]interface{}{
 		"_saml_response": base64.StdEncoding.EncodeToString([]byte(xmlResponse)),
 	})
@@ -145,5 +151,69 @@ func TestCompleteAuthFromSAMLResponse(t *testing.T) {
 	}
 	if result.Subject != "sub-xml" || result.Email != "xml@example.com" || result.DisplayName != "XML User" {
 		t.Fatalf("unexpected callback result: %+v", result)
+	}
+}
+
+func TestCompleteAuthRejectsMismatchedIssuer(t *testing.T) {
+	repo := store.New()
+	svc := New(repo, []byte("01234567890123456789012345678901"))
+	ctx := context.Background()
+	_, err := svc.UpsertConnection(ctx, ConnectionUpsertRequest{
+		Slug:        "acme",
+		DisplayName: "Acme",
+		EntityID:    "urn:test:idp",
+		SSOURL:      "https://idp.example.com/sso",
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("upsert connection: %v", err)
+	}
+	start, err := svc.StartAuth(ctx, "acme", "/after")
+	if err != nil {
+		t.Fatalf("start auth: %v", err)
+	}
+	state, err := svc.verifyRelayState(start.RelayState)
+	if err != nil {
+		t.Fatalf("verify relay state: %v", err)
+	}
+	expires := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339)
+	xmlResponse := `<Response InResponseTo="` + state.RequestID + `"><Issuer>urn:wrong:idp</Issuer><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Issuer>urn:wrong:idp</Issuer><Subject><NameID>sub-xml</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="` + state.RequestID + `" NotOnOrAfter="` + expires + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + expires + `"/></Assertion></Response>`
+	_, err = svc.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", map[string]interface{}{
+		"_saml_response": base64.StdEncoding.EncodeToString([]byte(xmlResponse)),
+	})
+	if err == nil {
+		t.Fatal("expected mismatched issuer to fail")
+	}
+}
+
+func TestCompleteAuthRejectsExpiredAssertion(t *testing.T) {
+	repo := store.New()
+	svc := New(repo, []byte("01234567890123456789012345678901"))
+	ctx := context.Background()
+	_, err := svc.UpsertConnection(ctx, ConnectionUpsertRequest{
+		Slug:        "acme",
+		DisplayName: "Acme",
+		EntityID:    "urn:test:idp",
+		SSOURL:      "https://idp.example.com/sso",
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("upsert connection: %v", err)
+	}
+	start, err := svc.StartAuth(ctx, "acme", "/after")
+	if err != nil {
+		t.Fatalf("start auth: %v", err)
+	}
+	state, err := svc.verifyRelayState(start.RelayState)
+	if err != nil {
+		t.Fatalf("verify relay state: %v", err)
+	}
+	expired := time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339)
+	xmlResponse := `<Response InResponseTo="` + state.RequestID + `"><Issuer>urn:test:idp</Issuer><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Issuer>urn:test:idp</Issuer><Subject><NameID>sub-xml</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="` + state.RequestID + `" NotOnOrAfter="` + expired + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + expired + `"/></Assertion></Response>`
+	_, err = svc.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", map[string]interface{}{
+		"_saml_response": base64.StdEncoding.EncodeToString([]byte(xmlResponse)),
+	})
+	if err == nil {
+		t.Fatal("expected expired assertion to fail")
 	}
 }

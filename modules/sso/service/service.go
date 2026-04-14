@@ -60,6 +60,7 @@ type ConnectionUpsertRequest struct {
 type callbackState struct {
 	Connection string `json:"connection"`
 	RedirectTo string `json:"redirect_to"`
+	RequestID  string `json:"request_id"`
 	IssuedAt   int64  `json:"issued_at"`
 }
 
@@ -120,15 +121,17 @@ func (s *Service) StartAuth(ctx context.Context, slug, redirectTo string) (*Star
 	if !connection.Enabled {
 		return nil, ErrConnectionDisabled
 	}
-	relayState, err := s.signRelayState(callbackState{
+	state := callbackState{
 		Connection: connection.Slug,
 		RedirectTo: normalizeRedirect(firstNonEmpty(redirectTo, connection.DefaultRedirectTo)),
+		RequestID:  newSAMLRequestID(),
 		IssuedAt:   s.now().Unix(),
-	})
+	}
+	relayState, err := s.signRelayState(state)
 	if err != nil {
 		return nil, err
 	}
-	redirectURL, err := buildRedirectURL(*connection, relayState)
+	redirectURL, err := buildRedirectURL(*connection, relayState, state.RequestID)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +162,7 @@ func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, e
 		resolvedAttributes[key] = value
 	}
 	if rawSAML := stringValue(resolvedAttributes["_saml_response"]); rawSAML != "" {
-		parsed, err := parseSAMLResponse(rawSAML, connection)
+		parsed, err := parseSAMLResponse(rawSAML, connection, state.RequestID, s.now())
 		if err != nil {
 			return nil, err
 		}
@@ -311,13 +314,17 @@ func (s *Service) fetchMetadata(ctx context.Context, metadataURL string) (*fetch
 	return result, nil
 }
 
-func buildRedirectURL(connection store.Connection, relayState string) (string, error) {
+func buildRedirectURL(connection store.Connection, relayState, requestID string) (string, error) {
 	parsed, err := url.Parse(connection.SSOURL)
 	if err != nil {
 		return "", err
 	}
 	query := parsed.Query()
-	query.Set("SAMLRequest", base64.RawURLEncoding.EncodeToString([]byte(connection.EntityID)))
+	authnRequest, err := buildAuthnRequest(connection, requestID)
+	if err != nil {
+		return "", err
+	}
+	query.Set("SAMLRequest", base64.StdEncoding.EncodeToString([]byte(authnRequest)))
 	query.Set("RelayState", relayState)
 	for key, value := range connection.ExtraAuthnContext {
 		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
@@ -327,6 +334,39 @@ func buildRedirectURL(connection store.Connection, relayState string) (string, e
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
+}
+
+type authnRequestEnvelope struct {
+	XMLName      xml.Name `xml:"samlp:AuthnRequest"`
+	XmlnsSamlp   string   `xml:"xmlns:samlp,attr"`
+	XmlnsSaml    string   `xml:"xmlns:saml,attr"`
+	ID           string   `xml:"ID,attr"`
+	Version      string   `xml:"Version,attr"`
+	IssueInstant string   `xml:"IssueInstant,attr"`
+	Destination  string   `xml:"Destination,attr,omitempty"`
+	Issuer       struct {
+		Value string `xml:",chardata"`
+	} `xml:"saml:Issuer"`
+}
+
+func buildAuthnRequest(connection store.Connection, requestID string) (string, error) {
+	if strings.TrimSpace(requestID) == "" {
+		requestID = newSAMLRequestID()
+	}
+	env := authnRequestEnvelope{
+		XmlnsSamlp:   "urn:oasis:names:tc:SAML:2.0:protocol",
+		XmlnsSaml:    "urn:oasis:names:tc:SAML:2.0:assertion",
+		ID:           requestID,
+		Version:      "2.0",
+		IssueInstant: time.Now().UTC().Format(time.RFC3339Nano),
+		Destination:  strings.TrimSpace(connection.SSOURL),
+	}
+	env.Issuer.Value = "urn:aegion:sp:" + connection.Slug
+	raw, err := xml.Marshal(env)
+	if err != nil {
+		return "", err
+	}
+	return xml.Header + string(raw), nil
 }
 
 func (s *Service) signRelayState(state callbackState) (string, error) {
@@ -425,12 +465,33 @@ func stringValue(value interface{}) string {
 }
 
 type samlResponseEnvelope struct {
-	XMLName   xml.Name `xml:"Response"`
-	Issuer    string   `xml:"Issuer"`
+	XMLName      xml.Name `xml:"Response"`
+	ID           string   `xml:"ID,attr"`
+	InResponseTo string   `xml:"InResponseTo,attr"`
+	Destination  string   `xml:"Destination,attr"`
+	IssueInstant string   `xml:"IssueInstant,attr"`
+	Issuer       string   `xml:"Issuer"`
+	Status       struct {
+		StatusCode struct {
+			Value string `xml:"Value,attr"`
+		} `xml:"StatusCode"`
+	} `xml:"Status"`
 	Assertion struct {
+		Issuer  string `xml:"Issuer"`
 		Subject struct {
-			NameID string `xml:"NameID"`
+			NameID              string `xml:"NameID"`
+			SubjectConfirmation struct {
+				SubjectConfirmationData struct {
+					InResponseTo string `xml:"InResponseTo,attr"`
+					NotOnOrAfter string `xml:"NotOnOrAfter,attr"`
+					Recipient    string `xml:"Recipient,attr"`
+				} `xml:"SubjectConfirmationData"`
+			} `xml:"SubjectConfirmation"`
 		} `xml:"Subject"`
+		Conditions struct {
+			NotBefore    string `xml:"NotBefore,attr"`
+			NotOnOrAfter string `xml:"NotOnOrAfter,attr"`
+		} `xml:"Conditions"`
 		AttributeStatement struct {
 			Attributes []struct {
 				Name   string `xml:"Name,attr"`
@@ -449,7 +510,7 @@ type parsedSAMLResponse struct {
 	Attributes  map[string]interface{}
 }
 
-func parseSAMLResponse(raw string, connection *store.Connection) (*parsedSAMLResponse, error) {
+func parseSAMLResponse(raw string, connection *store.Connection, expectedRequestID string, now time.Time) (*parsedSAMLResponse, error) {
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
 		decoded, err = base64.RawStdEncoding.DecodeString(strings.TrimSpace(raw))
@@ -459,6 +520,22 @@ func parseSAMLResponse(raw string, connection *store.Connection) (*parsedSAMLRes
 	}
 	var envelope samlResponseEnvelope
 	if err := xml.Unmarshal(decoded, &envelope); err != nil {
+		return nil, ErrInvalidSAMLResponse
+	}
+	if status := strings.TrimSpace(envelope.Status.StatusCode.Value); status != "" &&
+		status != "urn:oasis:names:tc:SAML:2.0:status:Success" {
+		return nil, ErrInvalidSAMLResponse
+	}
+	if !matchesRequestID(expectedRequestID, envelope.InResponseTo, envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.InResponseTo) {
+		return nil, ErrInvalidSAMLResponse
+	}
+	if !matchesIssuer(connection, envelope.Issuer, envelope.Assertion.Issuer) {
+		return nil, ErrInvalidSAMLResponse
+	}
+	if !validTimeWindow(now, envelope.Assertion.Conditions.NotBefore, envelope.Assertion.Conditions.NotOnOrAfter) {
+		return nil, ErrInvalidSAMLResponse
+	}
+	if !validNotOnOrAfter(now, envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.NotOnOrAfter) {
 		return nil, ErrInvalidSAMLResponse
 	}
 	result := &parsedSAMLResponse{
@@ -487,6 +564,70 @@ func parseSAMLResponse(raw string, connection *store.Connection) (*parsedSAMLRes
 		return nil, ErrInvalidSAMLResponse
 	}
 	return result, nil
+}
+
+func newSAMLRequestID() string {
+	return "_" + fmt.Sprintf("%d", time.Now().UTC().UnixNano())
+}
+
+func matchesRequestID(expected string, values ...string) bool {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return true
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesIssuer(connection *store.Connection, issuers ...string) bool {
+	if connection == nil || strings.TrimSpace(connection.EntityID) == "" {
+		return true
+	}
+	expected := strings.TrimSpace(connection.EntityID)
+	for _, issuer := range issuers {
+		if strings.TrimSpace(issuer) == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func validTimeWindow(now time.Time, notBeforeRaw, notOnOrAfterRaw string) bool {
+	const skew = 2 * time.Minute
+	if notBefore, ok := parseSAMLTimestamp(notBeforeRaw); ok && now.Add(skew).Before(notBefore) {
+		return false
+	}
+	if notOnOrAfter, ok := parseSAMLTimestamp(notOnOrAfterRaw); ok && !now.Before(notOnOrAfter.Add(skew)) {
+		return false
+	}
+	return true
+}
+
+func validNotOnOrAfter(now time.Time, value string) bool {
+	const skew = 2 * time.Minute
+	t, ok := parseSAMLTimestamp(value)
+	if !ok {
+		return true
+	}
+	return now.Before(t.Add(skew))
+}
+
+func parseSAMLTimestamp(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999Z", "2006-01-02T15:04:05Z"}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 func compactCertificate(value string) string {

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -229,6 +230,35 @@ func TestLogPolicyAction(t *testing.T) {
 	err := logger.LogPolicyAction(actorID, "admin@example.com", ActionPolicyCreated, policyID, "New access policy", nil, policyData, nil)
 
 	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+}
+
+func TestLogActionRedactsSensitiveFields(t *testing.T) {
+	mockStore := &MockStore{}
+	logger := NewLogger(mockStore)
+
+	mockStore.On("WriteEntry", mock.MatchedBy(func(e *AuditEntry) bool {
+		return !strings.Contains(string(e.Before), "before-secret") &&
+			!strings.Contains(string(e.After), "after-secret") &&
+			!strings.Contains(string(e.Metadata), "should-hide") &&
+			strings.Contains(string(e.Before), "[REDACTED]") &&
+			strings.Contains(string(e.After), "[REDACTED]") &&
+			strings.Contains(string(e.Metadata), "[REDACTED]")
+	})).Return(nil)
+
+	err := logger.LogPolicyAction(
+		uuid.New(),
+		"admin@example.com",
+		ActionPolicyUpdated,
+		"policy-1",
+		"updated secrets",
+		map[string]interface{}{"client_secret": "before-secret", "nested": map[string]interface{}{"authorization": "Bearer abc"}},
+		map[string]interface{}{"password": "after-secret", "safe": "value"},
+		map[string]interface{}{"api_key": "should-hide", "note": "keep"},
+	)
+	if err != nil {
+		t.Fatalf("LogPolicyAction failed: %v", err)
+	}
 	mockStore.AssertExpectations(t)
 }
 
