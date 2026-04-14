@@ -28,6 +28,7 @@ import (
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
+	"github.com/aegion/aegion/modules/admin/scim"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
 )
@@ -278,11 +279,30 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		APIKeyPrefixLen:    cfg.Admin.APIKeyPrefixLen,
 		APIKeyEntropyBytes: cfg.Admin.APIKeyEntropy,
 	})
+	var scimService *scim.Service
+	var scimHandler *scim.Handler
+	if cfg.Admin.SCIM.Enabled {
+		scimService = scim.NewService(adminStore, nil, scim.Config{
+			BasePath:                   cfg.Admin.SCIM.BasePath,
+			TokenPrefix:                cfg.Admin.SCIM.TokenPrefix,
+			TokenLookupPrefixLen:       cfg.Admin.SCIM.TokenLookupPrefixLen,
+			TokenEntropyBytes:          cfg.Admin.SCIM.TokenEntropyBytes,
+			DefaultPageSize:            cfg.Admin.SCIM.DefaultPageSize,
+			MaxPageSize:                cfg.Admin.SCIM.MaxPageSize,
+			TokenLastUsedUpdateTimeout: cfg.Admin.SCIM.TokenLastUsedUpdateTimeout,
+		})
+		scimHandler = scim.NewHandler(scimService, scim.HandlerConfig{
+			DefaultPageSize: cfg.Admin.SCIM.DefaultPageSize,
+			MaxPageSize:     cfg.Admin.SCIM.MaxPageSize,
+		})
+	}
 
 	server := &Server{
-		Config:  cfg,
-		DB:      db,
-		Handler: adminHandler,
+		Config:      cfg,
+		DB:          db,
+		Handler:     adminHandler,
+		SCIMService: scimService,
+		SCIMHandler: scimHandler,
 	}
 
 	httpServer := &http.Server{
