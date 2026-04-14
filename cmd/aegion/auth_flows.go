@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,8 @@ import (
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	magiclinkservice "github.com/aegion/aegion/modules/magic_link/service"
 	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
+	mfaservice "github.com/aegion/aegion/modules/mfa/service"
+	passkeysservice "github.com/aegion/aegion/modules/passkeys/service"
 	passwordservice "github.com/aegion/aegion/modules/password/service"
 )
 
@@ -49,8 +52,10 @@ type flowSubmitInput struct {
 }
 
 type flowExecutionResult struct {
-	Status  string
-	Message string
+	Status         string
+	Message        string
+	KeepFlowActive bool
+	FlowPayload    interface{}
 }
 
 type flowHTTPError struct {
@@ -66,7 +71,7 @@ func (e *flowHTTPError) Error() string {
 }
 
 func (s *Server) selfServiceAuthEnabled() bool {
-	return s != nil && (s.passwordAuth != nil || s.magicLinkAuth != nil)
+	return s != nil && (s.passwordAuth != nil || s.magicLinkAuth != nil || s.passkeyAuth != nil)
 }
 
 func publicBaseURL(cfg *platformconfig.Config) string {
@@ -190,7 +195,11 @@ func (s *Server) executeFlowSubmission(ctx context.Context, w http.ResponseWrite
 	}
 }
 
-func (s *Server) executeLoginFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, _ *flows.Flow, values map[string]string) (*flowExecutionResult, error) {
+func (s *Server) executeLoginFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, flow *flows.Flow, values map[string]string) (*flowExecutionResult, error) {
+	if pendingIdentityID, primaryMethod, ok := s.pendingMFALogin(flow); ok {
+		return s.completePendingMFALogin(ctx, w, r, flow, values, pendingIdentityID, primaryMethod)
+	}
+
 	identifier := normalizedEmailValue(values, "identifier", "email")
 	password := strings.TrimSpace(values["password"])
 
@@ -212,11 +221,7 @@ func (s *Server) executeLoginFlow(ctx context.Context, w http.ResponseWriter, r 
 			}
 		}
 
-		if _, err := s.createSession(ctx, w, r, identityID, coresession.AuthMethodPassword); err != nil {
-			return nil, err
-		}
-
-		return &flowExecutionResult{Status: "authenticated", Message: "login successful"}, nil
+		return s.finishPrimaryAuthentication(ctx, w, r, flow, identityID, identifier, coresession.AuthMethodPassword)
 	}
 
 	if s.magicLinkAuth == nil {
@@ -329,6 +334,11 @@ func (s *Server) executeSettingsFlow(ctx context.Context, flow *flows.Flow, valu
 		if err := s.passwordAuth.ResetPassword(ctx, *flow.IdentityID, newPassword); err != nil {
 			return nil, s.mapPasswordError(err)
 		}
+		if s.sessionManager != nil {
+			if err := s.sessionManager.RevokeAllForIdentity(ctx, *flow.IdentityID); err != nil {
+				return nil, err
+			}
+		}
 		return &flowExecutionResult{Status: "updated", Message: "password reset complete"}, nil
 	}
 
@@ -399,6 +409,240 @@ func (s *Server) createSession(ctx context.Context, w http.ResponseWriter, r *ht
 		s.sessionManager.SetCookie(w, session)
 	}
 	return session, nil
+}
+
+func (s *Server) finishPrimaryAuthentication(ctx context.Context, w http.ResponseWriter, r *http.Request, flow *flows.Flow, identityID uuid.UUID, identifier string, method coresession.AuthMethod) (*flowExecutionResult, error) {
+	trustedDeviceSatisfied, pendingFlow, err := s.ensureSecondFactorOrTrustedDevice(ctx, r, flow, identityID, identifier, method)
+	if err != nil {
+		return nil, err
+	}
+	if pendingFlow != nil {
+		return &flowExecutionResult{
+			Status:         "mfa_required",
+			Message:        "multi-factor authentication required",
+			KeepFlowActive: true,
+			FlowPayload:    pendingFlow,
+		}, nil
+	}
+
+	currentSession, err := s.createSession(ctx, w, r, identityID, method)
+	if err != nil {
+		return nil, err
+	}
+	if trustedDeviceSatisfied && currentSession != nil {
+		if err := s.sessionManager.AddAuthMethod(ctx, currentSession.ID, coresession.AuthMethodTOTP); err != nil {
+			return nil, err
+		}
+	}
+
+	return &flowExecutionResult{Status: "authenticated", Message: "login successful"}, nil
+}
+
+func (s *Server) ensureSecondFactorOrTrustedDevice(ctx context.Context, r *http.Request, flow *flows.Flow, identityID uuid.UUID, identifier string, primaryMethod coresession.AuthMethod) (bool, *flows.Flow, error) {
+	if s.mfaAuth == nil {
+		return false, nil, nil
+	}
+
+	hasEnrolledFactor, err := s.mfaAuth.HasEnrolledFactor(ctx, identityID.String())
+	if err != nil {
+		return false, nil, err
+	}
+	if !hasEnrolledFactor {
+		return false, nil, nil
+	}
+
+	if token := s.readMFATrustedDeviceCookie(r); token != "" {
+		valid, err := s.mfaAuth.ValidateTrustedDevice(ctx, identityID.String(), token)
+		if err != nil {
+			return false, nil, err
+		}
+		if valid {
+			return true, nil, nil
+		}
+	}
+
+	if flow == nil {
+		createdFlow, err := s.flowService.CreateLoginFlow(ctx, r.URL.String())
+		if err != nil {
+			return false, nil, err
+		}
+		flow = createdFlow
+	}
+
+	if err := s.prepareMFALoginFlow(ctx, flow, identityID, identifier, primaryMethod); err != nil {
+		return false, nil, err
+	}
+	return false, flow, nil
+}
+
+func (s *Server) completePendingMFALogin(ctx context.Context, w http.ResponseWriter, r *http.Request, flow *flows.Flow, values map[string]string, identityID uuid.UUID, primaryMethod coresession.AuthMethod) (*flowExecutionResult, error) {
+	if s.mfaAuth == nil {
+		return nil, &flowHTTPError{Status: http.StatusServiceUnavailable, Message: "multi-factor authentication is not enabled"}
+	}
+
+	totpCode := normalizedFlowValue(values, "totp_code", "code")
+	backupCode := normalizedFlowValue(values, "backup_code")
+	rememberDevice := strings.EqualFold(normalizedFlowValue(values, "remember_device"), "true") ||
+		strings.EqualFold(normalizedFlowValue(values, "remember_device"), "on") ||
+		normalizedFlowValue(values, "remember_device") == "1"
+
+	if totpCode == "" && backupCode == "" {
+		return nil, &flowHTTPError{Status: http.StatusBadRequest, Message: "totp_code or backup_code is required"}
+	}
+
+	var secondFactorMethod coresession.AuthMethod
+	switch {
+	case totpCode != "":
+		if err := s.mfaAuth.VerifyTOTP(ctx, identityID.String(), totpCode); err != nil {
+			return nil, &flowHTTPError{Status: http.StatusUnauthorized, Message: "invalid totp code"}
+		}
+		secondFactorMethod = coresession.AuthMethodTOTP
+	case backupCode != "":
+		if err := s.mfaAuth.VerifyBackupCode(ctx, identityID.String(), backupCode); err != nil {
+			return nil, &flowHTTPError{Status: http.StatusUnauthorized, Message: "invalid backup code"}
+		}
+		secondFactorMethod = coresession.AuthMethodBackup
+	}
+
+	currentSession, err := s.createSession(ctx, w, r, identityID, primaryMethod)
+	if err != nil {
+		return nil, err
+	}
+	if currentSession != nil {
+		if err := s.sessionManager.AddAuthMethod(ctx, currentSession.ID, secondFactorMethod); err != nil {
+			return nil, err
+		}
+	}
+
+	if rememberDevice {
+		token, expiresAt, err := s.mfaAuth.RememberTrustedDevice(ctx, identityID.String(), r.UserAgent())
+		if err != nil {
+			return nil, err
+		}
+		s.writeMFATrustedDeviceCookie(w, token, expiresAt)
+	}
+
+	clearPendingMFALogin(flow)
+	if err := s.flowService.UpdateFlow(ctx, flow); err != nil {
+		return nil, err
+	}
+
+	return &flowExecutionResult{Status: "authenticated", Message: "login successful"}, nil
+}
+
+func (s *Server) prepareMFALoginFlow(ctx context.Context, flow *flows.Flow, identityID uuid.UUID, identifier string, primaryMethod coresession.AuthMethod) error {
+	if flow == nil {
+		return errors.New("flow is required")
+	}
+	flow.AddContext("pending_login_identity_id", identityID.String())
+	flow.AddContext("pending_login_method", string(primaryMethod))
+	flow.AddContext("pending_login_identifier", strings.TrimSpace(identifier))
+	flow.UI = &flows.UIState{
+		Action: flow.RequestURL,
+		Method: "POST",
+		Nodes:  generateMFALoginFormNodes(flow.CSRFToken),
+		Messages: []flows.Msg{
+			{
+				ID:   "login.mfa_required",
+				Type: flows.MsgTypeInfo,
+				Text: "Enter an authenticator code or a backup code to finish signing in.",
+			},
+		},
+	}
+	return s.flowService.UpdateFlow(ctx, flow)
+}
+
+func pendingMFALoginIdentity(flow *flows.Flow) (*uuid.UUID, bool) {
+	if flow == nil {
+		return nil, false
+	}
+	raw, ok := flow.GetContext("pending_login_identity_id")
+	if !ok {
+		return nil, false
+	}
+	text, ok := raw.(string)
+	if !ok {
+		return nil, false
+	}
+	parsed, err := uuid.Parse(strings.TrimSpace(text))
+	if err != nil {
+		return nil, false
+	}
+	return &parsed, true
+}
+
+func pendingMFALoginMethod(flow *flows.Flow) (coresession.AuthMethod, bool) {
+	if flow == nil {
+		return "", false
+	}
+	raw, ok := flow.GetContext("pending_login_method")
+	if !ok {
+		return "", false
+	}
+	text, ok := raw.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return coresession.AuthMethod(strings.TrimSpace(text)), true
+}
+
+func (s *Server) pendingMFALogin(flow *flows.Flow) (uuid.UUID, coresession.AuthMethod, bool) {
+	identityID, ok := pendingMFALoginIdentity(flow)
+	if !ok || identityID == nil {
+		return uuid.Nil, "", false
+	}
+	method, ok := pendingMFALoginMethod(flow)
+	if !ok {
+		return uuid.Nil, "", false
+	}
+	return *identityID, method, true
+}
+
+func clearPendingMFALogin(flow *flows.Flow) {
+	if flow == nil {
+		return
+	}
+	delete(flow.Context, "pending_login_identity_id")
+	delete(flow.Context, "pending_login_method")
+	delete(flow.Context, "pending_login_identifier")
+}
+
+func generateMFALoginFormNodes(csrfToken string) []flows.Node {
+	nodes := []flows.Node{
+		flows.NewHiddenNode("csrf_token", csrfToken),
+		flows.WithPattern(flows.NewInputNode("totp_code", flows.InputTypeText, "Authenticator Code", false), "^[0-9]{6}$"),
+		flows.NewInputNode("backup_code", flows.InputTypeText, "Backup Code", false),
+		flows.NewInputNode("remember_device", flows.InputTypeCheckbox, "Remember this device", false),
+		flows.NewSubmitNode("method", "Verify"),
+	}
+	return nodes
+}
+
+func (s *Server) readMFATrustedDeviceCookie(r *http.Request) string {
+	if s == nil || s.cfg == nil {
+		return ""
+	}
+	cookie, err := r.Cookie(strings.TrimSpace(s.cfg.MFA.TrustedDeviceCookieName))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cookie.Value)
+}
+
+func (s *Server) writeMFATrustedDeviceCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	if s == nil || s.cfg == nil || strings.TrimSpace(token) == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     strings.TrimSpace(s.cfg.MFA.TrustedDeviceCookieName),
+		Value:    strings.TrimSpace(token),
+		Path:     s.cfg.Sessions.Cookie.Path,
+		Domain:   s.cfg.Sessions.Cookie.Domain,
+		SameSite: parseSameSite(s.cfg.Sessions.Cookie.SameSite),
+		Secure:   s.cfg.Sessions.Cookie.Secure,
+		HttpOnly: true,
+		Expires:  expiresAt.UTC(),
+	})
 }
 
 func (s *Server) lookupIdentityByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
@@ -554,11 +798,24 @@ func (s *Server) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request, c
 			writeError(w, http.StatusBadRequest, "login link is invalid", nil)
 			return
 		}
-		if _, err := s.createSession(r.Context(), w, r, *identityID, coresession.AuthMethodMagicLink); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create session", err)
+		result, err := s.finishPrimaryAuthentication(r.Context(), w, r, nil, *identityID, recipient, coresession.AuthMethodMagicLink)
+		if err != nil {
+			s.writeFlowExecutionError(w, err)
 			return
 		}
-		s.respondMagicLinkVerification(w, r, map[string]any{"status": "authenticated", "message": "login successful"})
+		payload := map[string]any{"status": "authenticated", "message": "login successful"}
+		if result != nil {
+			if result.Status != "" {
+				payload["status"] = result.Status
+			}
+			if result.Message != "" {
+				payload["message"] = result.Message
+			}
+			if result.FlowPayload != nil {
+				payload["flow"] = result.FlowPayload
+			}
+		}
+		s.respondMagicLinkVerification(w, r, payload)
 	case magiclinkstore.CodeTypeRecovery:
 		if identityID == nil {
 			writeError(w, http.StatusBadRequest, "recovery link is invalid", nil)
@@ -603,7 +860,265 @@ func (s *Server) respondMagicLinkVerification(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusOK, payload)
 		return
 	}
+	if flowPayload, ok := payload["flow"]; ok {
+		if flow, ok := flowPayload.(*flows.Flow); ok && flow != nil {
+			http.Redirect(w, r, "/ui/login?flow="+flow.ID.String()+"&mfa=1", http.StatusSeeOther)
+			return
+		}
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *Server) handleStartSettingsTOTPEnrollment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	if s.mfaAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "multi-factor authentication is not enabled", nil)
+		return
+	}
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "active session required", err)
+		return
+	}
+	accountName, err := s.primaryEmailByIdentity(r.Context(), currentSession.IdentityID)
+	if err != nil || strings.TrimSpace(accountName) == "" {
+		accountName = currentSession.IdentityID.String()
+	}
+	resp, err := s.mfaAuth.StartTOTPEnrollment(r.Context(), currentSession.IdentityID.String(), accountName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to start totp enrollment", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleFinishSettingsTOTPEnrollment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	if s.mfaAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "multi-factor authentication is not enabled", nil)
+		return
+	}
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "active session required", err)
+		return
+	}
+	var req mfaservice.TOTPEnrollmentFinishRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	req.IdentityID = currentSession.IdentityID.String()
+	resp, err := s.mfaAuth.CompleteTOTPEnrollment(r.Context(), &req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to finish totp enrollment", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleRegenerateSettingsBackupCodes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	if s.mfaAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "multi-factor authentication is not enabled", nil)
+		return
+	}
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "active session required", err)
+		return
+	}
+	codes, err := s.mfaAuth.RegenerateBackupCodes(r.Context(), currentSession.IdentityID.String())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to regenerate backup codes", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "regenerated",
+		"backup_codes": codes,
+	})
+}
+
+func (s *Server) handleStartLoginPasskey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	if s.passkeyAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "passkeys are not enabled", nil)
+		return
+	}
+	var req struct {
+		FlowID     string `json:"flow_id"`
+		CSRFToken  string `json:"csrf_token"`
+		Identifier string `json:"identifier"`
+	}
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	flowID, err := uuid.Parse(strings.TrimSpace(req.FlowID))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid flow id", err)
+		return
+	}
+	if _, err := s.flowService.ValidateFlow(r.Context(), flowID, strings.TrimSpace(req.CSRFToken)); err != nil {
+		s.writeFlowValidationError(w, err)
+		return
+	}
+	identityID, err := s.lookupIdentityByEmail(r.Context(), strings.ToLower(strings.TrimSpace(req.Identifier)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve passkey identity", err)
+		return
+	}
+	if identityID == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"challenge":              "",
+			"allowed_credential_ids": []string{},
+			"expires_in":             0,
+		})
+		return
+	}
+	resp, err := s.passkeyAuth.BeginAuthentication(identityID.String())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to start passkey authentication", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleFinishLoginPasskey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	if s.passkeyAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "passkeys are not enabled", nil)
+		return
+	}
+	var req struct {
+		FlowID       string `json:"flow_id"`
+		CSRFToken    string `json:"csrf_token"`
+		Identifier   string `json:"identifier"`
+		Challenge    string `json:"challenge"`
+		CredentialID string `json:"credential_id"`
+		Signature    string `json:"signature"`
+		SignCount    uint32 `json:"sign_count"`
+	}
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	flowID, err := uuid.Parse(strings.TrimSpace(req.FlowID))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid flow id", err)
+		return
+	}
+	flow, err := s.flowService.ValidateFlow(r.Context(), flowID, strings.TrimSpace(req.CSRFToken))
+	if err != nil {
+		s.writeFlowValidationError(w, err)
+		return
+	}
+	identityID, err := s.lookupIdentityByEmail(r.Context(), strings.ToLower(strings.TrimSpace(req.Identifier)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve passkey identity", err)
+		return
+	}
+	if identityID == nil {
+		writeError(w, http.StatusUnauthorized, "invalid passkey assertion", nil)
+		return
+	}
+	if err := s.passkeyAuth.FinishAuthentication(&passkeysservice.AuthenticationFinishRequest{
+		IdentityID:   identityID.String(),
+		Challenge:    req.Challenge,
+		CredentialID: req.CredentialID,
+		Signature:    req.Signature,
+		SignCount:    req.SignCount,
+	}); err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid passkey assertion", err)
+		return
+	}
+	result, err := s.finishPrimaryAuthentication(r.Context(), w, r, flow, *identityID, strings.ToLower(strings.TrimSpace(req.Identifier)), coresession.AuthMethodPasskey)
+	if err != nil {
+		s.writeFlowExecutionError(w, err)
+		return
+	}
+	if result != nil && result.KeepFlowActive {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":  result.Status,
+			"message": result.Message,
+			"flow":    result.FlowPayload,
+		})
+		return
+	}
+	if err := s.flowService.CompleteFlow(r.Context(), flow.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "authenticated",
+		"message": "login successful",
+	})
+}
+
+func (s *Server) handleStartSettingsPasskeyRegistration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	if s.passkeyAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "passkeys are not enabled", nil)
+		return
+	}
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "active session required", err)
+		return
+	}
+	resp, err := s.passkeyAuth.BeginRegistration(currentSession.IdentityID.String())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to start passkey registration", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleFinishSettingsPasskeyRegistration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	if s.passkeyAuth == nil {
+		writeError(w, http.StatusServiceUnavailable, "passkeys are not enabled", nil)
+		return
+	}
+	currentSession, err := s.sessionManager.GetFromRequest(r.Context(), r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "active session required", err)
+		return
+	}
+	var req passkeysservice.RegistrationFinishRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body", err)
+		return
+	}
+	req.IdentityID = currentSession.IdentityID.String()
+	if err := s.passkeyAuth.FinishRegistration(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "failed to finish passkey registration", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "registered",
+	})
 }
 
 func acceptsJSON(r *http.Request) bool {

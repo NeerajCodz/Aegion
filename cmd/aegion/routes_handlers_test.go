@@ -68,9 +68,14 @@ type stubRouteSessionManager struct {
 	created        []*session.Session
 	setCookieCount int
 
-	revokeErr   error
-	revokedIDs  []uuid.UUID
-	clearCookie int
+	revokeErr          error
+	revokeAllErr       error
+	addAuthMethodErr   error
+	revokedIDs         []uuid.UUID
+	revokedIdentityIDs []uuid.UUID
+	addedAuthMethods   []session.AuthMethod
+	addedAuthMethodIDs []uuid.UUID
+	clearCookie        int
 }
 
 func (s *stubRouteSessionManager) GetFromRequest(ctx context.Context, r *http.Request) (*session.Session, error) {
@@ -107,6 +112,17 @@ func (s *stubRouteSessionManager) Create(ctx context.Context, identityID uuid.UU
 func (s *stubRouteSessionManager) Revoke(ctx context.Context, sessionID uuid.UUID) error {
 	s.revokedIDs = append(s.revokedIDs, sessionID)
 	return s.revokeErr
+}
+
+func (s *stubRouteSessionManager) RevokeAllForIdentity(ctx context.Context, identityID uuid.UUID) error {
+	s.revokedIdentityIDs = append(s.revokedIdentityIDs, identityID)
+	return s.revokeAllErr
+}
+
+func (s *stubRouteSessionManager) AddAuthMethod(ctx context.Context, sessionID uuid.UUID, method session.AuthMethod) error {
+	s.addedAuthMethodIDs = append(s.addedAuthMethodIDs, sessionID)
+	s.addedAuthMethods = append(s.addedAuthMethods, method)
+	return s.addAuthMethodErr
 }
 
 func (s *stubRouteSessionManager) SetCookie(w http.ResponseWriter, sess *session.Session) {

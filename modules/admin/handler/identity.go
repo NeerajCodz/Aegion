@@ -275,15 +275,36 @@ func (h *Handler) ResetIdentityMFA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.dbConn().Exec(r.Context(), `
-		UPDATE core_sessions
-		SET aal = 'aal1', updated_at = NOW()
-		WHERE identity_id = $1
-		  AND active = TRUE
-		  AND expires_at > NOW()
-		  AND aal = 'aal2'
-	`, identityID)
+	tx, err := h.dbConn().Begin(r.Context())
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reset MFA state")
+		return
+	}
+	defer func() {
+		_ = tx.Rollback(r.Context())
+	}()
+
+	statements := []string{
+		`
+			UPDATE core_sessions
+			SET aal = 'aal1', updated_at = NOW()
+			WHERE identity_id = $1
+			  AND active = TRUE
+			  AND expires_at > NOW()
+			  AND aal = 'aal2'
+		`,
+		`DELETE FROM mfa_enrollments WHERE identity_id = $1`,
+		`DELETE FROM mfa_backup_codes WHERE identity_id = $1`,
+		`DELETE FROM mfa_totp_factors WHERE identity_id = $1`,
+		`DELETE FROM mfa_trusted_devices WHERE identity_id = $1`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(r.Context(), statement, identityID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reset MFA state")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reset MFA state")
 		return
 	}
