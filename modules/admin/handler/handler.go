@@ -190,6 +190,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.With(RequirePermission(h, service.PermIdentitiesRead)).Get("/{id}", h.GetIdentity)
 			r.With(RequirePermission(h, service.PermIdentitiesUpdate)).Patch("/{id}", h.UpdateIdentity)
 			r.With(RequirePermission(h, service.PermIdentitiesDelete)).Delete("/{id}", h.DeleteIdentity)
+			r.With(RequirePermission(h, service.PermIdentitiesUpdate)).Post("/{id}/suspend", h.SuspendIdentity)
+			r.With(RequirePermission(h, service.PermIdentitiesUpdate)).Post("/{id}/activate", h.ActivateIdentity)
+			r.With(RequirePermission(h, service.PermIdentitiesUpdate)).Post("/{id}/reset-mfa", h.ResetIdentityMFA)
 
 			// Session management for identity
 			r.Route("/{id}/sessions", func(r chi.Router) {
@@ -231,6 +234,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		// Dashboard and system settings
 		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/stats", h.DashboardStats)
 		r.With(RequirePermission(h, service.PermAuditRead)).Get("/logs/activity", h.ActivityFeed)
+		r.With(RequirePermission(h, service.PermSecurityRead)).Get("/security/ip-bans", h.ListIPBans)
+		r.With(RequirePermission(h, service.PermSecurityCreate)).Post("/security/ip-bans", h.UpsertIPBan)
+		r.With(RequirePermission(h, service.PermSecurityDelete)).Delete("/security/ip-bans/{id}", h.DeleteIPBan)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/setup/status", h.SetupStatus)
 		r.With(RequirePermission(h, service.PermRolesRead)).Get("/rbac/summary", h.RBACSummary)
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/overview", h.IntegrationOverview)

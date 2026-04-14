@@ -39,6 +39,7 @@ type SetupStatusResponse struct {
 	ProxyRoutes       int64 `json:"proxy_routes"`
 	ProxyEnabled      int64 `json:"proxy_enabled"`
 	SCIMTokens        int64 `json:"scim_tokens"`
+	IPBans            int64 `json:"ip_bans"`
 	AuditEvents24h    int64 `json:"audit_events_24h"`
 	AdminOperators    int64 `json:"admin_operators"`
 	HasAdminOperator  bool  `json:"has_admin_operator"`
@@ -46,6 +47,7 @@ type SetupStatusResponse struct {
 	HasSSOConnection  bool  `json:"has_sso_connection"`
 	HasProxyRoute     bool  `json:"has_proxy_route"`
 	HasSCIMToken      bool  `json:"has_scim_token"`
+	HasIPBan          bool  `json:"has_ip_ban"`
 }
 
 type SocialPresetView struct {
@@ -146,6 +148,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 		{`SELECT COUNT(*) FROM proxy_routes`, &resp.ProxyRoutes},
 		{`SELECT COUNT(*) FROM proxy_routes WHERE enabled = true`, &resp.ProxyEnabled},
 		{`SELECT COUNT(*) FROM adm_scim_tokens`, &resp.SCIMTokens},
+		{`SELECT COUNT(*) FROM adm_ip_bans WHERE expires_at IS NULL OR expires_at > NOW()`, &resp.IPBans},
 		{`SELECT COUNT(*) FROM adm_audit_logs WHERE created_at >= NOW() - INTERVAL '24 hours'`, &resp.AuditEvents24h},
 	}
 	for _, query := range queries {
@@ -164,6 +167,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 	resp.HasSSOConnection = resp.SSOConnections > 0
 	resp.HasProxyRoute = resp.ProxyRoutes > 0
 	resp.HasSCIMToken = resp.SCIMTokens > 0
+	resp.HasIPBan = resp.IPBans > 0
 
 	writeJSON(w, http.StatusOK, resp)
 }
