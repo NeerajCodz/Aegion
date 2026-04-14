@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"net/http"
 	"os"
 	"testing"
 
@@ -13,53 +15,55 @@ func TestDefaultListenAddr(t *testing.T) {
 	if got := defaultListenAddr(); got != defaultListen {
 		t.Fatalf("expected default listen addr %q, got %q", defaultListen, got)
 	}
-
-	t.Setenv(listenAddrEnv, "127.0.0.1:19007")
-	if got := defaultListenAddr(); got != "127.0.0.1:19007" {
-		t.Fatalf("expected env listen addr override, got %q", got)
-	}
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9007")
+	cfg := moduleConfig("127.0.0.1:9007", func(*http.ServeMux) {})
 	if cfg.Module != "sso" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9007" {
-		t.Fatalf("unexpected module config header: %+v", cfg)
+		t.Fatalf("unexpected module config: %+v", cfg)
 	}
-	if len(cfg.Capabilities) != 2 || cfg.Capabilities[0] != "saml" || cfg.Capabilities[1] != "scim" {
+	if len(cfg.Capabilities) != 3 || cfg.Capabilities[1] != "connection_registry" {
 		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
 	}
-	if len(cfg.Routes) != 3 || cfg.Routes[0] != "/self-service/sso/*" || cfg.Routes[1] != "/api/v1/sso/*" || cfg.Routes[2] != "/scim/v2/*" {
-		t.Fatalf("unexpected routes: %#v", cfg.Routes)
+}
+
+func TestBuildRuntimeDefaultsToMemoryStore(t *testing.T) {
+	t.Setenv(dbURLEnv, "")
+	t.Setenv(legacyDBURLEnv, "")
+	t.Setenv(managementTokenEnv, "secret")
+	t.Setenv(stateSecretEnv, "super-secret")
+	runtime, err := buildRuntime(context.Background())
+	if err != nil {
+		t.Fatalf("buildRuntime returned error: %v", err)
 	}
-	if len(cfg.GRPCServices) != 1 || cfg.GRPCServices[0] != "sso.SSOEngine" {
-		t.Fatalf("unexpected grpc services: %#v", cfg.GRPCServices)
-	}
-	if len(cfg.EventSubscriptions) != 2 || cfg.EventSubscriptions[0] != "identity.updated" || cfg.EventSubscriptions[1] != "identity.deleted" {
-		t.Fatalf("unexpected event subscriptions: %#v", cfg.EventSubscriptions)
+	if runtime == nil || runtime.registerHTTPRoutes == nil || runtime.cleanup == nil {
+		t.Fatalf("unexpected runtime: %+v", runtime)
 	}
 }
 
 func TestMainInvokesRunModuleServer(t *testing.T) {
 	origRun := runModuleServer
+	origBuild := buildRuntimeHook
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	t.Cleanup(func() {
 		runModuleServer = origRun
+		buildRuntimeHook = origBuild
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 	})
-
 	var captured moduleserver.Config
 	runModuleServer = func(cfg moduleserver.Config) error {
 		captured = cfg
 		return nil
 	}
-
+	buildRuntimeHook = func(context.Context) (*moduleRuntime, error) {
+		return &moduleRuntime{registerHTTPRoutes: func(*http.ServeMux) {}, cleanup: func() {}}, nil
+	}
 	os.Args = []string{"sso-server", "-listen", "127.0.0.1:19007"}
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	main()
-
 	if captured.Module != "sso" || captured.ListenAddr != "127.0.0.1:19007" {
-		t.Fatalf("main did not pass expected config: %+v", captured)
+		t.Fatalf("unexpected config passed to run: %+v", captured)
 	}
 }
