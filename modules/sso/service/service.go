@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -15,9 +18,10 @@ import (
 )
 
 var (
-	ErrConnectionDisabled = errors.New("sso connection is disabled")
-	ErrInvalidRelayState  = errors.New("invalid relay state")
-	ErrMissingStateSecret = errors.New("sso state secret is required")
+	ErrConnectionDisabled  = errors.New("sso connection is disabled")
+	ErrInvalidRelayState   = errors.New("invalid relay state")
+	ErrMissingStateSecret  = errors.New("sso state secret is required")
+	ErrInvalidSAMLResponse = errors.New("invalid sso response")
 )
 
 const relayStateKind = "sso_state"
@@ -63,6 +67,7 @@ type Service struct {
 	repo        store.Repository
 	stateSecret []byte
 	now         func() time.Time
+	httpClient  *http.Client
 }
 
 func New(repo store.Repository, stateSecret []byte) *Service {
@@ -75,6 +80,7 @@ func New(repo store.Repository, stateSecret []byte) *Service {
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -95,7 +101,7 @@ func (s *Service) GetConnectionForDomain(ctx context.Context, domain string) (*s
 }
 
 func (s *Service) UpsertConnection(ctx context.Context, req ConnectionUpsertRequest) (*store.Connection, error) {
-	connection, err := normalizeConnection(req)
+	connection, err := s.normalizeConnection(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +158,20 @@ func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, e
 	for key, value := range attributes {
 		resolvedAttributes[key] = value
 	}
+	if rawSAML := stringValue(resolvedAttributes["_saml_response"]); rawSAML != "" {
+		parsed, err := parseSAMLResponse(rawSAML, connection)
+		if err != nil {
+			return nil, err
+		}
+		subject = firstNonEmpty(parsed.Subject, subject)
+		email = firstNonEmpty(parsed.Email, email)
+		displayName = firstNonEmpty(parsed.DisplayName, displayName)
+		for key, value := range parsed.Attributes {
+			if _, ok := resolvedAttributes[key]; !ok {
+				resolvedAttributes[key] = value
+			}
+		}
+	}
 	if strings.TrimSpace(subject) == "" && connection.AttributeMapping.Subject != "" {
 		subject = stringValue(resolvedAttributes[connection.AttributeMapping.Subject])
 	}
@@ -175,7 +195,22 @@ func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, e
 	}, nil
 }
 
-func normalizeConnection(req ConnectionUpsertRequest) (store.Connection, error) {
+func (s *Service) normalizeConnection(ctx context.Context, req ConnectionUpsertRequest) (store.Connection, error) {
+	if metadataURL := strings.TrimSpace(req.MetadataURL); metadataURL != "" {
+		metadata, err := s.fetchMetadata(ctx, metadataURL)
+		if err != nil {
+			return store.Connection{}, err
+		}
+		if strings.TrimSpace(req.EntityID) == "" {
+			req.EntityID = metadata.EntityID
+		}
+		if strings.TrimSpace(req.SSOURL) == "" {
+			req.SSOURL = metadata.SSOURL
+		}
+		if strings.TrimSpace(req.CertificatePEM) == "" {
+			req.CertificatePEM = metadata.CertificatePEM
+		}
+	}
 	now := time.Now().UTC()
 	connection := store.Connection{
 		Slug:              strings.ToLower(strings.TrimSpace(req.Slug)),
@@ -210,6 +245,70 @@ func normalizeConnection(req ConnectionUpsertRequest) (store.Connection, error) 
 		connection.AttributeMapping.DisplayName = "display_name"
 	}
 	return connection, nil
+}
+
+type metadataEntityDescriptor struct {
+	XMLName          xml.Name `xml:"EntityDescriptor"`
+	EntityID         string   `xml:"entityID,attr"`
+	IDPSSODescriptor struct {
+		SingleSignOnServices []struct {
+			Binding  string `xml:"Binding,attr"`
+			Location string `xml:"Location,attr"`
+		} `xml:"SingleSignOnService"`
+		KeyDescriptors []struct {
+			KeyInfo struct {
+				X509Data struct {
+					Certificate string `xml:"X509Certificate"`
+				} `xml:"X509Data"`
+			} `xml:"KeyInfo"`
+		} `xml:"KeyDescriptor"`
+	} `xml:"IDPSSODescriptor"`
+}
+
+type fetchedMetadata struct {
+	EntityID       string
+	SSOURL         string
+	CertificatePEM string
+}
+
+func (s *Service) fetchMetadata(ctx context.Context, metadataURL string) (*fetchedMetadata, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, ErrConnectionDisabled
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	var entity metadataEntityDescriptor
+	if err := xml.Unmarshal(body, &entity); err != nil {
+		return nil, err
+	}
+	result := &fetchedMetadata{
+		EntityID: strings.TrimSpace(entity.EntityID),
+	}
+	for _, service := range entity.IDPSSODescriptor.SingleSignOnServices {
+		if strings.TrimSpace(service.Location) != "" {
+			result.SSOURL = strings.TrimSpace(service.Location)
+			break
+		}
+	}
+	for _, key := range entity.IDPSSODescriptor.KeyDescriptors {
+		cert := compactCertificate(key.KeyInfo.X509Data.Certificate)
+		if cert != "" {
+			result.CertificatePEM = "-----BEGIN CERTIFICATE-----\n" + cert + "\n-----END CERTIFICATE-----"
+			break
+		}
+	}
+	return result, nil
 }
 
 func buildRedirectURL(connection store.Connection, relayState string) (string, error) {
@@ -323,4 +422,76 @@ func stringValue(value interface{}) string {
 	default:
 		return ""
 	}
+}
+
+type samlResponseEnvelope struct {
+	XMLName   xml.Name `xml:"Response"`
+	Issuer    string   `xml:"Issuer"`
+	Assertion struct {
+		Subject struct {
+			NameID string `xml:"NameID"`
+		} `xml:"Subject"`
+		AttributeStatement struct {
+			Attributes []struct {
+				Name   string `xml:"Name,attr"`
+				Values []struct {
+					Value string `xml:",chardata"`
+				} `xml:"AttributeValue"`
+			} `xml:"Attribute"`
+		} `xml:"AttributeStatement"`
+	} `xml:"Assertion"`
+}
+
+type parsedSAMLResponse struct {
+	Subject     string
+	Email       string
+	DisplayName string
+	Attributes  map[string]interface{}
+}
+
+func parseSAMLResponse(raw string, connection *store.Connection) (*parsedSAMLResponse, error) {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(strings.TrimSpace(raw))
+		if err != nil {
+			return nil, ErrInvalidSAMLResponse
+		}
+	}
+	var envelope samlResponseEnvelope
+	if err := xml.Unmarshal(decoded, &envelope); err != nil {
+		return nil, ErrInvalidSAMLResponse
+	}
+	result := &parsedSAMLResponse{
+		Subject:    strings.TrimSpace(envelope.Assertion.Subject.NameID),
+		Attributes: map[string]interface{}{},
+	}
+	for _, attr := range envelope.Assertion.AttributeStatement.Attributes {
+		key := strings.TrimSpace(attr.Name)
+		if key == "" || len(attr.Values) == 0 {
+			continue
+		}
+		value := strings.TrimSpace(attr.Values[0].Value)
+		if value == "" {
+			continue
+		}
+		result.Attributes[key] = value
+	}
+	if connection != nil {
+		result.Email = stringValue(result.Attributes[connection.AttributeMapping.Email])
+		result.DisplayName = stringValue(result.Attributes[connection.AttributeMapping.DisplayName])
+		if result.Subject == "" {
+			result.Subject = stringValue(result.Attributes[connection.AttributeMapping.Subject])
+		}
+	}
+	if result.Subject == "" {
+		return nil, ErrInvalidSAMLResponse
+	}
+	return result, nil
+}
+
+func compactCertificate(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\n", "")
+	value = strings.ReplaceAll(value, "\r", "")
+	return value
 }
