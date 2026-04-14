@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"net/http"
 	"os"
 	"testing"
 
@@ -21,30 +23,46 @@ func TestDefaultListenAddr(t *testing.T) {
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9009")
+	cfg := moduleConfig("127.0.0.1:9009", func(*http.ServeMux) {})
 	if cfg.Module != "proxy" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9009" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
-	if len(cfg.Capabilities) != 2 || cfg.Capabilities[0] != "authz_proxy" || cfg.Capabilities[1] != "policy_enforcement" {
+	if len(cfg.Capabilities) != 3 || cfg.Capabilities[2] != "proxy_rule_registry" {
 		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
 	}
 	if len(cfg.Routes) != 2 || cfg.Routes[0] != "/proxy/*" || cfg.Routes[1] != "/api/v1/proxy/*" {
 		t.Fatalf("unexpected routes: %#v", cfg.Routes)
 	}
-	if len(cfg.GRPCServices) != 1 || cfg.GRPCServices[0] != "proxy.PolicyProxy" {
-		t.Fatalf("unexpected grpc services: %#v", cfg.GRPCServices)
+	if cfg.RegisterHTTPRoutes == nil {
+		t.Fatal("expected HTTP route registration hook")
 	}
-	if len(cfg.EventSubscriptions) != 4 || cfg.EventSubscriptions[0] != "policy.updated" || cfg.EventSubscriptions[1] != "identity.updated" || cfg.EventSubscriptions[2] != "session.created" || cfg.EventSubscriptions[3] != "session.revoked" {
-		t.Fatalf("unexpected event subscriptions: %#v", cfg.EventSubscriptions)
+}
+
+func TestBuildRuntimeDefaultsToMemoryStore(t *testing.T) {
+	t.Setenv(dbURLEnv, "")
+	t.Setenv(legacyDBURLEnv, "")
+	t.Setenv(managementTokenEnv, "secret")
+
+	runtime, err := buildRuntime(context.Background())
+	if err != nil {
+		t.Fatalf("buildRuntime returned error: %v", err)
+	}
+	if runtime == nil || runtime.registerHTTPRoutes == nil {
+		t.Fatal("expected runtime with HTTP routes")
+	}
+	if runtime.cleanup == nil {
+		t.Fatal("expected cleanup function")
 	}
 }
 
 func TestMainInvokesRunModuleServer(t *testing.T) {
 	origRun := runModuleServer
+	origBuild := buildRuntimeHook
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	t.Cleanup(func() {
 		runModuleServer = origRun
+		buildRuntimeHook = origBuild
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 	})
@@ -53,6 +71,12 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 	runModuleServer = func(cfg moduleserver.Config) error {
 		captured = cfg
 		return nil
+	}
+	buildRuntimeHook = func(_ context.Context) (*moduleRuntime, error) {
+		return &moduleRuntime{
+			registerHTTPRoutes: func(*http.ServeMux) {},
+			cleanup:            func() {},
+		}, nil
 	}
 
 	os.Args = []string{"proxy-server", "-listen", "127.0.0.1:19009"}
