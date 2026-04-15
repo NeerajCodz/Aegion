@@ -4,14 +4,13 @@ package webhook
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 )
 
 // ClaimsRequest represents a request to inject claims into a token.
@@ -77,7 +76,10 @@ func (c *ClaimsHookClient) InjectClaims(ctx context.Context, req *ClaimsRequest)
 
 	// Sign request if secret is configured
 	if c.secret != "" {
-		signature := c.signPayload(payload)
+		signature, err := c.signPayload(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sign webhook payload: %w", err)
+		}
 		httpReq.Header.Set("X-Aegion-Signature", signature)
 	}
 
@@ -111,16 +113,13 @@ func (c *ClaimsHookClient) InjectClaims(ctx context.Context, req *ClaimsRequest)
 }
 
 // signPayload generates HMAC-SHA256 signature for the payload.
-func (c *ClaimsHookClient) signPayload(payload []byte) string {
-	h := hmac.New(sha256.New, []byte(c.secret))
-	h.Write(payload)
-	return hex.EncodeToString(h.Sum(nil))
+func (c *ClaimsHookClient) signPayload(payload []byte) (string, error) {
+	return platformcrypto.SignEnvelope("oauth2_webhook", []byte(c.secret), payload, time.Now().UTC())
 }
 
 // VerifySignature verifies the HMAC signature of a webhook request.
 func (c *ClaimsHookClient) VerifySignature(payload []byte, signature string) bool {
-	expected := c.signPayload(payload)
-	return hmac.Equal([]byte(expected), []byte(signature))
+	return platformcrypto.VerifyEnvelope("oauth2_webhook", []byte(c.secret), payload, signature, 5*time.Minute, time.Now().UTC())
 }
 
 // MergeClaimsHTTP is a helper to merge custom claims into existing claims (for HTTP integration).

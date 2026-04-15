@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -344,7 +345,11 @@ func (l *ConfigLoader) LoadModuleConfig(moduleID string) (*ModuleConfig, error) 
 	}
 
 	// Look for module-specific config file
-	modulePath := fmt.Sprintf("%s/modules/%s.yaml", l.configPath[:len(l.configPath)-len("/aegion.yaml")], moduleID)
+	modulePath, err := moduleConfigFilePath(l.configPath, moduleID)
+	if err != nil {
+		return nil, err
+	}
+	// #nosec G304 -- modulePath is constrained to "<configDir>/modules/<validated-module-id>.yaml" by moduleConfigFilePath.
 	data, err := os.ReadFile(modulePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -367,6 +372,28 @@ func (l *ConfigLoader) LoadModuleConfig(moduleID string) (*ModuleConfig, error) 
 	}
 
 	return &cfg, nil
+}
+
+func moduleConfigFilePath(configPath, moduleID string) (string, error) {
+	moduleID = strings.TrimSpace(moduleID)
+	if moduleID == "" {
+		return "", ErrMissingModuleID
+	}
+	if strings.Contains(moduleID, string(filepath.Separator)) || strings.Contains(moduleID, "/") || strings.Contains(moduleID, "\\") || strings.Contains(moduleID, "..") {
+		return "", fmt.Errorf("%w: invalid module id path segment", ErrInvalidConfig)
+	}
+
+	baseDir := filepath.Dir(configPath)
+	modulesDir := filepath.Join(baseDir, "modules")
+	candidate := filepath.Join(modulesDir, moduleID+".yaml")
+	rel, err := filepath.Rel(modulesDir, candidate)
+	if err != nil {
+		return "", fmt.Errorf("%w: resolving module config path", ErrInvalidConfig)
+	}
+	if rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: module config path escapes modules directory", ErrInvalidConfig)
+	}
+	return candidate, nil
 }
 
 // buildModuleConfig creates a module configuration from aegion.yaml.

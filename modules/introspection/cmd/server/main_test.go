@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -21,7 +24,13 @@ func TestDefaultListenAddr(t *testing.T) {
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9008")
+	registerCalled := false
+	cfg := moduleConfig("127.0.0.1:9008", func(mux *http.ServeMux) {
+		registerCalled = true
+		mux.HandleFunc("/oauth2/introspect", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+	})
 	if cfg.Module != "introspection" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9008" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
@@ -37,19 +46,58 @@ func TestModuleConfig(t *testing.T) {
 	if len(cfg.EventSubscriptions) != 3 || cfg.EventSubscriptions[0] != "session.created" || cfg.EventSubscriptions[1] != "session.revoked" || cfg.EventSubscriptions[2] != "identity.updated" {
 		t.Fatalf("unexpected event subscriptions: %#v", cfg.EventSubscriptions)
 	}
+
+	mux := http.NewServeMux()
+	cfg.RegisterHTTPRoutes(mux)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/introspect", nil)
+	mux.ServeHTTP(rec, req)
+	if !registerCalled || rec.Code != http.StatusNoContent {
+		t.Fatalf("expected registered introspection route to be served, got status=%d called=%v", rec.Code, registerCalled)
+	}
+}
+
+func TestOAuth2Issuer(t *testing.T) {
+	t.Setenv(issuerEnv, "")
+	t.Setenv(legacyIssuerEnv, "")
+	if got := oauth2Issuer(); got != defaultIssuer {
+		t.Fatalf("expected default issuer %q, got %q", defaultIssuer, got)
+	}
+
+	t.Setenv(legacyIssuerEnv, "https://issuer.example.com/")
+	if got := oauth2Issuer(); got != "https://issuer.example.com" {
+		t.Fatalf("expected trimmed legacy issuer, got %q", got)
+	}
+
+	t.Setenv(issuerEnv, "https://introspection.example.com/")
+	if got := oauth2Issuer(); got != "https://introspection.example.com" {
+		t.Fatalf("expected trimmed override issuer, got %q", got)
+	}
 }
 
 func TestMainInvokesRunModuleServer(t *testing.T) {
 	origRun := runModuleServer
+	origBuildRuntime := buildRuntimeHook
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	t.Cleanup(func() {
 		runModuleServer = origRun
+		buildRuntimeHook = origBuildRuntime
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 	})
 
 	var captured moduleserver.Config
+	buildRuntimeHook = func(ctx context.Context) (*moduleRuntime, error) {
+		return &moduleRuntime{
+			registerHTTPRoutes: func(mux *http.ServeMux) {
+				mux.HandleFunc("/oauth2/introspect", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
+			},
+			cleanup: func() {},
+		}, nil
+	}
 	runModuleServer = func(cfg moduleserver.Config) error {
 		captured = cfg
 		return nil
@@ -59,7 +107,7 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	main()
 
-	if captured.Module != "introspection" || captured.ListenAddr != "127.0.0.1:19008" {
+	if captured.Module != "introspection" || captured.ListenAddr != "127.0.0.1:19008" || captured.RegisterHTTPRoutes == nil {
 		t.Fatalf("main did not pass expected config: %+v", captured)
 	}
 }

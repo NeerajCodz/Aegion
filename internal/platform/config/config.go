@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,23 +14,28 @@ import (
 
 // Config represents the complete Aegion configuration.
 type Config struct {
-	ModuleVersions map[string]string `yaml:"module_versions"`
-	ModuleRegistry ModuleRegistry    `yaml:"module_registry"`
-	Server         ServerConfig      `yaml:"server"`
-	Database       DatabaseConfig    `yaml:"database"`
-	Cache          CacheConfig       `yaml:"cache"`
-	Secrets        SecretsConfig     `yaml:"secrets"`
-	Log            LogConfig         `yaml:"log"`
-	Operator       OperatorConfig    `yaml:"operator"`
-	Courier        CourierConfig     `yaml:"courier"`
-	Sessions       SessionsConfig    `yaml:"sessions"`
-	Identity       IdentityConfig    `yaml:"identity"`
-	Security       SecurityConfig    `yaml:"security"`
-	Password       PasswordConfig    `yaml:"password"`
-	MagicLink      MagicLinkConfig   `yaml:"magic_link"`
-	Admin          AdminConfig       `yaml:"admin"`
-	Policy         PolicyConfig      `yaml:"policy"`
-	Proxy          ProxyConfig       `yaml:"proxy"`
+	XTimeouts      map[string]any      `yaml:"x-timeouts"`
+	XRateLimits    map[string]any      `yaml:"x-rate-limits"`
+	ModuleVersions map[string]string   `yaml:"module_versions"`
+	ModuleRegistry ModuleRegistry      `yaml:"module_registry"`
+	Server         ServerConfig        `yaml:"server"`
+	Database       DatabaseConfig      `yaml:"database"`
+	Cache          CacheConfig         `yaml:"cache"`
+	Secrets        SecretsConfig       `yaml:"secrets"`
+	Log            LogConfig           `yaml:"log"`
+	Operator       OperatorConfig      `yaml:"operator"`
+	Courier        CourierConfig       `yaml:"courier"`
+	Sessions       SessionsConfig      `yaml:"sessions"`
+	Identity       IdentityConfig      `yaml:"identity"`
+	Security       SecurityConfig      `yaml:"security"`
+	Password       PasswordConfig      `yaml:"password"`
+	MagicLink      MagicLinkConfig     `yaml:"magic_link"`
+	MFA            MFAConfig           `yaml:"mfa"`
+	Passkeys       PasskeysConfig      `yaml:"passkeys"`
+	Admin          AdminConfig         `yaml:"admin"`
+	Policy         PolicyConfig        `yaml:"policy"`
+	Proxy          ProxyConfig         `yaml:"proxy"`
+	Observability  ObservabilityConfig `yaml:"observability"`
 }
 
 // ModuleRegistry configures where to pull module images from.
@@ -53,9 +59,11 @@ type ServerConfig struct {
 
 // TLSConfig configures TLS settings.
 type TLSConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	CertFile string `yaml:"cert_file"`
-	KeyFile  string `yaml:"key_file"`
+	Enabled      bool   `yaml:"enabled"`
+	CertFile     string `yaml:"cert_file"`
+	KeyFile      string `yaml:"key_file"`
+	ClientCAFile string `yaml:"client_ca_file"`
+	MinVersion   string `yaml:"min_version"`
 }
 
 // CORSConfig configures CORS settings.
@@ -91,9 +99,10 @@ type DatabaseConfig struct {
 
 // CacheConfig configures the Redis cache.
 type CacheConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	URL       string `yaml:"url"`
-	KeyPrefix string `yaml:"key_prefix"`
+	Enabled    bool   `yaml:"enabled"`
+	URL        string `yaml:"url"`
+	KeyPrefix  string `yaml:"key_prefix"`
+	TLSEnabled bool   `yaml:"tls_enabled"`
 }
 
 // SecretsConfig holds encryption and signing secrets.
@@ -105,8 +114,10 @@ type SecretsConfig struct {
 
 // LogConfig configures logging.
 type LogConfig struct {
-	Level  string `yaml:"level"`
-	Format string `yaml:"format"`
+	Level            string   `yaml:"level"`
+	Format           string   `yaml:"format"`
+	IncludeRequestID bool     `yaml:"include_request_id"`
+	RedactFields     []string `yaml:"redact_fields"`
 }
 
 // OperatorConfig configures the bootstrap operator.
@@ -118,6 +129,7 @@ type OperatorConfig struct {
 // CourierConfig configures email/SMS delivery.
 type CourierConfig struct {
 	SMTP SMTPConfig `yaml:"smtp"`
+	SMS  SMSConfig  `yaml:"sms"`
 }
 
 // SMTPConfig configures SMTP delivery.
@@ -127,6 +139,7 @@ type SMTPConfig struct {
 	FromAddress string   `yaml:"from_address"`
 	FromName    string   `yaml:"from_name"`
 	Auth        SMTPAuth `yaml:"auth"`
+	TLS         SMTPTLS  `yaml:"tls"`
 }
 
 // SMTPAuth configures SMTP authentication.
@@ -136,18 +149,35 @@ type SMTPAuth struct {
 	Password string `yaml:"password"`
 }
 
+type SMTPTLS struct {
+	Enabled    bool `yaml:"enabled"`
+	SkipVerify bool `yaml:"skip_verify"`
+}
+
+// SMSConfig configures generic HTTP SMS delivery.
+type SMSConfig struct {
+	Enabled      bool              `yaml:"enabled"`
+	URL          string            `yaml:"url"`
+	Method       string            `yaml:"method"`
+	Headers      map[string]string `yaml:"headers"`
+	BodyTemplate string            `yaml:"body_template"`
+	Timeout      Duration          `yaml:"timeout"`
+}
+
 // SessionsConfig configures session management.
 type SessionsConfig struct {
 	Cookie             CookieConfig `yaml:"cookie"`
 	Lifespan           Duration     `yaml:"lifespan"`
 	IdleTimeout        Duration     `yaml:"idle_timeout"`
 	RememberMeLifespan Duration     `yaml:"remember_me_lifespan"`
+	MaxPerUser         int          `yaml:"max_per_user"`
 }
 
 // CookieConfig configures session cookies.
 type CookieConfig struct {
 	Name     string `yaml:"name"`
 	Path     string `yaml:"path"`
+	Domain   string `yaml:"domain"`
 	SameSite string `yaml:"same_site"`
 	Secure   bool   `yaml:"secure"`
 	HTTPOnly bool   `yaml:"http_only"`
@@ -168,8 +198,18 @@ type SchemaConfig struct {
 // SecurityConfig configures security settings.
 type SecurityConfig struct {
 	AccountEnumMitigation bool             `yaml:"account_enumeration_mitigation"`
+	CSRF                  CSRFConfig       `yaml:"csrf"`
 	RateLimits            RateLimitsConfig `yaml:"rate_limits"`
 	BruteForce            BruteForceConfig `yaml:"brute_force"`
+	Headers               HeadersConfig    `yaml:"headers"`
+}
+
+type CSRFConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	TokenLength int    `yaml:"token_length"`
+	CookieName  string `yaml:"cookie_name"`
+	Secure      bool   `yaml:"secure"`
+	SameSite    string `yaml:"same_site"`
 }
 
 // RateLimitsConfig configures rate limits.
@@ -177,6 +217,9 @@ type RateLimitsConfig struct {
 	Login         RateLimitRule `yaml:"login"`
 	Registration  RateLimitRule `yaml:"registration"`
 	EmailDelivery RateLimitRule `yaml:"email_delivery"`
+	Global        RateLimitRule `yaml:"global"`
+	PasswordReset RateLimitRule `yaml:"password_reset"`
+	API           RateLimitRule `yaml:"api"`
 }
 
 // RateLimitRule defines a rate limit.
@@ -187,8 +230,18 @@ type RateLimitRule struct {
 
 // BruteForceConfig configures brute force protection.
 type BruteForceConfig struct {
-	MaxAttempts     int      `yaml:"max_attempts"`
-	LockoutDuration Duration `yaml:"lockout_duration"`
+	MaxAttempts        int      `yaml:"max_attempts"`
+	LockoutDuration    Duration `yaml:"lockout_duration"`
+	ProgressiveLockout bool     `yaml:"progressive_lockout"`
+	MaxLockoutDuration Duration `yaml:"max_lockout_duration"`
+}
+
+type HeadersConfig struct {
+	ContentSecurityPolicy string `yaml:"content_security_policy"`
+	XFrameOptions         string `yaml:"x_frame_options"`
+	XContentTypeOptions   string `yaml:"x_content_type_options"`
+	ReferrerPolicy        string `yaml:"referrer_policy"`
+	PermissionsPolicy     string `yaml:"permissions_policy"`
 }
 
 // PasswordConfig configures the password module.
@@ -219,11 +272,35 @@ type MagicLinkConfig struct {
 	RecoveryRateLimit int      `yaml:"recovery_rate_limit"`
 }
 
+// MFAConfig configures built-in multi-factor authentication behavior.
+type MFAConfig struct {
+	Enabled                 bool     `yaml:"enabled"`
+	Issuer                  string   `yaml:"issuer"`
+	EnrollmentTTL           Duration `yaml:"enrollment_ttl"`
+	CodeDigits              int      `yaml:"code_digits"`
+	CodePeriod              Duration `yaml:"code_period"`
+	AllowedTimeWindows      int      `yaml:"allowed_time_windows"`
+	BackupCodeCount         int      `yaml:"backup_code_count"`
+	TrustedDeviceLifespan   Duration `yaml:"trusted_device_lifespan"`
+	TrustedDeviceCookieName string   `yaml:"trusted_device_cookie_name"`
+}
+
+// PasskeysConfig configures built-in passkey support.
+type PasskeysConfig struct {
+	Enabled            bool     `yaml:"enabled"`
+	RPID               string   `yaml:"rp_id"`
+	RPOrigin           string   `yaml:"rp_origin"`
+	ChallengeTTL       Duration `yaml:"challenge_ttl"`
+	AllowedCredentials int      `yaml:"allowed_credentials"`
+}
+
 // AdminConfig configures the admin module.
 type AdminConfig struct {
 	Enabled               bool            `yaml:"enabled"`
 	Path                  string          `yaml:"path"`
 	SessionLifespan       Duration        `yaml:"session_lifespan"`
+	RequireReauth         bool            `yaml:"require_reauth"`
+	ReauthTimeout         Duration        `yaml:"reauth_timeout"`
 	DefaultPageSize       int             `yaml:"default_page_size"`
 	MaxPageSize           int             `yaml:"max_page_size"`
 	APIKeyPrefix          string          `yaml:"api_key_prefix"`
@@ -274,10 +351,34 @@ type ProxyConfig struct {
 	UpstreamTimeout             Duration `yaml:"upstream_timeout"`
 	PreserveHost                bool     `yaml:"preserve_host"`
 	TrustForwardedHeaders       bool     `yaml:"trust_forwarded_headers"`
+	TrustedProxyCIDRs           []string `yaml:"trusted_proxy_cidrs"`
 	StripInboundIdentityHeaders bool     `yaml:"strip_inbound_identity_headers"`
 	IdentitySigningSecret       string   `yaml:"identity_signing_secret"`
 	IdentitySignatureHeader     string   `yaml:"identity_signature_header"`
 	SignedIdentityHeaders       []string `yaml:"signed_identity_headers"`
+}
+
+type ObservabilityConfig struct {
+	Metrics ObservabilityMetricsConfig `yaml:"metrics"`
+	Tracing ObservabilityTracingConfig `yaml:"tracing"`
+	Health  ObservabilityHealthConfig  `yaml:"health"`
+}
+
+type ObservabilityMetricsConfig struct {
+	Enabled    bool     `yaml:"enabled"`
+	Path       string   `yaml:"path"`
+	AllowedIPs []string `yaml:"allowed_ips"`
+}
+
+type ObservabilityTracingConfig struct {
+	Enabled    bool    `yaml:"enabled"`
+	Endpoint   string  `yaml:"endpoint"`
+	SampleRate float64 `yaml:"sample_rate"`
+}
+
+type ObservabilityHealthConfig struct {
+	Path     string `yaml:"path"`
+	Detailed bool   `yaml:"detailed"`
 }
 
 // Duration wraps time.Duration for YAML unmarshaling.
@@ -314,7 +415,9 @@ func Load(path string) (*Config, error) {
 	expanded := os.ExpandEnv(string(data))
 
 	var cfg Config
-	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader([]byte(expanded)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
@@ -412,11 +515,44 @@ func applyDefaults(cfg *Config) {
 	if cfg.MagicLink.RecoveryRateLimit == 0 {
 		cfg.MagicLink.RecoveryRateLimit = 3
 	}
+	if cfg.MFA.Issuer == "" {
+		cfg.MFA.Issuer = "Aegion"
+	}
+	if cfg.MFA.EnrollmentTTL == 0 {
+		cfg.MFA.EnrollmentTTL = Duration(10 * time.Minute)
+	}
+	if cfg.MFA.CodeDigits == 0 {
+		cfg.MFA.CodeDigits = 6
+	}
+	if cfg.MFA.CodePeriod == 0 {
+		cfg.MFA.CodePeriod = Duration(30 * time.Second)
+	}
+	if cfg.MFA.AllowedTimeWindows == 0 {
+		cfg.MFA.AllowedTimeWindows = 1
+	}
+	if cfg.MFA.BackupCodeCount == 0 {
+		cfg.MFA.BackupCodeCount = 12
+	}
+	if cfg.MFA.TrustedDeviceLifespan == 0 {
+		cfg.MFA.TrustedDeviceLifespan = Duration(30 * 24 * time.Hour)
+	}
+	if cfg.MFA.TrustedDeviceCookieName == "" {
+		cfg.MFA.TrustedDeviceCookieName = "aegion_mfa_trusted_device"
+	}
+	if cfg.Passkeys.ChallengeTTL == 0 {
+		cfg.Passkeys.ChallengeTTL = Duration(5 * time.Minute)
+	}
+	if cfg.Passkeys.AllowedCredentials == 0 {
+		cfg.Passkeys.AllowedCredentials = 20
+	}
 	if cfg.Admin.Path == "" {
 		cfg.Admin.Path = "/aegion"
 	}
 	if cfg.Admin.SessionLifespan == 0 {
 		cfg.Admin.SessionLifespan = Duration(4 * time.Hour)
+	}
+	if cfg.Admin.ReauthTimeout == 0 {
+		cfg.Admin.ReauthTimeout = Duration(5 * time.Minute)
 	}
 	if cfg.Admin.DefaultPageSize == 0 {
 		cfg.Admin.DefaultPageSize = 20
@@ -465,6 +601,18 @@ func applyDefaults(cfg *Config) {
 	}
 	if len(cfg.Proxy.SignedIdentityHeaders) == 0 {
 		cfg.Proxy.SignedIdentityHeaders = []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
+	}
+	if cfg.Observability.Metrics.Path == "" {
+		cfg.Observability.Metrics.Path = "/metrics"
+	}
+	if cfg.Observability.Health.Path == "" {
+		cfg.Observability.Health.Path = "/health"
+	}
+	if cfg.Courier.SMS.Method == "" {
+		cfg.Courier.SMS.Method = "POST"
+	}
+	if cfg.Courier.SMS.Timeout == 0 {
+		cfg.Courier.SMS.Timeout = Duration(10 * time.Second)
 	}
 }
 
@@ -586,6 +734,22 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("internal secret must be at least 32 characters")
 		}
 	}
+	if c.MFA.Enabled {
+		if c.MFA.CodeDigits != 6 && c.MFA.CodeDigits != 8 {
+			return fmt.Errorf("mfa.code_digits must be 6 or 8 when mfa is enabled")
+		}
+		if c.MFA.AllowedTimeWindows < 0 {
+			return fmt.Errorf("mfa.allowed_time_windows must be greater than or equal to 0")
+		}
+	}
+	if c.Passkeys.Enabled {
+		if strings.TrimSpace(c.Passkeys.RPID) == "" {
+			return fmt.Errorf("passkeys.rp_id is required when passkeys are enabled")
+		}
+		if strings.TrimSpace(c.Passkeys.RPOrigin) == "" {
+			return fmt.Errorf("passkeys.rp_origin is required when passkeys are enabled")
+		}
+	}
 
 	if !isProductionEnvironment() {
 		return nil
@@ -609,6 +773,24 @@ func (c *Config) Validate() error {
 	}
 	if strings.EqualFold(strings.TrimSpace(c.Log.Level), "debug") {
 		return fmt.Errorf("log.level=debug is not allowed in production")
+	}
+	if c.Server.TLS.Enabled && (strings.TrimSpace(c.Server.TLS.CertFile) == "" || strings.TrimSpace(c.Server.TLS.KeyFile) == "") {
+		return fmt.Errorf("server.tls.cert_file and server.tls.key_file are required when tls is enabled")
+	}
+	if c.Courier.SMS.Enabled {
+		smsURL := strings.ToLower(strings.TrimSpace(c.Courier.SMS.URL))
+		if smsURL == "" {
+			return fmt.Errorf("courier.sms.url is required when sms delivery is enabled")
+		}
+		if isProductionEnvironment() && !strings.HasPrefix(smsURL, "https://") {
+			return fmt.Errorf("courier.sms.url must use https in production")
+		}
+	}
+	if c.Proxy.TrustForwardedHeaders && len(c.Proxy.TrustedProxyCIDRs) == 0 {
+		return fmt.Errorf("proxy.trusted_proxy_cidrs is required when proxy.trust_forwarded_headers is enabled")
+	}
+	if c.Passkeys.Enabled && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.Passkeys.RPOrigin)), "https://") {
+		return fmt.Errorf("passkeys.rp_origin must use https in production")
 	}
 	if containsPlaceholderValue(c.Operator.Password) {
 		return fmt.Errorf("operator.password must be rotated before production")

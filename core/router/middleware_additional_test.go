@@ -86,6 +86,8 @@ func TestGetClientIPAdditionalBranches(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com", nil)
 	req.Header.Set("X-Forwarded-For", " , 203.0.113.8")
+	req.RemoteAddr = "192.0.2.20:1234"
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "192.0.2.0/24")
 	if got := getClientIP(req); got != "203.0.113.8" {
 		t.Fatalf("expected first non-empty forwarded IP, got %q", got)
 	}
@@ -243,6 +245,7 @@ func TestRateLimitMiddlewareDefaultDoesNotTrustForwardedHeaders(t *testing.T) {
 }
 
 func TestRateLimitMiddlewareTrustProxyUsesForwardedHeaders(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "192.0.2.0/24")
 	handler := RateLimitWithTrustProxy(RateLimitConfig{
 		RequestsPerSecond: 1,
 		Burst:             1,

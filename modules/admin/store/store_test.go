@@ -1058,7 +1058,7 @@ func TestAPIKeyStoreMethods(t *testing.T) {
 }
 
 func TestHashAndValidateAPIKeyToken(t *testing.T) {
-	token := "aegion_12345678901234567890"
+	token := "aegion_examplekey01_not_a_real_token"
 	hash := HashAPIKeyToken(token)
 
 	assert.NotEmpty(t, hash)

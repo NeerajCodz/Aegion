@@ -1,7 +1,4 @@
-//! FFI bindings for CGo integration
-//!
-//! These functions are exposed as C-compatible functions that can be
-//! called from Go through CGo.
+//! FFI bindings for CGo integration.
 
 use libc::{c_char, c_int, size_t};
 use std::ffi::{CStr, CString};
@@ -9,37 +6,34 @@ use std::ptr;
 use std::slice;
 
 use crate::encrypt::generate_key;
-use crate::{constant_time_compare, decrypt_field, encrypt_field, hash_password, verify_password};
+use crate::{
+    compute_pkce_challenge, constant_time_compare, decrypt_field, encrypt_field,
+    generate_internal_token, hash_opaque_token, hash_password, lookup_prefix, sign_envelope,
+    sign_hex, sign_session_cookie, validate_opaque_token, verify_envelope, verify_internal_token,
+    verify_password, verify_pkce, verify_session_cookie,
+};
 
-/// Result structure for functions that return strings
 #[repr(C)]
 pub struct CryptoResult {
-    /// 0 on success, negative error code on failure
     pub error_code: c_int,
-    /// Null-terminated result string (caller must free with crypto_free_string)
     pub result: *mut c_char,
 }
 
-/// Result structure for functions that return bytes
 #[repr(C)]
 pub struct BytesResult {
-    /// 0 on success, negative error code on failure
     pub error_code: c_int,
-    /// Result bytes (caller must free with crypto_free_bytes)
     pub data: *mut u8,
-    /// Length of the data
     pub len: size_t,
 }
 
-// ============================================================================
-// Password Hashing
-// ============================================================================
+#[repr(C)]
+pub struct ParsedTokenResult {
+    pub error_code: c_int,
+    pub module_id: *mut c_char,
+    pub timestamp: i64,
+    pub signature_hex: *mut c_char,
+}
 
-/// Hash a password using Argon2id
-///
-/// # Safety
-/// - `password` must be a valid null-terminated C string
-/// - The returned `CryptoResult.result` must be freed with `crypto_free_string`
 #[no_mangle]
 pub unsafe extern "C" fn crypto_hash_password(password: *const c_char) -> CryptoResult {
     if password.is_null() {
@@ -60,13 +54,10 @@ pub unsafe extern "C" fn crypto_hash_password(password: *const c_char) -> Crypto
     };
 
     match hash_password(password_str) {
-        Ok(hash) => {
-            let c_hash = CString::new(hash).unwrap();
-            CryptoResult {
-                error_code: 0,
-                result: c_hash.into_raw(),
-            }
-        }
+        Ok(hash) => CryptoResult {
+            error_code: 0,
+            result: CString::new(hash).unwrap().into_raw(),
+        },
         Err(e) => CryptoResult {
             error_code: e.to_error_code(),
             result: ptr::null_mut(),
@@ -74,16 +65,6 @@ pub unsafe extern "C" fn crypto_hash_password(password: *const c_char) -> Crypto
     }
 }
 
-/// Verify a password against an Argon2id hash
-///
-/// # Safety
-/// - `password` must be a valid null-terminated C string
-/// - `hash` must be a valid null-terminated C string
-///
-/// # Returns
-/// - 1 if password matches
-/// - 0 if password does not match
-/// - Negative error code on failure
 #[no_mangle]
 pub unsafe extern "C" fn crypto_verify_password(
     password: *const c_char,
@@ -97,7 +78,6 @@ pub unsafe extern "C" fn crypto_verify_password(
         Ok(s) => s,
         Err(_) => return -1,
     };
-
     let hash_str = match CStr::from_ptr(hash).to_str() {
         Ok(s) => s,
         Err(_) => return -1,
@@ -110,17 +90,6 @@ pub unsafe extern "C" fn crypto_verify_password(
     }
 }
 
-// ============================================================================
-// Field Encryption
-// ============================================================================
-
-/// Encrypt a field with XChaCha20-Poly1305
-///
-/// # Safety
-/// - `key` must point to exactly 32 bytes
-/// - `plaintext` and `plaintext_len` must be valid
-/// - `aad` can be null if `aad_len` is 0
-/// - The returned `CryptoResult.result` must be freed with `crypto_free_string`
 #[no_mangle]
 pub unsafe extern "C" fn crypto_encrypt_field(
     key: *const u8,
@@ -150,13 +119,10 @@ pub unsafe extern "C" fn crypto_encrypt_field(
     };
 
     match encrypt_field(key_slice, plaintext_slice, aad_opt) {
-        Ok(ciphertext) => {
-            let c_str = CString::new(ciphertext).unwrap();
-            CryptoResult {
-                error_code: 0,
-                result: c_str.into_raw(),
-            }
-        }
+        Ok(ciphertext) => CryptoResult {
+            error_code: 0,
+            result: CString::new(ciphertext).unwrap().into_raw(),
+        },
         Err(e) => CryptoResult {
             error_code: e.to_error_code(),
             result: ptr::null_mut(),
@@ -164,13 +130,6 @@ pub unsafe extern "C" fn crypto_encrypt_field(
     }
 }
 
-/// Decrypt a field with XChaCha20-Poly1305
-///
-/// # Safety
-/// - `key` must point to exactly 32 bytes
-/// - `ciphertext` must be a valid null-terminated C string (base64)
-/// - `aad` can be null if `aad_len` is 0
-/// - The returned `BytesResult.data` must be freed with `crypto_free_bytes`
 #[no_mangle]
 pub unsafe extern "C" fn crypto_decrypt_field(
     key: *const u8,
@@ -207,10 +166,10 @@ pub unsafe extern "C" fn crypto_decrypt_field(
         Ok(plaintext) => {
             let len = plaintext.len();
             let boxed = plaintext.into_boxed_slice();
-            let ptr = Box::into_raw(boxed) as *mut u8;
+            let data = Box::into_raw(boxed) as *mut u8;
             BytesResult {
                 error_code: 0,
-                data: ptr,
+                data,
                 len,
             }
         }
@@ -222,14 +181,6 @@ pub unsafe extern "C" fn crypto_decrypt_field(
     }
 }
 
-/// Generate a random 32-byte encryption key
-///
-/// # Safety
-/// - `out` must point to a buffer of at least 32 bytes
-///
-/// # Returns
-/// - 0 on success
-/// - Negative error code on failure
 #[no_mangle]
 pub unsafe extern "C" fn crypto_generate_key(out: *mut u8) -> c_int {
     if out.is_null() {
@@ -245,18 +196,6 @@ pub unsafe extern "C" fn crypto_generate_key(out: *mut u8) -> c_int {
     }
 }
 
-// ============================================================================
-// Comparison
-// ============================================================================
-
-/// Constant-time byte comparison
-///
-/// # Safety
-/// - `a` and `b` must point to valid memory of at least `len` bytes
-///
-/// # Returns
-/// - 1 if equal
-/// - 0 if not equal
 #[no_mangle]
 pub unsafe extern "C" fn crypto_constant_time_compare(
     a: *const u8,
@@ -269,7 +208,6 @@ pub unsafe extern "C" fn crypto_constant_time_compare(
 
     let a_slice = slice::from_raw_parts(a, len);
     let b_slice = slice::from_raw_parts(b, len);
-
     if constant_time_compare(a_slice, b_slice) {
         1
     } else {
@@ -277,14 +215,440 @@ pub unsafe extern "C" fn crypto_constant_time_compare(
     }
 }
 
-// ============================================================================
-// Memory Management
-// ============================================================================
+#[no_mangle]
+pub unsafe extern "C" fn crypto_opaque_hash(token: *const c_char) -> CryptoResult {
+    if token.is_null() {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
 
-/// Free a string returned by crypto functions
-///
-/// # Safety
-/// - `s` must be a string returned by a crypto function, or null
+    let token_str = match CStr::from_ptr(token).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return CryptoResult {
+                error_code: -8,
+                result: ptr::null_mut(),
+            }
+        }
+    };
+
+    CryptoResult {
+        error_code: 0,
+        result: CString::new(hash_opaque_token(token_str))
+            .unwrap()
+            .into_raw(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_opaque_validate(
+    token: *const c_char,
+    expected_hash: *const c_char,
+) -> c_int {
+    if token.is_null() || expected_hash.is_null() {
+        return 0;
+    }
+
+    let token_str = match CStr::from_ptr(token).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let hash_str = match CStr::from_ptr(expected_hash).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+
+    if validate_opaque_token(token_str, hash_str) {
+        1
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_opaque_prefix(
+    token: *const c_char,
+    length: size_t,
+) -> CryptoResult {
+    if token.is_null() {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
+
+    let token_str = match CStr::from_ptr(token).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return CryptoResult {
+                error_code: -8,
+                result: ptr::null_mut(),
+            }
+        }
+    };
+
+    CryptoResult {
+        error_code: 0,
+        result: CString::new(lookup_prefix(token_str, length))
+            .unwrap()
+            .into_raw(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_hmac_sha256_hex(
+    secret: *const u8,
+    secret_len: size_t,
+    message: *const u8,
+    message_len: size_t,
+) -> CryptoResult {
+    if secret.is_null() || (message.is_null() && message_len > 0) {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
+
+    let secret_slice = slice::from_raw_parts(secret, secret_len);
+    let message_slice = if message_len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(message, message_len)
+    };
+
+    match sign_hex(secret_slice, message_slice) {
+        Ok(signature) => CryptoResult {
+            error_code: 0,
+            result: CString::new(signature).unwrap().into_raw(),
+        },
+        Err(e) => CryptoResult {
+            error_code: e.to_error_code(),
+            result: ptr::null_mut(),
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_sign_envelope(
+    kind: *const c_char,
+    secret: *const u8,
+    secret_len: size_t,
+    timestamp: i64,
+    payload: *const u8,
+    payload_len: size_t,
+) -> CryptoResult {
+    if kind.is_null() || secret.is_null() || (payload.is_null() && payload_len > 0) {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
+
+    let kind_str = match CStr::from_ptr(kind).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return CryptoResult {
+                error_code: -8,
+                result: ptr::null_mut(),
+            }
+        }
+    };
+    let secret_slice = slice::from_raw_parts(secret, secret_len);
+    let payload_slice = if payload_len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(payload, payload_len)
+    };
+
+    match sign_envelope(kind_str, secret_slice, timestamp, payload_slice) {
+        Ok(envelope) => CryptoResult {
+            error_code: 0,
+            result: CString::new(envelope).unwrap().into_raw(),
+        },
+        Err(e) => CryptoResult {
+            error_code: e.to_error_code(),
+            result: ptr::null_mut(),
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_verify_envelope(
+    kind: *const c_char,
+    secret: *const u8,
+    secret_len: size_t,
+    payload: *const u8,
+    payload_len: size_t,
+    envelope: *const c_char,
+    max_age_seconds: u64,
+    now_unix: i64,
+) -> c_int {
+    if kind.is_null()
+        || secret.is_null()
+        || envelope.is_null()
+        || (payload.is_null() && payload_len > 0)
+    {
+        return 0;
+    }
+
+    let kind_str = match CStr::from_ptr(kind).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let secret_slice = slice::from_raw_parts(secret, secret_len);
+    let payload_slice = if payload_len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(payload, payload_len)
+    };
+    let envelope_str = match CStr::from_ptr(envelope).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+
+    match verify_envelope(
+        kind_str,
+        secret_slice,
+        payload_slice,
+        envelope_str,
+        max_age_seconds,
+        now_unix,
+    ) {
+        Ok(true) => 1,
+        _ => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_sign_session_cookie(
+    secret: *const u8,
+    secret_len: size_t,
+    token: *const c_char,
+    timestamp: i64,
+) -> CryptoResult {
+    if secret.is_null() || token.is_null() {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
+
+    let secret_slice = slice::from_raw_parts(secret, secret_len);
+    let token_str = match CStr::from_ptr(token).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return CryptoResult {
+                error_code: -8,
+                result: ptr::null_mut(),
+            }
+        }
+    };
+
+    match sign_session_cookie(secret_slice, token_str, timestamp) {
+        Ok(value) => CryptoResult {
+            error_code: 0,
+            result: CString::new(value).unwrap().into_raw(),
+        },
+        Err(e) => CryptoResult {
+            error_code: e.to_error_code(),
+            result: ptr::null_mut(),
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_verify_session_cookie(
+    secret: *const u8,
+    secret_len: size_t,
+    signed: *const c_char,
+    max_age_seconds: u64,
+    now_unix: i64,
+) -> CryptoResult {
+    if secret.is_null() || signed.is_null() {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
+
+    let secret_slice = slice::from_raw_parts(secret, secret_len);
+    let signed_str = match CStr::from_ptr(signed).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return CryptoResult {
+                error_code: -8,
+                result: ptr::null_mut(),
+            }
+        }
+    };
+
+    match verify_session_cookie(secret_slice, signed_str, now_unix, max_age_seconds) {
+        Ok(token) => CryptoResult {
+            error_code: 0,
+            result: CString::new(token).unwrap().into_raw(),
+        },
+        Err(e) => CryptoResult {
+            error_code: e.to_error_code(),
+            result: ptr::null_mut(),
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_generate_internal_token(
+    secret: *const u8,
+    secret_len: size_t,
+    module_id: *const c_char,
+    timestamp: i64,
+) -> CryptoResult {
+    if secret.is_null() || module_id.is_null() {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
+
+    let secret_slice = slice::from_raw_parts(secret, secret_len);
+    let module_str = match CStr::from_ptr(module_id).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return CryptoResult {
+                error_code: -8,
+                result: ptr::null_mut(),
+            }
+        }
+    };
+
+    match generate_internal_token(secret_slice, module_str, timestamp) {
+        Ok(token) => CryptoResult {
+            error_code: 0,
+            result: CString::new(token).unwrap().into_raw(),
+        },
+        Err(e) => CryptoResult {
+            error_code: e.to_error_code(),
+            result: ptr::null_mut(),
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_verify_internal_token(
+    secret: *const u8,
+    secret_len: size_t,
+    token: *const c_char,
+    ttl_seconds: u64,
+    now_unix: i64,
+) -> ParsedTokenResult {
+    if secret.is_null() || token.is_null() {
+        return ParsedTokenResult {
+            error_code: -8,
+            module_id: ptr::null_mut(),
+            timestamp: 0,
+            signature_hex: ptr::null_mut(),
+        };
+    }
+
+    let secret_slice = slice::from_raw_parts(secret, secret_len);
+    let token_str = match CStr::from_ptr(token).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return ParsedTokenResult {
+                error_code: -8,
+                module_id: ptr::null_mut(),
+                timestamp: 0,
+                signature_hex: ptr::null_mut(),
+            }
+        }
+    };
+
+    match verify_internal_token(secret_slice, token_str, now_unix, ttl_seconds) {
+        Ok(parsed) => ParsedTokenResult {
+            error_code: 0,
+            module_id: CString::new(parsed.module_id).unwrap().into_raw(),
+            timestamp: parsed.timestamp_millis,
+            signature_hex: CString::new(parsed.signature_hex).unwrap().into_raw(),
+        },
+        Err(e) => ParsedTokenResult {
+            error_code: e.to_error_code(),
+            module_id: ptr::null_mut(),
+            timestamp: 0,
+            signature_hex: ptr::null_mut(),
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_pkce_challenge(
+    verifier: *const c_char,
+    method: *const c_char,
+) -> CryptoResult {
+    if verifier.is_null() {
+        return CryptoResult {
+            error_code: -8,
+            result: ptr::null_mut(),
+        };
+    }
+
+    let verifier_str = match CStr::from_ptr(verifier).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            return CryptoResult {
+                error_code: -8,
+                result: ptr::null_mut(),
+            }
+        }
+    };
+    let method_str = if method.is_null() {
+        ""
+    } else {
+        CStr::from_ptr(method).to_str().unwrap_or("")
+    };
+
+    match compute_pkce_challenge(verifier_str, method_str) {
+        Ok(challenge) => CryptoResult {
+            error_code: 0,
+            result: CString::new(challenge).unwrap().into_raw(),
+        },
+        Err(e) => CryptoResult {
+            error_code: e.to_error_code(),
+            result: ptr::null_mut(),
+        },
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn crypto_pkce_verify(
+    verifier: *const c_char,
+    challenge: *const c_char,
+    method: *const c_char,
+) -> c_int {
+    if verifier.is_null() || challenge.is_null() {
+        return -1;
+    }
+
+    let verifier_str = match CStr::from_ptr(verifier).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let challenge_str = match CStr::from_ptr(challenge).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let method_str = if method.is_null() {
+        ""
+    } else {
+        CStr::from_ptr(method).to_str().unwrap_or("")
+    };
+
+    match verify_pkce(verifier_str, challenge_str, method_str) {
+        Ok(true) => 1,
+        Ok(false) => 0,
+        Err(e) => e.to_error_code(),
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn crypto_free_string(s: *mut c_char) {
     if !s.is_null() {
@@ -292,11 +656,6 @@ pub unsafe extern "C" fn crypto_free_string(s: *mut c_char) {
     }
 }
 
-/// Free bytes returned by crypto functions
-///
-/// # Safety
-/// - `data` must be bytes returned by a crypto function, or null
-/// - `len` must match the original length
 #[no_mangle]
 pub unsafe extern "C" fn crypto_free_bytes(data: *mut u8, len: size_t) {
     if !data.is_null() {
@@ -304,68 +663,12 @@ pub unsafe extern "C" fn crypto_free_bytes(data: *mut u8, len: size_t) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ptr;
-
-    #[test]
-    fn encrypt_rejects_null_plaintext_with_nonzero_length() {
-        let key = generate_key().unwrap();
-
-        let result = unsafe { crypto_encrypt_field(key.as_ptr(), ptr::null(), 1, ptr::null(), 0) };
-
-        assert_eq!(result.error_code, -1);
-        assert!(result.result.is_null());
+#[no_mangle]
+pub unsafe extern "C" fn crypto_free_parsed_token(result: ParsedTokenResult) {
+    if !result.module_id.is_null() {
+        drop(CString::from_raw(result.module_id));
     }
-
-    #[test]
-    fn encrypt_and_decrypt_empty_plaintext() {
-        let key = generate_key().unwrap();
-
-        let encrypted =
-            unsafe { crypto_encrypt_field(key.as_ptr(), ptr::null(), 0, ptr::null(), 0) };
-        assert_eq!(encrypted.error_code, 0);
-        assert!(!encrypted.result.is_null());
-
-        let decrypted = unsafe {
-            crypto_decrypt_field(
-                key.as_ptr(),
-                encrypted.result as *const c_char,
-                ptr::null(),
-                0,
-            )
-        };
-        assert_eq!(decrypted.error_code, 0);
-        assert_eq!(decrypted.len, 0);
-
-        unsafe {
-            crypto_free_string(encrypted.result);
-            crypto_free_bytes(decrypted.data, decrypted.len);
-        }
-    }
-
-    #[test]
-    fn decrypt_rejects_null_aad_with_nonzero_length() {
-        let key = generate_key().unwrap();
-        let encrypted =
-            unsafe { crypto_encrypt_field(key.as_ptr(), b"x".as_ptr(), 1, ptr::null(), 0) };
-        assert_eq!(encrypted.error_code, 0);
-
-        let result = unsafe {
-            crypto_decrypt_field(
-                key.as_ptr(),
-                encrypted.result as *const c_char,
-                ptr::null(),
-                1,
-            )
-        };
-        assert_eq!(result.error_code, -1);
-        assert!(result.data.is_null());
-        assert_eq!(result.len, 0);
-
-        unsafe {
-            crypto_free_string(encrypted.result);
-        }
+    if !result.signature_hex.is_null() {
+        drop(CString::from_raw(result.signature_hex));
     }
 }

@@ -435,6 +435,34 @@ func TestServer_Check_ReBACMaxDepthExceeded(t *testing.T) {
 	assert.Equal(t, []string{"rebac:max_depth_exceeded"}, resp.GetEvalPath())
 }
 
+func TestServer_Check_ReBACTraversalLimitExceeded(t *testing.T) {
+	tuples := make([]policystore.ReBACTuple, 0, 1105)
+	for i := 0; i < 1105; i++ {
+		tuples = append(tuples, policystore.ReBACTuple{
+			Namespace: "documents",
+			ObjectID:  "spec-1",
+			Relation:  "viewer",
+			SubjectID: fmt.Sprintf("group:fanout-%d#viewer", i),
+		})
+	}
+
+	st := &mockRBACStore{rebacTuples: tuples}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		Resource:     "documents:spec-1",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "rebac",
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetAllowed())
+	assert.Equal(t, "rebac", resp.GetModelUsed())
+	assert.Equal(t, "traversal_limit_exceeded", resp.GetDenyReason())
+	assert.Equal(t, []string{"rebac:traversal_limit_exceeded"}, resp.GetEvalPath())
+}
+
 func TestServer_HelperUtilities(t *testing.T) {
 	t.Run("splitCSV trims and skips empty segments", func(t *testing.T) {
 		assert.Equal(t, []string{}, splitCSV("   "))

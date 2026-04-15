@@ -276,6 +276,13 @@ aegion/
 └── aegion.yaml                    ← root config read by core at startup
 ```
 
+## SQL ownership conventions
+
+- `core/migrations/*.up.sql|*.down.sql`: only core schema (`core_*`) tables and shared database primitives.
+- `modules/<module>/migrations/*.up.sql|*.down.sql`: module-owned schema only (for example, policy DDL only in `modules/policy/migrations`).
+- `cmd/aegion` runs both layers in order: core migrator first, then enabled module migrators.
+- Test fixture SQL must stay in testdata/fixture locations and not be mixed into production migration trees.
+
 ---
 
 ## Boundary rules

@@ -24,6 +24,7 @@ This guide covers deploying Aegion to production environments with enterprise-gr
 - [ ] Network isolation configured (VPC/subnets)
 - [ ] Firewall rules configured (minimal port exposure)
 - [ ] Secret management solution (Vault, AWS Secrets Manager, etc.)
+- [ ] If `DOCKER_HOST` uses `tcp://`, set `DOCKER_TLS_VERIFY=1` and explicitly allow with `AEGION_ALLOW_REMOTE_DOCKER_HOST=true`
 
 ### Compliance Requirements
 

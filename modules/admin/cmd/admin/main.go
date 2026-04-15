@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,8 +29,11 @@ import (
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
+	"github.com/aegion/aegion/modules/admin/scim"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
+	socialservice "github.com/aegion/aegion/modules/social/service"
+	socialstore "github.com/aegion/aegion/modules/social/store"
 )
 
 type LogConfig struct {
@@ -48,6 +54,13 @@ type Config struct {
 		ReadTimeout  time.Duration `yaml:"read_timeout"`
 		WriteTimeout time.Duration `yaml:"write_timeout"`
 		IdleTimeout  time.Duration `yaml:"idle_timeout"`
+		TLS          struct {
+			Enabled      bool   `yaml:"enabled"`
+			CertFile     string `yaml:"cert_file"`
+			KeyFile      string `yaml:"key_file"`
+			ClientCAFile string `yaml:"client_ca_file"`
+			MinVersion   string `yaml:"min_version"`
+		} `yaml:"tls"`
 	} `yaml:"server"`
 	Admin struct {
 		Enabled          bool          `yaml:"enabled"`
@@ -74,6 +87,9 @@ type Config struct {
 		ServiceURL string `yaml:"service_url"`
 		APIKey     string `yaml:"api_key"`
 	} `yaml:"core"`
+	Secrets struct {
+		Cipher []string `yaml:"cipher"`
+	} `yaml:"secrets"`
 	Observability struct {
 		Enabled      bool          `yaml:"enabled"`
 		ProbeTimeout time.Duration `yaml:"probe_timeout"`
@@ -261,6 +277,15 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 	adminService := service.New(adminStore, service.Config{
 		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
+	var socialProviders handler.SocialProviderManager
+	if len(cfg.Secrets.Cipher) > 0 && strings.TrimSpace(cfg.Secrets.Cipher[0]) != "" {
+		sum := sha256.Sum256([]byte(strings.TrimSpace(cfg.Secrets.Cipher[0])))
+		socialRepo, err := socialstore.NewPostgres(db, sum[:])
+		if err != nil {
+			return nil, fmt.Errorf("initialize social provider manager: %w", err)
+		}
+		socialProviders = socialservice.New(socialRepo)
+	}
 	adminHandler := handler.New(adminService, handler.HandlerConfig{
 		SessionTokenExpiry: cfg.Admin.SessionLifespan,
 		DefaultPageSize:    cfg.Admin.DefaultPageSize,
@@ -268,12 +293,32 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		APIKeyPrefix:       cfg.Admin.APIKeyPrefix,
 		APIKeyPrefixLen:    cfg.Admin.APIKeyPrefixLen,
 		APIKeyEntropyBytes: cfg.Admin.APIKeyEntropy,
+		SocialProviders:    socialProviders,
 	})
+	var scimService *scim.Service
+	var scimHandler *scim.Handler
+	if cfg.Admin.SCIM.Enabled {
+		scimService = scim.NewService(adminStore, nil, scim.Config{
+			BasePath:                   cfg.Admin.SCIM.BasePath,
+			TokenPrefix:                cfg.Admin.SCIM.TokenPrefix,
+			TokenLookupPrefixLen:       cfg.Admin.SCIM.TokenLookupPrefixLen,
+			TokenEntropyBytes:          cfg.Admin.SCIM.TokenEntropyBytes,
+			DefaultPageSize:            cfg.Admin.SCIM.DefaultPageSize,
+			MaxPageSize:                cfg.Admin.SCIM.MaxPageSize,
+			TokenLastUsedUpdateTimeout: cfg.Admin.SCIM.TokenLastUsedUpdateTimeout,
+		})
+		scimHandler = scim.NewHandler(scimService, scim.HandlerConfig{
+			DefaultPageSize: cfg.Admin.SCIM.DefaultPageSize,
+			MaxPageSize:     cfg.Admin.SCIM.MaxPageSize,
+		})
+	}
 
 	server := &Server{
-		Config:  cfg,
-		DB:      db,
-		Handler: adminHandler,
+		Config:      cfg,
+		DB:          db,
+		Handler:     adminHandler,
+		SCIMService: scimService,
+		SCIMHandler: scimHandler,
 	}
 
 	httpServer := &http.Server{
@@ -283,13 +328,26 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
+	if cfg.Server.TLS.Enabled {
+		tlsConfig, err := buildTLSConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		httpServer.TLSConfig = tlsConfig
+	}
 
 	go func() {
 		log.Info().
 			Str("address", httpServer.Addr).
 			Msg("Starting HTTP server")
 
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if cfg.Server.TLS.Enabled {
+			err = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+		} else {
+			err = httpServer.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("Failed to start HTTP server")
 		}
 	}()
@@ -469,6 +527,11 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	cfg.Server.ReadTimeout = superCfg.Server.ReadTimeout.Duration()
 	cfg.Server.WriteTimeout = superCfg.Server.WriteTimeout.Duration()
 	cfg.Server.IdleTimeout = superCfg.Server.IdleTimeout.Duration()
+	cfg.Server.TLS.Enabled = superCfg.Server.TLS.Enabled
+	cfg.Server.TLS.CertFile = superCfg.Server.TLS.CertFile
+	cfg.Server.TLS.KeyFile = superCfg.Server.TLS.KeyFile
+	cfg.Server.TLS.ClientCAFile = superCfg.Server.TLS.ClientCAFile
+	cfg.Server.TLS.MinVersion = superCfg.Server.TLS.MinVersion
 
 	cfg.Admin.Enabled = superCfg.Admin.Enabled
 	cfg.Admin.Path = superCfg.Admin.Path
@@ -486,6 +549,7 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	cfg.Admin.SCIM.DefaultPageSize = superCfg.Admin.SCIM.DefaultPageSize
 	cfg.Admin.SCIM.MaxPageSize = superCfg.Admin.SCIM.MaxPageSize
 	cfg.Admin.SCIM.TokenLastUsedUpdateTimeout = superCfg.Admin.SCIM.TokenLastUsedUpdateTimeout.Duration()
+	cfg.Secrets.Cipher = append([]string(nil), superCfg.Secrets.Cipher...)
 
 	cfg.Log.Level = superCfg.Log.Level
 	cfg.Log.Format = superCfg.Log.Format
@@ -504,6 +568,39 @@ func safeInt32(value int) int32 {
 	default:
 		return int32(value)
 	}
+}
+
+func buildTLSConfig(cfg *Config) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	switch strings.TrimSpace(cfg.Server.TLS.MinVersion) {
+	case "", "1.2":
+		tlsConfig.MinVersion = tls.VersionTLS12
+	case "1.3":
+		tlsConfig.MinVersion = tls.VersionTLS13
+	default:
+		return nil, fmt.Errorf("unsupported tls min_version %q", cfg.Server.TLS.MinVersion)
+	}
+
+	if strings.TrimSpace(cfg.Server.TLS.ClientCAFile) == "" {
+		return tlsConfig, nil
+	}
+
+	caPEM, err := os.ReadFile(cfg.Server.TLS.ClientCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tls client CA file: %w", err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, errors.New("failed to parse tls client CA file")
+	}
+
+	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+	tlsConfig.ClientCAs = pool
+	return tlsConfig, nil
 }
 
 func setupLogger(logConfig LogConfig) {

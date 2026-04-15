@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
@@ -432,48 +432,11 @@ func (r *rateLimiter) cleanupLoop() {
 }
 
 func rateLimitKey(r *http.Request) string {
-	if allowSessionIdentityHeaderAuth() {
-		if identityID := strings.TrimSpace(r.Header.Get("X-Aegion-Session-Identity-ID")); identityID != "" {
-			if _, err := uuid.Parse(identityID); err == nil {
-				return "id:" + identityID
-			}
-		}
-	}
-
 	return "ip:" + getClientIP(r)
 }
 
 func getClientIP(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-
-	if allowAdminForwardedHeaders() {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				if candidate := strings.TrimSpace(parts[0]); candidate != "" {
-					return candidate
-				}
-			}
-		}
-
-		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
-		}
-	}
-
-	addr := strings.TrimSpace(r.RemoteAddr)
-	if addr == "" {
-		return ""
-	}
-
-	host, _, err := net.SplitHostPort(addr)
-	if err == nil && host != "" {
-		return host
-	}
-
-	return addr
+	return trustedproxy.ClientIP(r, allowAdminForwardedHeaders(), "AEGION_ADMIN_TRUSTED_PROXY_CIDRS")
 }
 
 func loadRateLimitConfig() (float64, int) {
@@ -492,15 +455,6 @@ func loadRateLimitConfig() (float64, int) {
 	}
 
 	return rps, burst
-}
-
-func allowSessionIdentityHeaderAuth() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }
 
 func allowAdminForwardedHeaders() bool {

@@ -91,7 +91,8 @@ func TestClaimsHookClient_InjectClaims_HTTPScenarios(t *testing.T) {
 func TestClaimsHookClient_Signature(t *testing.T) {
 	client := NewClaimsHookClient("https://example.test", "secret", time.Second)
 	payload := []byte(`{"x":1}`)
-	signature := client.signPayload(payload)
+	signature, err := client.signPayload(payload)
+	require.NoError(t, err)
 	assert.True(t, client.VerifySignature(payload, signature))
 	assert.False(t, client.VerifySignature(payload, "deadbeef"))
 }

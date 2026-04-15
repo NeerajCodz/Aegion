@@ -1,1 +1,1 @@
--- Initial SSO module scaffold rollback (no-op).
+DROP TABLE IF EXISTS sso_connections;

@@ -31,6 +31,7 @@ type Server struct {
 }
 
 var errReBACMaxDepthExceeded = errors.New("rebac max depth exceeded")
+var errReBACTraversalLimitExceeded = errors.New("rebac traversal limit exceeded")
 
 // NewServer creates a new policy server adapter.
 func NewServer(store PolicyStore) *Server {
@@ -424,6 +425,14 @@ func (s *Server) evaluateReBAC(ctx context.Context, req *policypb.CheckRequest) 
 				EvalPath:   []string{"rebac:max_depth_exceeded"},
 			}, nil
 		}
+		if errors.Is(err, errReBACTraversalLimitExceeded) {
+			return &policypb.CheckResponse{
+				Allowed:    false,
+				ModelUsed:  "rebac",
+				DenyReason: "traversal_limit_exceeded",
+				EvalPath:   []string{"rebac:traversal_limit_exceeded"},
+			}, nil
+		}
 		return nil, err
 	} else if allowed {
 		return &policypb.CheckResponse{
@@ -472,6 +481,8 @@ func actionToRelation(action string) string {
 }
 
 func (s *Server) expandReBAC(ctx context.Context, namespace, objectID, relation, subject string, maxDepth int) (bool, error) {
+	const rebacMaxVisitedNodes = 1000
+
 	type node struct {
 		objectID string
 		relation string
@@ -494,6 +505,9 @@ func (s *Server) expandReBAC(ctx context.Context, namespace, objectID, relation,
 			continue
 		}
 		visited[key] = struct{}{}
+		if len(visited) > rebacMaxVisitedNodes {
+			return false, errReBACTraversalLimitExceeded
+		}
 
 		tuples, err := s.store.ListReBACTuples(ctx, namespace, current.objectID, current.relation)
 		if err != nil {

@@ -193,12 +193,13 @@ func TestProxy_AdditionalCoverageBranches(t *testing.T) {
 	}
 
 	original := httptest.NewRequest(http.MethodGet, "http://edge.local/resource", nil)
-	original.RemoteAddr = ""
+	original.RemoteAddr = "198.51.100.10:1234"
 	original.Host = "edge.local"
 	original.Header.Set("X-Real-IP", "203.0.113.9")
 	forwarded := httptest.NewRequest(http.MethodGet, "http://upstream.local/resource", nil)
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 	defaultSigProxy.addForwardedHeaders(forwarded, original)
-	if got := forwarded.Header.Get("X-Forwarded-For"); got != "203.0.113.9" {
+	if got := forwarded.Header.Get("X-Forwarded-For"); got != "198.51.100.10" {
 		t.Fatalf("expected fallback forwarded-for IP, got %q", got)
 	}
 }

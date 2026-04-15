@@ -20,6 +20,8 @@ type mockTokenStore struct {
 	refreshToken               *store.RefreshToken
 	refreshTokenByID           map[string]*store.RefreshToken
 	accessTokens               []*store.AccessToken
+	accessTokenByJTI           map[string]*store.AccessToken
+	accessTokenBySignature     map[string]*store.AccessToken
 	refreshTokens              []*store.RefreshToken
 	idTokens                   []*store.IDToken
 	getClientErr               error
@@ -148,6 +150,24 @@ func (m *mockTokenStore) RevokeAccessToken(ctx context.Context, jti string) erro
 	return m.revokeAccessErr
 }
 
+func (m *mockTokenStore) GetAccessToken(ctx context.Context, jti string) (*store.AccessToken, error) {
+	if m.accessTokenByJTI != nil {
+		if token, ok := m.accessTokenByJTI[jti]; ok {
+			return token, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
+func (m *mockTokenStore) GetAccessTokenBySignature(ctx context.Context, signature string) (*store.AccessToken, error) {
+	if m.accessTokenBySignature != nil {
+		if token, ok := m.accessTokenBySignature[signature]; ok {
+			return token, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (m *mockTokenStore) RevokeRefreshTokensBySession(ctx context.Context, sessionID string) (int64, error) {
 	if m.revokeRefreshBySessionErr != nil {
 		return 0, m.revokeRefreshBySessionErr
@@ -244,6 +264,78 @@ func TestExchangeAuthorizationCode(t *testing.T) {
 
 		_, err := svc.ExchangeAuthorizationCode(ctx, req)
 		assert.ErrorIs(t, err, ErrInvalidGrant)
+	})
+}
+
+func TestIntrospectToken(t *testing.T) {
+	ctx := context.Background()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+
+	t.Run("active token by jti", func(t *testing.T) {
+		mockStore := &mockTokenStore{
+			client: &store.Client{
+				ID:                      "client-1",
+				TokenEndpointAuthMethod: "client_secret_post",
+				SecretHash:              ptrString(string(hash)),
+			},
+			accessTokenByJTI: map[string]*store.AccessToken{
+				"at-jti-1": {
+					JTI:       "at-jti-1",
+					ClientID:  "client-1",
+					Subject:   "identity-1",
+					Scopes:    []string{"openid", "profile"},
+					Audience:  []string{"api"},
+					Issuer:    "https://issuer.example.com",
+					ExpiresAt: time.Now().UTC().Add(time.Minute),
+				},
+			},
+		}
+		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://issuer.example.com")
+
+		resp, err := svc.IntrospectToken(ctx, &IntrospectionRequest{
+			Token:        "at-jti-1",
+			ClientID:     "client-1",
+			ClientSecret: "secret",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.True(t, resp.Active)
+		assert.Equal(t, "client-1", resp.ClientID)
+		assert.Equal(t, "openid profile", resp.Scope)
+	})
+
+	t.Run("inactive token by signature fingerprint", func(t *testing.T) {
+		token := "signed.jwt.token"
+		mockStore := &mockTokenStore{
+			client: &store.Client{
+				ID:                      "client-1",
+				TokenEndpointAuthMethod: "client_secret_post",
+				SecretHash:              ptrString(string(hash)),
+			},
+			accessTokenBySignature: map[string]*store.AccessToken{
+				accessTokenSignature(token): {
+					JTI:       "at-jti-2",
+					ClientID:  "client-1",
+					Subject:   "identity-1",
+					Scopes:    []string{"openid"},
+					Issuer:    "https://issuer.example.com",
+					Revoked:   true,
+					ExpiresAt: time.Now().UTC().Add(time.Minute),
+				},
+			},
+		}
+		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://issuer.example.com")
+
+		resp, err := svc.IntrospectToken(ctx, &IntrospectionRequest{
+			Token:        token,
+			ClientID:     "client-1",
+			ClientSecret: "secret",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.False(t, resp.Active)
 	})
 }
 

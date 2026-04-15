@@ -8,7 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
+	"net/http"
 	"net/smtp"
+	"net/url"
+	"strings"
+	texttemplate "text/template"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,11 +73,23 @@ type SMTPConfig struct {
 	AuthEnabled bool
 }
 
+// SMSConfig holds dynamic HTTP SMS gateway configuration.
+type SMSConfig struct {
+	Enabled      bool
+	URL          string
+	Method       string
+	Headers      map[string]string
+	BodyTemplate string
+	Timeout      time.Duration
+}
+
 // Courier handles message delivery.
 type Courier struct {
 	db          *pgxpool.Pool
 	smtp        SMTPConfig
+	sms         SMSConfig
 	templates   map[string]*template.Template
+	subjects    map[string]*template.Template
 	maxRetries  int
 	codeExpiry  time.Duration
 	linkExpiry  time.Duration
@@ -96,6 +113,7 @@ var errCourierDBUnavailable = errors.New("courier database is not configured")
 type Config struct {
 	DB         *pgxpool.Pool
 	SMTP       SMTPConfig
+	SMS        SMSConfig
 	MaxRetries int
 	CodeExpiry time.Duration // Expiry for verification codes (default: 15 minutes)
 	LinkExpiry time.Duration // Expiry for magic links (default: 15 minutes)
@@ -112,11 +130,19 @@ func New(cfg Config) *Courier {
 	if cfg.LinkExpiry == 0 {
 		cfg.LinkExpiry = 15 * time.Minute
 	}
+	if cfg.SMS.Method == "" {
+		cfg.SMS.Method = http.MethodPost
+	}
+	if cfg.SMS.Timeout == 0 {
+		cfg.SMS.Timeout = 10 * time.Second
+	}
 
 	c := &Courier{
 		db:         cfg.DB,
 		smtp:       cfg.SMTP,
+		sms:        cfg.SMS,
 		templates:  make(map[string]*template.Template),
+		subjects:   make(map[string]*template.Template),
 		maxRetries: cfg.MaxRetries,
 		codeExpiry: cfg.CodeExpiry,
 		linkExpiry: cfg.LinkExpiry,
@@ -151,11 +177,58 @@ func (c *Courier) QueueEmail(ctx context.Context, recipient, subject, body strin
 		CreatedAt: c.now(),
 		UpdatedAt: c.now(),
 	}
+	if err := c.prepareMessage(msg); err != nil {
+		return nil, err
+	}
 
 	for _, opt := range opts {
 		opt(msg)
 	}
 
+	return c.queueMessage(ctx, msg)
+}
+
+// QueueSMS queues an SMS for delivery.
+func (c *Courier) QueueSMS(ctx context.Context, recipient, body string, opts ...QueueOption) (*Message, error) {
+	msg := &Message{
+		ID:        uuid.New(),
+		Type:      MessageTypeSMS,
+		Status:    StatusQueued,
+		Recipient: recipient,
+		Body:      body,
+		CreatedAt: c.now(),
+		UpdatedAt: c.now(),
+	}
+	if err := c.prepareMessage(msg); err != nil {
+		return nil, err
+	}
+
+	for _, opt := range opts {
+		opt(msg)
+	}
+
+	return c.queueMessage(ctx, msg)
+}
+
+func (c *Courier) prepareMessage(msg *Message) error {
+	normalizedRecipient, err := sanitizeDeliveryValue(msg.Recipient, "recipient", true)
+	if err != nil {
+		return err
+	}
+	normalizedSubject, err := sanitizeDeliveryValue(msg.Subject, "subject", false)
+	if err != nil {
+		return err
+	}
+	msg.Recipient = normalizedRecipient
+	msg.Subject = normalizedSubject
+	msg.Body = strings.TrimSpace(msg.Body)
+	if msg.Body == "" {
+		return fmt.Errorf("invalid body: value is required")
+	}
+	return nil
+}
+
+func (c *Courier) queueMessage(ctx context.Context, msg *Message) (*Message, error) {
 	templateDataJSON, _ := json.Marshal(msg.TemplateData)
 
 	_, err := c.execStmt(ctx, `
@@ -272,6 +345,12 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 			if err == nil {
 				body = rendered
 			}
+			if msgType == MessageTypeEmail && strings.TrimSpace(subject) == "" {
+				renderedSubject, err := c.renderSubjectTemplate(*templateID, templateData)
+				if err == nil {
+					subject = renderedSubject
+				}
+			}
 		}
 
 		// Send message
@@ -301,7 +380,23 @@ func (c *Courier) ProcessQueue(ctx context.Context, batchSize int) (int, error) 
 
 // sendEmail sends an email via SMTP.
 func (c *Courier) sendEmail(to, subject, body string) error {
-	from := fmt.Sprintf("%s <%s>", c.smtp.FromName, c.smtp.FromAddress)
+	normalizedTo, err := sanitizeDeliveryValue(to, "recipient", true)
+	if err != nil {
+		return err
+	}
+	normalizedSubject, err := sanitizeDeliveryValue(subject, "subject", false)
+	if err != nil {
+		return err
+	}
+	normalizedFromAddress, err := sanitizeDeliveryValue(c.smtp.FromAddress, "from address", true)
+	if err != nil {
+		return err
+	}
+	normalizedFromName, err := sanitizeDeliveryValue(c.smtp.FromName, "from name", true)
+	if err != nil {
+		return err
+	}
+	from := fmt.Sprintf("%s <%s>", normalizedFromName, normalizedFromAddress)
 
 	msg := fmt.Sprintf("From: %s\r\n"+
 		"To: %s\r\n"+
@@ -310,7 +405,7 @@ func (c *Courier) sendEmail(to, subject, body string) error {
 		"Content-Type: text/html; charset=\"utf-8\"\r\n"+
 		"\r\n"+
 		"%s",
-		from, to, subject, body)
+		from, normalizedTo, normalizedSubject, body)
 
 	addr := fmt.Sprintf("%s:%d", c.smtp.Host, c.smtp.Port)
 
@@ -319,22 +414,116 @@ func (c *Courier) sendEmail(to, subject, body string) error {
 		auth = smtp.PlainAuth("", c.smtp.Username, c.smtp.Password, c.smtp.Host)
 	}
 
-	return smtp.SendMail(addr, auth, c.smtp.FromAddress, []string{to}, []byte(msg))
+	return smtp.SendMail(addr, auth, normalizedFromAddress, []string{normalizedTo}, []byte(msg))
 }
 
-// sendSMS sends an SMS (placeholder - would integrate with SMS gateway).
+func sanitizeDeliveryValue(value, field string, required bool) (string, error) {
+	normalized := strings.TrimSpace(value)
+	if strings.ContainsAny(normalized, "\r\n") {
+		return "", fmt.Errorf("invalid %s: newline characters are not allowed", field)
+	}
+	if required && normalized == "" {
+		return "", fmt.Errorf("invalid %s: value is required", field)
+	}
+	return normalized, nil
+}
+
+func sanitizeSMTPHeaderValue(value, field string, required bool) (string, error) {
+	return sanitizeDeliveryValue(value, field, required)
+}
+
+// sendSMS sends an SMS using a generic configurable HTTP gateway.
 func (c *Courier) sendSMS(to, body string) error {
-	// TODO: Integrate with SMS gateway (Twilio, AWS SNS, etc.)
-	return fmt.Errorf("SMS delivery not implemented")
+	normalizedTo, err := sanitizeDeliveryValue(to, "recipient", true)
+	if err != nil {
+		return err
+	}
+	trimmedBody := strings.TrimSpace(body)
+	if trimmedBody == "" {
+		return fmt.Errorf("invalid body: value is required")
+	}
+	if !c.sms.Enabled {
+		return fmt.Errorf("sms delivery is not configured")
+	}
+	parsedURL, err := url.Parse(strings.TrimSpace(c.sms.URL))
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return fmt.Errorf("sms delivery url is invalid")
+	}
+
+	payload, err := c.renderSMSPayload(normalizedTo, trimmedBody)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(strings.ToUpper(strings.TrimSpace(c.sms.Method)), parsedURL.String(), bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+
+	contentTypeSet := false
+	for key, value := range c.sms.Headers {
+		normalizedKey, err := sanitizeDeliveryValue(key, "sms header name", true)
+		if err != nil {
+			return err
+		}
+		normalizedValue, err := sanitizeDeliveryValue(value, "sms header value", true)
+		if err != nil {
+			return err
+		}
+		req.Header.Set(normalizedKey, normalizedValue)
+		if strings.EqualFold(normalizedKey, "Content-Type") {
+			contentTypeSet = true
+		}
+	}
+	if !contentTypeSet {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	client := &http.Client{Timeout: c.sms.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("sms delivery failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	return nil
+}
+
+func (c *Courier) renderSMSPayload(to, body string) ([]byte, error) {
+	if strings.TrimSpace(c.sms.BodyTemplate) == "" {
+		return json.Marshal(map[string]string{
+			"to":   to,
+			"body": body,
+		})
+	}
+
+	tmpl, err := texttemplate.New("sms-body").Option("missingkey=error").Parse(c.sms.BodyTemplate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid sms body template: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]string{
+		"To":   to,
+		"Body": body,
+	}); err != nil {
+		return nil, fmt.Errorf("invalid sms payload rendering: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // renderTemplate renders a message template.
 func (c *Courier) renderTemplate(templateID string, data map[string]interface{}) (string, error) {
-	// Load template from database if not cached
 	tmpl, ok := c.templates[templateID]
 	if !ok {
-		// TODO: Load from core_courier_templates table
-		return "", fmt.Errorf("template not found: %s", templateID)
+		if err := c.loadTemplate(templateID); err != nil {
+			return "", err
+		}
+		tmpl = c.templates[templateID]
 	}
 
 	var buf bytes.Buffer
@@ -343,6 +532,69 @@ func (c *Courier) renderTemplate(templateID string, data map[string]interface{})
 	}
 
 	return buf.String(), nil
+}
+
+func (c *Courier) renderSubjectTemplate(templateID string, data map[string]interface{}) (string, error) {
+	if _, ok := c.subjects[templateID]; !ok {
+		if err := c.loadTemplate(templateID); err != nil {
+			return "", err
+		}
+	}
+	tmpl := c.subjects[templateID]
+	if tmpl == nil {
+		return "", fmt.Errorf("template subject not found: %s", templateID)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(buf.String()), nil
+}
+
+func (c *Courier) loadTemplate(templateID string) error {
+	rows, err := c.queryRows(context.Background(), `
+		SELECT subject, body
+		FROM core_courier_templates
+		WHERE name = $1
+		LIMIT 1
+	`, templateID)
+	if err != nil {
+		if errors.Is(err, errCourierDBUnavailable) {
+			return fmt.Errorf("template not found: %s", templateID)
+		}
+		return err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("template not found: %s", templateID)
+	}
+
+	var subject *string
+	var body string
+	if err := rows.Scan(&subject, &body); err != nil {
+		return err
+	}
+
+	bodyTemplate, err := template.New(templateID).Option("missingkey=zero").Parse(body)
+	if err != nil {
+		return fmt.Errorf("invalid template body %q: %w", templateID, err)
+	}
+	c.templates[templateID] = bodyTemplate
+
+	if subject != nil && strings.TrimSpace(*subject) != "" {
+		subjectTemplate, err := template.New(templateID + "-subject").Option("missingkey=zero").Parse(*subject)
+		if err != nil {
+			return fmt.Errorf("invalid template subject %q: %w", templateID, err)
+		}
+		c.subjects[templateID] = subjectTemplate
+	}
+
+	return nil
 }
 
 // markSent marks a message as sent.

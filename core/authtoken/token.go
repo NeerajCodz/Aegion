@@ -2,14 +2,14 @@
 package authtoken
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
-	"fmt"
-	"strings"
+	"strconv"
 	"sync"
 	"time"
+
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 )
 
 var (
@@ -30,6 +30,25 @@ type Token struct {
 	ModuleID  string
 	Timestamp time.Time
 	Signature []byte
+}
+
+// buildPayload creates the canonical payload for internal-token signatures.
+func buildPayload(moduleID string, timestamp time.Time) []byte {
+	encodedModuleID := base64.RawURLEncoding.EncodeToString([]byte(moduleID))
+	return []byte("internal_token\nv1\n" + strconv.FormatInt(timestamp.UTC().UnixMilli(), 10) + "\n" + encodedModuleID)
+}
+
+// sign creates an HMAC-SHA256 signature through the Rust-backed crypto layer.
+func sign(payload, secret []byte) []byte {
+	signature, err := platformcrypto.HMACSHA256Hex(secret, payload)
+	if err != nil {
+		return nil
+	}
+	decoded, err := hex.DecodeString(signature)
+	if err != nil {
+		return nil
+	}
+	return decoded
 }
 
 // Generator creates and validates internal auth tokens.
@@ -82,81 +101,32 @@ func (g *Generator) Generate(moduleID string) (string, error) {
 	g.mu.RUnlock()
 
 	timestamp := time.Now().UTC()
-	payload := buildPayload(moduleID, timestamp)
-	signature := sign(payload, secret)
-
-	// Encode: base64(moduleID).base64(timestamp).base64(signature)
-	token := fmt.Sprintf("%s%s%s%s%s",
-		base64.RawURLEncoding.EncodeToString([]byte(moduleID)),
-		TokenSeparator,
-		base64.RawURLEncoding.EncodeToString([]byte(timestamp.Format(time.RFC3339Nano))),
-		TokenSeparator,
-		base64.RawURLEncoding.EncodeToString(signature),
-	)
-
-	return token, nil
+	return platformcrypto.GenerateInternalToken(secret, moduleID, timestamp)
 }
 
 // Validate validates a token and returns the decoded token data.
 func (g *Generator) Validate(tokenStr string) (*Token, error) {
-	parts := strings.Split(tokenStr, TokenSeparator)
-	if len(parts) != 3 {
-		return nil, ErrInvalidToken
-	}
-
-	// Decode module ID
-	moduleIDBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return nil, ErrInvalidToken
-	}
-	moduleID := string(moduleIDBytes)
-
-	// Decode timestamp
-	timestampBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, ErrInvalidToken
-	}
-	timestamp, err := time.Parse(time.RFC3339Nano, string(timestampBytes))
-	if err != nil {
-		return nil, ErrInvalidToken
-	}
-
-	// Decode signature
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return nil, ErrInvalidToken
-	}
-
-	// Check expiration
-	if time.Since(timestamp) > g.ttl {
-		return nil, ErrExpiredToken
-	}
-
-	// Verify signature against all secrets (supports rotation)
-	payload := buildPayload(moduleID, timestamp)
-
 	g.mu.RLock()
 	secrets := g.secrets
 	g.mu.RUnlock()
 
-	valid := false
 	for _, secret := range secrets {
-		expectedSig := sign(payload, secret)
-		if hmac.Equal(signature, expectedSig) {
-			valid = true
-			break
+		parsed, err := platformcrypto.VerifyInternalToken(secret, tokenStr, g.ttl, time.Now().UTC())
+		if err == nil {
+			return &Token{
+				ModuleID:  parsed.ModuleID,
+				Timestamp: parsed.Timestamp,
+				Signature: parsed.Signature,
+			}, nil
+		}
+		if errors.Is(err, platformcrypto.ErrExpired) {
+			return nil, ErrExpiredToken
+		}
+		if errors.Is(err, platformcrypto.ErrInternalToken) || errors.Is(err, platformcrypto.ErrInvalidSignature) {
+			continue
 		}
 	}
-
-	if !valid {
-		return nil, ErrInvalidToken
-	}
-
-	return &Token{
-		ModuleID:  moduleID,
-		Timestamp: timestamp,
-		Signature: signature,
-	}, nil
+	return nil, ErrInvalidToken
 }
 
 // ValidateString is a convenience method that returns module ID or error.
@@ -189,16 +159,4 @@ func (g *Generator) SetSecrets(primary []byte, previous ...[]byte) error {
 // GetTTL returns the token TTL.
 func (g *Generator) GetTTL() time.Duration {
 	return g.ttl
-}
-
-// buildPayload creates the payload to be signed.
-func buildPayload(moduleID string, timestamp time.Time) []byte {
-	return []byte(fmt.Sprintf("%s:%s", moduleID, timestamp.Format(time.RFC3339Nano)))
-}
-
-// sign creates an HMAC-SHA256 signature.
-func sign(payload, secret []byte) []byte {
-	h := hmac.New(sha256.New, secret)
-	h.Write(payload)
-	return h.Sum(nil)
 }

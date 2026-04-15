@@ -10,6 +10,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/service/device"
 	"github.com/aegion/aegion/modules/oauth2/service/grants"
+	"github.com/aegion/aegion/modules/oauth2/service/introspection"
 	"github.com/aegion/aegion/modules/oauth2/service/oidc"
 	"github.com/aegion/aegion/modules/oauth2/service/revocation"
 	"github.com/aegion/aegion/modules/oauth2/service/token"
@@ -27,6 +28,7 @@ type OAuth2Handler struct {
 	discoverySvc   *oidc.DiscoveryService
 	jwksSvc        *oidc.JWKSService
 	userInfoSvc    *oidc.UserInfoService
+	introspectSvc  *introspection.Service
 }
 
 // NewOAuth2Handler creates a new OAuth2 handler.
@@ -52,6 +54,15 @@ func NewOAuth2Handler(
 		jwksSvc:        jwksSvc,
 		userInfoSvc:    userInfoSvc,
 	}
+}
+
+// WithIntrospectionService configures RFC7662 introspection handling.
+func (h *OAuth2Handler) WithIntrospectionService(svc *introspection.Service) *OAuth2Handler {
+	if h == nil {
+		return nil
+	}
+	h.introspectSvc = svc
+	return h
 }
 
 // HandleAuthorize handles GET /oauth2/authorize
@@ -388,6 +399,44 @@ func (h *OAuth2Handler) HandleUserInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, claims)
+}
+
+// HandleIntrospect handles POST /oauth2/introspect.
+func (h *OAuth2Handler) HandleIntrospect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "invalid_request", "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.introspectSvc == nil {
+		writeError(w, "server_error", "Introspection service unavailable", http.StatusInternalServerError)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeError(w, "invalid_request", "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+	setNoStoreHeaders(w)
+
+	clientID, clientSecret := extractClientCredentials(r)
+	resp, err := h.introspectSvc.IntrospectToken(r.Context(), &token.IntrospectionRequest{
+		Token:        r.FormValue("token"),
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, token.ErrInvalidClient):
+			w.Header().Set("WWW-Authenticate", `Basic realm="oauth2", error="invalid_client"`)
+			writeError(w, "invalid_client", "Client authentication failed", http.StatusUnauthorized)
+		case errors.Is(err, token.ErrInvalidRequest):
+			writeError(w, "invalid_request", "Invalid introspection request", http.StatusBadRequest)
+		default:
+			writeError(w, "server_error", "Internal server error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Helper functions

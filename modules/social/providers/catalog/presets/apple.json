@@ -1,0 +1,23 @@
+{
+  "slug": "apple",
+  "display_name": "Apple",
+  "preset": "apple",
+  "protocol": "oidc",
+  "issuer": "https://appleid.apple.com",
+  "discovery_url": "https://appleid.apple.com/.well-known/openid-configuration",
+  "scopes": ["openid", "email", "name"],
+  "claim_mapping": {
+    "subject": "sub",
+    "email": "email",
+    "email_verified": "email_verified",
+    "name": "name"
+  },
+  "pkce_method": "S256",
+  "auth_style": "client_secret_post",
+  "claim_source": "id_token",
+  "enabled": false,
+  "extra_auth_params": {
+    "response_mode": "form_post"
+  },
+  "trust_email_verified": true
+}

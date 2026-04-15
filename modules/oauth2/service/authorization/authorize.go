@@ -3,14 +3,12 @@ package authorization
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
@@ -332,25 +330,13 @@ func (s *AuthorizationService) RejectConsent(ctx context.Context, challengeID, e
 
 // VerifyPKCE verifies a PKCE code verifier against the challenge.
 func VerifyPKCE(codeVerifier, codeChallenge, method string) error {
-	if method == "" {
-		method = "plain"
-	}
-
-	var computed string
-	switch method {
-	case "plain":
-		computed = codeVerifier
-	case "S256":
-		h := sha256.Sum256([]byte(codeVerifier))
-		computed = base64.RawURLEncoding.EncodeToString(h[:])
-	default:
+	ok, err := platformcrypto.VerifyPKCE(codeVerifier, codeChallenge, method)
+	if err != nil {
 		return fmt.Errorf("unsupported code_challenge_method: %s", method)
 	}
-
-	if subtle.ConstantTimeCompare([]byte(computed), []byte(codeChallenge)) != 1 {
+	if !ok {
 		return store.ErrPKCEMismatch
 	}
-
 	return nil
 }
 

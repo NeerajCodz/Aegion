@@ -1,18 +1,12 @@
 package proxy
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"sort"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/aegion/aegion/core/session"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 )
 
 type failingWriteResponseWriter struct {
@@ -298,46 +293,7 @@ func TestProxy_Forward_SignsIdentityHeaders(t *testing.T) {
 }
 
 func verifyProxySignature(signatureHeader, secret string, signedHeaders []string, headers http.Header) bool {
-	parts := strings.Split(signatureHeader, ",")
-	if len(parts) != 2 {
-		return false
-	}
-
-	var timestamp, signature string
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "t=") {
-			timestamp = strings.TrimPrefix(part, "t=")
-		}
-		if strings.HasPrefix(part, "v1=") {
-			signature = strings.TrimPrefix(part, "v1=")
-		}
-	}
-	if timestamp == "" || signature == "" {
-		return false
-	}
-	if _, err := strconv.ParseInt(timestamp, 10, 64); err != nil {
-		return false
-	}
-
-	canonicalHeaders := make([]string, 0, len(signedHeaders))
-	for _, header := range signedHeaders {
-		value := strings.TrimSpace(headers.Get(header))
-		if value == "" {
-			continue
-		}
-		canonicalHeaders = append(canonicalHeaders, strings.ToLower(header)+":"+value)
-	}
-	if len(canonicalHeaders) == 0 {
-		return false
-	}
-	sort.Strings(canonicalHeaders)
-
-	payload := timestamp + "." + strings.Join(canonicalHeaders, "\n")
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(payload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(signature), []byte(expected))
+	return platformcrypto.VerifyIdentityHeaders([]byte(secret), headers, signedHeaders, signatureHeader, time.Minute, time.Now().UTC())
 }
 
 func TestProxy_ForwardWithPathRewrite(t *testing.T) {
@@ -828,6 +784,7 @@ func TestProxy_AddForwardedHeaders_WithTLS(t *testing.T) {
 }
 
 func TestProxy_AddForwardedHeaders_PreservesIncomingHeaders(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 	cfg := DefaultConfig()
 	cfg.TrustForwardedHeaders = true
 	proxy := newProxyForTest(t, cfg, nil, zerolog.New(zerolog.NewTestWriter(t)))

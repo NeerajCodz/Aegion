@@ -188,7 +188,7 @@ func TestLoad_EnvironmentVariableExpansion(t *testing.T) {
 	if err := os.Setenv("TEST_DB_URL", "postgres://env-user:env-pass@env-host/env-db"); err != nil {
 		t.Fatalf("failed to set TEST_DB_URL: %v", err)
 	}
-	if err := os.Setenv("TEST_SECRET", "environment-secret-32-characters-long"); err != nil {
+	if err := os.Setenv("TEST_SECRET", "example-app-secret-for-tests"); err != nil {
 		t.Fatalf("failed to set TEST_SECRET: %v", err)
 	}
 	defer func() {
@@ -218,7 +218,7 @@ secrets:
 	require.NoError(t, err)
 
 	assert.Equal(t, "postgres://env-user:env-pass@env-host/env-db", cfg.Database.URL)
-	assert.Equal(t, "environment-secret-32-characters-long", cfg.Secrets.Cookie[0])
+	assert.Equal(t, "example-app-secret-for-tests", cfg.Secrets.Cookie[0])
 }
 
 func TestLoad_FileNotFound(t *testing.T) {
@@ -242,6 +242,27 @@ invalid: yaml: content:
 	_, err = Load(configPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse config file")
+}
+
+func TestLoad_RejectsUnknownFields(t *testing.T) {
+	content := `
+database:
+  url: postgres://user:pass@localhost/db
+secrets:
+  cookie: ["cookie-secret-32-characters-long!!"]
+  cipher: ["cipher-secret-32-characters-long!!"]
+  internal: ["internal-secret-32-characters-long"]
+server:
+  unexpected_flag: true
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "unknown.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(content), 0o644))
+
+	_, err := Load(configPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "field unexpected_flag not found")
 }
 
 func TestApplyDefaults(t *testing.T) {
@@ -315,6 +336,17 @@ func TestApplyDefaults(t *testing.T) {
 	assert.False(t, cfg.Proxy.TrustForwardedHeaders)
 	assert.Equal(t, "X-Aegion-Signature", cfg.Proxy.IdentitySignatureHeader)
 	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}, cfg.Proxy.SignedIdentityHeaders)
+	assert.Equal(t, "POST", cfg.Courier.SMS.Method)
+	assert.Equal(t, Duration(10*time.Second), cfg.Courier.SMS.Timeout)
+
+	// MFA / passkey defaults
+	assert.Equal(t, "Aegion", cfg.MFA.Issuer)
+	assert.Equal(t, 6, cfg.MFA.CodeDigits)
+	assert.Equal(t, Duration(30*time.Second), cfg.MFA.CodePeriod)
+	assert.Equal(t, 12, cfg.MFA.BackupCodeCount)
+	assert.Equal(t, "aegion_mfa_trusted_device", cfg.MFA.TrustedDeviceCookieName)
+	assert.Equal(t, Duration(5*time.Minute), cfg.Passkeys.ChallengeTTL)
+	assert.Equal(t, 20, cfg.Passkeys.AllowedCredentials)
 }
 
 func TestApplyDefaults_DoesNotOverrideExisting(t *testing.T) {
@@ -563,6 +595,54 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			wantErr: "",
 		},
+		{
+			name: "requires rp id when passkeys enabled",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!"},
+					Cipher:   []string{"cipher-secret-32-characters-long!!"},
+					Internal: []string{"internal-secret-32-characters-long"},
+				},
+				Passkeys: PasskeysConfig{
+					Enabled:  true,
+					RPOrigin: "https://example.com",
+				},
+			},
+			wantErr: "passkeys.rp_id is required when passkeys are enabled",
+		},
+		{
+			name: "requires rp origin when passkeys enabled",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!"},
+					Cipher:   []string{"cipher-secret-32-characters-long!!"},
+					Internal: []string{"internal-secret-32-characters-long"},
+				},
+				Passkeys: PasskeysConfig{
+					Enabled: true,
+					RPID:    "example.com",
+				},
+			},
+			wantErr: "passkeys.rp_origin is required when passkeys are enabled",
+		},
+		{
+			name: "rejects unsupported mfa digits",
+			config: &Config{
+				Database: DatabaseConfig{URL: "postgres://localhost/db"},
+				Secrets: SecretsConfig{
+					Cookie:   []string{"cookie-secret-32-characters-long!!"},
+					Cipher:   []string{"cipher-secret-32-characters-long!!"},
+					Internal: []string{"internal-secret-32-characters-long"},
+				},
+				MFA: MFAConfig{
+					Enabled:    true,
+					CodeDigits: 7,
+				},
+			},
+			wantErr: "mfa.code_digits must be 6 or 8 when mfa is enabled",
+		},
 	}
 
 	for _, tt := range tests {
@@ -702,6 +782,39 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 			}(),
 			wantErr: "module_versions.password must be pinned in production",
 		},
+		{
+			name: "requires https passkey origin in production",
+			cfg: func() *Config {
+				c := *valid
+				c.Passkeys = PasskeysConfig{
+					Enabled:  true,
+					RPID:     "example.com",
+					RPOrigin: "http://example.com",
+				}
+				return &c
+			}(),
+			wantErr: "passkeys.rp_origin must use https in production",
+		},
+		{
+			name: "requires courier sms url when enabled",
+			cfg: func() *Config {
+				c := *valid
+				c.Courier.SMS.Enabled = true
+				c.Courier.SMS.URL = ""
+				return &c
+			}(),
+			wantErr: "courier.sms.url is required when sms delivery is enabled",
+		},
+		{
+			name: "requires https courier sms url in production",
+			cfg: func() *Config {
+				c := *valid
+				c.Courier.SMS.Enabled = true
+				c.Courier.SMS.URL = "http://sms.example.com/send"
+				return &c
+			}(),
+			wantErr: "courier.sms.url must use https in production",
+		},
 	}
 
 	for _, tt := range tests {
@@ -715,6 +828,94 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestConfig_Validate_ProductionTLSAndProxyTrustRequirements(t *testing.T) {
+	t.Setenv("AEGION_ENV", "production")
+	t.Setenv("AEGION_ENVIRONMENT", "")
+
+	base := &Config{
+		Database: DatabaseConfig{
+			URL: "postgres://user:pass@localhost/db?sslmode=require",
+		},
+		Secrets: SecretsConfig{
+			Cookie:   []string{"cookie-secret-32-characters-long!!"},
+			Cipher:   []string{"cipher-secret-32-characters-long!!"},
+			Internal: []string{"internal-secret-32-characters-long"},
+		},
+		Sessions: SessionsConfig{
+			Cookie: CookieConfig{
+				Secure:   true,
+				HTTPOnly: true,
+			},
+		},
+		Log: LogConfig{
+			Level:  "info",
+			Format: "json",
+		},
+		Operator: OperatorConfig{
+			Password: "StrongBootstrapPassword#2026",
+		},
+	}
+
+	missingTLS := *base
+	missingTLS.Server.TLS.Enabled = true
+	err := missingTLS.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "server.tls.cert_file and server.tls.key_file are required")
+
+	missingProxyCIDRs := *base
+	missingProxyCIDRs.Proxy.TrustForwardedHeaders = true
+	err = missingProxyCIDRs.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "proxy.trusted_proxy_cidrs is required")
+}
+
+func TestLoad_ProductionConfigConformance(t *testing.T) {
+	env := map[string]string{
+		"AEGION_ENV":                       "production",
+		"AEGION_MODULE_PASSWORD_VERSION":   "v1.0.0",
+		"AEGION_MODULE_MAGIC_LINK_VERSION": "v1.0.0",
+		"AEGION_MODULE_ADMIN_VERSION":      "v1.0.0",
+		"AEGION_MODULE_POLICY_VERSION":     "v1.0.0",
+		"AEGION_MODULE_PROXY_VERSION":      "v1.0.0",
+		"AEGION_MODULE_REGISTRY":           "ghcr.io/aegion",
+		"AEGION_CORS_ORIGIN":               "https://example.com",
+		"AEGION_DATABASE_URL":              "postgres://user:pass@localhost/db?sslmode=require",
+		"AEGION_REDIS_URL":                 "redis://localhost:6379",
+		"AEGION_SECRET_COOKIE_1":           "cookie-secret-32-characters-long!!",
+		"AEGION_SECRET_CIPHER_1":           "cipher-secret-32-characters-long!!",
+		"AEGION_SECRET_INTERNAL_1":         "internal-secret-32-characters-long",
+		"AEGION_OPERATOR_EMAIL":            "admin@example.com",
+		"AEGION_OPERATOR_PASSWORD":         "StrongBootstrapPassword#2026",
+		"AEGION_SMTP_HOST":                 "smtp.example.com",
+		"AEGION_SMTP_FROM_ADDRESS":         "noreply@example.com",
+		"AEGION_SMTP_USERNAME":             "smtp-user",
+		"AEGION_SMTP_PASSWORD":             "smtp-password",
+		"AEGION_TLS_CERT_FILE":             "/etc/ssl/cert.pem",
+		"AEGION_TLS_KEY_FILE":              "/etc/ssl/key.pem",
+	}
+	for key, value := range env {
+		t.Setenv(key, value)
+	}
+
+	cfg, err := Load(filepath.Join("..", "..", "..", "configs", "aegion.production.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, cfg.Validate())
+
+	assert.True(t, cfg.Server.TLS.Enabled)
+	assert.Equal(t, "/etc/ssl/cert.pem", cfg.Server.TLS.CertFile)
+	assert.Equal(t, "1.2", cfg.Server.TLS.MinVersion)
+	assert.True(t, cfg.Cache.TLSEnabled == false)
+	assert.True(t, cfg.Log.IncludeRequestID)
+	assert.Contains(t, cfg.Log.RedactFields, "token")
+	assert.Equal(t, "__Host-aegion_session", cfg.Sessions.Cookie.Name)
+	assert.Equal(t, 5, cfg.Sessions.MaxPerUser)
+	assert.True(t, cfg.Security.CSRF.Enabled)
+	assert.Equal(t, "__Host-aegion_csrf", cfg.Security.CSRF.CookieName)
+	assert.True(t, cfg.Admin.RequireReauth)
+	assert.Equal(t, Duration(5*time.Minute), cfg.Admin.ReauthTimeout)
+	assert.Equal(t, "/metrics", cfg.Observability.Metrics.Path)
 }
 
 func TestConfig_StructFields(t *testing.T) {
@@ -862,6 +1063,16 @@ security:
 
 func TestConfigYAMLTags_Phase3PolicyProxy(t *testing.T) {
 	yamlContent := `
+courier:
+  sms:
+    enabled: true
+    url: https://sms.example.com/send
+    method: POST
+    headers:
+      Authorization: Bearer token
+    body_template: '{"to":"{{.To}}","body":"{{.Body}}"}'
+    timeout: 5s
+
 policy:
   enabled: true
   default_model: rebac
@@ -904,6 +1115,12 @@ proxy:
 	assert.Equal(t, "test-signing-secret", cfg.Proxy.IdentitySigningSecret)
 	assert.Equal(t, "X-Test-Signature", cfg.Proxy.IdentitySignatureHeader)
 	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID"}, cfg.Proxy.SignedIdentityHeaders)
+	assert.True(t, cfg.Courier.SMS.Enabled)
+	assert.Equal(t, "https://sms.example.com/send", cfg.Courier.SMS.URL)
+	assert.Equal(t, "POST", cfg.Courier.SMS.Method)
+	assert.Equal(t, "Bearer token", cfg.Courier.SMS.Headers["Authorization"])
+	assert.Equal(t, `{"to":"{{.To}}","body":"{{.Body}}"}`, cfg.Courier.SMS.BodyTemplate)
+	assert.Equal(t, Duration(5*time.Second), cfg.Courier.SMS.Timeout)
 }
 
 func TestLoad_Integration(t *testing.T) {

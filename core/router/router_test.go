@@ -148,6 +148,9 @@ func TestGetClientIP(t *testing.T) {
 			for key, value := range tt.headers {
 				req.Header.Set(key, value)
 			}
+			if req.Header.Get("X-Forwarded-For") != "" || req.Header.Get("X-Real-IP") != "" {
+				t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "10.0.0.0/8")
+			}
 
 			// Set remote address
 			req.RemoteAddr = tt.remoteAddr

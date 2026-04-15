@@ -2,13 +2,13 @@ package proxy
 
 import (
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 )
 
 var (
@@ -258,53 +258,11 @@ func getClientIP(r *http.Request) string {
 }
 
 func getClientIPWithTrust(r *http.Request, trustForwardedHeaders bool) string {
-	if r == nil {
-		return ""
-	}
-
-	if trustForwardedHeaders {
-		// Check X-Forwarded-For header first (most common)
-		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-			// X-Forwarded-For can contain multiple IPs, take the first non-empty one.
-			for _, ip := range strings.Split(xff, ",") {
-				ip = strings.TrimSpace(ip)
-				if ip != "" {
-					return ip
-				}
-			}
-		}
-
-		// Check X-Real-IP header
-		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
-		}
-
-		// Check CF-Connecting-IP header (Cloudflare)
-		if cfip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfip != "" {
-			return cfip
-		}
-	}
-
-	// Fall back to RemoteAddr
-	if ip := getRemoteIP(r.RemoteAddr); ip != "" {
-		return ip
-	}
-
-	return ""
+	return trustedproxy.ClientIP(r, trustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS")
 }
 
 func getRemoteIP(remoteAddr string) string {
-	remoteAddr = strings.TrimSpace(remoteAddr)
-	if remoteAddr == "" {
-		return ""
-	}
-
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err == nil {
-		return strings.Trim(host, "[]")
-	}
-
-	return strings.Trim(remoteAddr, "[]")
+	return trustedproxy.RemoteIP(remoteAddr)
 }
 
 // Reset resets rate limiting for a specific key.

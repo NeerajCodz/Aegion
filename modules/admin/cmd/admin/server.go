@@ -14,11 +14,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
 	admin "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
+	"github.com/aegion/aegion/modules/admin/scim"
 	"github.com/aegion/aegion/modules/admin/security"
 	"github.com/aegion/aegion/modules/admin/service"
 )
@@ -29,10 +31,12 @@ type DBPinger interface {
 }
 
 type Server struct {
-	Config  *Config
-	DB      *pgxpool.Pool
-	dbPing  DBPinger // for testing
-	Handler *handler.Handler
+	Config      *Config
+	DB          *pgxpool.Pool
+	dbPing      DBPinger // for testing
+	Handler     *handler.Handler
+	SCIMService *scim.Service
+	SCIMHandler *scim.Handler
 
 	adminPath string
 	spaServer *SPAFileServer
@@ -97,9 +101,23 @@ func (s *Server) setupRouter() chi.Router {
 			r.Use(security.SecurityAudit)
 			r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermAuditRead)).
 				Get("/dashboard/observability", s.handleDashboardObservability)
+			if s.SCIMService != nil {
+				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigRead)).
+					Get("/scim/tokens", s.handleListSCIMTokens)
+				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigUpdate)).
+					Post("/scim/tokens", s.handleCreateSCIMToken)
+				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigUpdate)).
+					Delete("/scim/tokens/{id}", s.handleDeleteSCIMToken)
+			}
 			s.Handler.RegisterRoutes(r)
 		})
 	})
+
+	if s.SCIMHandler != nil && s.Config.Admin.SCIM.Enabled {
+		r.Route(normalizeMountedPath(s.Config.Admin.SCIM.BasePath), func(r chi.Router) {
+			s.SCIMHandler.RegisterRoutes(r)
+		})
+	}
 
 	// Serve embedded SPA
 	r.Mount(s.adminPath, s.spaHandler())
@@ -313,6 +331,84 @@ func normalizeAdminPath(adminPath string) string {
 	}
 
 	return trimmed
+}
+
+func normalizeMountedPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "/scim/v2"
+	}
+	if !strings.HasPrefix(trimmed, "/") {
+		trimmed = "/" + trimmed
+	}
+	if len(trimmed) > 1 {
+		trimmed = strings.TrimRight(trimmed, "/")
+	}
+	return trimmed
+}
+
+func (s *Server) handleListSCIMTokens(w http.ResponseWriter, r *http.Request) {
+	tokens, err := s.SCIMService.ListSCIMTokens(r.Context())
+	if err != nil {
+		http.Error(w, "failed to list SCIM tokens", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{"tokens": tokens})
+}
+
+func (s *Server) handleCreateSCIMToken(w http.ResponseWriter, r *http.Request) {
+	operator := handler.OperatorFromContext(r.Context())
+	if operator == nil {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Name        string     `json:"name"`
+		Description string     `json:"description"`
+		Permissions []string   `json:"permissions"`
+		ExpiresAt   *time.Time `json:"expires_at"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
+	token, plainToken, err := s.SCIMService.CreateSCIMToken(r.Context(), req.Name, strings.TrimSpace(req.Description), req.Permissions, req.ExpiresAt, operator.ID)
+	if err != nil {
+		http.Error(w, "failed to create SCIM token", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"token":       token,
+		"plain_token": plainToken,
+	})
+}
+
+func (s *Server) handleDeleteSCIMToken(w http.ResponseWriter, r *http.Request) {
+	tokenID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		http.Error(w, "invalid token id", http.StatusBadRequest)
+		return
+	}
+	if err := s.SCIMService.DeleteSCIMToken(r.Context(), tokenID); err != nil {
+		http.Error(w, "failed to delete SCIM token", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) spaHandler() http.Handler {

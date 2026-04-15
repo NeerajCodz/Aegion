@@ -23,6 +23,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/service/device"
 	"github.com/aegion/aegion/modules/oauth2/service/grants"
+	"github.com/aegion/aegion/modules/oauth2/service/introspection"
 	"github.com/aegion/aegion/modules/oauth2/service/oidc"
 	"github.com/aegion/aegion/modules/oauth2/service/revocation"
 	tokenservice "github.com/aegion/aegion/modules/oauth2/service/token"
@@ -218,10 +219,12 @@ func newHTTPServer(cfg *Config, oauthHandler *handler.OAuth2Handler) *http.Serve
 func registerRoutes(mux *http.ServeMux, h *handler.OAuth2Handler) {
 	mux.HandleFunc("/oauth2/authorize", h.HandleAuthorize)
 	mux.HandleFunc("/oauth2/token", h.HandleToken)
+	mux.HandleFunc("/oauth2/introspect", h.HandleIntrospect)
 	mux.HandleFunc("/oauth2/revoke", h.HandleRevoke)
 	mux.HandleFunc("/oauth2/device/authorize", h.HandleDeviceAuthorization)
 	mux.HandleFunc("/.well-known/openid-configuration", h.HandleDiscovery)
 	mux.HandleFunc("/.well-known/jwks.json", h.HandleJWKS)
+	mux.HandleFunc("/oauth2/userinfo", h.HandleUserInfo)
 	mux.HandleFunc("/oidc/userinfo", h.HandleUserInfo)
 }
 
@@ -476,6 +479,9 @@ func newOAuth2SigningKeyPair() (*platformjwt.KeyPair, error) {
 
 	switch {
 	case privateKeyB64 == "" && publicKeyB64 == "":
+		if isProductionEnvironment() {
+			return nil, errors.New("production requires static OAuth2 signing keys via AEGION_OAUTH2_SIGNING_PRIVATE_KEY_B64 and AEGION_OAUTH2_SIGNING_PUBLIC_KEY_B64")
+		}
 		keyPair, err := platformjwt.GenerateECKeyPair(keyID)
 		if err != nil {
 			return nil, fmt.Errorf("generate signing key pair: %w", err)
@@ -599,6 +605,7 @@ func buildHandler(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
 	jwtBearerSvc := grants.NewJWTBearerService(oauthStore, signer, cfg.OAuth2.Issuer, &disabledJWTAssertionValidator{})
 	discoverySvc := oidc.NewDiscoveryService(cfg.OAuth2.Issuer, cfg.OAuth2.BaseURL)
 	jwksSvc := oidc.NewJWKSService(jwksProvider)
+	introspectSvc := introspection.NewService(tokenSvc)
 	userInfoSvc := oidc.NewUserInfoService(&accessTokenValidator{
 		store:     oauthStore,
 		publicKey: keyPair.PublicKey,
@@ -616,7 +623,7 @@ func buildHandler(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
 		discoverySvc,
 		jwksSvc,
 		userInfoSvc,
-	)
+	).WithIntrospectionService(introspectSvc)
 }
 
 func containsScope(scopes []string, wanted string) bool {
@@ -633,4 +640,15 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func isProductionEnvironment() bool {
+	for _, key := range []string{"AEGION_ENV", "APP_ENV", "ENV"} {
+		value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		switch value {
+		case "prod", "production":
+			return true
+		}
+	}
+	return false
 }

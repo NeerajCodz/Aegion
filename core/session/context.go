@@ -3,11 +3,10 @@ package session
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
+	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/google/uuid"
 )
 
@@ -50,7 +49,10 @@ func InjectHeaders(r *http.Request, session *Session, secret []byte) {
 	}
 
 	// Add signature header for verification
-	sig := signHeaders(headers, secret)
+	sig, err := platformcrypto.SignSessionContextHeaders(secret, headers, time.Now().UTC())
+	if err != nil {
+		return
+	}
 	r.Header.Set(HeaderPrefix+"Signature", sig)
 }
 
@@ -63,10 +65,8 @@ func VerifyHeaders(r *http.Request, secret []byte) (*Context, error) {
 	}
 
 	// Verify signature
-	expectedSig := signHeaders(headers, secret)
 	actualSig := r.Header.Get(HeaderPrefix + "Signature")
-
-	if !hmac.Equal([]byte(expectedSig), []byte(actualSig)) {
+	if !platformcrypto.VerifySessionContextHeaders(secret, headers, actualSig, time.Now().UTC()) {
 		return nil, ErrSessionInvalid
 	}
 
@@ -90,12 +90,11 @@ func VerifyHeaders(r *http.Request, secret []byte) (*Context, error) {
 
 // signHeaders creates an HMAC signature for session headers.
 func signHeaders(headers map[string]string, secret []byte) string {
-	mac := hmac.New(sha256.New, secret)
-	// Deterministic order for signing
-	mac.Write([]byte(headers["Session-ID"]))
-	mac.Write([]byte(headers["Identity-ID"]))
-	mac.Write([]byte(headers["AAL"]))
-	return hex.EncodeToString(mac.Sum(nil))
+	sig, err := platformcrypto.SignSessionContextHeaders(secret, headers, time.Unix(0, 0).UTC())
+	if err != nil {
+		return ""
+	}
+	return sig
 }
 
 // WithSession adds session to context.

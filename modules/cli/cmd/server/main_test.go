@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"net/http"
 	"os"
 	"testing"
 
@@ -21,30 +23,43 @@ func TestDefaultListenAddr(t *testing.T) {
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9010")
+	cfg := moduleConfig("127.0.0.1:9010", func(*http.ServeMux) {})
 	if cfg.Module != "cli" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9010" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
-	if len(cfg.Capabilities) != 2 || cfg.Capabilities[0] != "automation" || cfg.Capabilities[1] != "ops_interface" {
+	if len(cfg.Capabilities) != 3 || cfg.Capabilities[0] != "ops_interface" {
 		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
 	}
 	if len(cfg.Routes) != 1 || cfg.Routes[0] != "/api/v1/cli/*" {
 		t.Fatalf("unexpected routes: %#v", cfg.Routes)
 	}
-	if len(cfg.GRPCServices) != 1 || cfg.GRPCServices[0] != "cli.CommandGateway" {
-		t.Fatalf("unexpected grpc services: %#v", cfg.GRPCServices)
+	if cfg.RegisterHTTPRoutes == nil {
+		t.Fatal("expected HTTP route registration hook")
 	}
-	if len(cfg.EventSubscriptions) != 2 || cfg.EventSubscriptions[0] != "system.health" || cfg.EventSubscriptions[1] != "policy.updated" {
-		t.Fatalf("unexpected event subscriptions: %#v", cfg.EventSubscriptions)
+}
+
+func TestBuildRuntimeDefaultsToMemoryStore(t *testing.T) {
+	t.Setenv(dbURLEnv, "")
+	t.Setenv(legacyDBURLEnv, "")
+	t.Setenv(managementTokenEnv, "secret")
+
+	runtime, err := buildRuntime(context.Background())
+	if err != nil {
+		t.Fatalf("buildRuntime returned error: %v", err)
+	}
+	if runtime == nil || runtime.registerHTTPRoutes == nil || runtime.cleanup == nil {
+		t.Fatalf("unexpected runtime: %+v", runtime)
 	}
 }
 
 func TestMainInvokesRunModuleServer(t *testing.T) {
 	origRun := runModuleServer
+	origBuild := buildRuntimeHook
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	t.Cleanup(func() {
 		runModuleServer = origRun
+		buildRuntimeHook = origBuild
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 	})
@@ -53,6 +68,12 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 	runModuleServer = func(cfg moduleserver.Config) error {
 		captured = cfg
 		return nil
+	}
+	buildRuntimeHook = func(context.Context) (*moduleRuntime, error) {
+		return &moduleRuntime{
+			registerHTTPRoutes: func(*http.ServeMux) {},
+			cleanup:            func() {},
+		}, nil
 	}
 
 	os.Args = []string{"cli-server", "-listen", "127.0.0.1:19110"}

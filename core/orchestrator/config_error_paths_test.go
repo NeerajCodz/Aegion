@@ -99,6 +99,17 @@ func TestConfigLoader_AdditionalErrorPaths(t *testing.T) {
 			t.Fatalf("expected ErrMissingModuleID, got %v", err)
 		}
 	})
+
+	t.Run("LoadModuleConfig rejects traversal-style module ids", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := writeMinimalMainConfig(t, dir)
+		loader := NewConfigLoader(configPath)
+
+		_, err := loader.LoadModuleConfig("../password")
+		if err == nil || !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("expected ErrInvalidConfig for traversal module id, got %v", err)
+		}
+	})
 }
 
 func TestApplyModuleDefaults_UsesMainNetworkDefaults(t *testing.T) {
