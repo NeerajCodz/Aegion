@@ -4,12 +4,11 @@
 package flows
 
 import (
-	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/google/uuid"
 )
 
@@ -212,8 +211,8 @@ func (f *Flow) GetContext(key string) (any, bool) {
 
 // GenerateCSRFToken generates a cryptographically secure CSRF token
 func GenerateCSRFToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	b, err := platformcrypto.RandomBytes(32)
+	if err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
@@ -224,7 +223,7 @@ func ValidateCSRFToken(expected, actual string) bool {
 	if len(expected) == 0 || len(actual) == 0 {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(expected), []byte(actual)) == 1
+	return platformcrypto.ConstantTimeCompare([]byte(expected), []byte(actual))
 }
 
 // Msg represents a message in the UI

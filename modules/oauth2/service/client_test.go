@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"golang.org/x/crypto/bcrypt"
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
@@ -354,9 +354,6 @@ func TestClientHelpers(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, VerifyClientSecret(string(hash), "secret"))
 	assert.False(t, VerifyClientSecret(string(hash), "nope"))
-
-	assert.Equal(t, byte(1), boolToByte(true))
-	assert.Equal(t, byte(0), boolToByte(false))
 }
 
 func TestClientService_StoreErrors(t *testing.T) {

@@ -17,6 +17,7 @@ import (
 
 type integrationStore struct {
 	client            *store.Client
+	sessionAuthCtx    map[string]*store.SessionAuthContext
 	loginChallenges   map[string]*store.LoginChallenge
 	consentChallenges map[string]*store.ConsentChallenge
 	consentSessions   map[string]*store.ConsentSession
@@ -29,6 +30,7 @@ type integrationStore struct {
 func newIntegrationStore(client *store.Client) *integrationStore {
 	return &integrationStore{
 		client:            client,
+		sessionAuthCtx:    map[string]*store.SessionAuthContext{},
 		loginChallenges:   map[string]*store.LoginChallenge{},
 		consentChallenges: map[string]*store.ConsentChallenge{},
 		consentSessions:   map[string]*store.ConsentSession{},
@@ -69,6 +71,13 @@ func (s *integrationStore) MarkAuthCodeUsed(ctx context.Context, code string) er
 	}
 	c.Used = true
 	return nil
+}
+
+func (s *integrationStore) GetSessionAuthContext(ctx context.Context, sessionID string) (*store.SessionAuthContext, error) {
+	if authCtx, ok := s.sessionAuthCtx[sessionID]; ok {
+		return authCtx, nil
+	}
+	return nil, store.ErrNotFound
 }
 
 func (s *integrationStore) CreateLoginChallenge(ctx context.Context, challenge *store.LoginChallenge) error {

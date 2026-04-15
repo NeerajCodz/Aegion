@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
 	"github.com/aegion/aegion/modules/oauth2/handler"
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
@@ -46,6 +47,7 @@ var (
 	connectDBHook      = connectDB
 	buildHandlerHook   = buildHandler
 	newHTTPServerHook  = newHTTPServer
+	rustSelfCheckHook  = platformcrypto.RuntimeSelfCheck
 	notifySignalsHook  = signal.Notify
 	stopSignalsHook    = signal.Stop
 	listenAndServeHook = func(srv *http.Server) error {
@@ -83,6 +85,9 @@ func main() {
 	if *showVersion {
 		_, _ = fmt.Printf("Aegion OAuth2 Module v%s\n", version)
 		return
+	}
+	if err := rustSelfCheckHook(); err != nil {
+		log.Fatal().Err(err).Msg("Rust crypto runtime check failed")
 	}
 
 	cfg, err := loadConfigHook(*configPath)

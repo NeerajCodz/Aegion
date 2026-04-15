@@ -29,6 +29,7 @@ type AuthorizationStore interface {
 	CreateAuthCode(ctx context.Context, code *store.AuthCode) error
 	GetAuthCode(ctx context.Context, code string) (*store.AuthCode, error)
 	MarkAuthCodeUsed(ctx context.Context, code string) error
+	GetSessionAuthContext(ctx context.Context, sessionID string) (*store.SessionAuthContext, error)
 	CreateLoginChallenge(ctx context.Context, challenge *store.LoginChallenge) error
 	GetLoginChallenge(ctx context.Context, id string) (*store.LoginChallenge, error)
 	AcceptLoginChallenge(ctx context.Context, id, identityID, sessionID string) error
@@ -54,6 +55,7 @@ func NewAuthorizationService(store AuthorizationStore) *AuthorizationService {
 type AuthorizeRequest struct {
 	ClientID            string   `json:"client_id"`
 	RedirectURI         string   `json:"redirect_uri"`
+	RequestURL          string   `json:"request_url,omitempty"`
 	ResponseType        string   `json:"response_type"`
 	Scope               string   `json:"scope"`
 	State               string   `json:"state,omitempty"`
@@ -143,11 +145,16 @@ func (s *AuthorizationService) StartAuthorization(ctx context.Context, req *Auth
 		}
 	}
 
+	requestURL := strings.TrimSpace(req.RequestURL)
+	if requestURL == "" {
+		requestURL = req.RedirectURI
+	}
+
 	// Create login challenge
 	challenge := &store.LoginChallenge{
 		ID:                  store.GenerateLoginChallenge(),
 		ClientID:            client.ID,
-		RequestURL:          "", // TODO: capture full request URL
+		RequestURL:          requestURL,
 		RedirectURI:         req.RedirectURI,
 		Scopes:              scopes,
 		Audience:            req.Audience,
@@ -290,6 +297,17 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 		return nil, err
 	}
 
+	acr, amr, authTime := deriveAuthContext(loginChallenge)
+	sessionAuthContext, err := s.store.GetSessionAuthContext(ctx, challenge.SessionID)
+	switch {
+	case err == nil:
+		acr, amr, authTime = deriveAuthContextFromSession(sessionAuthContext, authTime)
+	case errors.Is(err, store.ErrNotFound):
+		// Continue with login challenge context/defaults for compatibility.
+	default:
+		return nil, fmt.Errorf("%w: failed to resolve session auth context", ErrServerError)
+	}
+
 	// Generate authorization code
 	authCode := &store.AuthCode{
 		Code:                store.GenerateAuthCode(),
@@ -303,8 +321,9 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 		CodeChallengeMethod: loginChallenge.CodeChallengeMethod,
 		Nonce:               loginChallenge.Nonce,
 		State:               loginChallenge.State,
-		ACR:                 "aal1",          // TODO: determine from session
-		AMR:                 []string{"pwd"}, // TODO: determine from session
+		ACR:                 acr,
+		AMR:                 amr,
+		AuthTime:            authTime,
 		ExpiresAt:           time.Now().UTC().Add(10 * time.Minute),
 	}
 
@@ -376,4 +395,83 @@ func isSubset(values []string, allowed []string) bool {
 		}
 	}
 	return true
+}
+
+func deriveAuthContext(loginChallenge *store.LoginChallenge) (string, []string, time.Time) {
+	authTime := time.Now().UTC()
+	if loginChallenge != nil && loginChallenge.AuthenticatedAt != nil {
+		authTime = loginChallenge.AuthenticatedAt.UTC()
+	}
+	return "aal1", []string{"pwd"}, authTime
+}
+
+func deriveAuthContextFromSession(ctx *store.SessionAuthContext, fallbackAuthTime time.Time) (string, []string, time.Time) {
+	if ctx == nil {
+		return "aal1", []string{"pwd"}, fallbackAuthTime
+	}
+
+	acr := "aal1"
+	if normalized := normalizeACR(ctx.AAL); normalized != "" {
+		acr = normalized
+	}
+
+	amr := dedupeAMR(ctx.Methods)
+	if len(amr) == 0 {
+		amr = []string{"pwd"}
+	}
+
+	authTime := fallbackAuthTime
+	if !ctx.AuthenticatedAt.IsZero() {
+		authTime = ctx.AuthenticatedAt.UTC()
+	}
+
+	return acr, amr, authTime
+}
+
+func normalizeACR(aal string) string {
+	switch strings.ToLower(strings.TrimSpace(aal)) {
+	case "aal0":
+		return "aal0"
+	case "aal1":
+		return "aal1"
+	case "aal2":
+		return "aal2"
+	default:
+		return ""
+	}
+}
+
+func dedupeAMR(methods []string) []string {
+	if len(methods) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(methods))
+	amr := make([]string, 0, len(methods))
+	for _, method := range methods {
+		value := mapMethodToAMR(method)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		amr = append(amr, value)
+	}
+	return amr
+}
+
+func mapMethodToAMR(method string) string {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "password":
+		return "pwd"
+	case "totp", "magic_link", "sms", "backup_code":
+		return "otp"
+	case "webauthn", "passkey":
+		return "hwk"
+	case "social", "saml":
+		return "federated"
+	default:
+		return ""
+	}
 }

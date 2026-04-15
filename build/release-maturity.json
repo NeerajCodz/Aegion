@@ -8,21 +8,21 @@
       "deployment": "hybrid-control-plane",
       "summary": "Primary ingress, orchestration, and shared auth/session runtime.",
       "caveats": [],
-      "required_gates": ["ci", "security", "release-manifest", "release-maturity"]
+      "required_gates": ["ci", "security", "release-manifest", "release-maturity", "release-checklist"]
     },
     "password": {
       "status": "GA",
       "deployment": "embedded",
       "summary": "Stable password flow integrated with core session lifecycle.",
       "caveats": [],
-      "required_gates": ["ci", "security", "auth-e2e"]
+      "required_gates": ["ci", "security", "release-checklist", "auth-e2e"]
     },
     "magic_link": {
       "status": "GA",
       "deployment": "embedded",
       "summary": "Stable passwordless and recovery delivery path in core.",
       "caveats": [],
-      "required_gates": ["ci", "security", "auth-e2e"]
+      "required_gates": ["ci", "security", "release-checklist", "auth-e2e"]
     },
     "policy": {
       "status": "Beta",
@@ -32,7 +32,7 @@
         "Standalone extraction is not required in current GA train.",
         "Operator-facing authoring/simulation hardening is in progress."
       ],
-      "required_gates": ["ci", "security", "policy-simulation"]
+      "required_gates": ["ci", "security", "release-checklist", "policy-simulation"]
     },
     "admin": {
       "status": "Beta",
@@ -42,7 +42,7 @@
         "Some backend surfaces are ahead of SPA coverage.",
         "Uniform pagination/filter/error contracts are still being finalized."
       ],
-      "required_gates": ["ci", "security", "admin-e2e"]
+      "required_gates": ["ci", "security", "release-checklist", "admin-e2e"]
     },
     "oauth2": {
       "status": "Beta",
@@ -52,7 +52,7 @@
         "Request URL persistence and subject strategy closure are pending.",
         "ACR/AMR/auth_time propagation is being finalized."
       ],
-      "required_gates": ["ci", "security", "oauth2-e2e"]
+      "required_gates": ["ci", "security", "release-checklist", "oauth2-e2e"]
     },
     "social": {
       "status": "Beta",
@@ -61,7 +61,7 @@
       "caveats": [
         "Final callback-completion convergence with core auth orchestration is in progress."
       ],
-      "required_gates": ["ci", "security", "auth-e2e"]
+      "required_gates": ["ci", "security", "release-checklist", "auth-e2e"]
     },
     "sso": {
       "status": "Beta",
@@ -70,7 +70,7 @@
       "caveats": [
         "Enterprise-grade validation and lifecycle policy closure is in progress."
       ],
-      "required_gates": ["ci", "security", "enterprise-e2e"]
+      "required_gates": ["ci", "security", "release-checklist", "enterprise-e2e"]
     },
     "introspection": {
       "status": "Beta",
@@ -79,7 +79,7 @@
       "caveats": [
         "Final consistency gates follow OAuth2 token model closure."
       ],
-      "required_gates": ["ci", "security", "oauth2-e2e"]
+      "required_gates": ["ci", "security", "release-checklist", "oauth2-e2e"]
     },
     "proxy": {
       "status": "Beta",
@@ -88,7 +88,7 @@
       "caveats": [
         "Policy attachment diagnostics and signed-header operator visibility are still maturing."
       ],
-      "required_gates": ["ci", "security", "proxy-simulation"]
+      "required_gates": ["ci", "security", "release-checklist", "proxy-simulation"]
     },
     "mfa": {
       "status": "Not GA",

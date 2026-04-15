@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	crand "crypto/rand"
 	"errors"
 	"testing"
 	"time"
@@ -37,16 +36,10 @@ func TestGetByToken_PropagatesQueryError(t *testing.T) {
 	}
 }
 
-type failingEntropyReader struct{}
-
-func (failingEntropyReader) Read(_ []byte) (int, error) {
-	return 0, errors.New("entropy source failed")
-}
-
 func TestCreate_PropagatesGenerateCodeError(t *testing.T) {
-	origReader := crand.Reader
-	crand.Reader = failingEntropyReader{}
-	t.Cleanup(func() { crand.Reader = origReader })
+	origRandomIntN := randomIntN
+	randomIntN = func(int) (int, error) { return 0, errors.New("entropy source failed") }
+	t.Cleanup(func() { randomIntN = origRandomIntN })
 
 	st := NewWithDB(&fakeDB{})
 

@@ -52,6 +52,38 @@ func TestStartAndCompleteAuth(t *testing.T) {
 	}
 }
 
+func TestCompleteAuthRejectsRelayStateReplay(t *testing.T) {
+	repo := store.New()
+	svc := New(repo, []byte("01234567890123456789012345678901"))
+	ctx := context.Background()
+
+	_, err := svc.UpsertConnection(ctx, ConnectionUpsertRequest{
+		Slug:        "acme",
+		DisplayName: "Acme",
+		EntityID:    "urn:acme:test",
+		SSOURL:      "https://idp.example.com/sso",
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("upsert connection: %v", err)
+	}
+
+	start, err := svc.StartAuth(ctx, "acme", "/after")
+	if err != nil {
+		t.Fatalf("start auth: %v", err)
+	}
+
+	_, err = svc.CompleteAuth(ctx, "acme", start.RelayState, "sub-123", "user@example.com", "User", nil)
+	if err != nil {
+		t.Fatalf("first complete auth failed: %v", err)
+	}
+
+	_, err = svc.CompleteAuth(ctx, "acme", start.RelayState, "sub-123", "user@example.com", "User", nil)
+	if err == nil {
+		t.Fatal("expected replayed relay state to fail")
+	}
+}
+
 func TestGetConnectionForDomain(t *testing.T) {
 	repo := store.New()
 	svc := New(repo, []byte("01234567890123456789012345678901"))
@@ -188,6 +220,70 @@ func TestCompleteAuthRejectsMismatchedIssuer(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected mismatched issuer to fail")
+	}
+}
+
+func TestCompleteAuthRejectsMismatchedRecipientAndDestination(t *testing.T) {
+	repo := store.New()
+	svc := New(repo, []byte("01234567890123456789012345678901"))
+	ctx := context.Background()
+	_, err := svc.UpsertConnection(ctx, ConnectionUpsertRequest{
+		Slug:        "acme",
+		DisplayName: "Acme",
+		EntityID:    "urn:test:idp",
+		SSOURL:      "https://idp.example.com/sso",
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("upsert connection: %v", err)
+	}
+	start, err := svc.StartAuth(ctx, "acme", "/after")
+	if err != nil {
+		t.Fatalf("start auth: %v", err)
+	}
+	state, err := svc.verifyRelayState(start.RelayState)
+	if err != nil {
+		t.Fatalf("verify relay state: %v", err)
+	}
+	expires := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339)
+	xmlResponse := `<Response InResponseTo="` + state.RequestID + `" Destination="https://sp.example.com/callback"><Issuer>urn:test:idp</Issuer><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Issuer>urn:test:idp</Issuer><Subject><NameID>sub-xml</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="` + state.RequestID + `" Recipient="https://other.example.com/callback" NotOnOrAfter="` + expires + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + expires + `"/></Assertion></Response>`
+	_, err = svc.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", map[string]interface{}{
+		"_saml_response": base64.StdEncoding.EncodeToString([]byte(xmlResponse)),
+	})
+	if err == nil {
+		t.Fatal("expected recipient/destination mismatch to fail")
+	}
+}
+
+func TestCompleteAuthRejectsMismatchedAudience(t *testing.T) {
+	repo := store.New()
+	svc := New(repo, []byte("01234567890123456789012345678901"))
+	ctx := context.Background()
+	_, err := svc.UpsertConnection(ctx, ConnectionUpsertRequest{
+		Slug:        "acme",
+		DisplayName: "Acme",
+		EntityID:    "urn:test:idp",
+		SSOURL:      "https://idp.example.com/sso",
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatalf("upsert connection: %v", err)
+	}
+	start, err := svc.StartAuth(ctx, "acme", "/after")
+	if err != nil {
+		t.Fatalf("start auth: %v", err)
+	}
+	state, err := svc.verifyRelayState(start.RelayState)
+	if err != nil {
+		t.Fatalf("verify relay state: %v", err)
+	}
+	expires := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339)
+	xmlResponse := `<Response InResponseTo="` + state.RequestID + `"><Issuer>urn:test:idp</Issuer><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Issuer>urn:test:idp</Issuer><Subject><NameID>sub-xml</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="` + state.RequestID + `" NotOnOrAfter="` + expires + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + expires + `"><AudienceRestriction><Audience>urn:aegion:sp:other</Audience></AudienceRestriction></Conditions></Assertion></Response>`
+	_, err = svc.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", map[string]interface{}{
+		"_saml_response": base64.StdEncoding.EncodeToString([]byte(xmlResponse)),
+	})
+	if err == nil {
+		t.Fatal("expected mismatched audience to fail")
 	}
 }
 

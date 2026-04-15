@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 )
 
 type fakeDB struct {

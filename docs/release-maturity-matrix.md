@@ -28,4 +28,4 @@ This table summarizes the current release stance for each module. The machine-ch
 
 ## Release gate intent
 
-For GA and Beta modules, release approval requires passing baseline gates from CI/security and module-specific hardening requirements described in `build/release-maturity.json`.
+For GA and Beta modules, release approval requires passing baseline gates from CI/security, release checklist validation (`build/release-checklist.json`), and module-specific hardening requirements described in `build/release-maturity.json`.

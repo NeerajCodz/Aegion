@@ -4581,13 +4581,18 @@ func TestOperatorHandler_AdditionalCoveragePaths(t *testing.T) {
 			assert.Equal(t, "inactive", capturedState)
 		})
 
-		t.Run("bcrypt rejects too long password", func(t *testing.T) {
+		t.Run("database begin error propagates", func(t *testing.T) {
 			h := New(&fakeService{store: &fakeStore{}})
+			h.db = &fakeDB{
+				beginFn: func(context.Context) (pgx.Tx, error) {
+					return nil, errors.New("begin failed")
+				},
+			}
 			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
 				Email:    "toolong@example.com",
 				Password: strings.Repeat("x", 73),
 			})
-			require.Error(t, err)
+			require.EqualError(t, err, "begin failed")
 		})
 
 		t.Run("schema lookup error propagates", func(t *testing.T) {

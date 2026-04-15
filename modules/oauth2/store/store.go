@@ -3,11 +3,11 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,9 +54,9 @@ func NewWithDB(db DB) *Store {
 
 // generateID generates a cryptographically secure random ID
 func generateID(prefix string, length int) string {
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		panic(err) // crypto/rand should never fail
+	b, err := platformcrypto.RandomBytes(length)
+	if err != nil {
+		panic(err) // Rust-backed RNG should never fail in healthy runtime.
 	}
 	return prefix + base64.RawURLEncoding.EncodeToString(b)
 }
@@ -109,8 +109,8 @@ func GenerateDeviceCode() string {
 // GenerateUserCode generates a human-readable user code (8 chars, uppercase)
 func GenerateUserCode() string {
 	const charset = "BCDFGHJKLMNPQRSTVWXZ" // no vowels to avoid words
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
+	b, err := platformcrypto.RandomBytes(8)
+	if err != nil {
 		panic(err)
 	}
 	code := make([]byte, 8)

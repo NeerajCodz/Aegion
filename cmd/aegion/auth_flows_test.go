@@ -273,6 +273,15 @@ func TestHandleSubmitLoginExecutesPasswordAuthentication(t *testing.T) {
 	if body["status"] != "authenticated" {
 		t.Fatalf("expected authenticated status, got %q", body["status"])
 	}
+	if body["acr"] != "aal1" || body["aal"] != "aal1" || body["amr"] != "pwd" {
+		t.Fatalf("expected aal1/password auth context, got %+v", body)
+	}
+	if body["trusted_device"] != "false" || body["reauth_required"] != "false" {
+		t.Fatalf("expected non-trusted non-reauth flags, got %+v", body)
+	}
+	if strings.TrimSpace(body["sid"]) == "" || strings.TrimSpace(body["auth_time"]) == "" {
+		t.Fatalf("expected sid/auth_time in completion payload, got %+v", body)
+	}
 }
 
 func TestHandleSubmitLoginRequiresMFAChallengeWhenFactorEnrolled(t *testing.T) {
@@ -381,6 +390,17 @@ func TestHandleSubmitLoginCompletesPendingMFAChallenge(t *testing.T) {
 	if len(cookies) == 0 || cookies[0].Name != "aegion_mfa_trusted_device" {
 		t.Fatalf("expected trusted device cookie, got %+v", cookies)
 	}
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["acr"] != "aal2" || body["aal"] != "aal2" || body["amr"] != "otp pwd" {
+		t.Fatalf("expected upgraded aal2 auth context, got %+v", body)
+	}
+	if body["trusted_device"] != "false" {
+		t.Fatalf("expected trusted_device=false for MFA-completed login, got %+v", body)
+	}
 }
 
 func TestHandleSubmitLoginUsesTrustedDeviceToBypassPrompt(t *testing.T) {
@@ -426,6 +446,132 @@ func TestHandleSubmitLoginUsesTrustedDeviceToBypassPrompt(t *testing.T) {
 	}
 	if got := store.flows[flow.ID].State; got != flows.StateCompleted {
 		t.Fatalf("expected flow to complete, got %s", got)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["acr"] != "aal2" || body["aal"] != "aal2" || body["amr"] != "otp pwd" {
+		t.Fatalf("expected trusted-device login to report aal2 context, got %+v", body)
+	}
+	if body["trusted_device"] != "true" {
+		t.Fatalf("expected trusted_device=true, got %+v", body)
+	}
+}
+
+func TestHandleCompleteExternalLoginIssuesSession(t *testing.T) {
+	s, store := newFlowServer(t)
+	sm := &stubRouteSessionManager{}
+	s.sessionManager = sm
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+
+	identityID := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
+		"flow_id":     flow.ID.String(),
+		"csrf_token":  flow.CSRFToken,
+		"identity_id": identityID.String(),
+		"method":      "social",
+		"identifier":  "person@example.com",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	s.handleCompleteExternalLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if len(sm.created) != 1 || sm.created[0].IdentityID != identityID {
+		t.Fatalf("expected session for %s, got %+v", identityID, sm.created)
+	}
+	if got := sm.created[0].AuthMethods[0].Method; got != session.AuthMethodSocial {
+		t.Fatalf("expected social auth method, got %s", got)
+	}
+	if got := store.flows[flow.ID].State; got != flows.StateCompleted {
+		t.Fatalf("expected flow to be completed, got %s", got)
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "authenticated" || body["amr"] != "federated" {
+		t.Fatalf("expected authenticated federated response, got %+v", body)
+	}
+	if body["acr"] != "aal1" || body["aal"] != "aal1" || strings.TrimSpace(body["sid"]) == "" {
+		t.Fatalf("expected auth context in response, got %+v", body)
+	}
+}
+
+func TestHandleCompleteExternalLoginSupportsMFAStepUp(t *testing.T) {
+	s, store := newFlowServer(t)
+	sm := &stubRouteSessionManager{}
+	mfa := &stubMFAFlowService{hasFactor: true}
+	s.sessionManager = sm
+	s.mfaAuth = mfa
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
+		"flow_id":     flow.ID.String(),
+		"csrf_token":  flow.CSRFToken,
+		"identity_id": uuid.New().String(),
+		"method":      "saml",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	s.handleCompleteExternalLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if len(sm.created) != 0 {
+		t.Fatalf("expected no session before MFA, got %+v", sm.created)
+	}
+	if got := store.flows[flow.ID].State; got != flows.StateActive {
+		t.Fatalf("expected flow to stay active, got %s", got)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "mfa_required" {
+		t.Fatalf("expected mfa_required status, got %+v", body)
+	}
+	if _, ok := body["flow"].(map[string]any); !ok {
+		t.Fatalf("expected flow payload in response, got %+v", body)
+	}
+}
+
+func TestHandleCompleteExternalLoginRejectsUnsupportedMethod(t *testing.T) {
+	s, _ := newFlowServer(t)
+	s.sessionManager = &stubRouteSessionManager{}
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
+		"flow_id":     flow.ID.String(),
+		"csrf_token":  flow.CSRFToken,
+		"identity_id": uuid.New().String(),
+		"method":      "oidc",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	s.handleCompleteExternalLogin(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
 	}
 }
 

@@ -64,6 +64,7 @@ allowed_gates = {
     "security",
     "release-manifest",
     "release-maturity",
+    "release-checklist",
     "auth-e2e",
     "admin-e2e",
     "oauth2-e2e",

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base32"
 	"encoding/base64"
@@ -438,8 +437,8 @@ func (s *Service) verifyTOTP(secret, code string, now time.Time) bool {
 }
 
 func generateTOTPSecret() (string, error) {
-	buf := make([]byte, 20)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := platformcrypto.RandomBytes(20)
+	if err != nil {
 		return "", err
 	}
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf), nil
@@ -475,8 +474,8 @@ func generateTOTPCode(secret []byte, counter int64, digits int) string {
 }
 
 func generateBackupCode() (string, error) {
-	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := platformcrypto.RandomBytes(8)
+	if err != nil {
 		return "", err
 	}
 	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf)
@@ -488,8 +487,8 @@ func generateBackupCode() (string, error) {
 }
 
 func randomTrustedDeviceToken() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := platformcrypto.RandomBytes(32)
+	if err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
