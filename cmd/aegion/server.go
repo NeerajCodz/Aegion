@@ -281,6 +281,14 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 				Password:    cfg.Config.Courier.SMTP.Auth.Password,
 				AuthEnabled: cfg.Config.Courier.SMTP.Auth.Enabled,
 			},
+			SMS: courier.SMSConfig{
+				Enabled:      cfg.Config.Courier.SMS.Enabled,
+				URL:          cfg.Config.Courier.SMS.URL,
+				Method:       cfg.Config.Courier.SMS.Method,
+				Headers:      cfg.Config.Courier.SMS.Headers,
+				BodyTemplate: cfg.Config.Courier.SMS.BodyTemplate,
+				Timeout:      cfg.Config.Courier.SMS.Timeout.Duration(),
+			},
 			CodeExpiry: cfg.Config.MagicLink.CodeLifespan.Duration(),
 			LinkExpiry: cfg.Config.MagicLink.LinkLifespan.Duration(),
 		})

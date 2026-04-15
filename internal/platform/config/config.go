@@ -129,6 +129,7 @@ type OperatorConfig struct {
 // CourierConfig configures email/SMS delivery.
 type CourierConfig struct {
 	SMTP SMTPConfig `yaml:"smtp"`
+	SMS  SMSConfig  `yaml:"sms"`
 }
 
 // SMTPConfig configures SMTP delivery.
@@ -151,6 +152,16 @@ type SMTPAuth struct {
 type SMTPTLS struct {
 	Enabled    bool `yaml:"enabled"`
 	SkipVerify bool `yaml:"skip_verify"`
+}
+
+// SMSConfig configures generic HTTP SMS delivery.
+type SMSConfig struct {
+	Enabled      bool              `yaml:"enabled"`
+	URL          string            `yaml:"url"`
+	Method       string            `yaml:"method"`
+	Headers      map[string]string `yaml:"headers"`
+	BodyTemplate string            `yaml:"body_template"`
+	Timeout      Duration          `yaml:"timeout"`
 }
 
 // SessionsConfig configures session management.
@@ -597,6 +608,12 @@ func applyDefaults(cfg *Config) {
 	if cfg.Observability.Health.Path == "" {
 		cfg.Observability.Health.Path = "/health"
 	}
+	if cfg.Courier.SMS.Method == "" {
+		cfg.Courier.SMS.Method = "POST"
+	}
+	if cfg.Courier.SMS.Timeout == 0 {
+		cfg.Courier.SMS.Timeout = Duration(10 * time.Second)
+	}
 }
 
 // applyEnvOverrides overrides config with environment variables.
@@ -759,6 +776,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.TLS.Enabled && (strings.TrimSpace(c.Server.TLS.CertFile) == "" || strings.TrimSpace(c.Server.TLS.KeyFile) == "") {
 		return fmt.Errorf("server.tls.cert_file and server.tls.key_file are required when tls is enabled")
+	}
+	if c.Courier.SMS.Enabled {
+		smsURL := strings.ToLower(strings.TrimSpace(c.Courier.SMS.URL))
+		if smsURL == "" {
+			return fmt.Errorf("courier.sms.url is required when sms delivery is enabled")
+		}
+		if isProductionEnvironment() && !strings.HasPrefix(smsURL, "https://") {
+			return fmt.Errorf("courier.sms.url must use https in production")
+		}
 	}
 	if c.Proxy.TrustForwardedHeaders && len(c.Proxy.TrustedProxyCIDRs) == 0 {
 		return fmt.Errorf("proxy.trusted_proxy_cidrs is required when proxy.trust_forwarded_headers is enabled")
