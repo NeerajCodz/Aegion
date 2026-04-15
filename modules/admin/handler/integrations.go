@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	coreproxy "github.com/aegion/aegion/core/proxy"
+	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/modules/admin/service"
 	adminstore "github.com/aegion/aegion/modules/admin/store"
 	"github.com/aegion/aegion/modules/social/providers/catalog"
@@ -726,6 +728,14 @@ type ProxyRouteRequest struct {
 	Description  string                 `json:"description"`
 }
 
+type ProxySimulationRequest struct {
+	Path          string   `json:"path"`
+	Method        string   `json:"method"`
+	Authenticated bool     `json:"authenticated"`
+	AAL           string   `json:"aal,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty"`
+}
+
 func (h *Handler) UpsertProxyRoute(w http.ResponseWriter, r *http.Request) {
 	if OperatorFromContext(r.Context()) == nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -829,6 +839,227 @@ func (h *Handler) DeleteProxyRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) SimulateProxyRoute(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	var req ProxySimulationRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+	requestPath := strings.TrimSpace(req.Path)
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	if !strings.HasPrefix(requestPath, "/") {
+		requestPath = "/" + requestPath
+	}
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+
+	rows, err := h.dbConn().Query(r.Context(), `
+		SELECT id, path, methods, require_auth, required_aal, capabilities, rate_limit, target, priority, headers, rewrite, enabled, description, created_at, updated_at
+		FROM proxy_routes
+		ORDER BY priority DESC, id ASC
+	`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load proxy routes")
+		return
+	}
+	defer rows.Close()
+
+	engineRules := make([]coreproxy.Rule, 0)
+	routeByID := make(map[string]map[string]any)
+	for rows.Next() {
+		var (
+			id, path, requiredAAL, target, description string
+			methodsRaw, capabilitiesRaw                []byte
+			rateLimitRaw, headersRaw, rewriteRaw       []byte
+			requireAuth, enabled                       bool
+			priority                                   int
+			createdAt, updatedAt                       time.Time
+		)
+		if err := rows.Scan(
+			&id, &path, &methodsRaw, &requireAuth, &requiredAAL, &capabilitiesRaw, &rateLimitRaw, &target, &priority,
+			&headersRaw, &rewriteRaw, &enabled, &description, &createdAt, &updatedAt,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read proxy routes")
+			return
+		}
+
+		methods := decodeStringSlice(methodsRaw)
+		capabilities := decodeStringSlice(capabilitiesRaw)
+		headers := decodeStringMap(headersRaw)
+		rewrite := decodeRewriteConfig(rewriteRaw)
+
+		engineRules = append(engineRules, coreproxy.Rule{
+			ID:           strings.TrimSpace(id),
+			Path:         strings.TrimSpace(path),
+			Methods:      methods,
+			RequireAuth:  requireAuth,
+			RequiredAAL:  session.AAL(strings.ToLower(strings.TrimSpace(requiredAAL))),
+			Capabilities: capabilities,
+			Target:       strings.ToLower(strings.TrimSpace(target)),
+			Priority:     priority,
+			Headers:      headers,
+			Rewrite:      rewrite,
+			Enabled:      enabled,
+			Description:  strings.TrimSpace(description),
+		})
+
+		routeByID[strings.TrimSpace(id)] = map[string]any{
+			"id":           strings.TrimSpace(id),
+			"path":         strings.TrimSpace(path),
+			"methods":      methods,
+			"require_auth": requireAuth,
+			"required_aal": strings.TrimSpace(requiredAAL),
+			"capabilities": capabilities,
+			"target":       strings.ToLower(strings.TrimSpace(target)),
+			"priority":     priority,
+			"enabled":      enabled,
+			"description":  strings.TrimSpace(description),
+			"created_at":   createdAt,
+			"updated_at":   updatedAt,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read proxy routes")
+		return
+	}
+
+	engine := coreproxy.NewRuleEngine(engineRules)
+	httpReq, _ := http.NewRequest(method, "http://proxy.simulator"+requestPath, nil)
+	matchedRule, matched := engine.Match(httpReq)
+	if !matched || matchedRule == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"matched":       false,
+			"allowed":       false,
+			"denial_reason": "no_matching_route",
+		})
+		h.logAction(r.Context(), &operator.ID, "simulate", "proxy_route", "no-match", map[string]any{
+			"path":          requestPath,
+			"method":        method,
+			"matched":       false,
+			"allowed":       false,
+			"denial_reason": "no_matching_route",
+		}, IPAddressFromContext(r.Context()))
+		return
+	}
+
+	var simulatedSession *session.Session
+	if req.Authenticated {
+		aal := session.AAL(strings.ToLower(strings.TrimSpace(req.AAL)))
+		if aal == "" {
+			aal = session.AAL1
+		}
+		simulatedSession = &session.Session{
+			ID:         uuid.New(),
+			IdentityID: uuid.New(),
+			AAL:        aal,
+		}
+	}
+
+	allowed := true
+	denialReason := ""
+	if accessErr := engine.CheckAccess(httpReq, matchedRule, simulatedSession); accessErr != nil {
+		allowed = false
+		denialReason = accessErr.Error()
+	}
+
+	var upstream map[string]any
+	var (
+		name, url, healthCheck, timeout string
+		maxConnections                  int
+		enabled                         bool
+	)
+	upstreamErr := h.dbConn().QueryRow(r.Context(), `
+		SELECT name, url, health_check, timeout, max_connections, enabled
+		FROM proxy_upstreams
+		WHERE name = $1
+	`, strings.ToLower(strings.TrimSpace(matchedRule.Target))).Scan(&name, &url, &healthCheck, &timeout, &maxConnections, &enabled)
+	if upstreamErr == nil {
+		upstream = map[string]any{
+			"name":            name,
+			"url":             url,
+			"health_check":    healthCheck,
+			"timeout":         timeout,
+			"max_connections": maxConnections,
+			"enabled":         enabled,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"matched":         true,
+		"allowed":         allowed,
+		"denial_reason":   denialReason,
+		"identity_needed": matchedRule.RequireAuth,
+		"rewritten_path":  matchedRule.ApplyRewrite(requestPath),
+		"rule":            routeByID[matchedRule.ID],
+		"upstream":        upstream,
+		"evaluation": map[string]any{
+			"capability_fail_closed": len(matchedRule.Capabilities) > 0,
+		},
+	})
+	h.logAction(r.Context(), &operator.ID, "simulate", "proxy_route", matchedRule.ID, map[string]any{
+		"path":          requestPath,
+		"method":        method,
+		"matched":       true,
+		"allowed":       allowed,
+		"denial_reason": denialReason,
+		"target":        matchedRule.Target,
+	}, IPAddressFromContext(r.Context()))
+}
+
+func decodeStringSlice(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	items := make([]string, 0)
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	normalized := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+func decodeStringMap(raw []byte) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	values := make(map[string]string)
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil
+	}
+	return values
+}
+
+func decodeRewriteConfig(raw []byte) *coreproxy.RewriteConfig {
+	if len(raw) == 0 {
+		return nil
+	}
+	var rewrite coreproxy.RewriteConfig
+	if err := json.Unmarshal(raw, &rewrite); err != nil {
+		return nil
+	}
+	if rewrite.StripPrefix == "" && rewrite.AddPrefix == "" && rewrite.Regex == "" && rewrite.Replacement == "" {
+		return nil
+	}
+	return &rewrite
 }
 
 func (h *Handler) listGenericRows(w http.ResponseWriter, r *http.Request, query string, columns []string, envelope string) {

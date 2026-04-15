@@ -3,12 +3,11 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"math/big"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/secrettoken"
 	"github.com/google/uuid"
@@ -28,6 +27,9 @@ var (
 	ErrCodeExpired  = errors.New("code expired")
 	ErrCodeUsed     = errors.New("code already used")
 	ErrRateLimited  = errors.New("rate limit exceeded")
+
+	randomIntN  = platformcrypto.RandomIntN
+	randomBytes = platformcrypto.RandomBytes
 )
 
 const tokenLookupPrefixLength = secrettoken.DefaultLookupPrefixLength
@@ -337,14 +339,14 @@ func (s *Store) Cleanup(ctx context.Context) (int64, error) {
 // generateCode generates a random OTP code.
 func (s *Store) generateCode() (string, error) {
 	code := make([]byte, s.codeLength)
-	charsetLen := big.NewInt(int64(len(s.codeCharset)))
+	charsetLen := len(s.codeCharset)
 
 	for i := 0; i < s.codeLength; i++ {
-		n, err := rand.Int(rand.Reader, charsetLen)
+		n, err := randomIntN(charsetLen)
 		if err != nil {
 			return "", err
 		}
-		code[i] = s.codeCharset[n.Int64()]
+		code[i] = s.codeCharset[n]
 	}
 
 	return string(code), nil
@@ -352,8 +354,8 @@ func (s *Store) generateCode() (string, error) {
 
 // generateToken generates a random magic link token.
 func (s *Store) generateToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	b, err := randomBytes(32)
+	if err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil

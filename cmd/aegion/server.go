@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/courier"
@@ -24,6 +23,7 @@ import (
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/database"
 	"github.com/aegion/aegion/internal/platform/logger"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
@@ -140,6 +140,9 @@ var newSessionManager = func(cfg session.ManagerConfig) sessionManager {
 }
 
 var pingDatabase = func(ctx context.Context, db *database.DB) error {
+	if db == nil || db.Pool == nil {
+		return errors.New("database unavailable")
+	}
 	return db.Pool.Ping(ctx)
 }
 
@@ -542,7 +545,7 @@ func bootstrapAdminOperator(ctx context.Context, db *database.DB, email, passwor
 			return outcome, schemaErr
 		}
 
-		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hashedPassword, hashErr := platformcrypto.HashPassword(password)
 		if hashErr != nil {
 			return outcome, hashErr
 		}
@@ -575,7 +578,7 @@ func bootstrapAdminOperator(ctx context.Context, db *database.DB, email, passwor
 		if _, execErr := tx.Exec(ctx, `
 			INSERT INTO pwd_credentials (id, identity_id, identifier, hash, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, NOW(), NOW())
-		`, uuid.New(), identityID, email, string(hashedPassword)); execErr != nil {
+		`, uuid.New(), identityID, email, hashedPassword); execErr != nil {
 			return outcome, execErr
 		}
 
@@ -588,14 +591,14 @@ func bootstrapAdminOperator(ctx context.Context, db *database.DB, email, passwor
 			return outcome, err
 		}
 		if credentialCount == 0 {
-			hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+			hashedPassword, hashErr := platformcrypto.HashPassword(password)
 			if hashErr != nil {
 				return outcome, hashErr
 			}
 			if _, execErr := tx.Exec(ctx, `
 				INSERT INTO pwd_credentials (id, identity_id, identifier, hash, created_at, updated_at)
 				VALUES ($1, $2, $3, $4, NOW(), NOW())
-			`, uuid.New(), identityID, email, string(hashedPassword)); execErr != nil {
+			`, uuid.New(), identityID, email, hashedPassword); execErr != nil {
 				return outcome, execErr
 			}
 		}
@@ -867,16 +870,52 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check registry health
-	registryOK := s.registry != nil && s.registry.ModuleCount() >= 0
+	moduleCount := 0
+	healthyCount := 0
+	unhealthyModules := make([]map[string]string, 0)
+	registryOK := s.registry != nil
+	if s.registry != nil {
+		moduleCount = s.registry.ModuleCount()
+		healthyCount = s.registry.HealthyCount()
+		for _, module := range s.registry.ListModules(nil) {
+			if module.Status == registry.StatusHealthy {
+				continue
+			}
+			unhealthyModules = append(unhealthyModules, map[string]string{
+				"id":     module.ID,
+				"name":   module.Name,
+				"status": string(module.Status),
+			})
+		}
+	}
 
 	resp := map[string]interface{}{
 		"status":        "ready",
 		"database":      "ok",
 		"registry":      registryOK,
 		"orchestrator":  s.orchestrator != nil,
-		"module_count":  s.registry.ModuleCount(),
-		"healthy_count": s.registry.HealthyCount(),
+		"module_count":  moduleCount,
+		"healthy_count": healthyCount,
+		"courier":       s.courier != nil,
+	}
+	if len(unhealthyModules) > 0 {
+		resp["unhealthy_modules"] = unhealthyModules
+	}
+	if !registryOK {
+		resp["status"] = "not ready"
+		resp["reason"] = "registry unavailable"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+	if moduleCount > 0 && healthyCount < moduleCount {
+		resp["status"] = "not ready"
+		resp["reason"] = "modules unhealthy"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(resp)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")

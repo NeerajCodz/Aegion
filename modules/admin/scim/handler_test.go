@@ -401,6 +401,36 @@ func TestHandlerGetUser(t *testing.T) {
 	assert.Equal(t, "testuser", returnedUser.UserName)
 }
 
+func TestHandlerGetUserSetsETagFromMetaVersion(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	handler := NewHandler(service)
+
+	userID := uuid.New().String()
+	user := &SCIMUser{
+		ID:       userID,
+		UserName: "testuser",
+		Active:   true,
+		Meta: Meta{
+			Version: "user-version-1",
+		},
+	}
+
+	mockStore.On("GetUserByID", mock.Anything, userID).Return(user, nil)
+
+	req := httptest.NewRequest("GET", "/scim/v2/Users/"+userID, nil)
+	rr := httptest.NewRecorder()
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", userID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	handler.GetUser(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, `W/"user-version-1"`, rr.Header().Get("ETag"))
+}
+
 // Test Get User Not Found
 func TestHandlerGetUserNotFound(t *testing.T) {
 	mockStore := &MockStore{}
@@ -566,6 +596,46 @@ func TestHandlerUpdateUserSuccess(t *testing.T) {
 	handler.UpdateUser(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandlerUpdateUserIfMatchMismatch(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	handler := NewHandler(service)
+
+	userID := uuid.New().String()
+	user := SCIMUser{
+		UserName: "updated",
+		Active:   true,
+	}
+
+	existingUser := &SCIMUser{
+		ID:       userID,
+		UserName: "existing",
+		Active:   false,
+		Meta: Meta{
+			Version: "v1",
+		},
+	}
+
+	mockStore.On("GetUserByID", mock.Anything, userID).Return(existingUser, nil)
+
+	body, err := json.Marshal(user)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("PUT", "/scim/v2/Users/"+userID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", `W/"v2"`)
+	rr := httptest.NewRecorder()
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", userID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	handler.UpdateUser(rr, req)
+
+	assert.Equal(t, http.StatusPreconditionFailed, rr.Code)
+	mockStore.AssertNotCalled(t, "UpdateUser", mock.Anything, mock.Anything)
 }
 
 // Test Update User Not Found
@@ -813,6 +883,36 @@ func TestHandlerGetGroup(t *testing.T) {
 	assert.Equal(t, groupID, returnedGroup.ID)
 }
 
+func TestHandlerGetGroupSetsETagFromLastModified(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	handler := NewHandler(service)
+
+	groupID := uuid.New().String()
+	modifiedAt := time.Unix(1735689600, 12345).UTC()
+	group := &SCIMGroup{
+		ID:          groupID,
+		DisplayName: "Developers",
+		Meta: Meta{
+			LastModified: &modifiedAt,
+		},
+	}
+
+	mockStore.On("GetGroupByID", mock.Anything, groupID).Return(group, nil)
+
+	req := httptest.NewRequest("GET", "/scim/v2/Groups/"+groupID, nil)
+	rr := httptest.NewRecorder()
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", groupID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	handler.GetGroup(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, `W/"1735689600000012345"`, rr.Header().Get("ETag"))
+}
+
 // Test Create Group Success
 func TestHandlerCreateGroupSuccess(t *testing.T) {
 	mockStore := &MockStore{}
@@ -902,6 +1002,44 @@ func TestHandlerUpdateGroupSuccess(t *testing.T) {
 	handler.UpdateGroup(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandlerUpdateGroupIfMatchMismatch(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	handler := NewHandler(service)
+
+	groupID := uuid.New().String()
+	group := SCIMGroup{
+		DisplayName: "UpdatedGroup",
+	}
+
+	existingGroup := &SCIMGroup{
+		ID:          groupID,
+		DisplayName: "OldGroup",
+		Meta: Meta{
+			Version: "g1",
+		},
+	}
+
+	mockStore.On("GetGroupByID", mock.Anything, groupID).Return(existingGroup, nil)
+
+	body, err := json.Marshal(group)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("PUT", "/scim/v2/Groups/"+groupID, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", `"g2"`)
+	rr := httptest.NewRecorder()
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", groupID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	handler.UpdateGroup(rr, req)
+
+	assert.Equal(t, http.StatusPreconditionFailed, rr.Code)
+	mockStore.AssertNotCalled(t, "UpdateGroup", mock.Anything, mock.Anything)
 }
 
 // Test Patch Group

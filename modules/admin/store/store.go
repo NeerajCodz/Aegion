@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/secrettoken"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // Errors for the admin store.
@@ -247,7 +247,8 @@ func (s *Store) AuthenticateOperatorByEmail(ctx context.Context, email, password
 		return nil, err
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
+	matches, verifyErr := platformcrypto.VerifyPassword(password, passwordHash)
+	if verifyErr != nil || !matches {
 		return nil, ErrInvalidCredentials
 	}
 

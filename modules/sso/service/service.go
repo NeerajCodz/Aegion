@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
@@ -73,6 +74,8 @@ type Service struct {
 	stateSecret []byte
 	now         func() time.Time
 	httpClient  *http.Client
+	replayMu    sync.Mutex
+	seenRequest map[string]time.Time
 }
 
 func New(repo store.Repository, stateSecret []byte) *Service {
@@ -85,7 +88,8 @@ func New(repo store.Repository, stateSecret []byte) *Service {
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		seenRequest: make(map[string]time.Time),
 	}
 }
 
@@ -159,6 +163,9 @@ func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, e
 		return nil, err
 	}
 	if state.Connection != connection.Slug {
+		return nil, ErrInvalidRelayState
+	}
+	if !s.consumeRequestID(state.RequestID, s.now()) {
 		return nil, ErrInvalidRelayState
 	}
 	resolvedAttributes := map[string]interface{}{}
@@ -427,6 +434,33 @@ func normalizeDomains(values []string) []string {
 	return out
 }
 
+func (s *Service) consumeRequestID(requestID string, now time.Time) bool {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return false
+	}
+	if s == nil {
+		return false
+	}
+
+	const replayWindow = 30 * time.Minute
+	cutoff := now.Add(-replayWindow)
+
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+
+	for id, seenAt := range s.seenRequest {
+		if seenAt.Before(cutoff) {
+			delete(s.seenRequest, id)
+		}
+	}
+	if _, exists := s.seenRequest[requestID]; exists {
+		return false
+	}
+	s.seenRequest[requestID] = now
+	return true
+}
+
 func normalizeExtra(in map[string]string) map[string]string {
 	out := make(map[string]string)
 	for key, value := range in {
@@ -493,8 +527,11 @@ type samlResponseEnvelope struct {
 			} `xml:"SubjectConfirmation"`
 		} `xml:"Subject"`
 		Conditions struct {
-			NotBefore    string `xml:"NotBefore,attr"`
-			NotOnOrAfter string `xml:"NotOnOrAfter,attr"`
+			NotBefore           string `xml:"NotBefore,attr"`
+			NotOnOrAfter        string `xml:"NotOnOrAfter,attr"`
+			AudienceRestriction []struct {
+				Audience []string `xml:"Audience"`
+			} `xml:"AudienceRestriction"`
 		} `xml:"Conditions"`
 		AttributeStatement struct {
 			Attributes []struct {
@@ -543,6 +580,15 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 		return nil, ErrInvalidSAMLResponse
 	}
 	if !validNotOnOrAfter(now, envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.NotOnOrAfter) {
+		return nil, ErrInvalidSAMLResponse
+	}
+	if !validRecipientAndDestination(
+		envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.Recipient,
+		envelope.Destination,
+	) {
+		return nil, ErrInvalidSAMLResponse
+	}
+	if !validAudience(connection, envelope.Assertion.Conditions.AudienceRestriction) {
 		return nil, ErrInvalidSAMLResponse
 	}
 	result := &parsedSAMLResponse{
@@ -729,6 +775,42 @@ func validNotOnOrAfter(now time.Time, value string) bool {
 	return now.Before(t.Add(skew))
 }
 
+func validRecipientAndDestination(recipientRaw, destinationRaw string) bool {
+	recipient, recipientSet := parseAbsoluteURL(recipientRaw)
+	destination, destinationSet := parseAbsoluteURL(destinationRaw)
+
+	if !recipientSet && !destinationSet {
+		return true
+	}
+	if recipientSet && !destinationSet {
+		return true
+	}
+	if !recipientSet && destinationSet {
+		return true
+	}
+	return recipient == destination
+}
+
+func parseAbsoluteURL(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
+	case "http", "https":
+	default:
+		return "", false
+	}
+	return parsed.String(), true
+}
+
 func parseSAMLTimestamp(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -741,6 +823,34 @@ func parseSAMLTimestamp(value string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+func validAudience(connection *store.Connection, restrictions []struct {
+	Audience []string `xml:"Audience"`
+}) bool {
+	expected := expectedAudience(connection)
+	if expected == "" || len(restrictions) == 0 {
+		return true
+	}
+	for _, restriction := range restrictions {
+		for _, audience := range restriction.Audience {
+			if strings.TrimSpace(audience) == expected {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func expectedAudience(connection *store.Connection) string {
+	if connection == nil {
+		return ""
+	}
+	slug := strings.TrimSpace(connection.Slug)
+	if slug == "" {
+		return ""
+	}
+	return "urn:aegion:sp:" + slug
 }
 
 func compactCertificate(value string) string {

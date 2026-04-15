@@ -76,6 +76,7 @@ func (h *OAuth2Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) 
 		ResponseType:        r.URL.Query().Get("response_type"),
 		ClientID:            r.URL.Query().Get("client_id"),
 		RedirectURI:         r.URL.Query().Get("redirect_uri"),
+		RequestURL:          r.URL.RequestURI(),
 		Scope:               r.URL.Query().Get("scope"),
 		State:               r.URL.Query().Get("state"),
 		Nonce:               r.URL.Query().Get("nonce"),

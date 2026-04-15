@@ -2,7 +2,6 @@ package service
 
 import (
 	"crypto/ecdsa"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/passkeys/store"
 )
 
@@ -207,8 +207,8 @@ func (s *Service) FinishAuthentication(req *AuthenticationFinishRequest) error {
 }
 
 func randomChallenge() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := platformcrypto.RandomBytes(32)
+	if err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
