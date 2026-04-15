@@ -23,6 +23,8 @@ var (
 	ErrSignCountReplay   = errors.New("webauthn sign count replay detected")
 )
 
+var randomChallengeBytes = platformcrypto.RandomBytes
+
 type Config struct {
 	RPID               string
 	RPOrigin           string
@@ -207,7 +209,7 @@ func (s *Service) FinishAuthentication(req *AuthenticationFinishRequest) error {
 }
 
 func randomChallenge() (string, error) {
-	buf, err := platformcrypto.RandomBytes(32)
+	buf, err := randomChallengeBytes(32)
 	if err != nil {
 		return "", err
 	}
