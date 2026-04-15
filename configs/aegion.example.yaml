@@ -9,9 +9,16 @@
 module_versions:
   password:   "latest"
   magic_link: "latest"
+  mfa:        "latest"
+  passkeys:   "latest"
+  social:     "latest"
+  sso:        "latest"
+  oauth2:     "latest"
+  introspection: "latest"
   admin:      "latest"
   policy:     "latest"
   proxy:      "latest"
+  cli:        "latest"
 
 # Module registry (use local Docker for development)
 module_registry:

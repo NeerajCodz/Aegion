@@ -14,6 +14,30 @@
       "tag": "aegion/aegion-magic-link:1.0.0",
       "digest": "sha256:placeholder"
     },
+    "mfa": {
+      "tag": "aegion/aegion-mfa:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "passkeys": {
+      "tag": "aegion/aegion-passkeys:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "social": {
+      "tag": "aegion/aegion-social:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "sso": {
+      "tag": "aegion/aegion-sso:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "oauth2": {
+      "tag": "aegion/aegion-oauth2:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "introspection": {
+      "tag": "aegion/aegion-introspection:1.0.0",
+      "digest": "sha256:placeholder"
+    },
     "admin": {
       "tag": "aegion/aegion-admin:1.0.0",
       "digest": "sha256:placeholder"
@@ -24,6 +48,10 @@
     },
     "proxy": {
       "tag": "aegion/aegion-proxy:1.0.0",
+      "digest": "sha256:placeholder"
+    },
+    "cli": {
+      "tag": "aegion/aegion-cli:1.0.0",
       "digest": "sha256:placeholder"
     }
   },

@@ -29,9 +29,16 @@ x-disabled-rate-limits: &disabled-rate-limits
 module_versions:
   password:   "latest"
   magic_link: "latest"
+  mfa:        "latest"
+  passkeys:   "latest"
+  social:     "latest"
+  sso:        "latest"
+  oauth2:     "latest"
+  introspection: "latest"
   admin:      "latest"
   policy:     "latest"
   proxy:      "latest"
+  cli:        "latest"
 
 module_registry:
   base_url: ""

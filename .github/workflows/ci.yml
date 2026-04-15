@@ -262,6 +262,21 @@ jobs:
         run: bash ./scripts/check-release-manifest.sh
 
   # ---------------------------------------------------------------------------
+  # Release Maturity Matrix Discipline
+  # ---------------------------------------------------------------------------
+  release-maturity:
+    name: Release Maturity Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate release maturity matrix schema and coverage
+        run: bash ./scripts/check-release-maturity.sh
+
+  # ---------------------------------------------------------------------------
   # Go Tests with Coverage
   # ---------------------------------------------------------------------------
   go-test:
@@ -459,6 +474,7 @@ jobs:
       - module-check
       - proto-consistency
       - release-manifest
+      - release-maturity
       - go-test
       - go-test-full
       - integration-smoke
@@ -484,6 +500,7 @@ jobs:
           check_result "module-check" "${{ needs.module-check.result }}"
           check_result "proto-consistency" "${{ needs.proto-consistency.result }}"
           check_result "release-manifest" "${{ needs.release-manifest.result }}"
+          check_result "release-maturity" "${{ needs.release-maturity.result }}"
           check_result "go-test" "${{ needs.go-test.result }}"
           check_result "go-test-full" "${{ needs.go-test-full.result }}"
           check_result "integration-smoke" "${{ needs.integration-smoke.result }}"
