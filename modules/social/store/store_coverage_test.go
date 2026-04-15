@@ -9,6 +9,7 @@ import (
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type testScanProvider struct {
@@ -335,8 +336,8 @@ func TestNewPostgresValidation(t *testing.T) {
 	if _, err := NewPostgres(nil, make([]byte, platformcrypto.KeySize)); err == nil {
 		t.Fatalf("NewPostgres(nil pool) expected error")
 	}
-	if _, err := NewPostgres(nil, []byte("short")); !errors.Is(err, errors.New("postgres pool is required")) && err == nil {
-		t.Fatalf("NewPostgres(short key) with nil pool should still fail")
+	if _, err := NewPostgres(&pgxpool.Pool{}, []byte("short")); !errors.Is(err, platformcrypto.ErrInvalidKeyLength) {
+		t.Fatalf("NewPostgres(short key) error = %v, want %v", err, platformcrypto.ErrInvalidKeyLength)
 	}
 }
 
