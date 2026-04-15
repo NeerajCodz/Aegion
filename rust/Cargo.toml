@@ -17,7 +17,7 @@ authors = ["Aegion Authors"]
 argon2 = { version = "0.5", features = ["std"] }
 chacha20poly1305 = { version = "0.10", features = ["std"] }
 ring = "0.17"
-rand = "0.10"
+rand = "0.10.1"
 subtle = "2.5"
 
 # JWT
@@ -33,5 +33,3 @@ cbindgen = "0.29"
 # Error handling
 thiserror = "2"
 
-# Testing
-proptest = "1"

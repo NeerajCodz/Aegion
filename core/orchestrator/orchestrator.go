@@ -104,7 +104,7 @@ func New(cfg Config) (*Orchestrator, error) {
 
 	// Create network manager
 	networkCfg := mainCfg.Server.InternalNetwork
-	network := NewNetworkManager(docker.cli, networkCfg.Name, networkCfg.Subnet)
+	network := NewNetworkManager(docker, networkCfg.Name, networkCfg.Subnet)
 
 	// Create token generator
 	secret := cfg.TokenSecret

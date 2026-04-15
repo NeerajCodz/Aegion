@@ -212,11 +212,13 @@ mod tests {
         let key = generate_key().unwrap();
 
         // Too short
-        let result = decrypt_field(&key, "dG9vIHNob3J0", None);
+        let short_ciphertext = BASE64.encode(b"tiny");
+        let result = decrypt_field(&key, &short_ciphertext, None);
         assert!(result.is_err());
 
         // Invalid base64
-        let result = decrypt_field(&key, "not!valid!base64!!!", None);
+        let invalid_base64 = "not base64 data";
+        let result = decrypt_field(&key, invalid_base64, None);
         assert!(result.is_err());
     }
 

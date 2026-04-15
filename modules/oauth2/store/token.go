@@ -115,6 +115,35 @@ func (s *Store) GetAccessToken(ctx context.Context, jti string) (*AccessToken, e
 	return token, nil
 }
 
+// GetAccessTokenBySignature retrieves an access token by token signature fingerprint.
+func (s *Store) GetAccessTokenBySignature(ctx context.Context, signature string) (*AccessToken, error) {
+	token := &AccessToken{}
+	var claims []byte
+
+	err := s.db.QueryRow(ctx, `
+		SELECT jti, signature, client_id, identity_id, session_id, scopes, audience,
+			issuer, subject, extra_claims, revoked, revoked_at, expires_at, created_at
+		FROM oa2_access_tokens WHERE signature = $1
+	`, signature).Scan(
+		&token.JTI, &token.Signature, &token.ClientID, &token.IdentityID, &token.SessionID,
+		&token.Scopes, &token.Audience, &token.Issuer, &token.Subject, &claims,
+		&token.Revoked, &token.RevokedAt, &token.ExpiresAt, &token.CreatedAt,
+	)
+
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	if len(claims) > 0 {
+		_ = json.Unmarshal(claims, &token.ExtraClaims)
+	}
+
+	return token, nil
+}
+
 // RevokeAccessToken marks an access token as revoked.
 func (s *Store) RevokeAccessToken(ctx context.Context, jti string) error {
 	now := nowUTC()

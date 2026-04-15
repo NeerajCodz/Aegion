@@ -26,6 +26,7 @@ type Config struct {
 	Routes             []string
 	GRPCServices       []string
 	EventSubscriptions []string
+	RegisterHTTPRoutes func(mux *http.ServeMux)
 }
 
 type metaResponse struct {
@@ -67,6 +68,9 @@ func buildModuleMux(cfg Config) *http.ServeMux {
 			EventSubscriptions: cfg.EventSubscriptions,
 		})
 	})
+	if cfg.RegisterHTTPRoutes != nil {
+		cfg.RegisterHTTPRoutes(mux)
+	}
 	return mux
 }
 

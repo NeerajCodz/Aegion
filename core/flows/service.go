@@ -255,6 +255,14 @@ func (s *Service) AddFlowMessage(ctx context.Context, id uuid.UUID, msg Msg) err
 	return s.store.Update(ctx, flow)
 }
 
+// UpdateFlow persists the supplied flow as-is.
+func (s *Service) UpdateFlow(ctx context.Context, flow *Flow) error {
+	if flow == nil {
+		return ErrFlowNotFound
+	}
+	return s.store.Update(ctx, flow)
+}
+
 // GetFlowMethods returns the available authentication methods for a flow type
 func (s *Service) GetFlowMethods(flowType FlowType) []AuthMethod {
 	switch flowType {

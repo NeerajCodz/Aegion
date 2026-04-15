@@ -4,7 +4,6 @@ package handler
 import (
 	"context"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -50,64 +49,13 @@ func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 			return
 		}
 
-		identityIDStr := strings.TrimSpace(r.Header.Get("X-Aegion-Session-Identity-ID"))
-		if identityIDStr == "" {
-			h.log.WarnContext(r.Context(), "admin auth missing credentials",
-				"path", r.URL.Path,
-				"method", r.Method,
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
-
-			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-			return
-		}
-
-		if !allowSessionIdentityHeaderAuth() {
-			h.log.WarnContext(r.Context(), "admin auth rejected untrusted session identity header",
-				"path", r.URL.Path,
-				"method", r.Method,
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
-			writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-			return
-		}
-
-		identityID, err := uuid.Parse(identityIDStr)
-		if err != nil {
-			h.log.WarnContext(r.Context(), "admin auth invalid identity header",
-				"path", r.URL.Path,
-				"method", r.Method,
-				"error", err.Error(),
-			)
-			writeError(w, http.StatusUnauthorized, "invalid_session", "Invalid session identity")
-			return
-		}
-
-		// Check if identity is an operator
-		operator, err := h.service.GetOperatorByIdentityID(r.Context(), identityID)
-		if err != nil {
-			h.log.WarnContext(r.Context(), "admin auth identity is not operator",
-				"identity_id", identityID.String(),
-				"path", r.URL.Path,
-				"method", r.Method,
-			)
-			writeError(w, http.StatusForbidden, "not_operator", "Access denied. Operator status required.")
-			return
-		}
-
-		// Store operator and IP in context
-		ctx := context.WithValue(r.Context(), contextKeyOperator, operator)
-		ctx = context.WithValue(ctx, contextKeyIPAddress, getClientIP(r))
-
-		h.log.InfoContext(ctx, "admin auth success",
-			"operator_id", operator.ID.String(),
-			"identity_id", operator.IdentityID.String(),
+		h.log.WarnContext(r.Context(), "admin auth missing valid api key",
 			"path", r.URL.Path,
 			"method", r.Method,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
 
-		next.ServeHTTP(w, r.WithContext(ctx))
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 	})
 }
 
@@ -296,13 +244,4 @@ func fmtUUID(op *store.Operator) string {
 		return ""
 	}
 	return op.ID.String()
-}
-
-func allowSessionIdentityHeaderAuth() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ADMIN_ALLOW_SESSION_IDENTITY_HEADER_AUTH"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
 }

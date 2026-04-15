@@ -1,42 +1,84 @@
 package handler
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/aegion/aegion/modules/cli/service"
+	"github.com/aegion/aegion/modules/cli/store"
 )
 
-func TestNewReturnsDistinctInstances(t *testing.T) {
-	first := New()
-	second := New()
-	if first == nil || second == nil {
-		t.Fatal("New returned nil instance")
-	}
-	if first == second {
-		t.Fatal("New returned shared instance")
+type stubCLIService struct{}
+
+func (stubCLIService) Commands() []service.CommandDescriptor {
+	return []service.CommandDescriptor{{Name: "status.summary"}}
+}
+
+func (stubCLIService) Execute(context.Context, service.ExecuteRequest) (*store.CommandRun, error) {
+	return &store.CommandRun{ID: "run-1", Command: "status.summary", Success: true}, nil
+}
+
+func (stubCLIService) ListRuns(context.Context, int) ([]store.CommandRun, error) {
+	return []store.CommandRun{{ID: "run-1", Command: "status.summary", Success: true}}, nil
+}
+
+func (stubCLIService) GetRun(context.Context, string) (*store.CommandRun, error) {
+	return &store.CommandRun{ID: "run-1", Command: "status.summary", Success: true}, nil
+}
+
+func TestCommandsRequireManagementToken(t *testing.T) {
+	h := New(stubCLIService{})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cli/commands", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
 	}
 }
 
-func TestRegisterRoutesPreservesExistingRoutes(t *testing.T) {
-	h := New()
+func TestCLIHandlersServeCommandsRunsAndExecution(t *testing.T) {
+	h := New(stubCLIService{}, Config{ManagementToken: "secret"})
 	mux := http.NewServeMux()
-	mux.HandleFunc("/existing", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
-
 	h.RegisterRoutes(mux)
 
-	existingReq := httptest.NewRequest(http.MethodGet, "/existing", nil)
-	existingRec := httptest.NewRecorder()
-	mux.ServeHTTP(existingRec, existingReq)
-	if existingRec.Code != http.StatusNoContent {
-		t.Fatalf("expected existing route status %d, got %d", http.StatusNoContent, existingRec.Code)
-	}
+	authHeader := http.Header{}
+	authHeader.Set("Authorization", "Bearer secret")
 
-	missingReq := httptest.NewRequest(http.MethodGet, "/not-registered", nil)
-	missingRec := httptest.NewRecorder()
-	mux.ServeHTTP(missingRec, missingReq)
-	if missingRec.Code != http.StatusNotFound {
-		t.Fatalf("expected missing route status %d, got %d", http.StatusNotFound, missingRec.Code)
-	}
+	t.Run("commands", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/cli/commands", nil)
+		req.Header = authHeader.Clone()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("runs", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/cli/runs?limit=5", nil)
+		req.Header = authHeader.Clone()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("execute", func(t *testing.T) {
+		body, _ := json.Marshal(service.ExecuteRequest{Command: "status.summary"})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/cli/execute", bytes.NewReader(body))
+		req.Header = authHeader.Clone()
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
 }

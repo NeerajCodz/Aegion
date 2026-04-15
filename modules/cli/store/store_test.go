@@ -1,14 +1,28 @@
 package store
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+)
 
-func TestNewReturnsDistinctInstances(t *testing.T) {
-	first := New()
-	second := New()
-	if first == nil || second == nil {
-		t.Fatal("New returned nil instance")
+func TestMemoryStorePersistsRuns(t *testing.T) {
+	repo := New()
+	run := CommandRun{
+		ID:         "run-1",
+		Command:    "status.summary",
+		Success:    true,
+		ExecutedAt: time.Now().UTC(),
 	}
-	if first == second {
-		t.Fatal("New returned shared instance")
+	if err := repo.SaveRun(context.Background(), run); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+
+	runs, err := repo.ListRuns(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("unexpected runs: %+v", runs)
 	}
 }

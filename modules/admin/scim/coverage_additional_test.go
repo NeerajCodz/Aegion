@@ -81,7 +81,7 @@ func TestSCIMService_AdditionalCoverageBranches(t *testing.T) {
 			TokenLastUsedUpdateTimeout: 5 * time.Millisecond,
 		})
 
-		tokenString := "aegion_scim_1234567890abcdefghijklmn"
+		tokenString := "aegion_scim_exampletokenvaluefortests"
 		prefix := tokenString[12:24]
 		hash := sha256.Sum256([]byte(tokenString))
 		token := &SCIMToken{

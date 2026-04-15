@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 )
 
 const (
@@ -31,6 +34,8 @@ const (
 	adminModuleID         = "admin"
 	coreModuleID          = "core"
 	maxJSONBodyBytes      = 1 << 20
+	defaultFlowRateLimit  = 60
+	defaultFlowRateWindow = time.Minute
 )
 
 type runtimePolicySettings struct {
@@ -53,7 +58,6 @@ type runtimeProxySettings struct {
 	PreserveHost                bool     `json:"preserve_host"`
 	TrustForwardedHeaders       bool     `json:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders bool     `json:"strip_inbound_identity_headers"`
-	IdentitySigningSecret       string   `json:"identity_signing_secret,omitempty"`
 	IdentitySignatureHeader     string   `json:"identity_signature_header"`
 	SignedIdentityHeaders       []string `json:"signed_identity_headers"`
 }
@@ -113,7 +117,6 @@ type runtimeProxySettingsPatch struct {
 	PreserveHost                *bool     `json:"preserve_host"`
 	TrustForwardedHeaders       *bool     `json:"trust_forwarded_headers"`
 	StripInboundIdentityHeaders *bool     `json:"strip_inbound_identity_headers"`
-	IdentitySigningSecret       *string   `json:"identity_signing_secret"`
 	IdentitySignatureHeader     *string   `json:"identity_signature_header"`
 	SignedIdentityHeaders       *[]string `json:"signed_identity_headers"`
 }
@@ -137,6 +140,13 @@ func SetupRoutes(s *Server) chi.Router {
 	r.Get("/health", s.handleHealth)
 	r.Get("/health/ready", s.handleReady)
 	r.Get("/health/live", s.handleLive)
+	r.Get("/.well-known/openid-configuration", s.handleOIDCDiscovery)
+	r.Get("/.well-known/jwks.json", s.handleJWKS)
+	r.Get("/oauth2/userinfo", s.handleOAuth2UserInfo)
+	r.Post("/oauth2/userinfo", s.handleOAuth2UserInfo)
+	r.Get("/self-service/login/methods/link/verify", s.handleMagicLinkLoginVerify)
+	r.Get("/self-service/recovery/methods/link/verify", s.handleMagicLinkRecoveryVerify)
+	r.Get("/self-service/verification/methods/link/verify", s.handleMagicLinkVerificationVerify)
 
 	// Public API routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -177,11 +187,18 @@ func SetupRoutes(s *Server) chi.Router {
 // setupSelfServiceRoutes configures self-service flow endpoints.
 func setupSelfServiceRoutes(r chi.Router, s *Server) {
 	r.Route("/self-service", func(r chi.Router) {
+		if limitCfg, ok := selfServiceRateLimitConfig(s.cfg); ok {
+			r.Use(router.RateLimitWithTrustProxy(limitCfg, s.cfg.Proxy.TrustForwardedHeaders))
+		}
+
 		// Login flow
 		r.Route("/login", func(r chi.Router) {
 			r.Get("/browser", s.handleInitLoginBrowser)
 			r.Get("/api", s.handleInitLoginAPI)
 			r.Get("/flows", s.handleGetLoginFlow)
+			r.Get("/methods/link/verify", s.handleMagicLinkLoginVerify)
+			r.Post("/methods/passkey/start", s.handleStartLoginPasskey)
+			r.Post("/methods/passkey/finish", s.handleFinishLoginPasskey)
 			r.Post("/", s.handleSubmitLogin)
 		})
 
@@ -198,6 +215,7 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/browser", s.handleInitRecoveryBrowser)
 			r.Get("/api", s.handleInitRecoveryAPI)
 			r.Get("/flows", s.handleGetRecoveryFlow)
+			r.Get("/methods/link/verify", s.handleMagicLinkRecoveryVerify)
 			r.Post("/", s.handleSubmitRecovery)
 		})
 
@@ -206,6 +224,11 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/browser", s.handleInitSettingsBrowser)
 			r.Get("/api", s.handleInitSettingsAPI)
 			r.Get("/flows", s.handleGetSettingsFlow)
+			r.Post("/methods/totp/start", s.handleStartSettingsTOTPEnrollment)
+			r.Post("/methods/totp/finish", s.handleFinishSettingsTOTPEnrollment)
+			r.Post("/methods/backup-codes/regenerate", s.handleRegenerateSettingsBackupCodes)
+			r.Post("/methods/passkey/start", s.handleStartSettingsPasskeyRegistration)
+			r.Post("/methods/passkey/finish", s.handleFinishSettingsPasskeyRegistration)
 			r.Post("/", s.handleSubmitSettings)
 		})
 
@@ -214,9 +237,39 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/browser", s.handleInitVerificationBrowser)
 			r.Get("/api", s.handleInitVerificationAPI)
 			r.Get("/flows", s.handleGetVerificationFlow)
+			r.Get("/methods/link/verify", s.handleMagicLinkVerificationVerify)
 			r.Post("/", s.handleSubmitVerification)
 		})
 	})
+}
+
+func selfServiceRateLimitConfig(cfg *platformconfig.Config) (router.RateLimitConfig, bool) {
+	limit := router.RateLimitConfig{
+		Enabled:           true,
+		RequestsPerSecond: float64(defaultFlowRateLimit) / defaultFlowRateWindow.Seconds(),
+		Burst:             defaultFlowRateLimit,
+	}
+	if cfg == nil {
+		return limit, true
+	}
+
+	rule := cfg.Security.RateLimits.API
+	if rule.Requests <= 0 || time.Duration(rule.Period) <= 0 {
+		rule = cfg.Security.RateLimits.Global
+	}
+	if rule.Requests > 0 && time.Duration(rule.Period) > 0 {
+		seconds := time.Duration(rule.Period).Seconds()
+		if seconds <= 0 {
+			return router.RateLimitConfig{}, false
+		}
+		return router.RateLimitConfig{
+			Enabled:           true,
+			RequestsPerSecond: float64(rule.Requests) / seconds,
+			Burst:             rule.Requests,
+		}, true
+	}
+
+	return limit, true
 }
 
 // setupModuleRoutes configures internal module communication endpoints.
@@ -561,13 +614,13 @@ type flowSubmitPayload struct {
 }
 
 func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expectedType flows.FlowType) {
-	flowID, csrfToken, err := parseFlowSubmitPayload(w, r)
+	input, err := parseFlowSubmitRequest(w, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid flow submission payload", err)
 		return
 	}
 
-	flow, err := s.flowService.ValidateFlow(r.Context(), flowID, csrfToken)
+	flow, err := s.flowService.ValidateFlow(r.Context(), input.FlowID, input.CSRFToken)
 	if err != nil {
 		s.writeFlowValidationError(w, err)
 		return
@@ -577,16 +630,51 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		return
 	}
 
-	if err := s.flowService.CompleteFlow(r.Context(), flowID); err != nil {
+	var result *flowExecutionResult
+	if s.selfServiceAuthEnabled() {
+		result, err = s.executeFlowSubmission(r.Context(), w, r, flow, input)
+		if err != nil {
+			s.writeFlowExecutionError(w, err)
+			return
+		}
+	}
+
+	if result != nil && result.KeepFlowActive {
+		response := map[string]any{
+			"status":    result.Status,
+			"flow_id":   input.FlowID.String(),
+			"flow_type": string(expectedType),
+		}
+		if result.Message != "" {
+			response["message"] = result.Message
+		}
+		if result.FlowPayload != nil {
+			response["flow"] = result.FlowPayload
+		}
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+
+	if err := s.flowService.CompleteFlow(r.Context(), input.FlowID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	response := map[string]any{
 		"status":    "completed",
-		"flow_id":   flowID.String(),
+		"flow_id":   input.FlowID.String(),
 		"flow_type": string(expectedType),
-	})
+	}
+	if result != nil {
+		if result.Status != "" {
+			response["status"] = result.Status
+		}
+		if result.Message != "" {
+			response["message"] = result.Message
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) writeFlowValidationError(w http.ResponseWriter, err error) {
@@ -615,57 +703,6 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) err
 		return errors.New("request body must contain a single JSON object")
 	}
 	return nil
-}
-
-func parseFlowSubmitPayload(w http.ResponseWriter, r *http.Request) (uuid.UUID, string, error) {
-	var payload flowSubmitPayload
-	contentType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))
-
-	if contentType == "application/json" {
-		if err := decodeJSONBody(w, r, &payload); err != nil {
-			return uuid.Nil, "", err
-		}
-	} else {
-		if err := r.ParseForm(); err != nil {
-			return uuid.Nil, "", err
-		}
-		payload.FlowID = r.Form.Get("flow_id")
-		payload.Flow = r.Form.Get("flow")
-		payload.ID = r.Form.Get("id")
-		payload.CSRFToken = r.Form.Get("csrf_token")
-	}
-
-	flowValue := strings.TrimSpace(payload.FlowID)
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(payload.Flow)
-	}
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(payload.ID)
-	}
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(r.URL.Query().Get("flow"))
-	}
-	if flowValue == "" {
-		flowValue = strings.TrimSpace(r.URL.Query().Get("id"))
-	}
-	if flowValue == "" {
-		return uuid.Nil, "", errors.New("missing flow id")
-	}
-
-	flowID, err := uuid.Parse(flowValue)
-	if err != nil {
-		return uuid.Nil, "", err
-	}
-
-	csrfToken := strings.TrimSpace(payload.CSRFToken)
-	if csrfToken == "" {
-		csrfToken = strings.TrimSpace(r.Header.Get("X-CSRF-Token"))
-	}
-	if csrfToken == "" {
-		return uuid.Nil, "", errors.New("missing csrf token")
-	}
-
-	return flowID, csrfToken, nil
 }
 
 // Session handlers
@@ -722,9 +759,80 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"keys": []map[string]interface{}{},
-	})
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	s.proxyOAuth2Endpoint(w, r, "/.well-known/jwks.json")
+}
+
+func (s *Server) handleOIDCDiscovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	s.proxyOAuth2Endpoint(w, r, "/.well-known/openid-configuration")
+}
+
+func (s *Server) handleOAuth2UserInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	s.proxyOAuth2Endpoint(w, r, "/oidc/userinfo")
+}
+
+func (s *Server) proxyOAuth2Endpoint(w http.ResponseWriter, r *http.Request, modulePath string) {
+	target, err := s.oauth2EndpointURL(modulePath)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "oauth2 module unavailable", err)
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	baseDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		baseDirector(req)
+		req.URL.Path = modulePath
+		req.URL.RawPath = ""
+		req.URL.RawQuery = r.URL.RawQuery
+		req.Host = target.Host
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
+		writeError(w, http.StatusBadGateway, "oauth2 upstream unavailable", proxyErr)
+	}
+	proxy.ServeHTTP(w, r)
+}
+
+func (s *Server) oauth2EndpointURL(modulePath string) (*url.URL, error) {
+	module, err := s.registry.GetModule("oauth2")
+	if err != nil {
+		return nil, err
+	}
+	if module.Status != registry.StatusHealthy && module.Status != registry.StatusStarting {
+		return nil, errors.New("oauth2 module is not healthy")
+	}
+
+	for _, endpoint := range module.Endpoints {
+		if endpoint.Type != registry.EndpointHTTP {
+			continue
+		}
+		parsed, parseErr := url.Parse(strings.TrimSpace(endpoint.URL))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return nil, errors.New("oauth2 module endpoint must use http or https")
+		}
+		if parsed.Host == "" {
+			return nil, errors.New("oauth2 module endpoint is missing host")
+		}
+		parsed.Path = modulePath
+		parsed.RawPath = ""
+		return parsed, nil
+	}
+
+	return nil, errors.New("oauth2 module has no HTTP endpoint")
 }
 
 // Module registration handlers
@@ -864,7 +972,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		PreserveHost:                proxySettings.PreserveHost,
 		TrustForwardedHeaders:       proxySettings.TrustForwardedHeaders,
 		StripInboundIdentityHeaders: proxySettings.StripInboundIdentityHeaders,
-		IdentitySigningSecret:       s.proxyIdentitySigningSecret(proxySettings.IdentitySigningSecret),
+		IdentitySigningSecret:       s.proxyIdentitySigningSecret(),
 		IdentitySignatureHeader:     proxySettings.IdentitySignatureHeader,
 		SignedIdentityHeaders:       proxySettings.SignedIdentityHeaders,
 		PolicyChecker:               checker,
@@ -881,6 +989,10 @@ func (s *Server) moduleProxyRuntimeSettings(ctx context.Context) (runtimeProxySe
 	if err != nil {
 		s.log.Warn().Err(err).Msg("failed to load runtime proxy config, using bootstrap defaults")
 		proxySettings = defaultRuntimeProxySettings(s.cfg)
+	}
+	if err := s.ensureRuntimeProxySigning(proxySettings); err != nil {
+		s.log.Warn().Err(err).Msg("runtime proxy config missing signing secret, forcing identity header stripping")
+		proxySettings.StripInboundIdentityHeaders = true
 	}
 
 	policySettings, err := s.loadRuntimePolicySettings(ctx)
@@ -917,10 +1029,7 @@ func (s *Server) sessionSecretForProxy() []byte {
 	return nil
 }
 
-func (s *Server) proxyIdentitySigningSecret(override string) []byte {
-	if secret := strings.TrimSpace(override); secret != "" {
-		return []byte(secret)
-	}
+func (s *Server) proxyIdentitySigningSecret() []byte {
 	if secret := strings.TrimSpace(s.cfg.Proxy.IdentitySigningSecret); secret != "" {
 		return []byte(secret)
 	}
@@ -947,33 +1056,7 @@ func extractRequestIP(r *http.Request) string {
 }
 
 func extractRequestIPWithTrust(r *http.Request, trustForwardedHeaders bool) string {
-	if r == nil {
-		return ""
-	}
-
-	if trustForwardedHeaders {
-		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				candidate := strings.TrimSpace(parts[0])
-				if candidate != "" {
-					return candidate
-				}
-			}
-		}
-		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
-		}
-	}
-	addr := strings.TrimSpace(r.RemoteAddr)
-	if addr == "" {
-		return ""
-	}
-	host, _, err := net.SplitHostPort(addr)
-	if err == nil {
-		return strings.Trim(host, "[]")
-	}
-	return strings.Trim(addr, "[]")
+	return trustedproxy.ClientIP(r, trustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS")
 }
 
 // Internal flow handlers
@@ -1972,7 +2055,7 @@ func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {
 	resp.Proxy.PreserveHost = proxySettings.PreserveHost
 	resp.Proxy.TrustForwardedHeaders = proxySettings.TrustForwardedHeaders
 	resp.Proxy.StripInboundIdentityHeaders = proxySettings.StripInboundIdentityHeaders
-	resp.Proxy.IdentitySigningSecretSet = strings.TrimSpace(proxySettings.IdentitySigningSecret) != ""
+	resp.Proxy.IdentitySigningSecretSet = len(s.proxyIdentitySigningSecret()) > 0
 	resp.Proxy.IdentitySignatureHeader = proxySettings.IdentitySignatureHeader
 	resp.Proxy.SignedIdentityHeaders = append([]string(nil), proxySettings.SignedIdentityHeaders...)
 
@@ -2020,6 +2103,10 @@ func (s *Server) handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, "invalid proxy runtime config patch", err)
 			return
 		}
+		if err := s.ensureRuntimeProxySigning(next); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid proxy runtime config patch", err)
+			return
+		}
 		if err := s.saveRuntimeConfig(ctx, systemConfigKeyProxy, next); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to persist proxy runtime config", err)
 			return
@@ -2036,11 +2123,7 @@ func (s *Server) loadRuntimePolicySettings(ctx context.Context) (runtimePolicySe
 	}
 
 	var raw []byte
-	err := s.queryRow(ctx, `
-		SELECT value
-		FROM core_system_config
-		WHERE key = $1
-	`, systemConfigKeyPolicy).Scan(&raw)
+	err := s.queryRow(ctx, sqlSelectSystemConfigByKey, systemConfigKeyPolicy).Scan(&raw)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return settings, nil
@@ -2067,11 +2150,7 @@ func (s *Server) loadRuntimeProxySettings(ctx context.Context) (runtimeProxySett
 	}
 
 	var raw []byte
-	err := s.queryRow(ctx, `
-		SELECT value
-		FROM core_system_config
-		WHERE key = $1
-	`, systemConfigKeyProxy).Scan(&raw)
+	err := s.queryRow(ctx, sqlSelectSystemConfigByKey, systemConfigKeyProxy).Scan(&raw)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return settings, nil
@@ -2143,7 +2222,6 @@ func defaultRuntimeProxySettings(cfg *platformconfig.Config) runtimeProxySetting
 	settings.PreserveHost = cfg.Proxy.PreserveHost
 	settings.TrustForwardedHeaders = cfg.Proxy.TrustForwardedHeaders
 	settings.StripInboundIdentityHeaders = cfg.Proxy.StripInboundIdentityHeaders
-	settings.IdentitySigningSecret = strings.TrimSpace(cfg.Proxy.IdentitySigningSecret)
 
 	if timeout := cfg.Proxy.UpstreamTimeout.Duration().String(); timeout != "" && timeout != "0s" {
 		settings.UpstreamTimeout = timeout
@@ -2202,9 +2280,6 @@ func applyRuntimeProxyPatch(current runtimeProxySettings, patch *runtimeProxySet
 	if patch.StripInboundIdentityHeaders != nil {
 		next.StripInboundIdentityHeaders = *patch.StripInboundIdentityHeaders
 	}
-	if patch.IdentitySigningSecret != nil {
-		next.IdentitySigningSecret = strings.TrimSpace(*patch.IdentitySigningSecret)
-	}
 	if patch.IdentitySignatureHeader != nil {
 		next.IdentitySignatureHeader = strings.TrimSpace(*patch.IdentitySignatureHeader)
 	}
@@ -2229,12 +2304,7 @@ func (s *Server) saveRuntimeConfig(ctx context.Context, key string, value interf
 		return err
 	}
 
-	_, err = s.exec(ctx, `
-		INSERT INTO core_system_config (key, value, updated_at)
-		VALUES ($1, $2::jsonb, NOW())
-		ON CONFLICT (key)
-		DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-	`, key, string(raw))
+	_, err = s.exec(ctx, sqlUpsertSystemConfig, key, string(raw))
 	return err
 }
 
@@ -2305,6 +2375,10 @@ func validateRuntimeProxySettings(settings runtimeProxySettings) error {
 		return errors.New("upstream_timeout must be a valid duration")
 	}
 
+	if settings.TrustForwardedHeaders && strings.TrimSpace(os.Getenv("AEGION_TRUSTED_PROXY_CIDRS")) == "" {
+		return errors.New("trusted proxy CIDRs are required when trust_forwarded_headers is enabled")
+	}
+
 	settings.IdentitySignatureHeader = strings.TrimSpace(settings.IdentitySignatureHeader)
 	if settings.IdentitySignatureHeader == "" {
 		return errors.New("identity_signature_header cannot be empty")
@@ -2330,11 +2404,31 @@ func validateRuntimeProxySettings(settings runtimeProxySettings) error {
 	}
 	settings.SignedIdentityHeaders = normalized
 
-	if strings.TrimSpace(settings.IdentitySigningSecret) != "" && len(settings.IdentitySigningSecret) < 16 {
-		return errors.New("identity_signing_secret must be at least 16 characters when set")
+	if isRuntimeProductionEnvironment() && !settings.StripInboundIdentityHeaders {
+		return errors.New("strip_inbound_identity_headers cannot be disabled in production")
 	}
 
 	return nil
+}
+
+func (s *Server) ensureRuntimeProxySigning(settings runtimeProxySettings) error {
+	if settings.StripInboundIdentityHeaders {
+		return nil
+	}
+	if len(s.proxyIdentitySigningSecret()) == 0 {
+		return errors.New("bootstrap proxy identity signing secret is required when strip_inbound_identity_headers is disabled")
+	}
+	return nil
+}
+
+func isRuntimeProductionEnvironment() bool {
+	for _, key := range []string{"AEGION_ENV", "AEGION_ENVIRONMENT"} {
+		env := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if env == "production" || env == "prod" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleAdminSystemHealth(w http.ResponseWriter, r *http.Request) {

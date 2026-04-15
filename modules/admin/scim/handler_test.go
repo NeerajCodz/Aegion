@@ -156,7 +156,7 @@ func TestAuthMiddlewareValidToken(t *testing.T) {
 	handler := NewHandler(service)
 
 	// Token format: "aegion_scim_" (12 chars) + prefix (12 chars) + rest
-	tokenString := "aegion_scim_test1234abcdef9876543210"
+	tokenString := "aegion_scim_exampletokenvaluefortests"
 	prefix := tokenString[12:24] // "test1234abcd"
 
 	token := &SCIMToken{
@@ -1424,7 +1424,7 @@ func TestAuthMiddlewareValidTokenSuccess(t *testing.T) {
 	service := NewService(mockStore, nil)
 	handler := NewHandler(service)
 
-	tokenString := "aegion_scim_test1234abcdef9876543210"
+	tokenString := "aegion_scim_exampletokenvaluefortests"
 	prefix := tokenString[12:24]
 	hash := sha256.Sum256([]byte(tokenString))
 	tokenHash := base64.StdEncoding.EncodeToString(hash[:])
@@ -1465,7 +1465,7 @@ func TestRegisterRoutesMiddlewareAndHandlers(t *testing.T) {
 	service := NewService(mockStore, nil)
 	handler := NewHandler(service)
 
-	tokenString := "aegion_scim_test1234abcdef9876543210"
+	tokenString := "aegion_scim_exampletokenvaluefortests"
 	prefix := tokenString[12:24]
 	hash := sha256.Sum256([]byte(tokenString))
 	tokenHash := base64.StdEncoding.EncodeToString(hash[:])

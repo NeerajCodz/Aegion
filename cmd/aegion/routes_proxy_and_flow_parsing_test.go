@@ -165,15 +165,12 @@ func TestModuleProxyHelpers(t *testing.T) {
 		}
 
 		s.cfg.Proxy.IdentitySigningSecret = "configured-signing-secret"
-		if got := string(s.proxyIdentitySigningSecret("  override-signing-secret  ")); got != "override-signing-secret" {
-			t.Fatalf("expected override signing secret, got %q", got)
-		}
-		if got := string(s.proxyIdentitySigningSecret("")); got != "configured-signing-secret" {
+		if got := string(s.proxyIdentitySigningSecret()); got != "configured-signing-secret" {
 			t.Fatalf("expected configured signing secret, got %q", got)
 		}
 		s.cfg.Proxy.IdentitySigningSecret = ""
 		s.cfg.Secrets.Internal = []string{"internal-signing-secret"}
-		if got := string(s.proxyIdentitySigningSecret("")); got != "internal-signing-secret" {
+		if got := string(s.proxyIdentitySigningSecret()); got != "internal-signing-secret" {
 			t.Fatalf("expected internal signing secret fallback, got %q", got)
 		}
 	})
@@ -182,6 +179,8 @@ func TestModuleProxyHelpers(t *testing.T) {
 		if got := extractRequestIP(nil); got != "" {
 			t.Fatalf("expected empty IP for nil request, got %q", got)
 		}
+
+		t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "198.51.100.99:443"
@@ -224,6 +223,10 @@ func TestModuleProxyHelpers(t *testing.T) {
 		if ctx != baseCtx {
 			t.Fatal("expected unchanged context when forwarded headers are not trusted")
 		}
+
+		req = httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "198.51.100.30:443"
+		req.Header.Set("X-Forwarded-For", "198.51.100.20")
 		ctx = withModuleProxyRequestContextWithTrust(baseCtx, req, true)
 		if ctx == baseCtx {
 			t.Fatal("expected derived context when trusted request ip is available")
@@ -300,7 +303,7 @@ func TestHandleAdminGetConfig_WithHookedRuntimeRows(t *testing.T) {
 			}}
 		case systemConfigKeyProxy:
 			return adminTestRow{scanFn: func(dest ...any) error {
-				*(dest[0].(*[]byte)) = []byte(`{"enabled":true,"upstream_timeout":"15s","preserve_host":true,"strip_inbound_identity_headers":true,"identity_signing_secret":"0123456789abcdef","identity_signature_header":"X-Sig","signed_identity_headers":["X-User-ID"]}`)
+				*(dest[0].(*[]byte)) = []byte(`{"enabled":true,"upstream_timeout":"15s","preserve_host":true,"strip_inbound_identity_headers":true,"identity_signing_secret":"example-signing-secret","identity_signature_header":"X-Sig","signed_identity_headers":["X-User-ID"]}`)
 				return nil
 			}}
 		default:
@@ -321,5 +324,9 @@ func TestHandleAdminGetConfig_WithHookedRuntimeRows(t *testing.T) {
 	}
 	if body["proxy"] == nil || body["policy"] == nil {
 		t.Fatalf("expected policy and proxy sections, got %v", body)
+	}
+	proxy := body["proxy"].(map[string]any)
+	if proxy["identity_signing_secret_set"] != false {
+		t.Fatalf("expected legacy stored runtime secret to be ignored in responses, got %v", proxy["identity_signing_secret_set"])
 	}
 }

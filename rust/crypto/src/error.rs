@@ -25,6 +25,18 @@ pub enum CryptoError {
 
     #[error("random number generation failed")]
     RngError,
+
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
+
+    #[error("signature format invalid")]
+    InvalidSignature,
+
+    #[error("token expired")]
+    Expired,
+
+    #[error("unsupported operation: {0}")]
+    Unsupported(String),
 }
 
 impl CryptoError {
@@ -38,6 +50,10 @@ impl CryptoError {
             CryptoError::InvalidKeyLength { .. } => -5,
             CryptoError::InvalidCiphertext => -6,
             CryptoError::RngError => -7,
+            CryptoError::InvalidInput(_) => -8,
+            CryptoError::InvalidSignature => -9,
+            CryptoError::Expired => -10,
+            CryptoError::Unsupported(_) => -11,
         }
     }
 }

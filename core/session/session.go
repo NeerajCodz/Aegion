@@ -3,17 +3,16 @@ package session
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/secrettoken"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -114,6 +113,8 @@ type Manager struct {
 var errTokenEntropyFailure = errors.New("failed to generate token entropy")
 var errSessionDBUnavailable = errors.New("session manager database unavailable")
 var readTokenRandom = rand.Read
+
+const sessionLookupPrefixLength = secrettoken.DefaultLookupPrefixLength
 
 type sessionTx interface {
 	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
@@ -235,16 +236,21 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 	}
 
 	// Insert session
+	tokenHash := secrettoken.Hash(session.Token)
+	tokenPrefix := secrettoken.Prefix(session.Token, sessionLookupPrefixLength)
+	logoutTokenHash := secrettoken.Hash(session.LogoutToken)
+	logoutTokenPrefix := secrettoken.Prefix(session.LogoutToken, sessionLookupPrefixLength)
+
 	_, err = m.execStmt(ctx, `
 		INSERT INTO core_sessions (
-			id, token, identity_id, aal, issued_at, expires_at,
-			authenticated_at, logout_token, devices, active,
+			id, token, token_hash, token_prefix, identity_id, aal, issued_at, expires_at,
+			authenticated_at, logout_token, logout_token_hash, logout_token_prefix, devices, active,
 			is_impersonation, impersonator_id, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 	`,
-		session.ID, session.Token, session.IdentityID, session.AAL,
+		session.ID, nil, tokenHash, tokenPrefix, session.IdentityID, session.AAL,
 		session.IssuedAt, session.ExpiresAt, session.AuthenticatedAt,
-		session.LogoutToken, session.Devices, session.Active,
+		nil, logoutTokenHash, logoutTokenPrefix, session.Devices, session.Active,
 		session.IsImpersonation, session.ImpersonatorID,
 		session.CreatedAt, session.UpdatedAt,
 	)
@@ -267,14 +273,20 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 // Get retrieves a session by token.
 func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 	session := &Session{}
+	tokenHash := secrettoken.Hash(token)
+	tokenPrefix := secrettoken.Prefix(token, sessionLookupPrefixLength)
 
 	err := m.queryRowFn(ctx, `
-		SELECT id, token, identity_id, aal, issued_at, expires_at,
-			   authenticated_at, logout_token, devices, active,
+		SELECT id, COALESCE(token, ''), identity_id, aal, issued_at, expires_at,
+			   authenticated_at, COALESCE(logout_token, ''), devices, active,
 			   is_impersonation, impersonator_id, created_at, updated_at
 		FROM core_sessions
-		WHERE token = $1 AND active = TRUE
-	`, token).Scan(
+		WHERE active = TRUE
+		  AND token_hash = $1
+		  AND token_prefix = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, tokenHash, tokenPrefix).Scan(
 		&session.ID, &session.Token, &session.IdentityID, &session.AAL,
 		&session.IssuedAt, &session.ExpiresAt, &session.AuthenticatedAt,
 		&session.LogoutToken, &session.Devices, &session.Active,
@@ -287,6 +299,7 @@ func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 		}
 		return nil, err
 	}
+	session.Token = token
 
 	// Check expiration
 	if m.now().After(session.ExpiresAt) {
@@ -485,28 +498,18 @@ func (m *Manager) generateToken() (string, error) {
 }
 
 func (m *Manager) signToken(token string) string {
-	mac := hmac.New(sha256.New, m.cookieSecret)
-	mac.Write([]byte(token))
-	sig := hex.EncodeToString(mac.Sum(nil))
-	return token + "." + sig
+	signed, err := platformcrypto.SignSessionCookieValue(m.cookieSecret, token, m.now())
+	if err != nil {
+		return ""
+	}
+	return signed
 }
 
 func (m *Manager) verifySignedToken(signed string) (string, error) {
-	parts := strings.SplitN(signed, ".", 2)
-	if len(parts) != 2 {
+	token, err := platformcrypto.VerifySessionCookieValue(m.cookieSecret, signed, m.lifespan, m.now())
+	if err != nil {
 		return "", ErrSessionInvalid
 	}
-
-	token, sig := parts[0], parts[1]
-
-	mac := hmac.New(sha256.New, m.cookieSecret)
-	mac.Write([]byte(token))
-	expected := hex.EncodeToString(mac.Sum(nil))
-
-	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		return "", ErrSessionInvalid
-	}
-
 	return token, nil
 }
 

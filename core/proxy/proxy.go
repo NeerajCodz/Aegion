@@ -2,9 +2,7 @@ package proxy
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +19,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/session"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 )
 
 var (
@@ -385,29 +384,15 @@ func (p *Proxy) signIdentityHeaders(req *http.Request) {
 		return
 	}
 
-	var canonicalHeaders []string
-	for _, header := range p.identityHeaders() {
-		value := strings.TrimSpace(req.Header.Get(header))
-		if value == "" {
-			continue
-		}
-		canonicalHeaders = append(canonicalHeaders, strings.ToLower(header)+":"+value)
-	}
-	if len(canonicalHeaders) == 0 {
-		return
-	}
-	sort.Strings(canonicalHeaders)
-
-	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
-	payload := timestamp + "." + strings.Join(canonicalHeaders, "\n")
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(payload))
-
 	signatureHeader := p.config.IdentitySignatureHeader
 	if signatureHeader == "" {
 		signatureHeader = "X-Aegion-Signature"
 	}
-	req.Header.Set(signatureHeader, "t="+timestamp+",v1="+hex.EncodeToString(mac.Sum(nil)))
+	signed, err := platformcrypto.SignIdentityHeaders([]byte(secret), req.Header, p.identityHeaders(), time.Now().UTC())
+	if err != nil || signed == "" {
+		return
+	}
+	req.Header.Set(signatureHeader, signed)
 }
 
 func (p *Proxy) identityHeaders() []string {
@@ -430,57 +415,25 @@ func (p *Proxy) addForwardedHeaders(req, original *http.Request) {
 		return
 	}
 
-	clientIP := getRemoteIP(original.RemoteAddr)
+	clientIP := trustedproxy.RemoteIP(original.RemoteAddr)
 	if clientIP == "" {
-		clientIP = getClientIPWithTrust(original, p.config.TrustForwardedHeaders)
+		clientIP = trustedproxy.ClientIP(original, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS")
 	}
 
-	if p.config.TrustForwardedHeaders {
-		// X-Forwarded-For
-		if prior := strings.TrimSpace(original.Header.Get("X-Forwarded-For")); prior != "" {
-			if clientIP != "" {
-				req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
-			} else {
-				req.Header.Set("X-Forwarded-For", prior)
-			}
-		} else if clientIP != "" {
-			req.Header.Set("X-Forwarded-For", clientIP)
-		}
-
-		// X-Forwarded-Proto
-		if proto := strings.TrimSpace(original.Header.Get("X-Forwarded-Proto")); proto != "" {
-			req.Header.Set("X-Forwarded-Proto", proto)
-		} else if original.TLS != nil {
-			req.Header.Set("X-Forwarded-Proto", "https")
+	if prior := trustedproxy.PriorForwardedFor(original, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"); prior != "" {
+		if clientIP != "" {
+			req.Header.Set("X-Forwarded-For", prior+", "+clientIP)
 		} else {
-			req.Header.Set("X-Forwarded-Proto", "http")
+			req.Header.Set("X-Forwarded-For", prior)
 		}
-
-		// X-Forwarded-Host
-		if host := strings.TrimSpace(original.Header.Get("X-Forwarded-Host")); host != "" {
-			req.Header.Set("X-Forwarded-Host", host)
-		} else {
-			req.Header.Set("X-Forwarded-Host", original.Host)
-		}
-		return
-	}
-
-	// X-Forwarded-For
-	if clientIP == "" {
+	} else if clientIP == "" {
 		req.Header.Del("X-Forwarded-For")
 	} else {
 		req.Header.Set("X-Forwarded-For", clientIP)
 	}
 
-	// X-Forwarded-Proto
-	if original.TLS != nil {
-		req.Header.Set("X-Forwarded-Proto", "https")
-	} else {
-		req.Header.Set("X-Forwarded-Proto", "http")
-	}
-
-	// X-Forwarded-Host
-	req.Header.Set("X-Forwarded-Host", original.Host)
+	req.Header.Set("X-Forwarded-Proto", trustedproxy.ForwardedProto(original, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"))
+	req.Header.Set("X-Forwarded-Host", trustedproxy.ForwardedHost(original, p.config.TrustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"))
 }
 
 // startHealthCheckers starts health checking for all configured upstreams.

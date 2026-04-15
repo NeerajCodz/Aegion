@@ -64,9 +64,18 @@ type stubRouteSessionManager struct {
 	session *session.Session
 	getErr  error
 
-	revokeErr   error
-	revokedIDs  []uuid.UUID
-	clearCookie int
+	createErr      error
+	created        []*session.Session
+	setCookieCount int
+
+	revokeErr          error
+	revokeAllErr       error
+	addAuthMethodErr   error
+	revokedIDs         []uuid.UUID
+	revokedIdentityIDs []uuid.UUID
+	addedAuthMethods   []session.AuthMethod
+	addedAuthMethodIDs []uuid.UUID
+	clearCookie        int
 }
 
 func (s *stubRouteSessionManager) GetFromRequest(ctx context.Context, r *http.Request) (*session.Session, error) {
@@ -79,9 +88,46 @@ func (s *stubRouteSessionManager) GetFromRequest(ctx context.Context, r *http.Re
 	return nil, session.ErrSessionNotFound
 }
 
+func (s *stubRouteSessionManager) Create(ctx context.Context, identityID uuid.UUID, method session.AuthMethod, device session.DeviceInfo) (*session.Session, error) {
+	if s.createErr != nil {
+		return nil, s.createErr
+	}
+	created := &session.Session{
+		ID:         uuid.New(),
+		IdentityID: identityID,
+		AAL:        session.AAL1,
+		Active:     true,
+		Devices:    []session.DeviceInfo{device},
+		AuthMethods: []session.SessionAuthMethod{
+			{
+				Method: method,
+			},
+		},
+	}
+	s.created = append(s.created, created)
+	s.session = created
+	return created, nil
+}
+
 func (s *stubRouteSessionManager) Revoke(ctx context.Context, sessionID uuid.UUID) error {
 	s.revokedIDs = append(s.revokedIDs, sessionID)
 	return s.revokeErr
+}
+
+func (s *stubRouteSessionManager) RevokeAllForIdentity(ctx context.Context, identityID uuid.UUID) error {
+	s.revokedIdentityIDs = append(s.revokedIdentityIDs, identityID)
+	return s.revokeAllErr
+}
+
+func (s *stubRouteSessionManager) AddAuthMethod(ctx context.Context, sessionID uuid.UUID, method session.AuthMethod) error {
+	s.addedAuthMethodIDs = append(s.addedAuthMethodIDs, sessionID)
+	s.addedAuthMethods = append(s.addedAuthMethods, method)
+	return s.addAuthMethodErr
+}
+
+func (s *stubRouteSessionManager) SetCookie(w http.ResponseWriter, sess *session.Session) {
+	s.setCookieCount++
+	s.session = sess
 }
 
 func (s *stubRouteSessionManager) ClearCookie(w http.ResponseWriter) {
@@ -610,6 +656,7 @@ func TestModuleProxyHandler(t *testing.T) {
 	})
 
 	t.Run("proxy can trust forwarded headers when explicitly enabled", func(t *testing.T) {
+		t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 		s.cfg.Proxy.TrustForwardedHeaders = true
 		defer func() {
 			s.cfg.Proxy.TrustForwardedHeaders = false
@@ -1749,10 +1796,64 @@ func TestSessionHandlers(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 		s.handleJWKS(rec, req)
 
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+}
+
+func TestOIDCRootRoutesProxyToOAuth2Module(t *testing.T) {
+	s := newTestServer(t)
+
+	var gotDiscoveryPath string
+	var gotJWKSPath string
+	var gotUserInfoPath string
+	var gotUserInfoAuthz string
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			gotDiscoveryPath = r.URL.Path
+			writeJSON(w, http.StatusOK, map[string]any{"issuer": "https://issuer.example"})
+		case "/.well-known/jwks.json":
+			gotJWKSPath = r.URL.Path
+			writeJSON(w, http.StatusOK, map[string]any{"keys": []map[string]string{{"kid": "key-1"}}})
+		case "/oidc/userinfo":
+			gotUserInfoPath = r.URL.Path
+			gotUserInfoAuthz = r.Header.Get("Authorization")
+			writeJSON(w, http.StatusOK, map[string]any{"sub": "user-1"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	registerTestModule(t, s, "oauth2", registry.EndpointHTTP, upstream.URL)
+	if err := s.registry.UpdateStatus("oauth2", registry.StatusHealthy); err != nil {
+		t.Fatalf("failed to set oauth2 module healthy: %v", err)
+	}
+
+	router := SetupRoutes(s)
+
+	t.Run("discovery proxied from root path", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil)
+		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
+		if gotDiscoveryPath != "/.well-known/openid-configuration" {
+			t.Fatalf("unexpected upstream discovery path: %q", gotDiscoveryPath)
+		}
+	})
 
+	t.Run("jwks proxied from root path", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
 		var body map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("failed to parse response: %v", err)
@@ -1761,8 +1862,27 @@ func TestSessionHandlers(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected keys array in response")
 		}
-		if len(keys) != 0 {
-			t.Fatalf("expected empty keyset, got %v", keys)
+		if len(keys) != 1 {
+			t.Fatalf("expected single key from oauth2 module, got %v", keys)
+		}
+		if gotJWKSPath != "/.well-known/jwks.json" {
+			t.Fatalf("unexpected upstream jwks path: %q", gotJWKSPath)
+		}
+	})
+
+	t.Run("userinfo proxied to oauth2 module path", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/oauth2/userinfo", nil)
+		req.Header.Set("Authorization", "Bearer test-token")
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+		if gotUserInfoPath != "/oidc/userinfo" {
+			t.Fatalf("unexpected upstream userinfo path: %q", gotUserInfoPath)
+		}
+		if gotUserInfoAuthz != "Bearer test-token" {
+			t.Fatalf("expected authorization header to be forwarded, got %q", gotUserInfoAuthz)
 		}
 	})
 }
@@ -1947,6 +2067,15 @@ func TestHandleAdminUpdateConfig_ValidationAndDBErrors(t *testing.T) {
 	t.Run("invalid proxy duration", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"proxy":{"upstream_timeout":"not-a-duration"}}`))
+		s.handleAdminUpdateConfig(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("strip-disabled proxy config requires bootstrap signing secret", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPatch, "/aegion/api/v1/system/config", bytes.NewBufferString(`{"proxy":{"strip_inbound_identity_headers":false}}`))
 		s.handleAdminUpdateConfig(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)

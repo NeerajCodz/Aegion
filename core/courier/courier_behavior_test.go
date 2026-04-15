@@ -517,6 +517,37 @@ func TestSendEmailFailureBranch(t *testing.T) {
 	}
 }
 
+func TestSendEmailRejectsHeaderInjection(t *testing.T) {
+	c := New(Config{
+		SMTP: SMTPConfig{
+			Host:        "127.0.0.1",
+			Port:        1,
+			FromAddress: "noreply@example.com",
+			FromName:    "Aegion",
+			AuthEnabled: false,
+		},
+		MaxRetries: 3,
+	})
+
+	if err := c.sendEmail("victim@example.com\r\nBcc: attacker@example.com", "Subj", "Body"); err == nil || !strings.Contains(err.Error(), "invalid recipient") {
+		t.Fatalf("expected recipient header injection rejection, got %v", err)
+	}
+	if err := c.sendEmail("victim@example.com", "Subj\r\nBcc: attacker@example.com", "Body"); err == nil || !strings.Contains(err.Error(), "invalid subject") {
+		t.Fatalf("expected subject header injection rejection, got %v", err)
+	}
+}
+
+func TestQueueEmailRejectsHeaderInjection(t *testing.T) {
+	c := New(Config{})
+
+	if _, err := c.QueueEmail(context.Background(), "victim@example.com\r\nBcc: attacker@example.com", "subject", "body"); err == nil || !strings.Contains(err.Error(), "invalid recipient") {
+		t.Fatalf("expected queued recipient injection rejection, got %v", err)
+	}
+	if _, err := c.QueueEmail(context.Background(), "victim@example.com", "subject\r\nBcc: attacker@example.com", "body"); err == nil || !strings.Contains(err.Error(), "invalid subject") {
+		t.Fatalf("expected queued subject injection rejection, got %v", err)
+	}
+}
+
 func TestQueueEmail_DBUnavailableViaMethods(t *testing.T) {
 	c := New(Config{})
 	if _, err := c.QueueEmail(context.Background(), "user@example.com", "s", "b"); !errors.Is(err, errCourierDBUnavailable) {

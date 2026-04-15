@@ -205,6 +205,15 @@ func TestNewOAuth2SigningKeyPair(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "must be set together")
 	})
+
+	t.Run("rejects ephemeral keys in production", func(t *testing.T) {
+		t.Setenv("AEGION_ENV", "production")
+		t.Setenv(signingPrivateKeyB64Env, "")
+		t.Setenv(signingPublicKeyB64Env, "")
+		_, err := newOAuth2SigningKeyPair()
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "production requires static OAuth2 signing keys")
+	})
 }
 
 func TestOAuth2JWTSignerAndJWKSProvider(t *testing.T) {

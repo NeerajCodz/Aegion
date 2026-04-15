@@ -167,6 +167,16 @@ courier:
     tls:
       enabled: true
       skip_verify: false
+  # Optional generic HTTPS SMS gateway.
+  sms:
+    enabled: ${AEGION_SMS_ENABLED:-false}
+    url: ${AEGION_SMS_URL:-}
+    method: ${AEGION_SMS_METHOD:-POST}
+    headers:
+      Authorization: ${AEGION_SMS_AUTHORIZATION_HEADER:-}
+    body_template: |
+      {"to":"{{.To}}","body":"{{.Body}}"}
+    timeout: ${AEGION_SMS_TIMEOUT:-10s}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sessions — Secure cookie settings for production

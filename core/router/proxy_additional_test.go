@@ -105,6 +105,7 @@ func TestModuleProxyServeHTTP_PolicyAllowAdditionalBranches(t *testing.T) {
 }
 
 func TestModuleProxyIdentityAndForwarded_AdditionalBranches(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID:              "module-a",
 		SignedIdentityHeaders: []string{"X-User-ID", "  ", "X-User-AAL"},
@@ -130,13 +131,13 @@ func TestModuleProxyIdentityAndForwarded_AdditionalBranches(t *testing.T) {
 	}
 
 	original := httptest.NewRequest(http.MethodGet, "http://edge.example.com/resource", nil)
-	original.RemoteAddr = ""
+	original.RemoteAddr = "198.51.100.41:1234"
 	original.Host = "edge.example.com"
 	original.Header.Set("X-Real-IP", "198.51.100.40")
 	forwarded := httptest.NewRequest(http.MethodGet, "http://upstream.example.com/resource", nil)
 
 	proxy.addForwardedHeaders(forwarded, original)
-	if forwarded.Header.Get("X-Forwarded-For") != "198.51.100.40" {
+	if forwarded.Header.Get("X-Forwarded-For") != "198.51.100.41" {
 		t.Fatalf("expected X-Forwarded-For fallback from getClientIP, got %q", forwarded.Header.Get("X-Forwarded-For"))
 	}
 }

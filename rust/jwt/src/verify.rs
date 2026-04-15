@@ -4,7 +4,9 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED, ED25519};
+use ring::signature::{
+    UnparsedPublicKey, ECDSA_P256_SHA256_FIXED, ED25519, RSA_PKCS1_2048_8192_SHA256,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::JwtError;
@@ -38,7 +40,7 @@ pub struct VerifyResult {
 ///
 /// # Arguments
 /// * `token` - The JWT string (header.payload.signature)
-/// * `algorithm` - Expected algorithm (ES256, EdDSA)
+/// * `algorithm` - Expected algorithm (RS256, ES256, EdDSA)
 /// * `public_key` - The public key bytes
 /// * `options` - Verification options
 ///
@@ -103,6 +105,11 @@ fn verify_signature(
     signature: &[u8],
 ) -> Result<(), JwtError> {
     match algorithm {
+        "RS256" => {
+            let key = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, public_key);
+            key.verify(message, signature)
+                .map_err(|_| JwtError::VerificationFailed("invalid signature".into()))
+        }
         "ES256" => {
             let key = UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, public_key);
             key.verify(message, signature)

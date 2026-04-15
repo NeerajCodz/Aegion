@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/aegion/aegion/core/authtoken"
+	"github.com/aegion/aegion/core/courier"
 	"github.com/aegion/aegion/core/flows"
 	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
@@ -25,6 +27,14 @@ import (
 	"github.com/aegion/aegion/internal/platform/database"
 	"github.com/aegion/aegion/internal/platform/logger"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	magiclinkservice "github.com/aegion/aegion/modules/magic_link/service"
+	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
+	mfaservice "github.com/aegion/aegion/modules/mfa/service"
+	mfastore "github.com/aegion/aegion/modules/mfa/store"
+	passkeysservice "github.com/aegion/aegion/modules/passkeys/service"
+	passkeysstore "github.com/aegion/aegion/modules/passkeys/store"
+	passwordservice "github.com/aegion/aegion/modules/password/service"
+	passwordstore "github.com/aegion/aegion/modules/password/store"
 	policygrpc "github.com/aegion/aegion/modules/policy/grpc"
 	policystore "github.com/aegion/aegion/modules/policy/store"
 )
@@ -52,6 +62,11 @@ type Server struct {
 	flowService    *flows.Service
 	policyChecker  policyChecker
 	workerManager  *workers.Manager
+	passwordAuth   passwordFlowService
+	magicLinkAuth  magicLinkFlowService
+	mfaAuth        mfaFlowService
+	passkeyAuth    passkeyFlowService
+	courier        *courier.Courier
 	dbQueryRowFn   func(ctx context.Context, sql string, args ...any) pgx.Row
 	dbQueryFn      func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	dbExecFn       func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
@@ -69,9 +84,51 @@ type moduleOrchestrator interface {
 }
 
 type sessionManager interface {
+	Create(ctx context.Context, identityID uuid.UUID, method session.AuthMethod, device session.DeviceInfo) (*session.Session, error)
 	GetFromRequest(ctx context.Context, r *http.Request) (*session.Session, error)
 	Revoke(ctx context.Context, sessionID uuid.UUID) error
+	RevokeAllForIdentity(ctx context.Context, identityID uuid.UUID) error
+	AddAuthMethod(ctx context.Context, sessionID uuid.UUID, method session.AuthMethod) error
+	SetCookie(w http.ResponseWriter, session *session.Session)
 	ClearCookie(w http.ResponseWriter)
+}
+
+type passwordFlowService interface {
+	ValidatePassword(ctx context.Context, password, identifier string) error
+	Register(ctx context.Context, identityID uuid.UUID, identifier, password string) error
+	Verify(ctx context.Context, identifier, password string) (uuid.UUID, error)
+	ChangePassword(ctx context.Context, identityID uuid.UUID, oldPassword, newPassword string) error
+	ResetPassword(ctx context.Context, identityID uuid.UUID, newPassword string) error
+}
+
+type magicLinkFlowService interface {
+	SendLoginCode(ctx context.Context, email string) error
+	VerifyMagicLink(ctx context.Context, token string) (string, *uuid.UUID, error)
+	VerifyMagicLinkForType(ctx context.Context, token string, expectedType magiclinkstore.CodeType) (string, *uuid.UUID, error)
+	SendVerificationCode(ctx context.Context, email string, identityID uuid.UUID) error
+	VerifyVerificationCode(ctx context.Context, email, otpCode string) (*uuid.UUID, error)
+	SendRecoveryCodeIfIdentityExists(ctx context.Context, email string, identityID *uuid.UUID) error
+	VerifyRecoveryCode(ctx context.Context, email, otpCode string) (*uuid.UUID, error)
+}
+
+type mfaFlowService interface {
+	StartTOTPEnrollment(ctx context.Context, identityID, accountName string) (*mfaservice.TOTPEnrollmentStartResponse, error)
+	CompleteTOTPEnrollment(ctx context.Context, req *mfaservice.TOTPEnrollmentFinishRequest) (*mfaservice.TOTPEnrollmentFinishResponse, error)
+	VerifyTOTP(ctx context.Context, identityID, code string) error
+	VerifyBackupCode(ctx context.Context, identityID, code string) error
+	HasEnrolledFactor(ctx context.Context, identityID string) (bool, error)
+	RegenerateBackupCodes(ctx context.Context, identityID string) ([]string, error)
+	RememberTrustedDevice(ctx context.Context, identityID, label string) (string, time.Time, error)
+	ValidateTrustedDevice(ctx context.Context, identityID, token string) (bool, error)
+	RevokeTrustedDevice(ctx context.Context, identityID, token string) error
+	ResetIdentity(ctx context.Context, identityID string) error
+}
+
+type passkeyFlowService interface {
+	BeginRegistration(identityID string) (*passkeysservice.RegistrationStartResponse, error)
+	FinishRegistration(req *passkeysservice.RegistrationFinishRequest) error
+	BeginAuthentication(identityID string) (*passkeysservice.AuthenticationStartResponse, error)
+	FinishAuthentication(req *passkeysservice.AuthenticationFinishRequest) error
 }
 
 var newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
@@ -187,7 +244,11 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 
 	// Initialize flow store and service
 	flowStore := flows.NewPostgresFlowStore(cfg.DB.Pool)
-	flowService := flows.NewService(flowStore, flows.DefaultConfig())
+	flowConfig := flows.DefaultConfig()
+	if cfg.Config.Passkeys.Enabled {
+		flowConfig.DefaultMethods = append(flowConfig.DefaultMethods, flows.AuthMethod{Method: "passkey"})
+	}
+	flowService := flows.NewService(flowStore, flowConfig)
 
 	sessionSecret := []byte(internalSecret)
 	if len(cfg.Config.Secrets.Cookie) > 0 {
@@ -207,6 +268,130 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		IdleTimeout: cfg.Config.Sessions.IdleTimeout.Duration(),
 	})
 
+	var courierSvc *courier.Courier
+	if cfg.DB != nil {
+		courierSvc = courier.New(courier.Config{
+			DB: cfg.DB.Pool,
+			SMTP: courier.SMTPConfig{
+				Host:        cfg.Config.Courier.SMTP.Host,
+				Port:        cfg.Config.Courier.SMTP.Port,
+				FromAddress: cfg.Config.Courier.SMTP.FromAddress,
+				FromName:    cfg.Config.Courier.SMTP.FromName,
+				Username:    cfg.Config.Courier.SMTP.Auth.Username,
+				Password:    cfg.Config.Courier.SMTP.Auth.Password,
+				AuthEnabled: cfg.Config.Courier.SMTP.Auth.Enabled,
+			},
+			SMS: courier.SMSConfig{
+				Enabled:      cfg.Config.Courier.SMS.Enabled,
+				URL:          cfg.Config.Courier.SMS.URL,
+				Method:       cfg.Config.Courier.SMS.Method,
+				Headers:      cfg.Config.Courier.SMS.Headers,
+				BodyTemplate: cfg.Config.Courier.SMS.BodyTemplate,
+				Timeout:      cfg.Config.Courier.SMS.Timeout.Duration(),
+			},
+			CodeExpiry: cfg.Config.MagicLink.CodeLifespan.Duration(),
+			LinkExpiry: cfg.Config.MagicLink.LinkLifespan.Duration(),
+		})
+	}
+
+	var passwordAuth passwordFlowService
+	if cfg.Config.Password.Enabled {
+		passwordAuth = passwordservice.New(
+			passwordstore.New(cfg.DB.Pool),
+			runtimePasswordHasher{},
+			passwordservice.Config{
+				MinLength:               cfg.Config.Password.MinLength,
+				RequireUppercase:        cfg.Config.Password.RequireUppercase,
+				RequireLowercase:        cfg.Config.Password.RequireLowercase,
+				RequireNumber:           cfg.Config.Password.RequireNumber,
+				RequireSpecial:          cfg.Config.Password.RequireSpecial,
+				HIBPEnabled:             cfg.Config.Password.HIBPEnabled,
+				HIBPBaseURL:             passwordHIBPBaseURL(cfg.Config.Password.HIBPHost),
+				HIBPTimeout:             cfg.Config.Password.HIBPTimeout.Duration(),
+				HIBPIgnoreNetworkErrors: cfg.Config.Password.HIBPIgnoreNetworkErrors,
+				HIBPMinBreachCount:      cfg.Config.Password.HIBPMinBreachCount,
+				HistoryCount:            cfg.Config.Password.HistoryCount,
+			},
+		)
+	}
+
+	var magicLinkAuth magicLinkFlowService
+	if cfg.Config.MagicLink.Enabled {
+		magicLinkAuth = magiclinkservice.New(
+			magiclinkstore.New(cfg.DB.Pool),
+			magicLinkCourierAdapter{courier: courierSvc},
+			magiclinkservice.Config{
+				BaseURL:           publicBaseURL(cfg.Config),
+				CodeLength:        cfg.Config.MagicLink.CodeLength,
+				CodeCharset:       cfg.Config.MagicLink.CodeCharset,
+				LinkLifespan:      cfg.Config.MagicLink.LinkLifespan.Duration(),
+				CodeLifespan:      cfg.Config.MagicLink.CodeLifespan.Duration(),
+				RateLimit:         cfg.Config.MagicLink.RateLimit,
+				RateWindow:        cfg.Config.MagicLink.RateWindow.Duration(),
+				RecoveryRateLimit: cfg.Config.MagicLink.RecoveryRateLimit,
+			},
+		)
+	}
+
+	var mfaAuth mfaFlowService
+	if cfg.Config.MFA.Enabled {
+		mfaRepo := any(mfastore.New())
+		if cfg.DB != nil && cfg.DB.Pool != nil {
+			if repo, err := mfastore.NewPostgres(cfg.DB.Pool); err == nil {
+				mfaRepo = repo
+			}
+		}
+		mfaAuth = mfaservice.New(mfaRepo.(interface {
+			SaveEnrollment(enrollment mfastore.Enrollment) error
+			GetEnrollment(enrollmentID string) (mfastore.Enrollment, error)
+			DeleteEnrollment(enrollmentID string) error
+			UpsertTOTPFactor(factor mfastore.TOTPFactor) error
+			GetTOTPFactor(identityID string) (mfastore.TOTPFactor, error)
+			UpdateTOTPLastUsed(identityID string, usedAt time.Time) error
+			ReplaceBackupCodes(identityID string, codes []mfastore.BackupCode) error
+			ListBackupCodes(identityID string) ([]mfastore.BackupCode, error)
+			MarkBackupCodeUsed(identityID, codeID string, usedAt time.Time) error
+			SaveTrustedDevice(device mfastore.TrustedDevice) error
+			GetTrustedDevice(identityID, tokenHash, tokenPrefix string) (mfastore.TrustedDevice, error)
+			TouchTrustedDevice(identityID, deviceID string, touchedAt time.Time) error
+			DeleteTrustedDevice(identityID, deviceID string, revokedAt time.Time) error
+			DeleteAllIdentityData(identityID string) error
+			ListFactorsByIdentity(identityID string) ([]mfastore.Factor, error)
+		}), mfaservice.Config{
+			Issuer:                 cfg.Config.MFA.Issuer,
+			EnrollmentTTL:          cfg.Config.MFA.EnrollmentTTL.Duration(),
+			TOTPPeriod:             cfg.Config.MFA.CodePeriod.Duration(),
+			TOTPDigits:             cfg.Config.MFA.CodeDigits,
+			TOTPAllowedTimeWindows: cfg.Config.MFA.AllowedTimeWindows,
+			BackupCodeCount:        cfg.Config.MFA.BackupCodeCount,
+			TrustedDeviceTTL:       cfg.Config.MFA.TrustedDeviceLifespan.Duration(),
+			CipherKey:              deriveCipherKey(cfg.Config),
+		})
+	}
+
+	var passkeyAuth passkeyFlowService
+	if cfg.Config.Passkeys.Enabled {
+		passkeyStore := any(passkeysstore.New())
+		if cfg.DB != nil && cfg.DB.Pool != nil {
+			if repo, err := passkeysstore.NewPostgres(cfg.DB.Pool); err == nil {
+				passkeyStore = repo
+			}
+		}
+		passkeyAuth = passkeysservice.New(passkeyStore.(interface {
+			SaveChallenge(challenge passkeysstore.Challenge)
+			ConsumeChallenge(challengeID string) (passkeysstore.Challenge, error)
+			UpsertCredential(credential passkeysstore.Credential)
+			GetCredential(credentialID string) (passkeysstore.Credential, error)
+			ListCredentialsByIdentity(identityID string) []passkeysstore.Credential
+			UpdateCredentialSignCount(credentialID string, signCount uint32) error
+		}), passkeysservice.Config{
+			RPID:               cfg.Config.Passkeys.RPID,
+			RPOrigin:           cfg.Config.Passkeys.RPOrigin,
+			ChallengeTTL:       cfg.Config.Passkeys.ChallengeTTL.Duration(),
+			AllowedCredentials: cfg.Config.Passkeys.AllowedCredentials,
+		})
+	}
+
 	var checker policyChecker
 	if cfg.Config.Policy.Enabled {
 		checker = policygrpc.NewServer(policystore.New(cfg.DB.Pool))
@@ -222,6 +407,11 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		flowService:    flowService,
 		policyChecker:  checker,
 		workerManager:  cfg.WorkerManager,
+		passwordAuth:   passwordAuth,
+		magicLinkAuth:  magicLinkAuth,
+		mfaAuth:        mfaAuth,
+		passkeyAuth:    passkeyAuth,
+		courier:        courierSvc,
 	}
 
 	// Setup routes
@@ -467,8 +657,25 @@ func bootstrapDisplayName(email string) string {
 	return localPart
 }
 
+func deriveCipherKey(cfg *config.Config) []byte {
+	if cfg == nil || len(cfg.Secrets.Cipher) == 0 || strings.TrimSpace(cfg.Secrets.Cipher[0]) == "" {
+		return nil
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(cfg.Secrets.Cipher[0])))
+	return sum[:]
+}
+
 // registerWorkers registers background workers with the manager.
 func (s *Server) registerWorkers() {
+	if s.courier != nil {
+		s.workerManager.Register(workers.NewCourierDispatchWorker(workers.CourierDispatchConfig{
+			DB:       s.db.Pool,
+			Log:      s.log,
+			Courier:  s.courier,
+			Interval: 30 * time.Second,
+		}))
+	}
+
 	// Register session cleanup worker
 	s.workerManager.Register(workers.NewSessionCleanupWorker(workers.SessionCleanupConfig{
 		DB:       s.db.Pool,

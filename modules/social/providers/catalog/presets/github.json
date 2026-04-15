@@ -1,0 +1,21 @@
+{
+  "slug": "github",
+  "display_name": "GitHub",
+  "preset": "github",
+  "protocol": "oauth2",
+  "authorize_endpoint": "https://github.com/login/oauth/authorize",
+  "token_endpoint": "https://github.com/login/oauth/access_token",
+  "userinfo_endpoint": "https://api.github.com/user",
+  "scopes": ["read:user", "user:email"],
+  "claim_mapping": {
+    "subject": "id",
+    "email": "email",
+    "name": "name|login",
+    "picture": "avatar_url"
+  },
+  "pkce_method": "S256",
+  "auth_style": "client_secret_post",
+  "claim_source": "github_user",
+  "enabled": false,
+  "trust_email_verified": true
+}

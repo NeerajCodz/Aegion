@@ -122,6 +122,17 @@ courier:
     # No auth for Mailpit
     auth:
       enabled: false
+  # Optional generic HTTP SMS gateway.
+  # When enabled, Aegion will POST a rendered payload instead of using
+  # a hardcoded provider integration.
+  sms:
+    enabled: false
+    url: https://sms.example.com/send
+    method: POST
+    headers:
+      Authorization: Bearer ${AEGION_SMS_API_TOKEN:-change-me}
+    body_template: '{"to":"{{.To}}","body":"{{.Body}}"}'
+    timeout: 10s
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sessions
