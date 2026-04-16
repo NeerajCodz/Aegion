@@ -269,3 +269,295 @@ func TestRotateOAuth2ClientSecretPublicClientBranch(t *testing.T) {
 		t.Fatalf("expected %d, got %d body=%s", http.StatusBadRequest, rec.Code, rec.Body.String())
 	}
 }
+
+func TestOAuth2HandlersAdditionalEndpointBranches(t *testing.T) {
+	t.Run("get client bad request and not found/internal", func(t *testing.T) {
+		h := newOAuth2Handler()
+		h.db = &fakeDB{}
+
+		rec := httptest.NewRecorder()
+		req := withOperator(httptest.NewRequest(http.MethodGet, "/admin/oauth2/clients", nil))
+		h.GetOAuth2Client(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodGet, "/admin/oauth2/clients/missing", nil), "id", "missing"))
+		h.GetOAuth2Client(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: errors.New("boom")}
+			},
+		}
+		rec = httptest.NewRecorder()
+		h.GetOAuth2Client(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+
+	t.Run("update client failure branches", func(t *testing.T) {
+		h := newOAuth2Handler()
+		h.db = &fakeDB{}
+
+		rec := httptest.NewRecorder()
+		req := withOperator(httptest.NewRequest(http.MethodPatch, "/admin/oauth2/clients", nil))
+		h.UpdateOAuth2Client(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodPatch, "/admin/oauth2/clients/missing", nil), "id", "missing"))
+		rec = httptest.NewRecorder()
+		h.UpdateOAuth2Client(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: errors.New("load failed")}
+			},
+		}
+		rec = httptest.NewRecorder()
+		h.UpdateOAuth2Client(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: oauth2ClientRowValues("client-u1", "client_secret_basic")}
+			},
+		}
+		rec = httptest.NewRecorder()
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodPatch, "/admin/oauth2/clients/client-u1", bytes.NewBufferString("{")), "id", "client-u1"))
+		req.Header.Set("Content-Type", "application/json")
+		h.UpdateOAuth2Client(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodPatch, "/admin/oauth2/clients/client-u1", oauth2JSONBody(t, map[string]any{
+			"redirect_uris": []string{"relative/path"},
+		})), "id", "client-u1"))
+		req.Header.Set("Content-Type", "application/json")
+		h.UpdateOAuth2Client(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: oauth2ClientRowValues("client-u2", "client_secret_basic")}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("update failed")
+			},
+		}
+		rec = httptest.NewRecorder()
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodPatch, "/admin/oauth2/clients/client-u2", oauth2JSONBody(t, map[string]any{
+			"name":          "Updated",
+			"redirect_uris": []string{"https://app.example.com/callback"},
+		})), "id", "client-u2"))
+		req.Header.Set("Content-Type", "application/json")
+		h.UpdateOAuth2Client(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		execCalls := 0
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: oauth2ClientRowValues("client-u3", "client_secret_basic")}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				execCalls++
+				if execCalls == 1 {
+					return pgconn.NewCommandTag("UPDATE 1"), nil
+				}
+				return pgconn.CommandTag{}, errors.New("secret rotate failed")
+			},
+		}
+		rec = httptest.NewRecorder()
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodPatch, "/admin/oauth2/clients/client-u3", oauth2JSONBody(t, map[string]any{
+			"name":          "Updated",
+			"redirect_uris": []string{"https://app.example.com/callback"},
+			"client_secret": "new-secret",
+		})), "id", "client-u3"))
+		req.Header.Set("Content-Type", "application/json")
+		h.UpdateOAuth2Client(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+
+	t.Run("delete and rotate secret error branches", func(t *testing.T) {
+		h := newOAuth2Handler()
+		h.db = &fakeDB{}
+
+		rec := httptest.NewRecorder()
+		req := withOperator(httptest.NewRequest(http.MethodDelete, "/admin/oauth2/clients", nil))
+		h.DeleteOAuth2Client(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodDelete, "/admin/oauth2/clients/missing", nil), "id", "missing"))
+		rec = httptest.NewRecorder()
+		h.DeleteOAuth2Client(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: oauth2ClientRowValues("client-d1", "client_secret_basic")}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("delete failed")
+			},
+		}
+		rec = httptest.NewRecorder()
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodDelete, "/admin/oauth2/clients/client-d1", nil), "id", "client-d1"))
+		h.DeleteOAuth2Client(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = withOperator(httptest.NewRequest(http.MethodPost, "/admin/oauth2/clients/rotate-secret", nil))
+		h.RotateOAuth2ClientSecret(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: oauth2ClientRowValues("client-r1", "client_secret_basic")}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("rotate failed")
+			},
+		}
+		rec = httptest.NewRecorder()
+		req = withOperator(withOAuth2RouteParam(httptest.NewRequest(http.MethodPost, "/admin/oauth2/clients/client-r1/rotate-secret", nil), "id", "client-r1"))
+		h.RotateOAuth2ClientSecret(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+}
+
+func TestOAuth2TokenHandlersAdditionalBranches(t *testing.T) {
+	now := time.Now().UTC()
+	accessTokenRow := []any{
+		"at-1",
+		"sig-1",
+		"client-1",
+		"identity-1",
+		"session-1",
+		[]string{"openid"},
+		[]string{"api://example"},
+		"https://issuer.example.com",
+		"identity-1",
+		[]byte(`{}`),
+		false,
+		(*time.Time)(nil),
+		now.Add(time.Hour),
+		now,
+	}
+
+	t.Run("list tokens count/query branches", func(t *testing.T) {
+		h := newOAuth2Handler()
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: errors.New("count failed")}
+			},
+		}
+
+		rec := httptest.NewRecorder()
+		req := withOperator(httptest.NewRequest(http.MethodGet, "/admin/oauth2/tokens", nil))
+		h.ListOAuth2Tokens(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{int64(1)}}
+			},
+			queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+				return nil, errors.New("query failed")
+			},
+		}
+		rec = httptest.NewRecorder()
+		h.ListOAuth2Tokens(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+
+	t.Run("revoke token invalid payload and internal branches", func(t *testing.T) {
+		h := newOAuth2Handler()
+
+		rec := httptest.NewRecorder()
+		req := withOperator(httptest.NewRequest(http.MethodPost, "/admin/oauth2/tokens/revoke", bytes.NewBufferString("{")))
+		req.Header.Set("Content-Type", "application/json")
+		h.RevokeOAuth2Token(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = withOperator(httptest.NewRequest(http.MethodPost, "/admin/oauth2/tokens/revoke", oauth2JSONBody(t, map[string]any{
+			"token_type": "access_token",
+		})))
+		req.Header.Set("Content-Type", "application/json")
+		h.RevokeOAuth2Token(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{err: errors.New("load failed")}
+			},
+		}
+		rec = httptest.NewRecorder()
+		req = withOperator(httptest.NewRequest(http.MethodPost, "/admin/oauth2/tokens/revoke", oauth2JSONBody(t, map[string]any{
+			"token_type": "access_token",
+			"id":         "at-1",
+		})))
+		req.Header.Set("Content-Type", "application/json")
+		h.RevokeOAuth2Token(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: accessTokenRow}
+			},
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("revoke failed")
+			},
+		}
+		rec = httptest.NewRecorder()
+		req = withOperator(httptest.NewRequest(http.MethodPost, "/admin/oauth2/tokens/revoke", oauth2JSONBody(t, map[string]any{
+			"token_type": "access_token",
+			"id":         "at-1",
+		})))
+		req.Header.Set("Content-Type", "application/json")
+		h.RevokeOAuth2Token(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+	})
+}

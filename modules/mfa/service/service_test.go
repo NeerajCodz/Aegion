@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/base32"
+	"errors"
 	"testing"
 	"time"
 
@@ -128,6 +129,84 @@ func TestGetStatusAndFactors(t *testing.T) {
 	}
 	if len(factors) != 1 || factors[0].GetMethod() != "totp" {
 		t.Fatalf("unexpected factors: %+v", factors)
+	}
+}
+
+func TestRegenerateBackupCodesAndResetIdentity(t *testing.T) {
+	repo := store.New()
+	svc := New(repo, Config{
+		EnrollmentTTL:          time.Minute,
+		TOTPPeriod:             30 * time.Second,
+		TOTPDigits:             6,
+		TOTPAllowedTimeWindows: 1,
+		BackupCodeCount:        3,
+		TrustedDeviceTTL:       time.Hour,
+		CipherKey:              []byte("0123456789abcdef0123456789abcdef"),
+	})
+
+	if _, err := svc.RegenerateBackupCodes(context.Background(), " "); !errors.Is(err, ErrInvalidIdentity) {
+		t.Fatalf("expected invalid identity error, got %v", err)
+	}
+	if _, err := svc.RegenerateBackupCodes(context.Background(), "missing"); !errors.Is(err, ErrInvalidIdentity) {
+		t.Fatalf("expected invalid identity for missing factor, got %v", err)
+	}
+
+	start, err := svc.StartTOTPEnrollment(context.Background(), "identity-regen", "regen@example.com")
+	if err != nil {
+		t.Fatalf("start enrollment: %v", err)
+	}
+	code := generateTOTPCodeForTest(t, start.Secret, svc.cfg, time.Now().UTC())
+	if _, err := svc.CompleteTOTPEnrollment(context.Background(), &TOTPEnrollmentFinishRequest{
+		IdentityID:   "identity-regen",
+		EnrollmentID: start.EnrollmentID,
+		Code:         code,
+	}); err != nil {
+		t.Fatalf("complete enrollment: %v", err)
+	}
+
+	regenerated, err := svc.RegenerateBackupCodes(context.Background(), "identity-regen")
+	if err != nil {
+		t.Fatalf("regenerate backup codes: %v", err)
+	}
+	if len(regenerated) != 3 {
+		t.Fatalf("expected 3 backup codes, got %d", len(regenerated))
+	}
+
+	if err := svc.ResetIdentity(context.Background(), " "); !errors.Is(err, ErrInvalidIdentity) {
+		t.Fatalf("expected invalid identity from reset, got %v", err)
+	}
+	if err := svc.ResetIdentity(context.Background(), "identity-regen"); err != nil {
+		t.Fatalf("reset identity: %v", err)
+	}
+	enrolled, err := svc.HasEnrolledFactor(context.Background(), "identity-regen")
+	if err != nil {
+		t.Fatalf("has enrolled factor after reset: %v", err)
+	}
+	if enrolled {
+		t.Fatal("expected no enrolled factors after identity reset")
+	}
+}
+
+func TestTrustedDeviceInputValidationBranches(t *testing.T) {
+	svc := New(store.New(), Config{
+		CipherKey:        []byte("0123456789abcdef0123456789abcdef"),
+		TrustedDeviceTTL: time.Hour,
+	})
+
+	valid, err := svc.ValidateTrustedDevice(context.Background(), " ", "token")
+	if err != nil || valid {
+		t.Fatalf("expected invalid identity to return false,nil; got valid=%v err=%v", valid, err)
+	}
+	valid, err = svc.ValidateTrustedDevice(context.Background(), "identity-1", " ")
+	if err != nil || valid {
+		t.Fatalf("expected empty token to return false,nil; got valid=%v err=%v", valid, err)
+	}
+
+	if err := svc.RevokeTrustedDevice(context.Background(), "", "token"); !errors.Is(err, ErrTrustedDeviceToken) {
+		t.Fatalf("expected trusted-device token error for empty identity, got %v", err)
+	}
+	if err := svc.RevokeTrustedDevice(context.Background(), "identity-1", "missing"); !errors.Is(err, ErrTrustedDeviceToken) {
+		t.Fatalf("expected trusted-device token error for unknown token, got %v", err)
 	}
 }
 
