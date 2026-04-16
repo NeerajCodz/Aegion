@@ -87,3 +87,32 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 		t.Fatalf("main did not pass expected config: %+v", captured)
 	}
 }
+
+func TestBuildRepositoryRejectsInvalidDBURL(t *testing.T) {
+	t.Setenv(dbURLEnv, "://bad-url")
+	t.Setenv(legacyDBURLEnv, "")
+
+	repo, cleanup, err := buildRepository(context.Background())
+	if err == nil {
+		t.Fatal("expected parse error for invalid proxy database URL")
+	}
+	if repo != nil || cleanup != nil {
+		t.Fatalf("expected nil repo/cleanup on parse error, got repo=%v cleanupNil=%t", repo, cleanup == nil)
+	}
+}
+
+func TestBuildRepositoryPingFailure(t *testing.T) {
+	t.Setenv(dbURLEnv, "postgres://user:pass@127.0.0.1:5432/aegion?sslmode=disable")
+	t.Setenv(legacyDBURLEnv, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	repo, cleanup, err := buildRepository(ctx)
+	if err == nil {
+		t.Fatal("expected ping failure with canceled context")
+	}
+	if repo != nil || cleanup != nil {
+		t.Fatalf("expected nil repo/cleanup on ping failure, got repo=%v cleanupNil=%t", repo, cleanup == nil)
+	}
+}

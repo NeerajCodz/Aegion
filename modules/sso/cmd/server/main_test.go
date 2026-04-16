@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"flag"
 	"net/http"
 	"os"
@@ -65,5 +66,54 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 	main()
 	if captured.Module != "sso" || captured.ListenAddr != "127.0.0.1:19007" {
 		t.Fatalf("unexpected config passed to run: %+v", captured)
+	}
+}
+
+func TestBuildRepositoryRejectsInvalidDBURL(t *testing.T) {
+	t.Setenv(dbURLEnv, "://bad-url")
+	t.Setenv(legacyDBURLEnv, "")
+
+	repo, cleanup, err := buildRepository(context.Background())
+	if err == nil {
+		t.Fatal("expected parse error for invalid SSO database URL")
+	}
+	if repo != nil || cleanup != nil {
+		t.Fatalf("expected nil repo/cleanup on parse error, got repo=%v cleanupNil=%t", repo, cleanup == nil)
+	}
+}
+
+func TestBuildRepositoryPingFailure(t *testing.T) {
+	t.Setenv(dbURLEnv, "postgres://user:pass@127.0.0.1:5432/aegion?sslmode=disable")
+	t.Setenv(legacyDBURLEnv, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	repo, cleanup, err := buildRepository(ctx)
+	if err == nil {
+		t.Fatal("expected ping failure with canceled context")
+	}
+	if repo != nil || cleanup != nil {
+		t.Fatalf("expected nil repo/cleanup on ping failure, got repo=%v cleanupNil=%t", repo, cleanup == nil)
+	}
+}
+
+func TestDeriveStateSecret(t *testing.T) {
+	t.Setenv(stateSecretEnv, "")
+	t.Setenv(legacyStateEnv, "")
+	if got := deriveStateSecret(); got != nil {
+		t.Fatalf("expected nil secret when envs are empty, got %x", got)
+	}
+
+	t.Setenv(legacyStateEnv, "legacy-secret")
+	wantLegacy := sha256.Sum256([]byte("legacy-secret"))
+	if got := deriveStateSecret(); len(got) != sha256.Size || string(got) != string(wantLegacy[:]) {
+		t.Fatalf("unexpected legacy-derived secret: %x", got)
+	}
+
+	t.Setenv(stateSecretEnv, "primary-secret")
+	wantPrimary := sha256.Sum256([]byte("primary-secret"))
+	if got := deriveStateSecret(); len(got) != sha256.Size || string(got) != string(wantPrimary[:]) {
+		t.Fatalf("unexpected primary-derived secret: %x", got)
 	}
 }
