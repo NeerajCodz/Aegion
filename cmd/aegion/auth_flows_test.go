@@ -84,6 +84,7 @@ func (s *stubPasswordFlowService) ResetPassword(ctx context.Context, identityID 
 
 type stubMagicLinkFlowService struct {
 	loginSends        []string
+	loginSendErr      error
 	verificationSends []struct {
 		Email      string
 		IdentityID uuid.UUID
@@ -92,6 +93,7 @@ type stubMagicLinkFlowService struct {
 		Email      string
 		IdentityID *uuid.UUID
 	}
+	recoverySendErr error
 
 	verifyLinkRecipient  string
 	verifyLinkIdentityID *uuid.UUID
@@ -103,7 +105,7 @@ type stubMagicLinkFlowService struct {
 
 func (s *stubMagicLinkFlowService) SendLoginCode(ctx context.Context, email string) error {
 	s.loginSends = append(s.loginSends, email)
-	return nil
+	return s.loginSendErr
 }
 
 func (s *stubMagicLinkFlowService) VerifyMagicLink(ctx context.Context, token string) (string, *uuid.UUID, error) {
@@ -131,7 +133,7 @@ func (s *stubMagicLinkFlowService) SendRecoveryCodeIfIdentityExists(ctx context.
 		Email      string
 		IdentityID *uuid.UUID
 	}{Email: email, IdentityID: identityID})
-	return nil
+	return s.recoverySendErr
 }
 
 func (s *stubMagicLinkFlowService) VerifyRecoveryCode(ctx context.Context, email, otpCode string) (*uuid.UUID, error) {
@@ -146,6 +148,8 @@ type stubMFAFlowService struct {
 	trustedDeviceToken       string
 	trustedDeviceExpiry      time.Time
 	trustedDeviceErr         error
+	startErr                 error
+	finishErr                error
 	verifyTOTPErr            error
 	verifyBackupErr          error
 	regeneratedBackupCodes   []string
@@ -166,6 +170,7 @@ type stubMFAFlowService struct {
 	}
 	verifyTOTPCodes   []string
 	verifyBackupCodes []string
+	finishRequests    []*mfaservice.TOTPEnrollmentFinishRequest
 }
 
 func (s *stubMFAFlowService) StartTOTPEnrollment(ctx context.Context, identityID, accountName string) (*mfaservice.TOTPEnrollmentStartResponse, error) {
@@ -173,6 +178,9 @@ func (s *stubMFAFlowService) StartTOTPEnrollment(ctx context.Context, identityID
 		IdentityID  string
 		AccountName string
 	}{IdentityID: identityID, AccountName: accountName})
+	if s.startErr != nil {
+		return nil, s.startErr
+	}
 	if resp, ok := s.startResp.(*mfaservice.TOTPEnrollmentStartResponse); ok {
 		return resp, nil
 	}
@@ -180,6 +188,13 @@ func (s *stubMFAFlowService) StartTOTPEnrollment(ctx context.Context, identityID
 }
 
 func (s *stubMFAFlowService) CompleteTOTPEnrollment(ctx context.Context, req *mfaservice.TOTPEnrollmentFinishRequest) (*mfaservice.TOTPEnrollmentFinishResponse, error) {
+	if req != nil {
+		reqCopy := *req
+		s.finishRequests = append(s.finishRequests, &reqCopy)
+	}
+	if s.finishErr != nil {
+		return nil, s.finishErr
+	}
 	if resp, ok := s.finishResp.(*mfaservice.TOTPEnrollmentFinishResponse); ok {
 		return resp, nil
 	}

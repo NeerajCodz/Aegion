@@ -795,6 +795,20 @@ func assignScanDest(dest any, val any) error {
 		default:
 			return fmt.Errorf("expected []byte/string value, got %T", val)
 		}
+	case *json.RawMessage:
+		switch v := val.(type) {
+		case []byte:
+			*d = append((*d)[:0], v...)
+			return nil
+		case string:
+			*d = json.RawMessage(v)
+			return nil
+		case nil:
+			*d = nil
+			return nil
+		default:
+			return fmt.Errorf("expected []byte/string value for json.RawMessage, got %T", val)
+		}
 	case *[]string:
 		v, ok := val.([]string)
 		if !ok {

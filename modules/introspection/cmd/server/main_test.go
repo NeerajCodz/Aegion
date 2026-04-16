@@ -111,3 +111,45 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 		t.Fatalf("main did not pass expected config: %+v", captured)
 	}
 }
+
+func TestBuildRuntimeRequiresDBURL(t *testing.T) {
+	t.Setenv(dbURLEnv, "")
+	t.Setenv(legacyDBURLEnv, "")
+
+	runtime, err := buildRuntime(context.Background())
+	if err == nil {
+		t.Fatal("expected error when no introspection database URL is configured")
+	}
+	if runtime != nil {
+		t.Fatalf("expected nil runtime, got %+v", runtime)
+	}
+}
+
+func TestBuildRuntimeRejectsInvalidDBURL(t *testing.T) {
+	t.Setenv(dbURLEnv, "://bad-url")
+	t.Setenv(legacyDBURLEnv, "")
+
+	runtime, err := buildRuntime(context.Background())
+	if err == nil {
+		t.Fatal("expected parse error for invalid database URL")
+	}
+	if runtime != nil {
+		t.Fatalf("expected nil runtime, got %+v", runtime)
+	}
+}
+
+func TestBuildRuntimePingFailure(t *testing.T) {
+	t.Setenv(dbURLEnv, "postgres://user:pass@127.0.0.1:5432/aegion?sslmode=disable")
+	t.Setenv(legacyDBURLEnv, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	runtime, err := buildRuntime(ctx)
+	if err == nil {
+		t.Fatal("expected ping failure with cancelled context")
+	}
+	if runtime != nil {
+		t.Fatalf("expected nil runtime, got %+v", runtime)
+	}
+}
