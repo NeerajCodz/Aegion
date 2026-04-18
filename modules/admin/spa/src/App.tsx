@@ -9,6 +9,12 @@ import { Sessions } from './pages/Sessions';
 import { Operators } from './pages/Operators';
 import { Roles } from './pages/Roles';
 import { Settings } from './pages/Settings';
+import { SCIM } from './pages/SCIM';
+import { Integrations } from './pages/Integrations';
+import { ActivityFeed } from './pages/ActivityFeed';
+import { OAuth2 } from './pages/OAuth2';
+import { Security } from './pages/Security';
+import { Policy } from './pages/Policy';
 import { Login } from './pages/Login';
 import { operatorHasPermission } from './lib/permissions';
 import type { Operator } from './types';
@@ -24,11 +30,17 @@ const queryClient = new QueryClient({
 
 const permissionRoutes: Array<{ path: string; permission: string }> = [
   { path: '/', permission: 'audit:read' },
+  { path: '/activity', permission: 'audit:read' },
   { path: '/identities', permission: 'identities:read' },
   { path: '/sessions', permission: 'sessions:read' },
   { path: '/operators', permission: 'operators:read' },
   { path: '/roles', permission: 'roles:read' },
+  { path: '/security', permission: 'security:read' },
+  { path: '/oauth2', permission: 'oauth2:clients:read' },
+  { path: '/integrations', permission: 'config:read' },
+  { path: '/policy', permission: 'config:read' },
   { path: '/settings', permission: 'config:read' },
+  { path: '/scim', permission: 'config:read' },
 ];
 
 function fallbackRoute(operator: Operator | null): string {
@@ -92,6 +104,14 @@ function AppRoutes() {
           }
         />
         <Route
+          path="activity"
+          element={
+            <ProtectedRoute permission="audit:read">
+              <ActivityFeed />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="identities"
           element={
             <ProtectedRoute permission="identities:read">
@@ -132,10 +152,50 @@ function AppRoutes() {
           }
         />
         <Route
+          path="oauth2"
+          element={
+            <ProtectedRoute permission="oauth2:clients:read">
+              <OAuth2 />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="security"
+          element={
+            <ProtectedRoute permission="security:read">
+              <Security />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="integrations"
+          element={
+            <ProtectedRoute permission="config:read">
+              <Integrations />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="policy"
+          element={
+            <ProtectedRoute permission="config:read">
+              <Policy />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="settings"
           element={
             <ProtectedRoute permission="config:read">
               <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="scim"
+          element={
+            <ProtectedRoute permission="config:read">
+              <SCIM />
             </ProtectedRoute>
           }
         />

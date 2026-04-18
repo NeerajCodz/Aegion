@@ -27,6 +27,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/scim"
@@ -131,6 +132,7 @@ func (s *liveRuntimeServer) shutdown(ctx context.Context) error {
 type mainDeps struct {
 	stdout         io.Writer
 	loadConfig     func(path string) (*Config, error)
+	rustSelfCheck  func() error
 	setupLogger    func(logConfig LogConfig)
 	parseDBConfig  func(connString string) (*pgxpool.Config, error)
 	newDBPool      func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error)
@@ -147,6 +149,7 @@ func defaultMainDeps() mainDeps {
 	return mainDeps{
 		stdout:        os.Stdout,
 		loadConfig:    loadConfig,
+		rustSelfCheck: platformcrypto.RuntimeSelfCheck,
 		setupLogger:   setupLogger,
 		parseDBConfig: pgxpool.ParseConfig,
 		newDBPool:     pgxpool.NewWithConfig,
@@ -190,6 +193,10 @@ func parseMainFlags(args []string, envLookup func(string, string) string) (*main
 }
 
 func run(args []string, deps mainDeps) error {
+	if deps.rustSelfCheck == nil {
+		deps.rustSelfCheck = platformcrypto.RuntimeSelfCheck
+	}
+
 	flags, err := parseMainFlags(args, getEnv)
 	if err != nil {
 		return fmt.Errorf("failed to parse flags: %w", err)
@@ -198,6 +205,9 @@ func run(args []string, deps mainDeps) error {
 	if flags.version {
 		_, _ = fmt.Fprintln(deps.stdout, "Aegion Admin Module v1.0.0")
 		return nil
+	}
+	if err := deps.rustSelfCheck(); err != nil {
+		return fmt.Errorf("failed rust runtime self-check: %w", err)
 	}
 
 	cfg, err := deps.loadConfig(flags.configPath)

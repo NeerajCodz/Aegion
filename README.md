@@ -55,18 +55,13 @@ See [docs/](./docs/) for complete documentation:
 - [Architecture](docs/architecture.md) — Go+Rust internals and runtime flow
 - [Security](docs/security.md) — Authentication and security controls
 - [Configuration](docs/config.md) — `aegion.yaml` model and ownership split
+- [Release Maturity Matrix](docs/release-maturity-matrix.md) — GA/Beta/Not-GA truth source
 
 ## Project Status
 
-**Phase 1 — Core Identity Platform** (In Development)
-- [ ] Core identity model
-- [ ] Password authentication
-- [ ] Sessions
-- [ ] Email OTP & Magic link
-- [ ] Admin panel
-- [ ] Postgres persistence
-- [ ] Identity schemas
-- [ ] Courier (email/SMS delivery)
+**Hybrid-first release train (active)**
+- Source of truth for module maturity is `build/release-maturity.json` and [docs/release-maturity-matrix.md](docs/release-maturity-matrix.md).
+- Current module mix is intentionally uneven: core/password/magic_link are stable, while standalone surfaces advance by maturity gate.
 
 ## License
 

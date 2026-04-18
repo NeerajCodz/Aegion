@@ -2,9 +2,12 @@
 package store
 
 import (
+	"errors"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -174,4 +177,38 @@ func TestErrors(t *testing.T) {
 	assert.Error(t, ErrFamilyInvalidated)
 	assert.Error(t, ErrPKCERequired)
 	assert.Error(t, ErrAlreadyExists)
+}
+
+func TestAdditionalIDGeneratorsAndHelpers(t *testing.T) {
+	t.Run("GenerateClientID has expected prefix and entropy", func(t *testing.T) {
+		id1 := GenerateClientID()
+		id2 := GenerateClientID()
+		assert.NotEqual(t, id1, id2)
+		assert.Regexp(t, regexp.MustCompile(`^oa2_[A-Za-z0-9_-]+$`), id1)
+	})
+
+	t.Run("GenerateAuthCode produces non-empty unique value", func(t *testing.T) {
+		code1 := GenerateAuthCode()
+		code2 := GenerateAuthCode()
+		assert.NotEmpty(t, code1)
+		assert.NotEqual(t, code1, code2)
+		assert.NotContains(t, code1, " ")
+	})
+
+	t.Run("GenerateUserCode format and charset", func(t *testing.T) {
+		code := GenerateUserCode()
+		assert.Regexp(t, regexp.MustCompile(`^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$`), code)
+	})
+
+	t.Run("isDuplicateKeyError branch coverage", func(t *testing.T) {
+		assert.False(t, isDuplicateKeyError(nil))
+		assert.False(t, isDuplicateKeyError(errors.New("other")))
+		assert.True(t, isDuplicateKeyError(&pgconn.PgError{Code: "23505"}))
+		assert.False(t, isDuplicateKeyError(&pgconn.PgError{Code: "22001"}))
+	})
+
+	t.Run("nowUTC returns UTC location", func(t *testing.T) {
+		now := nowUTC()
+		assert.Equal(t, time.UTC, now.Location())
+	})
 }

@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/store"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -271,7 +273,10 @@ func (s *TokenService) RefreshAccessToken(ctx context.Context, req *TokenRequest
 	}
 
 	// Mark old refresh token as used and link to new one
-	gracePeriod := 0 * time.Second // TODO: make configurable
+	gracePeriod, err := refreshTokenGracePeriod(client)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.store.MarkRefreshTokenUsed(ctx, req.RefreshToken, *resp.RefreshToken, gracePeriod); err != nil {
 		return nil, err
 	}
@@ -389,8 +394,10 @@ func (s *TokenService) resolveAccessTokenForIntrospection(ctx context.Context, t
 func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, identityID, sessionID string, scopes, audience []string, nonce *string, acr string, amr []string, authTime time.Time) (*TokenResponse, error) {
 	now := time.Now().UTC()
 
-	// Determine subject (TODO: support pairwise)
-	subject := identityID
+	subject, err := resolveTokenSubject(client, identityID, s.issuer)
+	if err != nil {
+		return nil, err
+	}
 
 	// Issue access token
 	accessJTI := store.GenerateAccessTokenJTI()
@@ -514,6 +521,67 @@ func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, id
 	return resp, nil
 }
 
+func resolveTokenSubject(client *store.Client, identityID, issuer string) (string, error) {
+	identityID = strings.TrimSpace(identityID)
+	if identityID == "" {
+		return "", ErrInvalidRequest
+	}
+	if client == nil {
+		return "", ErrInvalidClient
+	}
+
+	switch strings.ToLower(strings.TrimSpace(client.SubjectType)) {
+	case "", "public":
+		return identityID, nil
+	case "pairwise":
+		sector := resolvePairwiseSector(client)
+		if sector == "" {
+			return "", ErrInvalidClient
+		}
+		return computePairwiseSubject(identityID, strings.TrimSpace(issuer), sector), nil
+	default:
+		return "", ErrInvalidClient
+	}
+}
+
+func resolvePairwiseSector(client *store.Client) string {
+	if client == nil {
+		return ""
+	}
+	if client.SectorIdentifierURI != nil {
+		if sector := normalizeSectorIdentifier(*client.SectorIdentifierURI); sector != "" {
+			return sector
+		}
+	}
+	for _, redirectURI := range client.RedirectURIs {
+		if sector := normalizeSectorIdentifier(redirectURI); sector != "" {
+			return sector
+		}
+	}
+	return ""
+}
+
+func normalizeSectorIdentifier(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return strings.ToLower(trimmed)
+	}
+	if host := strings.TrimSpace(parsed.Hostname()); host != "" {
+		return strings.ToLower(host)
+	}
+	return strings.ToLower(trimmed)
+}
+
+func computePairwiseSubject(identityID, issuer, sector string) string {
+	base := strings.Join([]string{issuer, sector, identityID}, "|")
+	sum := sha256.Sum256([]byte(base))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 func accessTokenSignature(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
@@ -578,6 +646,27 @@ func parseScopes(scope string) []string {
 	return scopes
 }
 
+func refreshTokenGracePeriod(client *store.Client) (time.Duration, error) {
+	if client == nil {
+		return 0, ErrInvalidClient
+	}
+	if client.Metadata == nil {
+		return 0, nil
+	}
+	raw := strings.TrimSpace(client.Metadata["refresh_token_grace_seconds"])
+	if raw == "" {
+		raw = strings.TrimSpace(client.Metadata["refresh_token_grace_period_seconds"])
+	}
+	if raw == "" {
+		return 0, nil
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 {
+		return 0, ErrInvalidClient
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
 func authenticateClient(client *store.Client, clientSecret string) error {
 	if client == nil {
 		return ErrInvalidClient
@@ -598,7 +687,8 @@ func authenticateClient(client *store.Client, clientSecret string) error {
 	if strings.TrimSpace(clientSecret) == "" {
 		return ErrInvalidClient
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(*client.SecretHash), []byte(clientSecret)); err != nil {
+	matches, verifyErr := platformcrypto.VerifyPassword(clientSecret, *client.SecretHash)
+	if verifyErr != nil || !matches {
 		return ErrInvalidClient
 	}
 	return nil

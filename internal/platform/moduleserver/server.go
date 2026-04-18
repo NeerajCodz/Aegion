@@ -4,17 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 )
 
 var (
-	signalNotify = signal.Notify
-	signalStop   = signal.Stop
+	signalNotify         = signal.Notify
+	signalStop           = signal.Stop
+	rustRuntimeSelfCheck = platformcrypto.RuntimeSelfCheck
 )
 
 // Config defines a standard HTTP module process contract.
@@ -78,6 +82,9 @@ func buildModuleMux(cfg Config) *http.ServeMux {
 func Run(cfg Config) error {
 	if cfg.Module == "" {
 		return errors.New("module name is required")
+	}
+	if err := rustRuntimeSelfCheck(); err != nil {
+		return fmt.Errorf("[%s] rust runtime self-check failed: %w", cfg.Module, err)
 	}
 	if cfg.Version == "" {
 		cfg.Version = "0.1.0"

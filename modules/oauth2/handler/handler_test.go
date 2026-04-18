@@ -22,7 +22,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 )
 
 func TestOAuth2Handler_MethodGuards(t *testing.T) {
@@ -276,6 +276,9 @@ func (s *handlerAuthzStore) GetAuthCode(ctx context.Context, code string) (*stor
 }
 func (s *handlerAuthzStore) MarkAuthCodeUsed(ctx context.Context, code string) error {
 	return nil
+}
+func (s *handlerAuthzStore) GetSessionAuthContext(ctx context.Context, sessionID string) (*store.SessionAuthContext, error) {
+	return nil, store.ErrNotFound
 }
 func (s *handlerAuthzStore) CreateLoginChallenge(ctx context.Context, challenge *store.LoginChallenge) error {
 	return nil

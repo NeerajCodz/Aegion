@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -475,8 +474,8 @@ func (p *Proxy) getOrCreateRequestID(r *http.Request) string {
 	}
 
 	// Generate new request ID
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
+	b, err := platformcrypto.RandomBytes(8)
+	if err != nil {
 		return strconv.FormatInt(time.Now().UnixNano(), 16)
 	}
 	return hex.EncodeToString(b)

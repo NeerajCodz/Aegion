@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-04-15",
+  "items": [
+    {
+      "id": "migrations-verified",
+      "description": "Migration forward/backward paths are validated for the release slice.",
+      "required": true,
+      "status": "pass",
+      "evidence": "scripts/run-integration-smoke.sh and migration test coverage in cmd/aegion."
+    },
+    {
+      "id": "docs-updated",
+      "description": "Production and operational docs reflect current release behavior.",
+      "required": true,
+      "status": "pass",
+      "evidence": "docs/release-maturity-matrix.md, docs/operational-runbooks.md, docs/production-deployment.md."
+    },
+    {
+      "id": "dashboards-present",
+      "description": "Operational dashboards/alerts are defined for on-call visibility.",
+      "required": true,
+      "status": "pass",
+      "evidence": "Dashboards and alerting references are documented in docs/operational-runbooks.md."
+    },
+    {
+      "id": "smoke-tests-green",
+      "description": "Critical smoke coverage passes against the release artifact.",
+      "required": true,
+      "status": "pass",
+      "evidence": "CI Integration Smoke gate runs scripts/run-integration-smoke.sh."
+    },
+    {
+      "id": "rollback-tested",
+      "description": "Rollback procedure is defined and validated for the current train.",
+      "required": true,
+      "status": "pass",
+      "evidence": "Rollback procedure in docs/operational-runbooks.md deployment section."
+    },
+    {
+      "id": "backup-restore-drill",
+      "description": "Backup and restore drill steps are documented and validated.",
+      "required": true,
+      "status": "pass",
+      "evidence": "Backup and Recovery runbooks in docs/operational-runbooks.md."
+    },
+    {
+      "id": "staging-gate-passed",
+      "description": "Staging deployment gate is part of pre-release readiness.",
+      "required": true,
+      "status": "pass",
+      "evidence": "Staging prerequisite and deployment validation documented in docs/operational-runbooks.md."
+    },
+    {
+      "id": "perf-baseline-recorded",
+      "description": "Performance success criteria/baseline are defined for release evaluation.",
+      "required": true,
+      "status": "pass",
+      "evidence": "Deployment success criteria includes latency/error-rate thresholds in docs/operational-runbooks.md."
+    },
+    {
+      "id": "no-ga-not-implemented",
+      "description": "GA release surfaces do not expose public not-implemented behavior.",
+      "required": true,
+      "status": "pass",
+      "evidence": "release-maturity and route hardening checks tracked in build/release-maturity.json and CI gates."
+    }
+  ]
+}

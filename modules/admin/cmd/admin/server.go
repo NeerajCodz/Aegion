@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -108,6 +109,14 @@ func (s *Server) setupRouter() chi.Router {
 					Post("/scim/tokens", s.handleCreateSCIMToken)
 				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigUpdate)).
 					Delete("/scim/tokens/{id}", s.handleDeleteSCIMToken)
+				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigRead)).
+					Get("/scim/mappings", s.handleListSCIMMappings)
+				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigUpdate)).
+					Post("/scim/mappings", s.handleCreateSCIMMapping)
+				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigUpdate)).
+					Put("/scim/mappings/{id}", s.handleUpdateSCIMMapping)
+				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigUpdate)).
+					Delete("/scim/mappings/{id}", s.handleDeleteSCIMMapping)
 			}
 			s.Handler.RegisterRoutes(r)
 		})
@@ -406,6 +415,87 @@ func (s *Server) handleDeleteSCIMToken(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.SCIMService.DeleteSCIMToken(r.Context(), tokenID); err != nil {
 		http.Error(w, "failed to delete SCIM token", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleListSCIMMappings(w http.ResponseWriter, r *http.Request) {
+	mappings, err := s.SCIMService.ListSCIMMappings(r.Context())
+	if err != nil {
+		http.Error(w, "failed to list SCIM mappings", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{"mappings": mappings})
+}
+
+func (s *Server) handleCreateSCIMMapping(w http.ResponseWriter, r *http.Request) {
+	var req scim.SCIMMapping
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	mapping, err := s.SCIMService.CreateSCIMMapping(r.Context(), &req)
+	if err != nil {
+		if errors.Is(err, scim.ErrRequiredMappingName) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "failed to create SCIM mapping", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{"mapping": mapping})
+}
+
+func (s *Server) handleUpdateSCIMMapping(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		http.Error(w, "invalid mapping id", http.StatusBadRequest)
+		return
+	}
+
+	var req scim.SCIMMapping
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.ID = id
+
+	mapping, err := s.SCIMService.UpdateSCIMMapping(r.Context(), &req)
+	if err != nil {
+		if errors.Is(err, scim.ErrRequiredMappingName) || errors.Is(err, scim.ErrRequiredMappingID) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, "failed to update SCIM mapping", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{"mapping": mapping})
+}
+
+func (s *Server) handleDeleteSCIMMapping(w http.ResponseWriter, r *http.Request) {
+	mappingID, err := uuid.Parse(strings.TrimSpace(chi.URLParam(r, "id")))
+	if err != nil {
+		http.Error(w, "invalid mapping id", http.StatusBadRequest)
+		return
+	}
+	if err := s.SCIMService.DeleteSCIMMapping(r.Context(), mappingID); err != nil {
+		http.Error(w, "failed to delete SCIM mapping", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

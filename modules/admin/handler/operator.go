@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
@@ -308,7 +308,7 @@ func (h *Handler) createOperatorIdentity(ctx context.Context, req CreateOperator
 		state = "inactive"
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPassword, err := platformcrypto.HashPassword(req.Password)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -356,7 +356,7 @@ func (h *Handler) createOperatorIdentity(ctx context.Context, req CreateOperator
 	_, err = tx.Exec(ctx, `
 		INSERT INTO pwd_credentials (id, identity_id, identifier, hash, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, NOW(), NOW())
-	`, uuid.New(), identityID, email, string(hashedPassword))
+	`, uuid.New(), identityID, email, hashedPassword)
 	if err != nil {
 		return uuid.Nil, err
 	}

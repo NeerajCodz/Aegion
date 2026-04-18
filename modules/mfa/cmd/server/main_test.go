@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
@@ -62,4 +64,34 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 	if captured.Module != "mfa" || captured.ListenAddr != "127.0.0.1:19003" {
 		t.Fatalf("main did not pass expected config: %+v", captured)
 	}
+}
+
+func TestMainLogsFatalOnRunModuleError(t *testing.T) {
+	origRun := runModuleServer
+	origFatal := logFatal
+	origArgs := os.Args
+	origFlagSet := flag.CommandLine
+	t.Cleanup(func() {
+		runModuleServer = origRun
+		logFatal = origFatal
+		os.Args = origArgs
+		flag.CommandLine = origFlagSet
+	})
+
+	logFatal = func(v ...any) { panic(v[0]) }
+	runModuleServer = func(moduleserver.Config) error { return errors.New("module failed") }
+	os.Args = []string{"mfa-server"}
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected fatal panic")
+		}
+		got, ok := r.(error)
+		if !ok || !strings.Contains(got.Error(), "module failed") {
+			t.Fatalf("fatal panic=%v", r)
+		}
+	}()
+	main()
 }
