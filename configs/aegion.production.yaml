@@ -31,9 +31,16 @@ x-rate-limits: &strict-rate-limits
 module_versions:
   password:   "${AEGION_MODULE_PASSWORD_VERSION:-v1.0.0}"
   magic_link: "${AEGION_MODULE_MAGIC_LINK_VERSION:-v1.0.0}"
+  mfa:        "${AEGION_MODULE_MFA_VERSION:-v1.0.0}"
+  passkeys:   "${AEGION_MODULE_PASSKEYS_VERSION:-v1.0.0}"
+  social:     "${AEGION_MODULE_SOCIAL_VERSION:-v1.0.0}"
+  sso:        "${AEGION_MODULE_SSO_VERSION:-v1.0.0}"
+  oauth2:     "${AEGION_MODULE_OAUTH2_VERSION:-v1.0.0}"
+  introspection: "${AEGION_MODULE_INTROSPECTION_VERSION:-v1.0.0}"
   admin:      "${AEGION_MODULE_ADMIN_VERSION:-v1.0.0}"
   policy:     "${AEGION_MODULE_POLICY_VERSION:-v1.0.0}"
   proxy:      "${AEGION_MODULE_PROXY_VERSION:-v1.0.0}"
+  cli:        "${AEGION_MODULE_CLI_VERSION:-v1.0.0}"
 
 module_registry:
   base_url: "${AEGION_MODULE_REGISTRY:-ghcr.io/aegion}"

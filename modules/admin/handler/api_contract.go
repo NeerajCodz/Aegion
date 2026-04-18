@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/admin/store"
 )
 
@@ -106,7 +106,7 @@ func (h *Handler) generateAPIKeyToken() (string, error) {
 		entropy = 16
 	}
 	b := make([]byte, entropy)
-	if _, err := rand.Read(b); err != nil {
+	if err := platformcrypto.FillRandomBytes(b); err != nil {
 		return "", err
 	}
 	return h.config.APIKeyPrefix + base64.RawURLEncoding.EncodeToString(b), nil

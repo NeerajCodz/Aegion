@@ -31,8 +31,16 @@ const (
 )
 
 var (
-	runModuleServer  = moduleserver.Run
-	buildRuntimeHook = buildRuntime
+	runModuleServer       = moduleserver.Run
+	buildRuntimeHook      = buildRuntime
+	logFatal              = log.Fatal
+	newPoolWithConfigHook = pgxpool.NewWithConfig
+	poolPingHook          = func(ctx context.Context, pool *pgxpool.Pool) error { return pool.Ping(ctx) }
+	poolCloseHook         = func(pool *pgxpool.Pool) {
+		if pool != nil {
+			pool.Close()
+		}
+	}
 )
 
 type moduleRuntime struct {
@@ -67,7 +75,7 @@ func main() {
 
 	runtime, err := buildRuntimeHook(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		logFatal(err)
 	}
 	if runtime.cleanup != nil {
 		defer runtime.cleanup()
@@ -75,7 +83,7 @@ func main() {
 
 	err = runModuleServer(moduleConfig(*listenAddr, runtime.registerHTTPRoutes))
 	if err != nil {
-		log.Fatal(err)
+		logFatal(err)
 	}
 }
 
@@ -95,15 +103,15 @@ func buildRuntime(ctx context.Context) (*moduleRuntime, error) {
 	poolCfg.MaxConns = 10
 	poolCfg.MinConns = 1
 
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	pool, err := newPoolWithConfigHook(ctx, poolCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		pool.Close()
+	if err := poolPingHook(pingCtx, pool); err != nil {
+		poolCloseHook(pool)
 		return nil, err
 	}
 
@@ -114,7 +122,7 @@ func buildRuntime(ctx context.Context) (*moduleRuntime, error) {
 
 	return &moduleRuntime{
 		registerHTTPRoutes: h.RegisterRoutes,
-		cleanup:            pool.Close,
+		cleanup:            func() { poolCloseHook(pool) },
 	}, nil
 }
 

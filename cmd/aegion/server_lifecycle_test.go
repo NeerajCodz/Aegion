@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -130,6 +131,61 @@ func TestHandleReadyDatabaseHealthy(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"status":"ready"`) {
 		t.Fatalf("expected readiness success body, got %q", rec.Body.String())
+	}
+}
+
+func TestHandleReadyRegistryUnavailable(t *testing.T) {
+	s := newTestServer(t)
+	s.db = &database.DB{Pool: nil}
+	s.registry = nil
+
+	originalPing := pingDatabase
+	pingDatabase = func(ctx context.Context, db *database.DB) error { return nil }
+	defer func() { pingDatabase = originalPing }()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	s.handleReady(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"reason":"registry unavailable"`) {
+		t.Fatalf("expected registry unavailable body, got %q", rec.Body.String())
+	}
+}
+
+func TestHandleReadyModulesUnhealthy(t *testing.T) {
+	s := newTestServer(t)
+	s.db = &database.DB{Pool: nil}
+
+	originalPing := pingDatabase
+	pingDatabase = func(ctx context.Context, db *database.DB) error { return nil }
+	defer func() { pingDatabase = originalPing }()
+
+	registerTestModule(t, s, "proxy", registry.EndpointHTTP, "http://127.0.0.1:9999")
+	if err := s.registry.UpdateStatus("proxy", registry.StatusUnhealthy); err != nil {
+		t.Fatalf("failed to update module status: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	s.handleReady(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode readiness response: %v", err)
+	}
+	if body["reason"] != "modules unhealthy" {
+		t.Fatalf("unexpected reason: %v", body["reason"])
+	}
+	unhealthy, ok := body["unhealthy_modules"].([]interface{})
+	if !ok || len(unhealthy) != 1 {
+		t.Fatalf("expected one unhealthy module, got %#v", body["unhealthy_modules"])
 	}
 }
 

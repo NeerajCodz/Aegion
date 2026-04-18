@@ -795,6 +795,20 @@ func assignScanDest(dest any, val any) error {
 		default:
 			return fmt.Errorf("expected []byte/string value, got %T", val)
 		}
+	case *json.RawMessage:
+		switch v := val.(type) {
+		case []byte:
+			*d = append((*d)[:0], v...)
+			return nil
+		case string:
+			*d = json.RawMessage(v)
+			return nil
+		case nil:
+			*d = nil
+			return nil
+		default:
+			return fmt.Errorf("expected []byte/string value for json.RawMessage, got %T", val)
+		}
 	case *[]string:
 		v, ok := val.([]string)
 		if !ok {
@@ -4581,13 +4595,18 @@ func TestOperatorHandler_AdditionalCoveragePaths(t *testing.T) {
 			assert.Equal(t, "inactive", capturedState)
 		})
 
-		t.Run("bcrypt rejects too long password", func(t *testing.T) {
+		t.Run("database begin error propagates", func(t *testing.T) {
 			h := New(&fakeService{store: &fakeStore{}})
+			h.db = &fakeDB{
+				beginFn: func(context.Context) (pgx.Tx, error) {
+					return nil, errors.New("begin failed")
+				},
+			}
 			_, err := h.createOperatorIdentity(context.Background(), CreateOperatorRequest{
 				Email:    "toolong@example.com",
 				Password: strings.Repeat("x", 73),
 			})
-			require.Error(t, err)
+			require.EqualError(t, err, "begin failed")
 		})
 
 		t.Run("schema lookup error propagates", func(t *testing.T) {

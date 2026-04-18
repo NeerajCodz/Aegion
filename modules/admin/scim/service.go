@@ -3,17 +3,18 @@ package scim
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/aegion/aegion/core/registry"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/secrettoken"
 )
 
@@ -29,6 +30,8 @@ var (
 	ErrInvalidFilter       = errors.New("invalid filter")
 	ErrRequiredUserName    = errors.New("userName is required")
 	ErrRequiredDisplayName = errors.New("displayName is required")
+	ErrRequiredMappingName = errors.New("mapping name is required")
+	ErrRequiredMappingID   = errors.New("mapping id is required")
 	ErrInvalidTokenFormat  = errors.New("invalid token format")
 	ErrInvalidTokenLength  = errors.New("invalid token length")
 	ErrTokenNotFound       = errors.New("token not found")
@@ -172,7 +175,7 @@ func (s *Service) GetServiceProviderConfig() *ServiceProviderConfig {
 			Supported: true,
 		},
 		ETag: Supported{
-			Supported: false, // Not implemented yet
+			Supported: true,
 		},
 		AuthenticationSchemes: []AuthenticationScheme{
 			{
@@ -397,6 +400,9 @@ func (s *Service) ListUsers(ctx context.Context, filter string, sortBy string, s
 		if err != nil {
 			return nil, fmt.Errorf("invalid filter: %w", err)
 		}
+		if err := validateUserFilter(parsedFilter); err != nil {
+			return nil, fmt.Errorf("invalid filter: %w", err)
+		}
 	}
 
 	// Set defaults
@@ -441,7 +447,7 @@ func (s *Service) CreateUser(ctx context.Context, user *SCIMUser) (*SCIMUser, er
 		Created:      &now,
 		LastModified: &now,
 		Location:     s.resourceLocation("Users", user.ID),
-		Version:      "1",
+		Version:      scimVersionFromTime(now),
 	}
 
 	// Validate required fields
@@ -475,6 +481,7 @@ func (s *Service) UpdateUser(ctx context.Context, id string, user *SCIMUser) (*S
 	user.Meta = existing.Meta
 	user.Meta.LastModified = &now
 	user.Meta.Location = s.resourceLocation("Users", id)
+	user.Meta.Version = scimVersionFromTime(now)
 
 	err = s.store.UpdateUser(ctx, user)
 	if err != nil {
@@ -509,6 +516,9 @@ func (s *Service) ListGroups(ctx context.Context, filter string, sortBy string, 
 		var err error
 		parsedFilter, err = s.parseFilter(filter)
 		if err != nil {
+			return nil, fmt.Errorf("invalid filter: %w", err)
+		}
+		if err := validateGroupFilter(parsedFilter); err != nil {
 			return nil, fmt.Errorf("invalid filter: %w", err)
 		}
 	}
@@ -555,7 +565,7 @@ func (s *Service) CreateGroup(ctx context.Context, group *SCIMGroup) (*SCIMGroup
 		Created:      &now,
 		LastModified: &now,
 		Location:     s.resourceLocation("Groups", group.ID),
-		Version:      "1",
+		Version:      scimVersionFromTime(now),
 	}
 
 	// Validate required fields
@@ -589,6 +599,7 @@ func (s *Service) UpdateGroup(ctx context.Context, id string, group *SCIMGroup) 
 	group.Meta = existing.Meta
 	group.Meta.LastModified = &now
 	group.Meta.Location = s.resourceLocation("Groups", id)
+	group.Meta.Version = scimVersionFromTime(now)
 
 	err = s.store.UpdateGroup(ctx, group)
 	if err != nil {
@@ -608,13 +619,54 @@ func (s *Service) DeleteGroup(ctx context.Context, id string) error {
 	return s.store.DeleteGroup(ctx, id)
 }
 
+// Mapping operations
+
+// GetSCIMMapping retrieves a mapping by ID.
+func (s *Service) GetSCIMMapping(ctx context.Context, id uuid.UUID) (*SCIMMapping, error) {
+	return s.store.GetSCIMMapping(ctx, id)
+}
+
+// ListSCIMMappings retrieves all configured mappings.
+func (s *Service) ListSCIMMappings(ctx context.Context) ([]*SCIMMapping, error) {
+	return s.store.ListSCIMMappings(ctx)
+}
+
+// CreateSCIMMapping creates a new SCIM mapping.
+func (s *Service) CreateSCIMMapping(ctx context.Context, mapping *SCIMMapping) (*SCIMMapping, error) {
+	normalized, err := normalizeSCIMMapping(mapping, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.CreateSCIMMapping(ctx, normalized); err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+// UpdateSCIMMapping updates an existing SCIM mapping.
+func (s *Service) UpdateSCIMMapping(ctx context.Context, mapping *SCIMMapping) (*SCIMMapping, error) {
+	normalized, err := normalizeSCIMMapping(mapping, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.UpdateSCIMMapping(ctx, normalized); err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+// DeleteSCIMMapping deletes a SCIM mapping by ID.
+func (s *Service) DeleteSCIMMapping(ctx context.Context, id uuid.UUID) error {
+	return s.store.DeleteSCIMMapping(ctx, id)
+}
+
 // Token management
 
 // CreateSCIMToken creates a new SCIM API token.
 func (s *Service) CreateSCIMToken(ctx context.Context, name, description string, permissions []string, expiresAt *time.Time, createdBy uuid.UUID) (*SCIMToken, string, error) {
 	// Generate token
 	tokenBytes := make([]byte, s.config.TokenEntropyBytes)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	if err := platformcrypto.FillRandomBytes(tokenBytes); err != nil {
 		return nil, "", fmt.Errorf("failed to generate token: %w", err)
 	}
 	token := s.config.TokenPrefix + base64.RawURLEncoding.EncodeToString(tokenBytes)
@@ -735,6 +787,38 @@ func (s *Service) parseFilter(filter string) (*Filter, error) {
 	}, nil
 }
 
+func validateUserFilter(filter *Filter) error {
+	if filter == nil {
+		return nil
+	}
+	attr := strings.ToLower(strings.TrimSpace(filter.Attribute))
+	op := strings.ToLower(strings.TrimSpace(filter.Operator))
+	if op != "eq" {
+		return fmt.Errorf("%w operator", ErrInvalidFilter)
+	}
+	switch attr {
+	case "username", "externalid", "active":
+		return nil
+	default:
+		return fmt.Errorf("%w attribute", ErrInvalidFilter)
+	}
+}
+
+func validateGroupFilter(filter *Filter) error {
+	if filter == nil {
+		return nil
+	}
+	attr := strings.ToLower(strings.TrimSpace(filter.Attribute))
+	op := strings.ToLower(strings.TrimSpace(filter.Operator))
+	if op != "eq" {
+		return fmt.Errorf("%w operator", ErrInvalidFilter)
+	}
+	if attr != "displayname" {
+		return fmt.Errorf("%w attribute", ErrInvalidFilter)
+	}
+	return nil
+}
+
 func (s *Service) tokenLookupPrefix(token string) (string, error) {
 	if !strings.HasPrefix(token, s.config.TokenPrefix) {
 		return "", ErrInvalidTokenFormat
@@ -744,6 +828,53 @@ func (s *Service) tokenLookupPrefix(token string) (string, error) {
 		return "", ErrInvalidTokenLength
 	}
 	return tail[:s.config.TokenLookupPrefixLen], nil
+}
+
+func scimVersionFromTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return strconv.FormatInt(t.UTC().UnixNano(), 10)
+}
+
+func normalizeSCIMMapping(mapping *SCIMMapping, requireID bool) (*SCIMMapping, error) {
+	if mapping == nil {
+		return nil, ErrRequiredMappingName
+	}
+	normalized := *mapping
+	normalized.Name = strings.TrimSpace(normalized.Name)
+	normalized.Description = strings.TrimSpace(normalized.Description)
+	if normalized.Name == "" {
+		return nil, ErrRequiredMappingName
+	}
+	if requireID {
+		if normalized.ID == uuid.Nil {
+			return nil, ErrRequiredMappingID
+		}
+	} else if normalized.ID == uuid.Nil {
+		normalized.ID = uuid.New()
+	}
+	if normalized.UserNameSource == "" {
+		normalized.UserNameSource = "email"
+	}
+	if normalized.EmailSource == "" {
+		normalized.EmailSource = "primary"
+	}
+	if normalized.NameMapping == nil {
+		normalized.NameMapping = map[string]string{}
+	}
+	if normalized.AttributeMapping == nil {
+		normalized.AttributeMapping = map[string]string{}
+	}
+	if normalized.GroupMapping == nil {
+		normalized.GroupMapping = map[string]string{}
+	}
+	now := time.Now().UTC()
+	if normalized.CreatedAt.IsZero() {
+		normalized.CreatedAt = now
+	}
+	normalized.UpdatedAt = now
+	return &normalized, nil
 }
 
 func (s *Service) resourceLocation(resource, id string) string {

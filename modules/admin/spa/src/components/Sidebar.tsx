@@ -5,6 +5,9 @@ import {
   Activity,
   Shield,
   KeyRound,
+  Network,
+  GitBranch,
+  Scale,
   Settings,
   LogOut,
   X,
@@ -19,10 +22,16 @@ interface SidebarProps {
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, permission: 'audit:read' },
+  { name: 'Activity', href: '/activity', icon: Activity, permission: 'audit:read' },
   { name: 'Identities', href: '/identities', icon: Users, permission: 'identities:read' },
   { name: 'Sessions', href: '/sessions', icon: Activity, permission: 'sessions:read' },
   { name: 'Operators', href: '/operators', icon: Shield, permission: 'operators:read' },
   { name: 'Roles', href: '/roles', icon: KeyRound, permission: 'roles:read' },
+  { name: 'Security', href: '/security', icon: Shield, permission: 'security:read' },
+  { name: 'OAuth2', href: '/oauth2', icon: KeyRound, permission: 'oauth2:clients:read' },
+  { name: 'Integrations', href: '/integrations', icon: Network, permission: 'config:read' },
+  { name: 'Policy', href: '/policy', icon: Scale, permission: 'config:read' },
+  { name: 'SCIM', href: '/scim', icon: GitBranch, permission: 'config:read' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: 'config:read' },
 ];
 

@@ -567,6 +567,7 @@ func TestMainWithInjectedHooks(t *testing.T) {
 	origConnectDBHook := connectDBHook
 	origBuildHandlerHook := buildHandlerHook
 	origNewHTTPServerHook := newHTTPServerHook
+	origRustSelfCheckHook := rustSelfCheckHook
 	origNotifySignalsHook := notifySignalsHook
 	origStopSignalsHook := stopSignalsHook
 	origListenAndServeHook := listenAndServeHook
@@ -577,6 +578,7 @@ func TestMainWithInjectedHooks(t *testing.T) {
 		connectDBHook = origConnectDBHook
 		buildHandlerHook = origBuildHandlerHook
 		newHTTPServerHook = origNewHTTPServerHook
+		rustSelfCheckHook = origRustSelfCheckHook
 		notifySignalsHook = origNotifySignalsHook
 		stopSignalsHook = origStopSignalsHook
 		listenAndServeHook = origListenAndServeHook
@@ -600,6 +602,7 @@ func TestMainWithInjectedHooks(t *testing.T) {
 		require.NotNil(t, oauthStore)
 		return &handler.OAuth2Handler{}
 	}
+	rustSelfCheckHook = func() error { return nil }
 	newHTTPServerHook = func(cfg *Config, oauthHandler *handler.OAuth2Handler) *http.Server {
 		require.NotNil(t, oauthHandler)
 		return &http.Server{Addr: "127.0.0.1:0", Handler: http.NewServeMux()}

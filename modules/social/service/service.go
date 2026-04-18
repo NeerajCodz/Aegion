@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -411,16 +410,16 @@ func authorizationURL(provider store.Provider, resolved resolvedProvider, state,
 }
 
 func randomHexToken(bytesLen int) (string, error) {
-	buf := make([]byte, bytesLen)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := platformcrypto.RandomBytes(bytesLen)
+	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%x", buf), nil
 }
 
 func randomPKCEVerifier() (string, error) {
-	buf := make([]byte, 48)
-	if _, err := rand.Read(buf); err != nil {
+	buf, err := platformcrypto.RandomBytes(48)
+	if err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil

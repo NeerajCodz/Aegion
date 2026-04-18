@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -14,8 +13,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/crypto/bcrypt"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	adminstore "github.com/aegion/aegion/modules/admin/store"
 	oauth2store "github.com/aegion/aegion/modules/oauth2/store"
 )
@@ -957,19 +956,15 @@ func trimOptionalString(value *string) *string {
 }
 
 func generateOAuth2ClientSecret() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	b, err := platformcrypto.RandomBytes(32)
+	if err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 func hashOAuth2ClientSecret(secret string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
+	return platformcrypto.HashPassword(secret)
 }
 
 func (h *Handler) recordOAuth2TokenRevocation(r *http.Request, tokenType, tokenID, clientID, identityID string, expiresAt time.Time, reason string, operator *adminstore.Operator) error {

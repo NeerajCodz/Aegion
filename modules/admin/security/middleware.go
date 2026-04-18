@@ -3,8 +3,6 @@ package security
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
 	"os"
@@ -13,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/google/uuid"
@@ -27,7 +26,12 @@ const (
 	defaultRateLimitBurst = 20
 )
 
-var readRandom = rand.Read
+var readRandom = func(b []byte) (int, error) {
+	if err := platformcrypto.FillRandomBytes(b); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
 
 var newCleanupTicker = func() (<-chan time.Time, func()) {
 	ticker := time.NewTicker(5 * time.Minute)
@@ -246,7 +250,7 @@ func validateCSRFToken(r *http.Request, token string) bool {
 		return false
 	}
 
-	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(token)) == 1
+	return platformcrypto.ConstantTimeCompare([]byte(cookie.Value), []byte(token))
 }
 
 // generateRequestID generates a unique request ID.

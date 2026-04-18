@@ -3,13 +3,12 @@ package revocation
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"strings"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/oauth2/store"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -101,12 +100,13 @@ func (s *RevocationService) RevokeToken(ctx context.Context, req *RevocationRequ
 
 // authenticateClientSecret verifies a client secret using constant-time comparison.
 func authenticateClientSecret(hashedSecret, plainSecret string) bool {
-	if strings.HasPrefix(hashedSecret, "$2") {
-		return bcrypt.CompareHashAndPassword([]byte(hashedSecret), []byte(plainSecret)) == nil
+	if strings.HasPrefix(hashedSecret, "$") {
+		matches, err := platformcrypto.VerifyPassword(plainSecret, hashedSecret)
+		return err == nil && matches
 	}
 
 	// Fallback for legacy plaintext secrets.
-	return subtle.ConstantTimeCompare([]byte(hashedSecret), []byte(plainSecret)) == 1
+	return platformcrypto.ConstantTimeCompare([]byte(hashedSecret), []byte(plainSecret))
 }
 
 // ExtractTokenFromHeader extracts Bearer token from Authorization header.

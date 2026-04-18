@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,39 @@ func TestLogActionRedactsSensitiveFields(t *testing.T) {
 		t.Fatalf("LogPolicyAction failed: %v", err)
 	}
 	mockStore.AssertExpectations(t)
+}
+
+func TestRedactSecretsAdditionalBranches(t *testing.T) {
+	redactedMap := redactSecrets(map[string]string{
+		"client_secret": "top-secret",
+		"display_name":  "visible",
+	}).(map[string]string)
+	if redactedMap["client_secret"] != "[REDACTED]" {
+		t.Fatalf("expected client_secret to be redacted, got %q", redactedMap["client_secret"])
+	}
+	if redactedMap["display_name"] != "visible" {
+		t.Fatalf("expected non-sensitive key to remain visible, got %q", redactedMap["display_name"])
+	}
+
+	redactedList := redactSecrets([]interface{}{
+		map[string]interface{}{"api_key": "hide-me"},
+		"plain",
+		map[string]string{"token": "hide-too"},
+	}).([]interface{})
+	if len(redactedList) != 3 {
+		t.Fatalf("unexpected redacted list length: %d", len(redactedList))
+	}
+	encoded, err := json.Marshal(redactedList)
+	if err != nil {
+		t.Fatalf("failed to marshal redacted list: %v", err)
+	}
+	payload := string(encoded)
+	if strings.Contains(payload, "hide-me") || strings.Contains(payload, "hide-too") {
+		t.Fatalf("expected sensitive values to be redacted, got %s", payload)
+	}
+	if !strings.Contains(payload, "[REDACTED]") {
+		t.Fatalf("expected redaction markers in payload, got %s", payload)
+	}
 }
 
 func TestLogAdminAction(t *testing.T) {
