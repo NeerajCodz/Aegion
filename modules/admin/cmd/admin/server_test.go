@@ -14,9 +14,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	admin "github.com/aegion/aegion/modules/admin"
+	adminhandler "github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/scim"
+	adminservice "github.com/aegion/aegion/modules/admin/service"
+	adminstore "github.com/aegion/aegion/modules/admin/store"
 )
 
 func TestNormalizeAdminPath(t *testing.T) {
@@ -448,6 +452,53 @@ func (f *fakeDBPinger) Ping(ctx context.Context) error {
 	return f.pingErr
 }
 
+type errWriteResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *errWriteResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *errWriteResponseWriter) WriteHeader(statusCode int) { w.status = statusCode }
+
+func (w *errWriteResponseWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+type authOnlyAdminStore struct {
+	adminservice.Store
+	apiKey   *adminstore.APIKey
+	operator *adminstore.Operator
+}
+
+func (s *authOnlyAdminStore) GetAPIKeyByPrefix(context.Context, string) (*adminstore.APIKey, error) {
+	if s.apiKey == nil {
+		return nil, errors.New("api key missing")
+	}
+	return s.apiKey, nil
+}
+
+func (s *authOnlyAdminStore) GetOperator(context.Context, uuid.UUID) (*adminstore.Operator, error) {
+	if s.operator == nil {
+		return nil, errors.New("operator missing")
+	}
+	return s.operator, nil
+}
+
+func (s *authOnlyAdminStore) UpdateAPIKeyLastUsed(context.Context, uuid.UUID) error { return nil }
+
+type authOnlyHandlerService struct {
+	adminhandler.Service
+	store adminservice.Store
+}
+
+func (s *authOnlyHandlerService) Store() adminservice.Store { return s.store }
+
+func (s *authOnlyHandlerService) EvaluateCapability(context.Context, uuid.UUID, string) error { return nil }
+
 func TestHandleReady(t *testing.T) {
 	t.Run("healthy db", func(t *testing.T) {
 		s := &Server{
@@ -642,6 +693,7 @@ func TestHandleDashboardObservability(t *testing.T) {
 type serverSCIMStore struct {
 	scim.Store
 	listTokensFn    func(context.Context) ([]*scim.SCIMToken, error)
+	createTokenFn   func(context.Context, *scim.SCIMToken) error
 	deleteTokenFn   func(context.Context, uuid.UUID) error
 	listMappingsFn  func(context.Context) ([]*scim.SCIMMapping, error)
 	createMappingFn func(context.Context, *scim.SCIMMapping) error
@@ -654,6 +706,13 @@ func (s *serverSCIMStore) ListSCIMTokens(ctx context.Context) ([]*scim.SCIMToken
 		return s.listTokensFn(ctx)
 	}
 	return nil, nil
+}
+
+func (s *serverSCIMStore) CreateSCIMToken(ctx context.Context, token *scim.SCIMToken) error {
+	if s.createTokenFn != nil {
+		return s.createTokenFn(ctx, token)
+	}
+	return nil
 }
 
 func (s *serverSCIMStore) DeleteSCIMToken(ctx context.Context, id uuid.UUID) error {
@@ -770,6 +829,59 @@ func TestSCIMTokenHandlersBranches(t *testing.T) {
 		}
 	})
 
+	t.Run("create token authorized decode, validation, service error, and success", func(t *testing.T) {
+		operator := &adminstore.Operator{ID: uuid.New(), Role: "super_admin"}
+		fullToken := "aegion_abcdefghijklmnopqrstuv"
+		apiKey := &adminstore.APIKey{
+			ID:         uuid.New(),
+			OperatorID: operator.ID,
+			KeyHash:    adminstore.HashAPIKeyToken(fullToken),
+		}
+		authStore := &authOnlyAdminStore{apiKey: apiKey, operator: operator}
+		authHandler := adminhandler.New(&authOnlyHandlerService{store: authStore})
+
+		runCreate := func(scimStore *serverSCIMStore, body string) *httptest.ResponseRecorder {
+			s := &Server{
+				Config:      &Config{},
+				SCIMService: scim.NewService(scimStore, nil),
+				Handler:     authHandler,
+			}
+			secured := s.Handler.RequireAdmin(adminhandler.RequirePermission(s.Handler, adminservice.PermConfigUpdate)(http.HandlerFunc(s.handleCreateSCIMToken)))
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/scim/tokens", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+fullToken)
+			req.Header.Set("Content-Type", "application/json")
+			secured.ServeHTTP(rec, req)
+			return rec
+		}
+
+		rec := runCreate(&serverSCIMStore{}, `{`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = runCreate(&serverSCIMStore{}, `{"name":"  "}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = runCreate(&serverSCIMStore{
+			createTokenFn: func(context.Context, *scim.SCIMToken) error { return errors.New("create failed") },
+		}, `{"name":"token-a","permissions":["users:read"]}`)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		rec = runCreate(&serverSCIMStore{}, `{"name":"token-a","description":"demo","permissions":["users:read"]}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected %d, got %d body=%s", http.StatusCreated, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "plain_token") {
+			t.Fatalf("expected plain token in response, got %s", rec.Body.String())
+		}
+	})
+
 	t.Run("delete token validates id and handles service result", func(t *testing.T) {
 		s := &Server{
 			Config: &Config{},
@@ -802,6 +914,34 @@ func TestSCIMTokenHandlersBranches(t *testing.T) {
 		s.handleDeleteSCIMToken(rec, req)
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
+		}
+	})
+}
+
+func TestHandleHealthAndReadyAdditionalBranches(t *testing.T) {
+	t.Run("health encode write failure branch", func(t *testing.T) {
+		s := &Server{Config: &Config{}}
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := &errWriteResponseWriter{}
+		s.handleHealth(w, req)
+		if w.status != http.StatusOK {
+			t.Fatalf("expected %d status, got %d", http.StatusOK, w.status)
+		}
+	})
+
+	t.Run("ready falls back to DB pool when dbPing nil", func(t *testing.T) {
+		pool, err := pgxpool.New(context.Background(), "postgres://postgres:postgres@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1")
+		if err != nil {
+			t.Fatalf("create pool: %v", err)
+		}
+		defer pool.Close()
+
+		s := &Server{Config: &Config{}, DB: pool}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		s.handleReady(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
 		}
 	})
 }

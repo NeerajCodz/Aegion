@@ -15,6 +15,7 @@ import (
 
 type stubSocialService struct {
 	providers       []store.Provider
+	listErr         error
 	startResp       *service.StartAuthResponse
 	startErr        error
 	callbackRes     *service.CallbackResult
@@ -29,7 +30,7 @@ type stubSocialService struct {
 }
 
 func (s *stubSocialService) ListProviders(ctx context.Context) ([]store.Provider, error) {
-	return s.providers, nil
+	return s.providers, s.listErr
 }
 
 func (s *stubSocialService) StartAuth(ctx context.Context, provider, redirectTo string) (*service.StartAuthResponse, error) {

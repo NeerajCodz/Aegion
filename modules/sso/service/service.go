@@ -27,6 +27,12 @@ var (
 	ErrInvalidRelayState   = errors.New("invalid relay state")
 	ErrMissingStateSecret  = errors.New("sso state secret is required")
 	ErrInvalidSAMLResponse = errors.New("invalid sso response")
+
+	buildAuthnRequestHook = buildAuthnRequest
+	xmlMarshalHook        = xml.Marshal
+	jsonMarshalHook       = json.Marshal
+	signEnvelopeHook      = platformcrypto.SignEnvelope
+	systemCertPoolHook    = x509.SystemCertPool
 )
 
 const relayStateKind = "sso_state"
@@ -331,7 +337,7 @@ func buildRedirectURL(connection store.Connection, relayState, requestID string)
 		return "", err
 	}
 	query := parsed.Query()
-	authnRequest, err := buildAuthnRequest(connection, requestID)
+	authnRequest, err := buildAuthnRequestHook(connection, requestID)
 	if err != nil {
 		return "", err
 	}
@@ -373,7 +379,7 @@ func buildAuthnRequest(connection store.Connection, requestID string) (string, e
 		Destination:  strings.TrimSpace(connection.SSOURL),
 	}
 	env.Issuer.Value = "urn:aegion:sp:" + connection.Slug
-	raw, err := xml.Marshal(env)
+	raw, err := xmlMarshalHook(env)
 	if err != nil {
 		return "", err
 	}
@@ -384,11 +390,11 @@ func (s *Service) signRelayState(state callbackState) (string, error) {
 	if len(s.stateSecret) == 0 {
 		return "", ErrMissingStateSecret
 	}
-	payload, err := json.Marshal(state)
+	payload, err := jsonMarshalHook(state)
 	if err != nil {
 		return "", err
 	}
-	envelope, err := platformcrypto.SignEnvelope(relayStateKind, s.stateSecret, payload, s.now())
+	envelope, err := signEnvelopeHook(relayStateKind, s.stateSecret, payload, s.now())
 	if err != nil {
 		return "", err
 	}
@@ -687,7 +693,7 @@ func verifyCertificateChain(certs []*x509.Certificate, now time.Time) error {
 		return nil
 	}
 	leaf := certs[0]
-	roots, _ := x509.SystemCertPool()
+	roots, _ := systemCertPoolHook()
 	if roots == nil {
 		roots = x509.NewCertPool()
 	}

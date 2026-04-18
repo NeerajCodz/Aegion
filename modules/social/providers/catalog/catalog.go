@@ -17,10 +17,16 @@ import (
 var presetFS embed.FS
 
 var (
-	loadOnce     sync.Once
-	loadErr      error
-	presetBySlug map[string]store.Provider
-	presetOrder  []string
+	loadOnce           sync.Once
+	loadErr            error
+	presetBySlug       map[string]store.Provider
+	presetOrder        []string
+	readPresetsDirHook = func() ([]fs.DirEntry, error) {
+		return fs.ReadDir(presetFS, "presets")
+	}
+	readPresetFileHook = func(name string) ([]byte, error) {
+		return presetFS.ReadFile(path.Join("presets", name))
+	}
 )
 
 func Lookup(name string) (store.Provider, error) {
@@ -56,7 +62,7 @@ func Names() []string {
 func ensureLoaded() error {
 	loadOnce.Do(func() {
 		presetBySlug = make(map[string]store.Provider)
-		entries, err := fs.ReadDir(presetFS, "presets")
+		entries, err := readPresetsDirHook()
 		if err != nil {
 			loadErr = err
 			return
@@ -65,7 +71,7 @@ func ensureLoaded() error {
 			if entry.IsDir() || !strings.EqualFold(path.Ext(entry.Name()), ".json") {
 				continue
 			}
-			raw, err := presetFS.ReadFile(path.Join("presets", entry.Name()))
+			raw, err := readPresetFileHook(entry.Name())
 			if err != nil {
 				loadErr = err
 				return
