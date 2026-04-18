@@ -203,6 +203,26 @@ func TestPolicyReBACHandlersCoverage(t *testing.T) {
 		}
 
 		h.db = &fakeDB{queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &fakeRows{data: [][]any{{"bad"}}}, nil
+		}}
+		rec = httptest.NewRecorder()
+		req = withPolicyOperator(httptest.NewRequest(http.MethodGet, "/admin/policy/rebac-tuples", nil), operator)
+		h.ListPolicyReBACTuples(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 tuple scan error, got %d", rec.Code)
+		}
+
+		h.db = &fakeDB{queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &fakeRows{err: boom}, nil
+		}}
+		rec = httptest.NewRecorder()
+		req = withPolicyOperator(httptest.NewRequest(http.MethodGet, "/admin/policy/rebac-tuples", nil), operator)
+		h.ListPolicyReBACTuples(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 tuple rows error, got %d", rec.Code)
+		}
+
+		h.db = &fakeDB{queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
 			return &fakeRows{data: [][]any{{uuid.NewString(), "doc", "1", "viewer", "u1", now}}}, nil
 		}}
 		rec = httptest.NewRecorder()
@@ -218,6 +238,32 @@ func TestPolicyReBACHandlersCoverage(t *testing.T) {
 		h.ListPolicyReBACNamespaces(rec, req)
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("expected 500 namespace query error, got %d", rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		h.ListPolicyReBACNamespaces(rec, httptest.NewRequest(http.MethodGet, "/admin/policy/rebac-namespaces", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401 namespace unauthorized, got %d", rec.Code)
+		}
+
+		h.db = &fakeDB{queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &fakeRows{data: [][]any{{"bad"}}}, nil
+		}}
+		rec = httptest.NewRecorder()
+		req = withPolicyOperator(httptest.NewRequest(http.MethodGet, "/admin/policy/rebac-namespaces", nil), operator)
+		h.ListPolicyReBACNamespaces(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 namespace scan error, got %d", rec.Code)
+		}
+
+		h.db = &fakeDB{queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &fakeRows{err: boom}, nil
+		}}
+		rec = httptest.NewRecorder()
+		req = withPolicyOperator(httptest.NewRequest(http.MethodGet, "/admin/policy/rebac-namespaces", nil), operator)
+		h.ListPolicyReBACNamespaces(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected 500 namespace rows error, got %d", rec.Code)
 		}
 
 		h.db = &fakeDB{queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
@@ -428,6 +474,14 @@ func TestPolicyTupleAndSimulateHandlersCoverage(t *testing.T) {
 		h.SimulatePolicyDecision(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400 from checker failure, got %d body=%s", rec.Code, rec.Body.String())
+		}
+
+		h.db = &fakeDB{}
+		rec = httptest.NewRecorder()
+		req = withPolicyOperator(httptest.NewRequest(http.MethodPost, "/admin/policy/simulate", bytes.NewBufferString(`{"subject":"user:1","resource":"doc:1","resource_type":"doc","action":"read","model":"abac"}`)), operator)
+		h.SimulatePolicyDecision(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 simulate success, got %d body=%s", rec.Code, rec.Body.String())
 		}
 
 		if got := emptyToNil("   "); got != nil {
