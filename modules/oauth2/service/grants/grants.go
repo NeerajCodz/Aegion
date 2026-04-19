@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/oauth2/store"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -305,7 +305,8 @@ func authenticateClient(client *store.Client, clientSecret string) error {
 	if strings.TrimSpace(clientSecret) == "" {
 		return ErrInvalidClient
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(*client.SecretHash), []byte(clientSecret)); err != nil {
+	matches, verifyErr := platformcrypto.VerifyPassword(clientSecret, *client.SecretHash)
+	if verifyErr != nil || !matches {
 		return ErrInvalidClient
 	}
 	return nil

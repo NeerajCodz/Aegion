@@ -288,6 +288,25 @@ func TestEnabledModuleOrder(t *testing.T) {
 			t.Fatalf("expected ErrMissingDependency, got %v", err)
 		}
 	})
+
+	t.Run("returns cyclic dependency error", func(t *testing.T) {
+		original := moduleDependencies
+		moduleDependencies = map[string][]string{
+			"alpha": []string{"beta"},
+			"beta":  []string{"alpha"},
+		}
+		t.Cleanup(func() {
+			moduleDependencies = original
+		})
+
+		_, err := EnabledModuleOrder(map[string]string{
+			"alpha": "latest",
+			"beta":  "latest",
+		})
+		if err == nil || !strings.Contains(err.Error(), "cyclic dependency detected") {
+			t.Fatalf("expected cyclic dependency error, got %v", err)
+		}
+	})
 }
 
 func TestValidateModuleDependencies_ProductionModuleMaturity(t *testing.T) {
@@ -381,4 +400,114 @@ func mustAppearAfter(t *testing.T, order []string, module, dependency string) {
 	if moduleIdx <= dependencyIdx {
 		t.Fatalf("expected %q after %q, got %v", module, dependency, order)
 	}
+}
+
+func TestConfigLoader_AdditionalSuccessAndParseBranches(t *testing.T) {
+	t.Run("load wraps config parse failures", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, "aegion.yaml")
+		if err := os.WriteFile(configPath, []byte(":\n"), 0o644); err != nil {
+			t.Fatalf("failed to write config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		_, err := loader.Load()
+		if err == nil || !strings.Contains(err.Error(), "parsing config file") {
+			t.Fatalf("expected parsing config file error, got %v", err)
+		}
+	})
+
+	t.Run("load module config wraps module parse failures", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := writeMinimalMainConfig(t, dir)
+		modulesDir := filepath.Join(dir, "modules")
+		if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+			t.Fatalf("failed to create modules dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(modulesDir, "password.yaml"), []byte("{"), 0o644); err != nil {
+			t.Fatalf("failed to write invalid module config: %v", err)
+		}
+
+		loader := NewConfigLoader(configPath)
+		_, err := loader.LoadModuleConfig("password")
+		if err == nil || !strings.Contains(err.Error(), "parsing module config") {
+			t.Fatalf("expected parsing module config error, got %v", err)
+		}
+	})
+
+	t.Run("build module config falls back to latest and registry image", func(t *testing.T) {
+		loader := &ConfigLoader{
+			config: &AegionConfig{
+				ModuleVersions: map[string]string{},
+				ModuleRegistry: RegistryConfig{
+					BaseURL: "ghcr.io/aegion",
+				},
+			},
+		}
+
+		cfg, err := loader.buildModuleConfig("custom")
+		if err != nil {
+			t.Fatalf("buildModuleConfig returned error: %v", err)
+		}
+		if cfg.Version != "latest" {
+			t.Fatalf("expected default latest version, got %q", cfg.Version)
+		}
+		if cfg.Image != "ghcr.io/aegion/custom" {
+			t.Fatalf("expected registry image, got %q", cfg.Image)
+		}
+	})
+
+	t.Run("build module config validates required id", func(t *testing.T) {
+		loader := &ConfigLoader{
+			config: &AegionConfig{
+				ModuleVersions: map[string]string{},
+			},
+		}
+		if _, err := loader.buildModuleConfig(""); !errors.Is(err, ErrMissingModuleID) {
+			t.Fatalf("expected ErrMissingModuleID, got %v", err)
+		}
+	})
+
+	t.Run("defaults without main config use hardcoded network", func(t *testing.T) {
+		cfg := &ModuleConfig{
+			ID:    "demo",
+			Name:  "Demo",
+			Image: "repo/demo",
+		}
+		applyModuleDefaults(cfg, nil)
+		if cfg.Network != DefaultNetworkName {
+			t.Fatalf("expected network %q, got %q", DefaultNetworkName, cfg.Network)
+		}
+	})
+
+	t.Run("validate module config catches missing id and name", func(t *testing.T) {
+		if err := ValidateModuleConfig(&ModuleConfig{Name: "x", Image: "img"}); !errors.Is(err, ErrMissingModuleID) {
+			t.Fatalf("expected ErrMissingModuleID, got %v", err)
+		}
+		if err := ValidateModuleConfig(&ModuleConfig{ID: "x", Image: "img"}); !errors.Is(err, ErrMissingModuleName) {
+			t.Fatalf("expected ErrMissingModuleName, got %v", err)
+		}
+	})
+
+	t.Run("getters return loaded secret and network", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := writeMinimalMainConfig(t, dir)
+		loader := NewConfigLoader(configPath)
+
+		secret, err := loader.GetInternalSecret()
+		if err != nil {
+			t.Fatalf("GetInternalSecret returned error: %v", err)
+		}
+		if secret != "internal-secret" {
+			t.Fatalf("expected internal-secret, got %q", secret)
+		}
+
+		network, err := loader.GetNetworkConfig()
+		if err != nil {
+			t.Fatalf("GetNetworkConfig returned error: %v", err)
+		}
+		if network == nil || network.Name != "aegion_modules" {
+			t.Fatalf("unexpected network config: %#v", network)
+		}
+	})
 }
