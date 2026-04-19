@@ -21,6 +21,7 @@ import (
 	coresession "github.com/aegion/aegion/core/session"
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	magiclinkservice "github.com/aegion/aegion/modules/magic_link/service"
 	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
 	mfaservice "github.com/aegion/aegion/modules/mfa/service"
@@ -946,8 +947,8 @@ func (s *Server) resolveExternalSAMLLogin(ctx context.Context, r *http.Request, 
 	}
 
 	headers := map[string]string{
-		"X-Forwarded-Proto": externalForwardedProto(r),
-		"X-Forwarded-Host":  externalForwardedHost(r),
+		"X-Forwarded-Proto": externalForwardedProto(s, r),
+		"X-Forwarded-Host":  externalForwardedHost(s, r),
 	}
 	var callback ssoCallbackResponse
 	status, err := s.fetchExternalCallback(ctx, callbackURL, headers, &callback)
@@ -1069,36 +1070,14 @@ func mapExternalCallbackStatus(status int) error {
 	}
 }
 
-func externalForwardedProto(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	if forwarded := firstHeaderValue(r.Header.Get("X-Forwarded-Proto")); forwarded != "" {
-		return strings.ToLower(strings.TrimSpace(forwarded))
-	}
-	if r.TLS != nil {
-		return "https"
-	}
-	return "http"
+func externalForwardedProto(s *Server, r *http.Request) string {
+	trustForwarded := s != nil && s.cfg != nil && s.cfg.Proxy.TrustForwardedHeaders
+	return strings.ToLower(strings.TrimSpace(trustedproxy.ForwardedProto(r, trustForwarded, "AEGION_TRUSTED_PROXY_CIDRS")))
 }
 
-func externalForwardedHost(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	if forwarded := firstHeaderValue(r.Header.Get("X-Forwarded-Host")); forwarded != "" {
-		return strings.TrimSpace(forwarded)
-	}
-	return strings.TrimSpace(r.Host)
-}
-
-func firstHeaderValue(raw string) string {
-	for _, part := range strings.Split(raw, ",") {
-		if value := strings.TrimSpace(part); value != "" {
-			return value
-		}
-	}
-	return ""
+func externalForwardedHost(s *Server, r *http.Request) string {
+	trustForwarded := s != nil && s.cfg != nil && s.cfg.Proxy.TrustForwardedHeaders
+	return strings.TrimSpace(trustedproxy.ForwardedHost(r, trustForwarded, "AEGION_TRUSTED_PROXY_CIDRS"))
 }
 
 func (s *Server) handleMagicLinkRecoveryVerify(w http.ResponseWriter, r *http.Request) {
