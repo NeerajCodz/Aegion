@@ -134,7 +134,14 @@ func TestHandleCallbackIgnoresUntrustedIdentityFields(t *testing.T) {
 	if svc.subject != "" || svc.email != "" || svc.displayName != "" {
 		t.Fatalf("expected callback identity fields to be stripped, got subject=%q email=%q display_name=%q", svc.subject, svc.email, svc.displayName)
 	}
-	if len(svc.attributes) != 0 {
-		t.Fatalf("expected callback attributes to be stripped, got %+v", svc.attributes)
+	if got := svc.attributes["_saml_response"]; got != "fake" {
+		t.Fatalf("expected SAML response to be forwarded, got %+v", got)
+	}
+	recipients, ok := svc.attributes["_expected_recipients"].([]string)
+	if !ok || len(recipients) == 0 {
+		t.Fatalf("expected callback recipients to be forwarded, got %+v", svc.attributes["_expected_recipients"])
+	}
+	if got := svc.attributes["attributes"]; got != nil {
+		t.Fatalf("expected untrusted attributes to be dropped, got %+v", got)
 	}
 }
