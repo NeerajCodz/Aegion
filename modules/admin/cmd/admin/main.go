@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -26,11 +27,14 @@ import (
 	"gopkg.in/yaml.v3"
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/scim"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
+	socialservice "github.com/aegion/aegion/modules/social/service"
+	socialstore "github.com/aegion/aegion/modules/social/store"
 )
 
 type LogConfig struct {
@@ -84,6 +88,9 @@ type Config struct {
 		ServiceURL string `yaml:"service_url"`
 		APIKey     string `yaml:"api_key"`
 	} `yaml:"core"`
+	Secrets struct {
+		Cipher []string `yaml:"cipher"`
+	} `yaml:"secrets"`
 	Observability struct {
 		Enabled      bool          `yaml:"enabled"`
 		ProbeTimeout time.Duration `yaml:"probe_timeout"`
@@ -125,6 +132,7 @@ func (s *liveRuntimeServer) shutdown(ctx context.Context) error {
 type mainDeps struct {
 	stdout         io.Writer
 	loadConfig     func(path string) (*Config, error)
+	rustSelfCheck  func() error
 	setupLogger    func(logConfig LogConfig)
 	parseDBConfig  func(connString string) (*pgxpool.Config, error)
 	newDBPool      func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error)
@@ -141,6 +149,7 @@ func defaultMainDeps() mainDeps {
 	return mainDeps{
 		stdout:        os.Stdout,
 		loadConfig:    loadConfig,
+		rustSelfCheck: platformcrypto.RuntimeSelfCheck,
 		setupLogger:   setupLogger,
 		parseDBConfig: pgxpool.ParseConfig,
 		newDBPool:     pgxpool.NewWithConfig,
@@ -184,6 +193,10 @@ func parseMainFlags(args []string, envLookup func(string, string) string) (*main
 }
 
 func run(args []string, deps mainDeps) error {
+	if deps.rustSelfCheck == nil {
+		deps.rustSelfCheck = platformcrypto.RuntimeSelfCheck
+	}
+
 	flags, err := parseMainFlags(args, getEnv)
 	if err != nil {
 		return fmt.Errorf("failed to parse flags: %w", err)
@@ -192,6 +205,9 @@ func run(args []string, deps mainDeps) error {
 	if flags.version {
 		_, _ = fmt.Fprintln(deps.stdout, "Aegion Admin Module v1.0.0")
 		return nil
+	}
+	if err := deps.rustSelfCheck(); err != nil {
+		return fmt.Errorf("failed rust runtime self-check: %w", err)
 	}
 
 	cfg, err := deps.loadConfig(flags.configPath)
@@ -271,6 +287,15 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 	adminService := service.New(adminStore, service.Config{
 		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
+	var socialProviders handler.SocialProviderManager
+	if len(cfg.Secrets.Cipher) > 0 && strings.TrimSpace(cfg.Secrets.Cipher[0]) != "" {
+		sum := sha256.Sum256([]byte(strings.TrimSpace(cfg.Secrets.Cipher[0])))
+		socialRepo, err := socialstore.NewPostgres(db, sum[:])
+		if err != nil {
+			return nil, fmt.Errorf("initialize social provider manager: %w", err)
+		}
+		socialProviders = socialservice.New(socialRepo)
+	}
 	adminHandler := handler.New(adminService, handler.HandlerConfig{
 		SessionTokenExpiry: cfg.Admin.SessionLifespan,
 		DefaultPageSize:    cfg.Admin.DefaultPageSize,
@@ -278,6 +303,7 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		APIKeyPrefix:       cfg.Admin.APIKeyPrefix,
 		APIKeyPrefixLen:    cfg.Admin.APIKeyPrefixLen,
 		APIKeyEntropyBytes: cfg.Admin.APIKeyEntropy,
+		SocialProviders:    socialProviders,
 	})
 	var scimService *scim.Service
 	var scimHandler *scim.Handler
@@ -533,6 +559,7 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	cfg.Admin.SCIM.DefaultPageSize = superCfg.Admin.SCIM.DefaultPageSize
 	cfg.Admin.SCIM.MaxPageSize = superCfg.Admin.SCIM.MaxPageSize
 	cfg.Admin.SCIM.TokenLastUsedUpdateTimeout = superCfg.Admin.SCIM.TokenLastUsedUpdateTimeout.Duration()
+	cfg.Secrets.Cipher = append([]string(nil), superCfg.Secrets.Cipher...)
 
 	cfg.Log.Level = superCfg.Log.Level
 	cfg.Log.Format = superCfg.Log.Format

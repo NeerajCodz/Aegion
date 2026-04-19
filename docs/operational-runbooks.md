@@ -27,6 +27,8 @@ This document provides step-by-step procedures for common operational tasks, inc
 - [ ] Rollback plan documented
 - [ ] Team notified (deploy window scheduled)
 - [ ] Monitoring dashboards open
+- [ ] `build/release-checklist.json` validated (`bash ./scripts/check-release-checklist.sh`)
+- [ ] Rust FFI usage gate validated (`bash ./scripts/check-rust-ffi-usage.sh`)
 
 **Procedure**:
 
@@ -61,7 +63,7 @@ curl https://auth.example.com/health
 curl https://auth.example.com/.well-known/aegion/meta
 
 # Step 7: Smoke tests
-./scripts/smoke-tests.sh production
+./scripts/run-integration-smoke.sh
 
 # Step 8: Monitor for 15 minutes
 # Watch: Error rates, response times, active sessions
@@ -620,7 +622,7 @@ curl -X POST https://auth.example.com/admin/maintenance/enable \
 # - Version upgrades
 
 # T+1h: Smoke tests
-./scripts/smoke-tests.sh production
+./scripts/run-integration-smoke.sh
 
 # T+1h30min: Disable maintenance mode
 curl -X POST https://auth.example.com/admin/maintenance/disable \

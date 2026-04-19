@@ -12,7 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	admin "github.com/aegion/aegion/modules/admin"
+	adminhandler "github.com/aegion/aegion/modules/admin/handler"
+	"github.com/aegion/aegion/modules/admin/scim"
+	adminservice "github.com/aegion/aegion/modules/admin/service"
+	adminstore "github.com/aegion/aegion/modules/admin/store"
 )
 
 func TestNormalizeAdminPath(t *testing.T) {
@@ -444,6 +452,53 @@ func (f *fakeDBPinger) Ping(ctx context.Context) error {
 	return f.pingErr
 }
 
+type errWriteResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *errWriteResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *errWriteResponseWriter) WriteHeader(statusCode int) { w.status = statusCode }
+
+func (w *errWriteResponseWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+type authOnlyAdminStore struct {
+	adminservice.Store
+	apiKey   *adminstore.APIKey
+	operator *adminstore.Operator
+}
+
+func (s *authOnlyAdminStore) GetAPIKeyByPrefix(context.Context, string) (*adminstore.APIKey, error) {
+	if s.apiKey == nil {
+		return nil, errors.New("api key missing")
+	}
+	return s.apiKey, nil
+}
+
+func (s *authOnlyAdminStore) GetOperator(context.Context, uuid.UUID) (*adminstore.Operator, error) {
+	if s.operator == nil {
+		return nil, errors.New("operator missing")
+	}
+	return s.operator, nil
+}
+
+func (s *authOnlyAdminStore) UpdateAPIKeyLastUsed(context.Context, uuid.UUID) error { return nil }
+
+type authOnlyHandlerService struct {
+	adminhandler.Service
+	store adminservice.Store
+}
+
+func (s *authOnlyHandlerService) Store() adminservice.Store { return s.store }
+
+func (s *authOnlyHandlerService) EvaluateCapability(context.Context, uuid.UUID, string) error { return nil }
+
 func TestHandleReady(t *testing.T) {
 	t.Run("healthy db", func(t *testing.T) {
 		s := &Server{
@@ -633,4 +688,421 @@ func TestHandleDashboardObservability(t *testing.T) {
 	if got := statusByKey["tempo"]; got.Status != "offline" || got.Message != "endpoint not configured" {
 		t.Fatalf("expected offline tempo probe due missing endpoint, got status=%q message=%q", got.Status, got.Message)
 	}
+}
+
+type serverSCIMStore struct {
+	scim.Store
+	listTokensFn    func(context.Context) ([]*scim.SCIMToken, error)
+	createTokenFn   func(context.Context, *scim.SCIMToken) error
+	deleteTokenFn   func(context.Context, uuid.UUID) error
+	listMappingsFn  func(context.Context) ([]*scim.SCIMMapping, error)
+	createMappingFn func(context.Context, *scim.SCIMMapping) error
+	updateMappingFn func(context.Context, *scim.SCIMMapping) error
+	deleteMappingFn func(context.Context, uuid.UUID) error
+}
+
+func (s *serverSCIMStore) ListSCIMTokens(ctx context.Context) ([]*scim.SCIMToken, error) {
+	if s.listTokensFn != nil {
+		return s.listTokensFn(ctx)
+	}
+	return nil, nil
+}
+
+func (s *serverSCIMStore) CreateSCIMToken(ctx context.Context, token *scim.SCIMToken) error {
+	if s.createTokenFn != nil {
+		return s.createTokenFn(ctx, token)
+	}
+	return nil
+}
+
+func (s *serverSCIMStore) DeleteSCIMToken(ctx context.Context, id uuid.UUID) error {
+	if s.deleteTokenFn != nil {
+		return s.deleteTokenFn(ctx, id)
+	}
+	return nil
+}
+
+func (s *serverSCIMStore) ListSCIMMappings(ctx context.Context) ([]*scim.SCIMMapping, error) {
+	if s.listMappingsFn != nil {
+		return s.listMappingsFn(ctx)
+	}
+	return nil, nil
+}
+
+func (s *serverSCIMStore) CreateSCIMMapping(ctx context.Context, mapping *scim.SCIMMapping) error {
+	if s.createMappingFn != nil {
+		return s.createMappingFn(ctx, mapping)
+	}
+	return nil
+}
+
+func (s *serverSCIMStore) UpdateSCIMMapping(ctx context.Context, mapping *scim.SCIMMapping) error {
+	if s.updateMappingFn != nil {
+		return s.updateMappingFn(ctx, mapping)
+	}
+	return nil
+}
+
+func (s *serverSCIMStore) DeleteSCIMMapping(ctx context.Context, id uuid.UUID) error {
+	if s.deleteMappingFn != nil {
+		return s.deleteMappingFn(ctx, id)
+	}
+	return nil
+}
+
+func withSCIMRouteParam(req *http.Request, key, value string) *http.Request {
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add(key, value)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+func TestNormalizeMountedPath(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty defaults", in: "", want: "/scim/v2"},
+		{name: "adds leading slash", in: "scim/v2", want: "/scim/v2"},
+		{name: "trims trailing slash", in: "/scim/v2/", want: "/scim/v2"},
+		{name: "root stays root", in: "/", want: "/"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeMountedPath(tc.in); got != tc.want {
+				t.Fatalf("normalizeMountedPath(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSCIMTokenHandlersBranches(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("list tokens handles service error and success", func(t *testing.T) {
+		s := &Server{
+			Config: &Config{},
+			SCIMService: scim.NewService(&serverSCIMStore{
+				listTokensFn: func(context.Context) ([]*scim.SCIMToken, error) {
+					return nil, errors.New("list failed")
+				},
+			}, nil),
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/admin/scim/tokens", nil)
+		s.handleListSCIMTokens(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			listTokensFn: func(context.Context) ([]*scim.SCIMToken, error) {
+				return []*scim.SCIMToken{{
+					ID:        uuid.New(),
+					Name:      "token-1",
+					CreatedAt: now,
+					Active:    true,
+				}}, nil
+			},
+		}, nil)
+
+		rec = httptest.NewRecorder()
+		s.handleListSCIMTokens(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d body=%s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"token-1"`) {
+			t.Fatalf("expected token payload, got %s", rec.Body.String())
+		}
+	})
+
+	t.Run("create token requires operator context", func(t *testing.T) {
+		s := &Server{Config: &Config{}}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/scim/tokens", strings.NewReader(`{"name":"token-a"}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleCreateSCIMToken(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected %d, got %d", http.StatusUnauthorized, rec.Code)
+		}
+	})
+
+	t.Run("create token authorized decode, validation, service error, and success", func(t *testing.T) {
+		operator := &adminstore.Operator{ID: uuid.New(), Role: "super_admin"}
+		fullToken := "aegion_abcdefghijklmnopqrstuv"
+		apiKey := &adminstore.APIKey{
+			ID:         uuid.New(),
+			OperatorID: operator.ID,
+			KeyHash:    adminstore.HashAPIKeyToken(fullToken),
+		}
+		authStore := &authOnlyAdminStore{apiKey: apiKey, operator: operator}
+		authHandler := adminhandler.New(&authOnlyHandlerService{store: authStore})
+
+		runCreate := func(scimStore *serverSCIMStore, body string) *httptest.ResponseRecorder {
+			s := &Server{
+				Config:      &Config{},
+				SCIMService: scim.NewService(scimStore, nil),
+				Handler:     authHandler,
+			}
+			secured := s.Handler.RequireAdmin(adminhandler.RequirePermission(s.Handler, adminservice.PermConfigUpdate)(http.HandlerFunc(s.handleCreateSCIMToken)))
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/scim/tokens", strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+fullToken)
+			req.Header.Set("Content-Type", "application/json")
+			secured.ServeHTTP(rec, req)
+			return rec
+		}
+
+		rec := runCreate(&serverSCIMStore{}, `{`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = runCreate(&serverSCIMStore{}, `{"name":"  "}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = runCreate(&serverSCIMStore{
+			createTokenFn: func(context.Context, *scim.SCIMToken) error { return errors.New("create failed") },
+		}, `{"name":"token-a","permissions":["users:read"]}`)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		rec = runCreate(&serverSCIMStore{}, `{"name":"token-a","description":"demo","permissions":["users:read"]}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected %d, got %d body=%s", http.StatusCreated, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "plain_token") {
+			t.Fatalf("expected plain token in response, got %s", rec.Body.String())
+		}
+	})
+
+	t.Run("delete token validates id and handles service result", func(t *testing.T) {
+		s := &Server{
+			Config: &Config{},
+			SCIMService: scim.NewService(&serverSCIMStore{
+				deleteTokenFn: func(context.Context, uuid.UUID) error {
+					return errors.New("delete failed")
+				},
+			}, nil),
+		}
+
+		rec := httptest.NewRecorder()
+		req := withSCIMRouteParam(httptest.NewRequest(http.MethodDelete, "/api/admin/scim/tokens/bad", nil), "id", "bad")
+		s.handleDeleteSCIMToken(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		tokenID := uuid.New()
+		rec = httptest.NewRecorder()
+		req = withSCIMRouteParam(httptest.NewRequest(http.MethodDelete, "/api/admin/scim/tokens/"+tokenID.String(), nil), "id", tokenID.String())
+		s.handleDeleteSCIMToken(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			deleteTokenFn: func(context.Context, uuid.UUID) error { return nil },
+		}, nil)
+		rec = httptest.NewRecorder()
+		s.handleDeleteSCIMToken(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
+		}
+	})
+}
+
+func TestHandleHealthAndReadyAdditionalBranches(t *testing.T) {
+	t.Run("health encode write failure branch", func(t *testing.T) {
+		s := &Server{Config: &Config{}}
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := &errWriteResponseWriter{}
+		s.handleHealth(w, req)
+		if w.status != http.StatusOK {
+			t.Fatalf("expected %d status, got %d", http.StatusOK, w.status)
+		}
+	})
+
+	t.Run("ready falls back to DB pool when dbPing nil", func(t *testing.T) {
+		pool, err := pgxpool.New(context.Background(), "postgres://postgres:postgres@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1")
+		if err != nil {
+			t.Fatalf("create pool: %v", err)
+		}
+		defer pool.Close()
+
+		s := &Server{Config: &Config{}, DB: pool}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+		s.handleReady(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+}
+
+func TestSCIMMappingHandlersBranches(t *testing.T) {
+	t.Run("list mappings handles service error and success", func(t *testing.T) {
+		s := &Server{
+			Config: &Config{},
+			SCIMService: scim.NewService(&serverSCIMStore{
+				listMappingsFn: func(context.Context) ([]*scim.SCIMMapping, error) {
+					return nil, errors.New("list mappings failed")
+				},
+			}, nil),
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/admin/scim/mappings", nil)
+		s.handleListSCIMMappings(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			listMappingsFn: func(context.Context) ([]*scim.SCIMMapping, error) {
+				return []*scim.SCIMMapping{{ID: uuid.New(), Name: "default"}}, nil
+			},
+		}, nil)
+		rec = httptest.NewRecorder()
+		s.handleListSCIMMappings(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), `"default"`) {
+			t.Fatalf("expected mapping payload, got %s", rec.Body.String())
+		}
+	})
+
+	t.Run("create mapping validation and service branches", func(t *testing.T) {
+		s := &Server{
+			Config:      &Config{},
+			SCIMService: scim.NewService(&serverSCIMStore{}, nil),
+		}
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/scim/mappings", strings.NewReader("{"))
+		s.handleCreateSCIMMapping(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/api/admin/scim/mappings", strings.NewReader(`{"name":"  "}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleCreateSCIMMapping(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			createMappingFn: func(context.Context, *scim.SCIMMapping) error {
+				return errors.New("store create failed")
+			},
+		}, nil)
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/api/admin/scim/mappings", strings.NewReader(`{"name":"mapping-a"}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleCreateSCIMMapping(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			createMappingFn: func(context.Context, *scim.SCIMMapping) error { return nil },
+		}, nil)
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/api/admin/scim/mappings", strings.NewReader(`{"name":"mapping-a"}`))
+		req.Header.Set("Content-Type", "application/json")
+		s.handleCreateSCIMMapping(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected %d, got %d body=%s", http.StatusCreated, rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("update and delete mapping branches", func(t *testing.T) {
+		s := &Server{
+			Config: &Config{},
+			SCIMService: scim.NewService(&serverSCIMStore{
+				updateMappingFn: func(context.Context, *scim.SCIMMapping) error { return nil },
+				deleteMappingFn: func(context.Context, uuid.UUID) error { return nil },
+			}, nil),
+		}
+
+		rec := httptest.NewRecorder()
+		req := withSCIMRouteParam(httptest.NewRequest(http.MethodPut, "/api/admin/scim/mappings/bad", nil), "id", "bad")
+		s.handleUpdateSCIMMapping(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		mappingID := uuid.New()
+		req = withSCIMRouteParam(httptest.NewRequest(http.MethodPut, "/api/admin/scim/mappings/"+mappingID.String(), strings.NewReader("{")), "id", mappingID.String())
+		rec = httptest.NewRecorder()
+		s.handleUpdateSCIMMapping(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		req = withSCIMRouteParam(httptest.NewRequest(http.MethodPut, "/api/admin/scim/mappings/"+mappingID.String(), strings.NewReader(`{"name":" "}`)), "id", mappingID.String())
+		req.Header.Set("Content-Type", "application/json")
+		rec = httptest.NewRecorder()
+		s.handleUpdateSCIMMapping(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			updateMappingFn: func(context.Context, *scim.SCIMMapping) error { return errors.New("update failed") },
+		}, nil)
+		req = withSCIMRouteParam(httptest.NewRequest(http.MethodPut, "/api/admin/scim/mappings/"+mappingID.String(), strings.NewReader(`{"name":"mapping-updated"}`)), "id", mappingID.String())
+		req.Header.Set("Content-Type", "application/json")
+		rec = httptest.NewRecorder()
+		s.handleUpdateSCIMMapping(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			updateMappingFn: func(context.Context, *scim.SCIMMapping) error { return nil },
+		}, nil)
+		rec = httptest.NewRecorder()
+		req = withSCIMRouteParam(httptest.NewRequest(http.MethodPut, "/api/admin/scim/mappings/"+mappingID.String(), strings.NewReader(`{"name":"mapping-updated"}`)), "id", mappingID.String())
+		req.Header.Set("Content-Type", "application/json")
+		s.handleUpdateSCIMMapping(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d body=%s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		rec = httptest.NewRecorder()
+		req = withSCIMRouteParam(httptest.NewRequest(http.MethodDelete, "/api/admin/scim/mappings/bad", nil), "id", "bad")
+		s.handleDeleteSCIMMapping(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			deleteMappingFn: func(context.Context, uuid.UUID) error { return errors.New("delete failed") },
+		}, nil)
+		req = withSCIMRouteParam(httptest.NewRequest(http.MethodDelete, "/api/admin/scim/mappings/"+mappingID.String(), nil), "id", mappingID.String())
+		rec = httptest.NewRecorder()
+		s.handleDeleteSCIMMapping(rec, req)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+		}
+
+		s.SCIMService = scim.NewService(&serverSCIMStore{
+			deleteMappingFn: func(context.Context, uuid.UUID) error { return nil },
+		}, nil)
+		rec = httptest.NewRecorder()
+		s.handleDeleteSCIMMapping(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
+		}
+	})
 }

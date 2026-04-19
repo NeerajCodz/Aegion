@@ -9,17 +9,20 @@ Aegion is designed as a modular identity platform where capabilities are distrib
 
 This document clarifies which modules are which, and the roadmap for full modularization.
 
+> **Release-truth note:** dates and phase labels in this document are historical planning context.
+> Current support level is governed by `build/release-maturity.json` and [release-maturity-matrix.md](release-maturity-matrix.md).
+
 ## Current Architecture
 
 ### Core-Embedded Modules
 
 These modules are currently compiled into and run within the core `aegion` binary:
 
-| Module | Status | Reason | Standalone ETA |
-|--------|--------|--------|----------------|
-| **password** | ✓ Functional | Session/identity integration tight | Q2 2025 |
-| **magic_link** | ✓ Functional | Session/identity integration tight | Q2 2025 |
-| **policy** | ⚠ Partial | gRPC interface defined, embedded runtime | Q1 2025 |
+| Module | Status | Reason | Standalone target |
+|--------|--------|--------|-------------------|
+| **password** | GA | Session/identity integration tight | deferred by design |
+| **magic_link** | GA | Session/identity integration tight | deferred by design |
+| **policy** | Beta (embedded) | Embedded runtime is primary at GA | optional extraction post-GA |
 
 **Architecture**:
 ```
@@ -58,15 +61,15 @@ These modules run as independent microservices:
 
 | Module | Status | Communication | Ready for Prod |
 |--------|--------|---------------|----------------|
-| **admin** | ✓ Functional | HTTP + gRPC | Yes |
-| **oauth2** | ✓ Functional | HTTP + gRPC | Yes |
-| **mfa** | ✗ Scaffolded | gRPC (planned) | No |
-| **passkeys** | ✗ Scaffolded | gRPC (planned) | No |
-| **social** | ✗ Scaffolded | gRPC (planned) | No |
-| **sso** | ✗ Scaffolded | gRPC (planned) | No |
-| **introspection** | ✗ Scaffolded | gRPC (planned) | No |
-| **proxy** | ⚠ Partial | HTTP (reverse proxy) | Partial |
-| **cli** | ✗ Scaffolded | CLI (not a service) | No |
+| **admin** | Beta | HTTP + gRPC | Deployable with caveats |
+| **oauth2** | Beta | HTTP + gRPC | Deployable with caveats |
+| **mfa** | Not GA | HTTP + gRPC | No |
+| **passkeys** | Not GA | HTTP + gRPC | No |
+| **social** | Beta | HTTP + gRPC | Deployable with caveats |
+| **sso** | Beta | HTTP + gRPC | Deployable with caveats |
+| **introspection** | Beta | HTTP + gRPC | Deployable with caveats |
+| **proxy** | Beta | HTTP + gRPC | Deployable with caveats |
+| **cli** | Not GA | HTTP + gRPC | No |
 
 **Architecture**:
 ```

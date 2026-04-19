@@ -3,7 +3,6 @@ package session
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -112,7 +111,12 @@ type Manager struct {
 
 var errTokenEntropyFailure = errors.New("failed to generate token entropy")
 var errSessionDBUnavailable = errors.New("session manager database unavailable")
-var readTokenRandom = rand.Read
+var readTokenRandom = func(b []byte) (int, error) {
+	if err := platformcrypto.FillRandomBytes(b); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
 
 const sessionLookupPrefixLength = secrettoken.DefaultLookupPrefixLength
 

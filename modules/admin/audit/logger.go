@@ -3,6 +3,7 @@ package audit
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -231,7 +232,7 @@ func (l *Logger) logEntityAction(actorID uuid.UUID, actorEmail, action, entityTy
 
 	// Serialize before state
 	if before != nil {
-		beforeBytes, err := json.Marshal(before)
+		beforeBytes, err := json.Marshal(redactSecrets(before))
 		if err == nil {
 			entry.Before = beforeBytes
 		}
@@ -239,7 +240,7 @@ func (l *Logger) logEntityAction(actorID uuid.UUID, actorEmail, action, entityTy
 
 	// Serialize after state
 	if after != nil {
-		afterBytes, err := json.Marshal(after)
+		afterBytes, err := json.Marshal(redactSecrets(after))
 		if err == nil {
 			entry.After = afterBytes
 		}
@@ -247,7 +248,7 @@ func (l *Logger) logEntityAction(actorID uuid.UUID, actorEmail, action, entityTy
 
 	// Serialize metadata
 	if metadata != nil {
-		metaBytes, err := json.Marshal(metadata)
+		metaBytes, err := json.Marshal(redactSecrets(metadata))
 		if err == nil {
 			entry.Metadata = metaBytes
 		}
@@ -269,4 +270,51 @@ func (l *Logger) GetEntry(id uuid.UUID) (*AuditEntry, error) {
 // GetActorSummary returns audit activity summary for an actor.
 func (l *Logger) GetActorSummary(actorID uuid.UUID, days int) (map[string]int, error) {
 	return l.store.GetActorSummary(actorID, days)
+}
+
+func redactSecrets(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for key, item := range v {
+			if isSensitiveKey(key) {
+				out[key] = "[REDACTED]"
+				continue
+			}
+			out[key] = redactSecrets(item)
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(v))
+		for key, item := range v {
+			if isSensitiveKey(key) {
+				out[key] = "[REDACTED]"
+				continue
+			}
+			out[key] = item
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			out = append(out, redactSecrets(item))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func isSensitiveKey(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	sensitiveFragments := []string{
+		"password", "secret", "token", "authorization", "cookie", "client_secret",
+		"api_key", "apikey", "private_key", "session", "set-cookie",
+	}
+	for _, fragment := range sensitiveFragments {
+		if strings.Contains(key, fragment) {
+			return true
+		}
+	}
+	return false
 }

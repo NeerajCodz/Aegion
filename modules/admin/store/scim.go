@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -524,7 +525,7 @@ func scanSCIMUser(row interface{ Scan(dest ...any) error }) (*adminscim.SCIMUser
 			Created:      &createdAt,
 			LastModified: &updatedAt,
 			Location:     "/Users/" + id.String(),
-			Version:      "1",
+			Version:      scimVersionFromTime(updatedAt),
 		},
 	}
 	if user.UserName != "" {
@@ -569,7 +570,7 @@ func scanSCIMGroupRow(row interface{ Scan(dest ...any) error }) (*adminscim.SCIM
 			Created:      &createdAt,
 			LastModified: &updatedAt,
 			Location:     "/Groups/" + id,
-			Version:      "1",
+			Version:      scimVersionFromTime(updatedAt),
 		},
 	}
 	_ = json.Unmarshal(membersRaw, &group.Members)
@@ -756,6 +757,13 @@ func derefString(value *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*value)
+}
+
+func scimVersionFromTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return strconv.FormatInt(t.UTC().UnixNano(), 10)
 }
 
 func firstNonEmptySCIM(values ...string) string {

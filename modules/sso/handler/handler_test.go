@@ -37,6 +37,24 @@ func (stubSSOService) CompleteAuth(context.Context, string, string, string, stri
 	return &service.CallbackResult{Connection: "acme", Subject: "sub", RedirectTo: "/after"}, nil
 }
 
+type captureSSOService struct {
+	stubSSOService
+	relayState  string
+	subject     string
+	email       string
+	displayName string
+	attributes  map[string]interface{}
+}
+
+func (s *captureSSOService) CompleteAuth(_ context.Context, _ string, relayState, subject, email, displayName string, attributes map[string]interface{}) (*service.CallbackResult, error) {
+	s.relayState = relayState
+	s.subject = subject
+	s.email = email
+	s.displayName = displayName
+	s.attributes = attributes
+	return &service.CallbackResult{Connection: "acme", Subject: "sub", RedirectTo: "/after"}, nil
+}
+
 func TestSSOHandlersRequireManagementToken(t *testing.T) {
 	h := New(stubSSOService{})
 	mux := http.NewServeMux()
@@ -103,4 +121,36 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
 		}
 	})
+}
+
+func TestHandleCallbackIgnoresUntrustedIdentityFields(t *testing.T) {
+	svc := &captureSSOService{}
+	h := New(svc)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/self-service/sso/acme/callback?state=relay-state&subject=attacker&email=attacker@example.com&display_name=attacker", bytes.NewBufferString("attributes=%7B%22subject%22%3A%22attacker%22%7D&SAMLResponse=fake"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+	if svc.relayState != "relay-state" {
+		t.Fatalf("expected relay state to be forwarded, got %q", svc.relayState)
+	}
+	if svc.subject != "" || svc.email != "" || svc.displayName != "" {
+		t.Fatalf("expected callback identity fields to be stripped, got subject=%q email=%q display_name=%q", svc.subject, svc.email, svc.displayName)
+	}
+	if got := svc.attributes["_saml_response"]; got != "fake" {
+		t.Fatalf("expected SAML response to be forwarded, got %+v", got)
+	}
+	recipients, ok := svc.attributes["_expected_recipients"].([]string)
+	if !ok || len(recipients) == 0 {
+		t.Fatalf("expected callback recipients to be forwarded, got %+v", svc.attributes["_expected_recipients"])
+	}
+	if got := svc.attributes["attributes"]; got != nil {
+		t.Fatalf("expected untrusted attributes to be dropped, got %+v", got)
+	}
 }

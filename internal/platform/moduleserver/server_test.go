@@ -2,6 +2,7 @@ package moduleserver
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,6 +100,12 @@ func TestBuildModuleMuxEndpoints(t *testing.T) {
 }
 
 func TestRunValidationAndListenErrors(t *testing.T) {
+	origSelfCheck := rustRuntimeSelfCheck
+	t.Cleanup(func() {
+		rustRuntimeSelfCheck = origSelfCheck
+	})
+	rustRuntimeSelfCheck = func() error { return nil }
+
 	if err := Run(Config{}); err == nil || !strings.Contains(err.Error(), "module name is required") {
 		t.Fatalf("expected missing module validation error, got %v", err)
 	}
@@ -109,6 +116,23 @@ func TestRunValidationAndListenErrors(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected listen address error")
+	}
+}
+
+func TestRunReturnsRustSelfCheckError(t *testing.T) {
+	origSelfCheck := rustRuntimeSelfCheck
+	t.Cleanup(func() {
+		rustRuntimeSelfCheck = origSelfCheck
+	})
+
+	rustRuntimeSelfCheck = func() error { return errors.New("ffi unavailable") }
+
+	err := Run(Config{
+		Module:     "policy",
+		ListenAddr: "127.0.0.1:0",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rust runtime self-check failed") {
+		t.Fatalf("expected rust self-check failure, got %v", err)
 	}
 }
 

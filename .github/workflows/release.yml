@@ -13,6 +13,7 @@ on:
 env:
   GO_VERSION: '1.25.9'
   RUST_VERSION: 'stable'
+  NODE_VERSION: '22'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository }}
 
@@ -39,12 +40,81 @@ jobs:
         run: bash ./scripts/check-release-manifest.sh
 
   # ---------------------------------------------------------------------------
+  # Validate Release Checklist
+  # ---------------------------------------------------------------------------
+  validate-release-checklist:
+    name: Validate Release Checklist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate release checklist
+        run: bash ./scripts/check-release-checklist.sh
+
+  # ---------------------------------------------------------------------------
+  # Release Preflight Gates
+  # ---------------------------------------------------------------------------
+  pre-release-gates:
+    name: Release Preflight Gates
+    runs-on: ubuntu-latest
+    needs: [validate-release-manifest, validate-release-checklist]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: modules/admin/spa/package-lock.json
+
+      - name: Install protoc compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run release preflight suite
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          STRICT_DIGESTS: "true"
+        run: bash ./scripts/run-release-preflight.sh
+
+  # ---------------------------------------------------------------------------
   # Build Release Binaries
   # ---------------------------------------------------------------------------
   build-binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
-    needs: validate-release-manifest
+    needs: pre-release-gates
     strategy:
       matrix:
         include:
@@ -145,7 +215,7 @@ jobs:
   build-docker:
     name: Build Docker Images
     runs-on: ubuntu-latest
-    needs: validate-release-manifest
+    needs: pre-release-gates
     permissions:
       contents: read
       packages: write
@@ -250,7 +320,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [validate-release-manifest, build-binaries, build-docker, changelog]
+    needs: [validate-release-manifest, validate-release-checklist, pre-release-gates, build-binaries, build-docker, changelog]
     permissions:
       contents: write
     steps:
@@ -310,7 +380,7 @@ jobs:
           EOF
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Aegion ${{ steps.version.outputs.version }}
           body_path: release-notes.md

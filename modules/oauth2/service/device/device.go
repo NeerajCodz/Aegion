@@ -3,13 +3,12 @@ package device
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
@@ -216,8 +215,11 @@ func generateUserCode() string {
 
 	code := make([]byte, codeLength)
 	for i := 0; i < codeLength; i++ {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
-		code[i] = charset[n.Int64()]
+		n, err := platformcrypto.RandomIntN(len(charset))
+		if err != nil {
+			panic(err)
+		}
+		code[i] = charset[n]
 	}
 
 	// Format as XXXX-XXXX

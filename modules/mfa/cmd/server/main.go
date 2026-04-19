@@ -14,6 +14,7 @@ const (
 )
 
 var runModuleServer = moduleserver.Run
+var logFatal = log.Fatal
 
 func defaultListenAddr() string {
 	return moduleserver.EnvOrDefault(listenAddrEnv, defaultListen)
@@ -41,6 +42,6 @@ func main() {
 
 	err := runModuleServer(moduleConfig(*listenAddr))
 	if err != nil {
-		log.Fatal(err)
+		logFatal(err)
 	}
 }

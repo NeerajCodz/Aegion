@@ -10,7 +10,7 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/bcrypt"
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 )
 
 // Mock store for testing
@@ -32,6 +32,7 @@ type mockTokenStore struct {
 	createIDErr                error
 	getRefreshErr              error
 	markRefreshUsedErr         error
+	markRefreshUsedGracePeriod time.Duration
 	invalidateRefreshFamilyErr error
 	revokeAccessErr            error
 	revokeRefreshBySessionErr  error
@@ -123,6 +124,7 @@ func (m *mockTokenStore) MarkRefreshTokenUsed(ctx context.Context, id, successor
 	if m.markRefreshUsedErr != nil {
 		return m.markRefreshUsedErr
 	}
+	m.markRefreshUsedGracePeriod = gracePeriod
 	if m.refreshTokenByID != nil {
 		if rt, ok := m.refreshTokenByID[id]; ok {
 			rt.Used = true
@@ -377,6 +379,76 @@ func TestRefreshAccessToken(t *testing.T) {
 		assert.NotEmpty(t, resp.AccessToken)
 		assert.NotNil(t, resp.RefreshToken)
 		assert.True(t, mockStore.refreshToken.Used)
+		assert.Equal(t, 0*time.Second, mockStore.markRefreshUsedGracePeriod)
+	})
+
+	t.Run("ConfigurableGracePeriodFromMetadata", func(t *testing.T) {
+		mockStore := &mockTokenStore{
+			client: &store.Client{
+				ID:                 "client-123",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
+				AllowOfflineAccess: true,
+				Metadata: map[string]string{
+					"refresh_token_grace_seconds": "45",
+				},
+			},
+			refreshToken: &store.RefreshToken{
+				ID:         "rt_test123",
+				FamilyID:   "rtf_family",
+				ClientID:   "client-123",
+				IdentityID: "identity-456",
+				SessionID:  "session-789",
+				Scopes:     []string{"openid", "offline_access"},
+				Audience:   []string{"api.example.com"},
+				Active:     true,
+				ExpiresAt:  time.Now().UTC().Add(30 * 24 * time.Hour),
+			},
+		}
+
+		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://auth.example.com")
+		_, err := svc.RefreshAccessToken(ctx, &TokenRequest{
+			GrantType:    "refresh_token",
+			RefreshToken: "rt_test123",
+			ClientID:     "client-123",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 45*time.Second, mockStore.markRefreshUsedGracePeriod)
+	})
+
+	t.Run("InvalidGracePeriodConfig", func(t *testing.T) {
+		mockStore := &mockTokenStore{
+			client: &store.Client{
+				ID:                 "client-123",
+				AccessTokenTTL:     900,
+				RefreshTokenTTL:    2592000,
+				IDTokenTTL:         3600,
+				AllowOfflineAccess: true,
+				Metadata: map[string]string{
+					"refresh_token_grace_seconds": "not-a-number",
+				},
+			},
+			refreshToken: &store.RefreshToken{
+				ID:         "rt_test123",
+				FamilyID:   "rtf_family",
+				ClientID:   "client-123",
+				IdentityID: "identity-456",
+				SessionID:  "session-789",
+				Scopes:     []string{"openid", "offline_access"},
+				Audience:   []string{"api.example.com"},
+				Active:     true,
+				ExpiresAt:  time.Now().UTC().Add(30 * 24 * time.Hour),
+			},
+		}
+
+		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://auth.example.com")
+		_, err := svc.RefreshAccessToken(ctx, &TokenRequest{
+			GrantType:    "refresh_token",
+			RefreshToken: "rt_test123",
+			ClientID:     "client-123",
+		})
+		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 
 	t.Run("ReplayDetection", func(t *testing.T) {
@@ -1168,6 +1240,59 @@ func TestTokenService_AdditionalCoverageBranches(t *testing.T) {
 			TokenEndpointAuthMethod: "private_key_jwt",
 			SecretHash:              ptrString(string(hash)),
 		}, "valid-secret")
+		assert.ErrorIs(t, err, ErrInvalidClient)
+	})
+}
+
+func TestIssueTokens_PairwiseSubject(t *testing.T) {
+	ctx := context.Background()
+	sectorIdentifier := "https://sector.example.com/clients.json"
+	client := &store.Client{
+		ID:                  "client-pairwise",
+		SubjectType:         "pairwise",
+		SectorIdentifierURI: &sectorIdentifier,
+		AccessTokenTTL:      900,
+		RefreshTokenTTL:     3600,
+		IDTokenTTL:          3600,
+	}
+	mockStore := &mockTokenStore{client: client}
+	svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://issuer.example.com")
+
+	resp, err := svc.issueTokens(ctx, client, "identity-1", "session-1", []string{"openid"}, []string{"api"}, nil, "aal1", []string{"pwd"}, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.NotNil(t, resp.IDToken)
+	require.Len(t, mockStore.accessTokens, 1)
+
+	subject := mockStore.accessTokens[0].Subject
+	assert.NotEqual(t, "identity-1", subject)
+
+	expected, err := resolveTokenSubject(client, "identity-1", "https://issuer.example.com")
+	require.NoError(t, err)
+	assert.Equal(t, expected, subject)
+}
+
+func TestResolveTokenSubject_PairwiseFallbackAndValidation(t *testing.T) {
+	t.Run("uses redirect URI host when sector identifier is absent", func(t *testing.T) {
+		client := &store.Client{
+			ID:           "client-redirect-sector",
+			SubjectType:  "pairwise",
+			RedirectURIs: []string{"https://app.example.com/callback"},
+		}
+
+		subject, err := resolveTokenSubject(client, "identity-1", "https://issuer.example.com")
+		require.NoError(t, err)
+		assert.NotEmpty(t, subject)
+		assert.NotEqual(t, "identity-1", subject)
+	})
+
+	t.Run("returns invalid client when no sector can be derived", func(t *testing.T) {
+		client := &store.Client{
+			ID:          "client-bad-pairwise",
+			SubjectType: "pairwise",
+		}
+
+		_, err := resolveTokenSubject(client, "identity-1", "https://issuer.example.com")
 		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
 }
