@@ -138,14 +138,11 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		}
 	}
 	relayState := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("RelayState"), r.FormValue("RelayState"), r.URL.Query().Get("state")))
-	subject := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("subject"), r.FormValue("subject"), r.URL.Query().Get("name_id"), r.FormValue("name_id")))
-	email := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("email"), r.FormValue("email")))
-	displayName := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("display_name"), r.FormValue("display_name")))
-	attrs := map[string]interface{}{}
-	if raw := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("attributes"), r.FormValue("attributes"))); raw != "" {
-		_ = json.Unmarshal([]byte(raw), &attrs)
+	if hasUntrustedIdentityInputs(r) {
+		writeError(w, http.StatusBadRequest, "identity attributes must not be supplied by callback caller")
+		return
 	}
-	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, subject, email, displayName, attrs)
+	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, "", "", "", nil)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid sso callback")
 		return
@@ -160,6 +157,15 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func hasUntrustedIdentityInputs(r *http.Request) bool {
+	for _, key := range []string{"subject", "name_id", "email", "display_name", "attributes"} {
+		if strings.TrimSpace(firstNonEmpty(r.URL.Query().Get(key), r.FormValue(key))) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) handleAdminConnections(w http.ResponseWriter, r *http.Request) {
