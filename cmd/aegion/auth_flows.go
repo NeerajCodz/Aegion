@@ -790,64 +790,9 @@ func (s *Server) handleCompleteExternalLogin(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	identityIDValue := normalizedFlowValue(input.Values, "identity_id")
-	identityID, err := uuid.Parse(strings.TrimSpace(identityIDValue))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid identity id", err)
-		return
-	}
-
-	method, err := parseExternalAuthMethod(normalizedFlowValue(input.Values, "method", "auth_method"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error(), nil)
-		return
-	}
-	identifier := normalizedEmailValue(input.Values, "identifier", "email")
-
-	result, err := s.finishPrimaryAuthentication(r.Context(), w, r, flow, identityID, identifier, method)
-	if err != nil {
-		s.writeFlowExecutionError(w, err)
-		return
-	}
-
-	if result != nil && result.KeepFlowActive {
-		response := map[string]any{
-			"status":    result.Status,
-			"flow_id":   input.FlowID.String(),
-			"flow_type": string(flows.TypeLogin),
-		}
-		if result.Message != "" {
-			response["message"] = result.Message
-		}
-		if result.FlowPayload != nil {
-			response["flow"] = result.FlowPayload
-		}
-		mergeAuthContext(response, result.AuthContext)
-		writeJSON(w, http.StatusOK, response)
-		return
-	}
-
-	if err := s.flowService.CompleteFlow(r.Context(), input.FlowID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
-		return
-	}
-
-	response := map[string]any{
-		"status":    "authenticated",
-		"flow_id":   input.FlowID.String(),
-		"flow_type": string(flows.TypeLogin),
-		"message":   "login successful",
-	}
-	if result != nil {
-		if result.Status != "" {
-			response["status"] = result.Status
-		}
-		if result.Message != "" {
-			response["message"] = result.Message
-		}
-		mergeAuthContext(response, result.AuthContext)
-	}
-	writeJSON(w, http.StatusOK, response)
+	// External authentication completion is intentionally disabled until
+	// provider-signed assertions are validated server-side.
+	writeError(w, http.StatusNotImplemented, "external login completion is not enabled", nil)
 }
 
 func (s *Server) handleMagicLinkRecoveryVerify(w http.ResponseWriter, r *http.Request) {
