@@ -607,6 +607,8 @@ func TestHandleCompleteExternalLoginVerifiesSAMLCallbackAndIssuesSession(t *test
 	}))
 	req.Host = "login.example.com"
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-Host", "attacker.example.com")
+	req.Header.Set("X-Forwarded-Proto", "https")
 	s.handleCompleteExternalLogin(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -625,7 +627,7 @@ func TestHandleCompleteExternalLoginVerifiesSAMLCallbackAndIssuesSession(t *test
 		t.Fatalf("expected email verification update for person@example.com, got %q", verifiedEmail)
 	}
 	if forwardedHost != "login.example.com" || forwardedProto != "http" {
-		t.Fatalf("expected forwarded callback headers to be preserved, got host=%q proto=%q", forwardedHost, forwardedProto)
+		t.Fatalf("expected trusted forwarded values, got host=%q proto=%q", forwardedHost, forwardedProto)
 	}
 
 	var body map[string]any
