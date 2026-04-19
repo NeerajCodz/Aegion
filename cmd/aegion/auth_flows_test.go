@@ -460,7 +460,7 @@ func TestHandleSubmitLoginUsesTrustedDeviceToBypassPrompt(t *testing.T) {
 	}
 }
 
-func TestHandleCompleteExternalLoginIssuesSession(t *testing.T) {
+func TestHandleCompleteExternalLoginDisabled(t *testing.T) {
 	s, store := newFlowServer(t)
 	sm := &stubRouteSessionManager{}
 	s.sessionManager = sm
@@ -482,32 +482,18 @@ func TestHandleCompleteExternalLoginIssuesSession(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	s.handleCompleteExternalLogin(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected %d, got %d: %s", http.StatusNotImplemented, rec.Code, rec.Body.String())
 	}
-	if len(sm.created) != 1 || sm.created[0].IdentityID != identityID {
-		t.Fatalf("expected session for %s, got %+v", identityID, sm.created)
+	if len(sm.created) != 0 {
+		t.Fatalf("expected no session creation, got %+v", sm.created)
 	}
-	if got := sm.created[0].AuthMethods[0].Method; got != session.AuthMethodSocial {
-		t.Fatalf("expected social auth method, got %s", got)
-	}
-	if got := store.flows[flow.ID].State; got != flows.StateCompleted {
-		t.Fatalf("expected flow to be completed, got %s", got)
-	}
-
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body["status"] != "authenticated" || body["amr"] != "federated" {
-		t.Fatalf("expected authenticated federated response, got %+v", body)
-	}
-	if body["acr"] != "aal1" || body["aal"] != "aal1" || strings.TrimSpace(body["sid"]) == "" {
-		t.Fatalf("expected auth context in response, got %+v", body)
+	if got := store.flows[flow.ID].State; got != flows.StateActive {
+		t.Fatalf("expected flow to stay active, got %s", got)
 	}
 }
 
-func TestHandleCompleteExternalLoginSupportsMFAStepUp(t *testing.T) {
+func TestHandleCompleteExternalLoginDisabledWithMFAEnabled(t *testing.T) {
 	s, store := newFlowServer(t)
 	sm := &stubRouteSessionManager{}
 	mfa := &stubMFAFlowService{hasFactor: true}
@@ -529,29 +515,18 @@ func TestHandleCompleteExternalLoginSupportsMFAStepUp(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	s.handleCompleteExternalLogin(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected %d, got %d: %s", http.StatusNotImplemented, rec.Code, rec.Body.String())
 	}
 	if len(sm.created) != 0 {
-		t.Fatalf("expected no session before MFA, got %+v", sm.created)
+		t.Fatalf("expected no session creation, got %+v", sm.created)
 	}
 	if got := store.flows[flow.ID].State; got != flows.StateActive {
 		t.Fatalf("expected flow to stay active, got %s", got)
 	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body["status"] != "mfa_required" {
-		t.Fatalf("expected mfa_required status, got %+v", body)
-	}
-	if _, ok := body["flow"].(map[string]any); !ok {
-		t.Fatalf("expected flow payload in response, got %+v", body)
-	}
 }
 
-func TestHandleCompleteExternalLoginRejectsUnsupportedMethod(t *testing.T) {
+func TestHandleCompleteExternalLoginDisabledRegardlessOfMethod(t *testing.T) {
 	s, _ := newFlowServer(t)
 	s.sessionManager = &stubRouteSessionManager{}
 
@@ -570,8 +545,8 @@ func TestHandleCompleteExternalLoginRejectsUnsupportedMethod(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	s.handleCompleteExternalLogin(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("expected %d, got %d: %s", http.StatusNotImplemented, rec.Code, rec.Body.String())
 	}
 }
 
