@@ -85,15 +85,16 @@ cache:
   key_prefix: "aegion:"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Secrets (CHANGE THESE IN PRODUCTION!)
+# Secrets
+# Provide these via environment variables or *_FILE mounts.
 # ─────────────────────────────────────────────────────────────────────────────
 secrets:
   cookie:
-    - dev-cookie-secret-change-me-32chars!
+    - ${AEGION_SECRETS_COOKIE}
   cipher:
-    - dev-cipher-secret-change-me-32chars!
+    - ${AEGION_SECRETS_CIPHER}
   internal:
-    - dev-internal-secret-change-me-32ch!
+    - ${AEGION_SECRETS_INTERNAL}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -108,7 +109,7 @@ log:
 # ─────────────────────────────────────────────────────────────────────────────
 operator:
   email: admin@localhost
-  password: admin123!
+  password: ${AEGION_OPERATOR_PASSWORD}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Courier (Email/SMS)
