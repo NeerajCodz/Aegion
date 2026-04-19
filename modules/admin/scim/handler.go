@@ -226,6 +226,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, user.Meta)
 	h.writeJSON(w, http.StatusOK, user)
 }
 
@@ -252,12 +253,16 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, createdUser.Meta)
 	h.writeJSON(w, http.StatusCreated, createdUser)
 }
 
 // UpdateUser handles PUT /Users/{id}.
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !h.ensureUserIfMatch(w, r, id) {
+		return
+	}
 
 	var user SCIMUser
 	if err := h.decodeJSONBody(w, r, &user); err != nil {
@@ -276,12 +281,16 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, updatedUser.Meta)
 	h.writeJSON(w, http.StatusOK, updatedUser)
 }
 
 // PatchUser handles PATCH /Users/{id}.
 func (h *Handler) PatchUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !h.ensureUserIfMatch(w, r, id) {
+		return
+	}
 
 	var patchReq PatchRequest
 	if err := h.decodeJSONBody(w, r, &patchReq); err != nil {
@@ -310,12 +319,16 @@ func (h *Handler) PatchUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, user.Meta)
 	h.writeJSON(w, http.StatusOK, user)
 }
 
 // DeleteUser handles DELETE /Users/{id}.
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !h.ensureUserIfMatch(w, r, id) {
+		return
+	}
 
 	err := h.service.DeleteUser(r.Context(), id)
 	if err != nil {
@@ -366,6 +379,7 @@ func (h *Handler) GetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, group.Meta)
 	h.writeJSON(w, http.StatusOK, group)
 }
 
@@ -392,12 +406,16 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, createdGroup.Meta)
 	h.writeJSON(w, http.StatusCreated, createdGroup)
 }
 
 // UpdateGroup handles PUT /Groups/{id}.
 func (h *Handler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !h.ensureGroupIfMatch(w, r, id) {
+		return
+	}
 
 	var group SCIMGroup
 	if err := h.decodeJSONBody(w, r, &group); err != nil {
@@ -416,12 +434,16 @@ func (h *Handler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, updatedGroup.Meta)
 	h.writeJSON(w, http.StatusOK, updatedGroup)
 }
 
 // PatchGroup handles PATCH /Groups/{id}.
 func (h *Handler) PatchGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !h.ensureGroupIfMatch(w, r, id) {
+		return
+	}
 
 	var patchReq PatchRequest
 	if err := h.decodeJSONBody(w, r, &patchReq); err != nil {
@@ -450,12 +472,16 @@ func (h *Handler) PatchGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeResourceETag(w, group.Meta)
 	h.writeJSON(w, http.StatusOK, group)
 }
 
 // DeleteGroup handles DELETE /Groups/{id}.
 func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if !h.ensureGroupIfMatch(w, r, id) {
+		return
+	}
 
 	err := h.service.DeleteGroup(r.Context(), id)
 	if err != nil {
@@ -526,4 +552,97 @@ func (h *Handler) parsePagination(r *http.Request) (startIndex, count int) {
 	}
 
 	return startIndex, count
+}
+
+func (h *Handler) writeResourceETag(w http.ResponseWriter, meta Meta) {
+	if w == nil {
+		return
+	}
+	etag := h.resourceETagValue(meta)
+	if etag == "" {
+		return
+	}
+	w.Header().Set("ETag", etag)
+}
+
+func (h *Handler) ensureUserIfMatch(w http.ResponseWriter, r *http.Request, id string) bool {
+	ifMatch := strings.TrimSpace(r.Header.Get("If-Match"))
+	if ifMatch == "" {
+		return true
+	}
+	user, err := h.service.GetUser(r.Context(), id)
+	if err != nil {
+		h.writeError(w, http.StatusNotFound, "notFound", "User not found")
+		return false
+	}
+	if h.ifMatchSatisfied(user.Meta, ifMatch) {
+		return true
+	}
+	h.writeError(w, http.StatusPreconditionFailed, "preconditionFailed", "If-Match precondition failed")
+	return false
+}
+
+func (h *Handler) ensureGroupIfMatch(w http.ResponseWriter, r *http.Request, id string) bool {
+	ifMatch := strings.TrimSpace(r.Header.Get("If-Match"))
+	if ifMatch == "" {
+		return true
+	}
+	group, err := h.service.GetGroup(r.Context(), id)
+	if err != nil {
+		h.writeError(w, http.StatusNotFound, "notFound", "Group not found")
+		return false
+	}
+	if h.ifMatchSatisfied(group.Meta, ifMatch) {
+		return true
+	}
+	h.writeError(w, http.StatusPreconditionFailed, "preconditionFailed", "If-Match precondition failed")
+	return false
+}
+
+func (h *Handler) ifMatchSatisfied(meta Meta, ifMatch string) bool {
+	ifMatch = strings.TrimSpace(ifMatch)
+	if ifMatch == "" || ifMatch == "*" {
+		return true
+	}
+	current := h.resourceETagToken(meta)
+	if current == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(ifMatch, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" {
+			return true
+		}
+		if h.normalizeETagToken(candidate) == current {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) resourceETagValue(meta Meta) string {
+	token := h.resourceETagToken(meta)
+	if token == "" {
+		return ""
+	}
+	return `W/"` + token + `"`
+}
+
+func (h *Handler) resourceETagToken(meta Meta) string {
+	etag := strings.TrimSpace(meta.Version)
+	if etag != "" {
+		return etag
+	}
+	if meta.LastModified != nil && !meta.LastModified.IsZero() {
+		return strconv.FormatInt(meta.LastModified.UTC().UnixNano(), 10)
+	}
+	return ""
+}
+
+func (h *Handler) normalizeETagToken(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "W/")
+	value = strings.TrimPrefix(value, "w/")
+	value = strings.TrimSpace(value)
+	return strings.Trim(value, `"`)
 }

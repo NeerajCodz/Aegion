@@ -51,6 +51,16 @@ var permissionCatalog = []string{
 	PermFlowsUpdate,
 	PermFlowsDelete,
 	PermFlowsAll,
+	PermOAuth2ClientsRead,
+	PermOAuth2ClientsManage,
+	PermOAuth2TokensRead,
+	PermOAuth2TokensRevoke,
+	PermOAuth2All,
+	PermSecurityRead,
+	PermSecurityCreate,
+	PermSecurityUpdate,
+	PermSecurityDelete,
+	PermSecurityAll,
 }
 
 var validPermissionSet = func() map[string]struct{} {
@@ -123,6 +133,20 @@ const (
 	PermFlowsUpdate = "flows:update"
 	PermFlowsDelete = "flows:delete"
 	PermFlowsAll    = "flows:*"
+
+	// OAuth2 permissions
+	PermOAuth2ClientsRead   = "oauth2:clients:read"
+	PermOAuth2ClientsManage = "oauth2:clients:manage"
+	PermOAuth2TokensRead    = "oauth2:tokens:read"
+	PermOAuth2TokensRevoke  = "oauth2:tokens:revoke"
+	PermOAuth2All           = "oauth2:*"
+
+	// Security controls permissions
+	PermSecurityRead   = "security:read"
+	PermSecurityCreate = "security:create"
+	PermSecurityUpdate = "security:update"
+	PermSecurityDelete = "security:delete"
+	PermSecurityAll    = "security:*"
 )
 
 // DefaultRolePermissions defines the default permissions for each role.
@@ -134,8 +158,10 @@ var DefaultRolePermissions = map[string][]string{
 		PermConfigRead,
 		PermConfigUpdate,
 		PermAuditRead,
+		PermOAuth2All,
 		PermOperatorsRead,
 		PermRolesRead,
+		PermSecurityAll,
 	},
 	"operator": {
 		PermIdentitiesRead,
@@ -143,6 +169,9 @@ var DefaultRolePermissions = map[string][]string{
 		PermSessionsRead,
 		PermSessionsDelete,
 		PermAuditRead,
+		PermOAuth2ClientsRead,
+		PermOAuth2TokensRead,
+		PermSecurityRead,
 	},
 	"viewer": {
 		PermIdentitiesRead,

@@ -197,6 +197,7 @@ func setupSelfServiceRoutes(r chi.Router, s *Server) {
 			r.Get("/api", s.handleInitLoginAPI)
 			r.Get("/flows", s.handleGetLoginFlow)
 			r.Get("/methods/link/verify", s.handleMagicLinkLoginVerify)
+			r.Post("/methods/external/complete", s.handleCompleteExternalLogin)
 			r.Post("/methods/passkey/start", s.handleStartLoginPasskey)
 			r.Post("/methods/passkey/finish", s.handleFinishLoginPasskey)
 			r.Post("/", s.handleSubmitLogin)
@@ -672,6 +673,7 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		if result.Message != "" {
 			response["message"] = result.Message
 		}
+		mergeAuthContext(response, result.AuthContext)
 	}
 
 	writeJSON(w, http.StatusOK, response)

@@ -3,15 +3,12 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
 
-	"golang.org/x/crypto/bcrypt"
-
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/oauth2/store"
 )
 
@@ -292,7 +289,8 @@ func (s *ClientService) AuthenticateClient(ctx context.Context, clientID, client
 		return nil, errors.New("client secret not set")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(*client.SecretHash), []byte(clientSecret)); err != nil {
+	matches, verifyErr := platformcrypto.VerifyPassword(clientSecret, *client.SecretHash)
+	if verifyErr != nil || !matches {
 		return nil, ErrInvalidSecret
 	}
 
@@ -301,18 +299,18 @@ func (s *ClientService) AuthenticateClient(ctx context.Context, clientID, client
 
 // generateClientSecret generates a cryptographically secure client secret.
 func generateClientSecret() (string, string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	b, err := platformcrypto.RandomBytes(32)
+	if err != nil {
 		return "", "", err
 	}
 	secret := base64.RawURLEncoding.EncodeToString(b)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	hash, err := platformcrypto.HashPassword(secret)
 	if err != nil {
 		return "", "", err
 	}
 
-	return secret, string(hash), nil
+	return secret, hash, nil
 }
 
 // validateRedirectURI validates a redirect URI.
@@ -358,13 +356,6 @@ func isValidAuthMethod(method string) bool {
 
 // VerifyClientSecret verifies a client secret using constant-time comparison.
 func VerifyClientSecret(storedHash, providedSecret string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(providedSecret))
-	return subtle.ConstantTimeCompare([]byte{boolToByte(err == nil)}, []byte{1}) == 1
-}
-
-func boolToByte(b bool) byte {
-	if b {
-		return 1
-	}
-	return 0
+	matches, err := platformcrypto.VerifyPassword(providedSecret, storedHash)
+	return err == nil && matches
 }

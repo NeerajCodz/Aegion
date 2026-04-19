@@ -4,14 +4,22 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
+	coreproxy "github.com/aegion/aegion/core/proxy"
+	"github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/modules/admin/service"
+	adminstore "github.com/aegion/aegion/modules/admin/store"
+	"github.com/aegion/aegion/modules/social/providers/catalog"
 	socialservice "github.com/aegion/aegion/modules/social/service"
 	socialstore "github.com/aegion/aegion/modules/social/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+var integrationJSONMarshal = json.Marshal
 
 type IntegrationOverviewResponse struct {
 	SocialProviders int64 `json:"social_providers"`
@@ -20,6 +28,75 @@ type IntegrationOverviewResponse struct {
 	ProxyUpstreams  int64 `json:"proxy_upstreams"`
 	ProxyRoutes     int64 `json:"proxy_routes"`
 	SCIMTokens      int64 `json:"scim_tokens"`
+	OAuth2Clients   int64 `json:"oauth2_clients"`
+	OAuth2Tokens    int64 `json:"oauth2_tokens"`
+}
+
+type SetupStatusResponse struct {
+	Operators         int64 `json:"operators"`
+	Roles             int64 `json:"roles"`
+	APIKeys           int64 `json:"api_keys"`
+	SocialProviders   int64 `json:"social_providers"`
+	SocialEnabled     int64 `json:"social_enabled"`
+	SocialLinks       int64 `json:"social_links"`
+	SSOConnections    int64 `json:"sso_connections"`
+	SSOEnabled        int64 `json:"sso_enabled"`
+	ProxyUpstreams    int64 `json:"proxy_upstreams"`
+	ProxyRoutes       int64 `json:"proxy_routes"`
+	ProxyEnabled      int64 `json:"proxy_enabled"`
+	SCIMTokens        int64 `json:"scim_tokens"`
+	OAuth2Clients     int64 `json:"oauth2_clients"`
+	OAuth2Tokens      int64 `json:"oauth2_tokens"`
+	IPBans            int64 `json:"ip_bans"`
+	AuditEvents24h    int64 `json:"audit_events_24h"`
+	AdminOperators    int64 `json:"admin_operators"`
+	HasAdminOperator  bool  `json:"has_admin_operator"`
+	HasSocialProvider bool  `json:"has_social_provider"`
+	HasSSOConnection  bool  `json:"has_sso_connection"`
+	HasProxyRoute     bool  `json:"has_proxy_route"`
+	HasSCIMToken      bool  `json:"has_scim_token"`
+	HasOAuth2Client   bool  `json:"has_oauth2_client"`
+	HasIPBan          bool  `json:"has_ip_ban"`
+}
+
+type SocialPresetView struct {
+	Slug               string                   `json:"slug"`
+	DisplayName        string                   `json:"display_name"`
+	Preset             string                   `json:"preset"`
+	Protocol           socialstore.Protocol     `json:"protocol"`
+	Issuer             string                   `json:"issuer,omitempty"`
+	DiscoveryURL       string                   `json:"discovery_url,omitempty"`
+	AuthorizeEndpoint  string                   `json:"authorize_endpoint,omitempty"`
+	TokenEndpoint      string                   `json:"token_endpoint,omitempty"`
+	UserInfoEndpoint   string                   `json:"userinfo_endpoint,omitempty"`
+	JWKSURI            string                   `json:"jwks_uri,omitempty"`
+	Scopes             []string                 `json:"scopes,omitempty"`
+	ClaimMapping       socialstore.ClaimMapping `json:"claim_mapping"`
+	ExtraAuthParams    map[string]string        `json:"extra_auth_params,omitempty"`
+	PKCEMethod         socialstore.PKCEMethod   `json:"pkce_method"`
+	AuthStyle          socialstore.AuthStyle    `json:"auth_style"`
+	ClaimSource        socialstore.ClaimSource  `json:"claim_source"`
+	TrustEmailVerified bool                     `json:"trust_email_verified"`
+}
+
+type RoleSummary struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Permissions []string `json:"permissions"`
+	IsSystem    bool     `json:"is_system"`
+	OperatorIDs int64    `json:"operator_ids"`
+}
+
+type ActivityItem struct {
+	ID           string                 `json:"id"`
+	OperatorID   *string                `json:"operator_id,omitempty"`
+	Action       string                 `json:"action"`
+	ResourceType string                 `json:"resource_type"`
+	ResourceID   string                 `json:"resource_id"`
+	Details      map[string]interface{} `json:"details,omitempty"`
+	IPAddress    string                 `json:"ip_address"`
+	CreatedAt    time.Time              `json:"created_at"`
 }
 
 func (h *Handler) IntegrationOverview(w http.ResponseWriter, r *http.Request) {
@@ -29,32 +106,229 @@ func (h *Handler) IntegrationOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var resp IntegrationOverviewResponse
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM soc_providers`).Scan(&resp.SocialProviders); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM soc_providers`, &resp.SocialProviders); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load social provider count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM soc_identity_links`).Scan(&resp.SocialLinks); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM soc_identity_links`, &resp.SocialLinks); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load social link count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM sso_connections`).Scan(&resp.SSOConnections); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM sso_connections`, &resp.SSOConnections); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load SSO connection count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM proxy_upstreams`).Scan(&resp.ProxyUpstreams); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM proxy_upstreams`, &resp.ProxyUpstreams); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load proxy upstream count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM proxy_routes`).Scan(&resp.ProxyRoutes); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM proxy_routes`, &resp.ProxyRoutes); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load proxy route count")
 		return
 	}
-	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM adm_scim_tokens`).Scan(&resp.SCIMTokens); err != nil {
+	if err := h.countValue(r, `SELECT COUNT(*) FROM adm_scim_tokens`, &resp.SCIMTokens); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load SCIM token count")
+		return
+	}
+	if err := h.countValue(r, `SELECT COUNT(*) FROM oa2_clients`, &resp.OAuth2Clients); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load OAuth2 client count")
+		return
+	}
+	if err := h.countValue(r, `
+		SELECT COUNT(*) FROM (
+			SELECT jti FROM oa2_access_tokens WHERE revoked = false AND expires_at > NOW()
+			UNION ALL
+			SELECT id FROM oa2_refresh_tokens WHERE active = true AND expires_at > NOW()
+			UNION ALL
+			SELECT jti FROM oa2_id_tokens WHERE revoked = false AND expires_at > NOW()
+		) tokens
+	`, &resp.OAuth2Tokens); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load OAuth2 token count")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	var resp SetupStatusResponse
+	queries := []struct {
+		sql    string
+		target *int64
+	}{
+		{`SELECT COUNT(*) FROM adm_operators`, &resp.Operators},
+		{`SELECT COUNT(*) FROM adm_roles`, &resp.Roles},
+		{`SELECT COUNT(*) FROM adm_api_keys`, &resp.APIKeys},
+		{`SELECT COUNT(*) FROM soc_providers`, &resp.SocialProviders},
+		{`SELECT COUNT(*) FROM soc_providers WHERE enabled = true`, &resp.SocialEnabled},
+		{`SELECT COUNT(*) FROM soc_identity_links`, &resp.SocialLinks},
+		{`SELECT COUNT(*) FROM sso_connections`, &resp.SSOConnections},
+		{`SELECT COUNT(*) FROM sso_connections WHERE enabled = true`, &resp.SSOEnabled},
+		{`SELECT COUNT(*) FROM proxy_upstreams`, &resp.ProxyUpstreams},
+		{`SELECT COUNT(*) FROM proxy_routes`, &resp.ProxyRoutes},
+		{`SELECT COUNT(*) FROM proxy_routes WHERE enabled = true`, &resp.ProxyEnabled},
+		{`SELECT COUNT(*) FROM adm_scim_tokens`, &resp.SCIMTokens},
+		{`SELECT COUNT(*) FROM oa2_clients`, &resp.OAuth2Clients},
+		{`
+			SELECT COUNT(*) FROM (
+				SELECT jti FROM oa2_access_tokens WHERE revoked = false AND expires_at > NOW()
+				UNION ALL
+				SELECT id FROM oa2_refresh_tokens WHERE active = true AND expires_at > NOW()
+				UNION ALL
+				SELECT jti FROM oa2_id_tokens WHERE revoked = false AND expires_at > NOW()
+			) tokens
+		`, &resp.OAuth2Tokens},
+		{`SELECT COUNT(*) FROM adm_ip_bans WHERE expires_at IS NULL OR expires_at > NOW()`, &resp.IPBans},
+		{`SELECT COUNT(*) FROM adm_audit_logs WHERE created_at >= NOW() - INTERVAL '24 hours'`, &resp.AuditEvents24h},
+	}
+	for _, query := range queries {
+		if err := h.countValue(r, query.sql, query.target); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load setup status")
+			return
+		}
+	}
+	if err := h.countValue(r, `SELECT COUNT(*) FROM adm_operators WHERE role IN ('super_admin', 'admin')`, &resp.AdminOperators); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load admin operator status")
+		return
+	}
+
+	resp.HasAdminOperator = resp.AdminOperators > 0
+	resp.HasSocialProvider = resp.SocialProviders > 0
+	resp.HasSSOConnection = resp.SSOConnections > 0
+	resp.HasProxyRoute = resp.ProxyRoutes > 0
+	resp.HasSCIMToken = resp.SCIMTokens > 0
+	resp.HasOAuth2Client = resp.OAuth2Clients > 0
+	resp.HasIPBan = resp.IPBans > 0
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ListSocialPresets(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	presets := catalog.All()
+	items := make([]SocialPresetView, 0, len(presets))
+	for _, provider := range presets {
+		items = append(items, SocialPresetView{
+			Slug:               provider.Slug,
+			DisplayName:        provider.DisplayName,
+			Preset:             provider.Preset,
+			Protocol:           provider.Protocol,
+			Issuer:             provider.Issuer,
+			DiscoveryURL:       provider.DiscoveryURL,
+			AuthorizeEndpoint:  provider.AuthorizeEndpoint,
+			TokenEndpoint:      provider.TokenEndpoint,
+			UserInfoEndpoint:   provider.UserInfoEndpoint,
+			JWKSURI:            provider.JWKSURI,
+			Scopes:             append([]string(nil), provider.Scopes...),
+			ClaimMapping:       provider.ClaimMapping,
+			ExtraAuthParams:    provider.ExtraAuthParams,
+			PKCEMethod:         provider.PKCEMethod,
+			AuthStyle:          provider.AuthStyle,
+			ClaimSource:        provider.ClaimSource,
+			TrustEmailVerified: provider.TrustEmailVerified,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"presets": items,
+		"count":   len(items),
+	})
+}
+
+func (h *Handler) RBACSummary(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	roles, _, err := h.service.ListRoles(r.Context(), operator.ID, h.config.MaxPageSize, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load RBAC summary")
+		return
+	}
+
+	available := h.service.AvailablePermissions()
+	sort.Strings(available)
+	roleItems := make([]RoleSummary, 0, len(roles))
+	for _, role := range roles {
+		var count int64
+		if err := h.countValue(r, `SELECT COUNT(*) FROM adm_operators WHERE role = $1`, &count, role.Name); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load RBAC summary")
+			return
+		}
+		perms := append([]string(nil), role.Permissions...)
+		sort.Strings(perms)
+		roleItems = append(roleItems, RoleSummary{
+			ID:          role.ID.String(),
+			Name:        role.Name,
+			Description: role.Description,
+			Permissions: perms,
+			IsSystem:    role.IsSystem,
+			OperatorIDs: count,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"available_permissions": available,
+		"default_roles":         service.DefaultRolePermissions,
+		"roles":                 roleItems,
+		"count":                 len(roleItems),
+	})
+}
+
+func (h *Handler) ActivityFeed(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	page, perPage, offset := h.parsePagination(r)
+	if perPage > 50 {
+		perPage = 50
+	}
+
+	entries, total, err := h.service.ListAuditLogs(r.Context(), operator.ID, adminstore.AuditFilter{}, perPage, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load activity feed")
+		return
+	}
+
+	items := make([]ActivityItem, 0, len(entries))
+	for _, entry := range entries {
+		var operatorID *string
+		if entry.OperatorID != nil {
+			id := entry.OperatorID.String()
+			operatorID = &id
+		}
+		items = append(items, ActivityItem{
+			ID:           entry.ID.String(),
+			OperatorID:   operatorID,
+			Action:       entry.Action,
+			ResourceType: entry.ResourceType,
+			ResourceID:   entry.ResourceID,
+			Details:      entry.Details,
+			IPAddress:    entry.IPAddress,
+			CreatedAt:    entry.CreatedAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items":       items,
+		"count":       len(items),
+		"pagination":  buildPaginationMeta(page, perPage, total),
+		"total_items": total,
+	})
 }
 
 func (h *Handler) ListSocialProviders(w http.ResponseWriter, r *http.Request) {
@@ -242,17 +516,17 @@ func (h *Handler) UpsertSSOConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	domainsRaw, err := json.Marshal(req.Domains)
+	domainsRaw, err := integrationJSONMarshal(req.Domains)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid domains")
 		return
 	}
-	mappingRaw, err := json.Marshal(req.AttributeMapping)
+	mappingRaw, err := integrationJSONMarshal(req.AttributeMapping)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid attribute mapping")
 		return
 	}
-	extraRaw, err := json.Marshal(req.ExtraAuthnContext)
+	extraRaw, err := integrationJSONMarshal(req.ExtraAuthnContext)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid extra authn context")
 		return
@@ -369,12 +643,12 @@ func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "name and url are required")
 		return
 	}
-	headersRaw, err := json.Marshal(req.Headers)
+	headersRaw, err := integrationJSONMarshal(req.Headers)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid headers")
 		return
 	}
-	cbRaw, err := json.Marshal(req.CircuitBreaker)
+	cbRaw, err := integrationJSONMarshal(req.CircuitBreaker)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid circuit breaker")
 		return
@@ -456,6 +730,14 @@ type ProxyRouteRequest struct {
 	Description  string                 `json:"description"`
 }
 
+type ProxySimulationRequest struct {
+	Path          string   `json:"path"`
+	Method        string   `json:"method"`
+	Authenticated bool     `json:"authenticated"`
+	AAL           string   `json:"aal,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty"`
+}
+
 func (h *Handler) UpsertProxyRoute(w http.ResponseWriter, r *http.Request) {
 	if OperatorFromContext(r.Context()) == nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -478,27 +760,27 @@ func (h *Handler) UpsertProxyRoute(w http.ResponseWriter, r *http.Request) {
 	if req.ID == "" {
 		req.ID = uuid.NewString()
 	}
-	methodsRaw, err := json.Marshal(req.Methods)
+	methodsRaw, err := integrationJSONMarshal(req.Methods)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid methods")
 		return
 	}
-	capsRaw, err := json.Marshal(req.Capabilities)
+	capsRaw, err := integrationJSONMarshal(req.Capabilities)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid capabilities")
 		return
 	}
-	rateRaw, err := json.Marshal(req.RateLimit)
+	rateRaw, err := integrationJSONMarshal(req.RateLimit)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid rate limit")
 		return
 	}
-	headersRaw, err := json.Marshal(req.Headers)
+	headersRaw, err := integrationJSONMarshal(req.Headers)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid headers")
 		return
 	}
-	rewriteRaw, err := json.Marshal(req.Rewrite)
+	rewriteRaw, err := integrationJSONMarshal(req.Rewrite)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid rewrite")
 		return
@@ -561,6 +843,227 @@ func (h *Handler) DeleteProxyRoute(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) SimulateProxyRoute(w http.ResponseWriter, r *http.Request) {
+	operator := OperatorFromContext(r.Context())
+	if operator == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	var req ProxySimulationRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+	requestPath := strings.TrimSpace(req.Path)
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	if !strings.HasPrefix(requestPath, "/") {
+		requestPath = "/" + requestPath
+	}
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method == "" {
+		method = http.MethodGet
+	}
+
+	rows, err := h.dbConn().Query(r.Context(), `
+		SELECT id, path, methods, require_auth, required_aal, capabilities, rate_limit, target, priority, headers, rewrite, enabled, description, created_at, updated_at
+		FROM proxy_routes
+		ORDER BY priority DESC, id ASC
+	`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load proxy routes")
+		return
+	}
+	defer rows.Close()
+
+	engineRules := make([]coreproxy.Rule, 0)
+	routeByID := make(map[string]map[string]any)
+	for rows.Next() {
+		var (
+			id, path, requiredAAL, target, description string
+			methodsRaw, capabilitiesRaw                []byte
+			rateLimitRaw, headersRaw, rewriteRaw       []byte
+			requireAuth, enabled                       bool
+			priority                                   int
+			createdAt, updatedAt                       time.Time
+		)
+		if err := rows.Scan(
+			&id, &path, &methodsRaw, &requireAuth, &requiredAAL, &capabilitiesRaw, &rateLimitRaw, &target, &priority,
+			&headersRaw, &rewriteRaw, &enabled, &description, &createdAt, &updatedAt,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read proxy routes")
+			return
+		}
+
+		methods := decodeStringSlice(methodsRaw)
+		capabilities := decodeStringSlice(capabilitiesRaw)
+		headers := decodeStringMap(headersRaw)
+		rewrite := decodeRewriteConfig(rewriteRaw)
+
+		engineRules = append(engineRules, coreproxy.Rule{
+			ID:           strings.TrimSpace(id),
+			Path:         strings.TrimSpace(path),
+			Methods:      methods,
+			RequireAuth:  requireAuth,
+			RequiredAAL:  session.AAL(strings.ToLower(strings.TrimSpace(requiredAAL))),
+			Capabilities: capabilities,
+			Target:       strings.ToLower(strings.TrimSpace(target)),
+			Priority:     priority,
+			Headers:      headers,
+			Rewrite:      rewrite,
+			Enabled:      enabled,
+			Description:  strings.TrimSpace(description),
+		})
+
+		routeByID[strings.TrimSpace(id)] = map[string]any{
+			"id":           strings.TrimSpace(id),
+			"path":         strings.TrimSpace(path),
+			"methods":      methods,
+			"require_auth": requireAuth,
+			"required_aal": strings.TrimSpace(requiredAAL),
+			"capabilities": capabilities,
+			"target":       strings.ToLower(strings.TrimSpace(target)),
+			"priority":     priority,
+			"enabled":      enabled,
+			"description":  strings.TrimSpace(description),
+			"created_at":   createdAt,
+			"updated_at":   updatedAt,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read proxy routes")
+		return
+	}
+
+	engine := coreproxy.NewRuleEngine(engineRules)
+	httpReq, _ := http.NewRequest(method, "http://proxy.simulator"+requestPath, nil)
+	matchedRule, matched := engine.Match(httpReq)
+	if !matched || matchedRule == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"matched":       false,
+			"allowed":       false,
+			"denial_reason": "no_matching_route",
+		})
+		h.logAction(r.Context(), &operator.ID, "simulate", "proxy_route", "no-match", map[string]any{
+			"path":          requestPath,
+			"method":        method,
+			"matched":       false,
+			"allowed":       false,
+			"denial_reason": "no_matching_route",
+		}, IPAddressFromContext(r.Context()))
+		return
+	}
+
+	var simulatedSession *session.Session
+	if req.Authenticated {
+		aal := session.AAL(strings.ToLower(strings.TrimSpace(req.AAL)))
+		if aal == "" {
+			aal = session.AAL1
+		}
+		simulatedSession = &session.Session{
+			ID:         uuid.New(),
+			IdentityID: uuid.New(),
+			AAL:        aal,
+		}
+	}
+
+	allowed := true
+	denialReason := ""
+	if accessErr := engine.CheckAccess(httpReq, matchedRule, simulatedSession); accessErr != nil {
+		allowed = false
+		denialReason = accessErr.Error()
+	}
+
+	var upstream map[string]any
+	var (
+		name, url, healthCheck, timeout string
+		maxConnections                  int
+		enabled                         bool
+	)
+	upstreamErr := h.dbConn().QueryRow(r.Context(), `
+		SELECT name, url, health_check, timeout, max_connections, enabled
+		FROM proxy_upstreams
+		WHERE name = $1
+	`, strings.ToLower(strings.TrimSpace(matchedRule.Target))).Scan(&name, &url, &healthCheck, &timeout, &maxConnections, &enabled)
+	if upstreamErr == nil {
+		upstream = map[string]any{
+			"name":            name,
+			"url":             url,
+			"health_check":    healthCheck,
+			"timeout":         timeout,
+			"max_connections": maxConnections,
+			"enabled":         enabled,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"matched":         true,
+		"allowed":         allowed,
+		"denial_reason":   denialReason,
+		"identity_needed": matchedRule.RequireAuth,
+		"rewritten_path":  matchedRule.ApplyRewrite(requestPath),
+		"rule":            routeByID[matchedRule.ID],
+		"upstream":        upstream,
+		"evaluation": map[string]any{
+			"capability_fail_closed": len(matchedRule.Capabilities) > 0,
+		},
+	})
+	h.logAction(r.Context(), &operator.ID, "simulate", "proxy_route", matchedRule.ID, map[string]any{
+		"path":          requestPath,
+		"method":        method,
+		"matched":       true,
+		"allowed":       allowed,
+		"denial_reason": denialReason,
+		"target":        matchedRule.Target,
+	}, IPAddressFromContext(r.Context()))
+}
+
+func decodeStringSlice(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	items := make([]string, 0)
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	normalized := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+func decodeStringMap(raw []byte) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	values := make(map[string]string)
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil
+	}
+	return values
+}
+
+func decodeRewriteConfig(raw []byte) *coreproxy.RewriteConfig {
+	if len(raw) == 0 {
+		return nil
+	}
+	var rewrite coreproxy.RewriteConfig
+	if err := json.Unmarshal(raw, &rewrite); err != nil {
+		return nil
+	}
+	if rewrite.StripPrefix == "" && rewrite.AddPrefix == "" && rewrite.Regex == "" && rewrite.Replacement == "" {
+		return nil
+	}
+	return &rewrite
+}
+
 func (h *Handler) listGenericRows(w http.ResponseWriter, r *http.Request, query string, columns []string, envelope string) {
 	if OperatorFromContext(r.Context()) == nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -597,4 +1100,8 @@ func (h *Handler) listGenericRows(w http.ResponseWriter, r *http.Request, query 
 		envelope: items,
 		"count":  len(items),
 	})
+}
+
+func (h *Handler) countValue(r *http.Request, sql string, target *int64, args ...interface{}) error {
+	return h.dbConn().QueryRow(r.Context(), sql, args...).Scan(target)
 }

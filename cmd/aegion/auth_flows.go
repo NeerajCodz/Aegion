@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +58,7 @@ type flowExecutionResult struct {
 	Message        string
 	KeepFlowActive bool
 	FlowPayload    interface{}
+	AuthContext    map[string]string
 }
 
 type flowHTTPError struct {
@@ -433,9 +436,14 @@ func (s *Server) finishPrimaryAuthentication(ctx context.Context, w http.Respons
 		if err := s.sessionManager.AddAuthMethod(ctx, currentSession.ID, coresession.AuthMethodTOTP); err != nil {
 			return nil, err
 		}
+		applySessionAuthMethod(currentSession, coresession.AuthMethodTOTP)
+	}
+	authContext := authCompletionContext(currentSession, trustedDeviceSatisfied)
+	if err := s.applyAuthContextToFlow(ctx, flow, currentSession, authContext); err != nil {
+		return nil, err
 	}
 
-	return &flowExecutionResult{Status: "authenticated", Message: "login successful"}, nil
+	return &flowExecutionResult{Status: "authenticated", Message: "login successful", AuthContext: authContext}, nil
 }
 
 func (s *Server) ensureSecondFactorOrTrustedDevice(ctx context.Context, r *http.Request, flow *flows.Flow, identityID uuid.UUID, identifier string, primaryMethod coresession.AuthMethod) (bool, *flows.Flow, error) {
@@ -512,6 +520,7 @@ func (s *Server) completePendingMFALogin(ctx context.Context, w http.ResponseWri
 		if err := s.sessionManager.AddAuthMethod(ctx, currentSession.ID, secondFactorMethod); err != nil {
 			return nil, err
 		}
+		applySessionAuthMethod(currentSession, secondFactorMethod)
 	}
 
 	if rememberDevice {
@@ -522,12 +531,13 @@ func (s *Server) completePendingMFALogin(ctx context.Context, w http.ResponseWri
 		s.writeMFATrustedDeviceCookie(w, token, expiresAt)
 	}
 
+	authContext := authCompletionContext(currentSession, false)
 	clearPendingMFALogin(flow)
-	if err := s.flowService.UpdateFlow(ctx, flow); err != nil {
+	if err := s.applyAuthContextToFlow(ctx, flow, currentSession, authContext); err != nil {
 		return nil, err
 	}
 
-	return &flowExecutionResult{Status: "authenticated", Message: "login successful"}, nil
+	return &flowExecutionResult{Status: "authenticated", Message: "login successful", AuthContext: authContext}, nil
 }
 
 func (s *Server) prepareMFALoginFlow(ctx context.Context, flow *flows.Flow, identityID uuid.UUID, identifier string, primaryMethod coresession.AuthMethod) error {
@@ -758,6 +768,88 @@ func (s *Server) handleMagicLinkLoginVerify(w http.ResponseWriter, r *http.Reque
 	s.handleMagicLinkVerify(w, r, magiclinkstore.CodeTypeLogin)
 }
 
+func (s *Server) handleCompleteExternalLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+
+	input, err := parseFlowSubmitRequest(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid flow submission payload", err)
+		return
+	}
+
+	flow, err := s.flowService.ValidateFlow(r.Context(), input.FlowID, input.CSRFToken)
+	if err != nil {
+		s.writeFlowValidationError(w, err)
+		return
+	}
+	if flow.Type != flows.TypeLogin {
+		writeError(w, http.StatusBadRequest, "flow type mismatch for external login completion", nil)
+		return
+	}
+
+	identityIDValue := normalizedFlowValue(input.Values, "identity_id")
+	identityID, err := uuid.Parse(strings.TrimSpace(identityIDValue))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid identity id", err)
+		return
+	}
+
+	method, err := parseExternalAuthMethod(normalizedFlowValue(input.Values, "method", "auth_method"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+	identifier := normalizedEmailValue(input.Values, "identifier", "email")
+
+	result, err := s.finishPrimaryAuthentication(r.Context(), w, r, flow, identityID, identifier, method)
+	if err != nil {
+		s.writeFlowExecutionError(w, err)
+		return
+	}
+
+	if result != nil && result.KeepFlowActive {
+		response := map[string]any{
+			"status":    result.Status,
+			"flow_id":   input.FlowID.String(),
+			"flow_type": string(flows.TypeLogin),
+		}
+		if result.Message != "" {
+			response["message"] = result.Message
+		}
+		if result.FlowPayload != nil {
+			response["flow"] = result.FlowPayload
+		}
+		mergeAuthContext(response, result.AuthContext)
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+
+	if err := s.flowService.CompleteFlow(r.Context(), input.FlowID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
+		return
+	}
+
+	response := map[string]any{
+		"status":    "authenticated",
+		"flow_id":   input.FlowID.String(),
+		"flow_type": string(flows.TypeLogin),
+		"message":   "login successful",
+	}
+	if result != nil {
+		if result.Status != "" {
+			response["status"] = result.Status
+		}
+		if result.Message != "" {
+			response["message"] = result.Message
+		}
+		mergeAuthContext(response, result.AuthContext)
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleMagicLinkRecoveryVerify(w http.ResponseWriter, r *http.Request) {
 	s.handleMagicLinkVerify(w, r, magiclinkstore.CodeTypeRecovery)
 }
@@ -814,6 +906,7 @@ func (s *Server) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request, c
 			if result.FlowPayload != nil {
 				payload["flow"] = result.FlowPayload
 			}
+			mergeAuthContext(payload, result.AuthContext)
 		}
 		s.respondMagicLinkVerification(w, r, payload)
 	case magiclinkstore.CodeTypeRecovery:
@@ -1053,21 +1146,33 @@ func (s *Server) handleFinishLoginPasskey(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if result != nil && result.KeepFlowActive {
-		writeJSON(w, http.StatusOK, map[string]any{
+		response := map[string]any{
 			"status":  result.Status,
 			"message": result.Message,
 			"flow":    result.FlowPayload,
-		})
+		}
+		mergeAuthContext(response, result.AuthContext)
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	if err := s.flowService.CompleteFlow(r.Context(), flow.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to complete flow", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"status":  "authenticated",
 		"message": "login successful",
-	})
+	}
+	if result != nil {
+		if result.Status != "" {
+			response["status"] = result.Status
+		}
+		if result.Message != "" {
+			response["message"] = result.Message
+		}
+		mergeAuthContext(response, result.AuthContext)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleStartSettingsPasskeyRegistration(w http.ResponseWriter, r *http.Request) {
@@ -1119,6 +1224,123 @@ func (s *Server) handleFinishSettingsPasskeyRegistration(w http.ResponseWriter, 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "registered",
 	})
+}
+
+func authCompletionContext(currentSession *coresession.Session, trustedDevice bool) map[string]string {
+	if currentSession == nil {
+		return nil
+	}
+
+	authTime := currentSession.AuthenticatedAt.UTC()
+	if authTime.IsZero() {
+		authTime = time.Now().UTC()
+	}
+
+	return map[string]string{
+		"auth_time":       authTime.Format(time.RFC3339),
+		"acr":             string(currentSession.AAL),
+		"aal":             string(currentSession.AAL),
+		"amr":             strings.Join(sessionAMRValues(currentSession.AuthMethods), " "),
+		"sid":             currentSession.ID.String(),
+		"trusted_device":  strconv.FormatBool(trustedDevice),
+		"reauth_required": "false",
+	}
+}
+
+func sessionAMRValues(methods []coresession.SessionAuthMethod) []string {
+	if len(methods) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(methods))
+	amr := make([]string, 0, len(methods))
+	for _, method := range methods {
+		mapped := authMethodToAMR(method.Method)
+		if mapped == "" {
+			continue
+		}
+		if _, ok := seen[mapped]; ok {
+			continue
+		}
+		seen[mapped] = struct{}{}
+		amr = append(amr, mapped)
+	}
+	sort.Strings(amr)
+	return amr
+}
+
+func authMethodToAMR(method coresession.AuthMethod) string {
+	switch method {
+	case coresession.AuthMethodPassword:
+		return "pwd"
+	case coresession.AuthMethodTOTP, coresession.AuthMethodMagicLink, coresession.AuthMethodSMS, coresession.AuthMethodBackup:
+		return "otp"
+	case coresession.AuthMethodWebAuthn, coresession.AuthMethodPasskey:
+		return "hwk"
+	case coresession.AuthMethodSocial, coresession.AuthMethodSAML:
+		return "federated"
+	default:
+		return ""
+	}
+}
+
+func parseExternalAuthMethod(raw string) (coresession.AuthMethod, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "social":
+		return coresession.AuthMethodSocial, nil
+	case "saml", "sso":
+		return coresession.AuthMethodSAML, nil
+	default:
+		return "", errors.New("unsupported external auth method")
+	}
+}
+
+func applySessionAuthMethod(currentSession *coresession.Session, method coresession.AuthMethod) {
+	if currentSession == nil {
+		return
+	}
+
+	for _, authMethod := range currentSession.AuthMethods {
+		if authMethod.Method == method {
+			return
+		}
+	}
+
+	now := time.Now().UTC()
+	currentSession.AuthMethods = append(currentSession.AuthMethods, coresession.SessionAuthMethod{
+		Method:      method,
+		CompletedAt: now,
+	})
+	if method == coresession.AuthMethodTOTP || method == coresession.AuthMethodWebAuthn || method == coresession.AuthMethodSMS || method == coresession.AuthMethodBackup {
+		currentSession.AAL = coresession.AAL2
+		currentSession.AuthenticatedAt = now
+	}
+}
+
+func (s *Server) applyAuthContextToFlow(ctx context.Context, flow *flows.Flow, currentSession *coresession.Session, authContext map[string]string) error {
+	if s == nil || s.flowService == nil || flow == nil || currentSession == nil {
+		return nil
+	}
+
+	flow.SetIdentity(currentSession.IdentityID)
+	flow.SetSession(currentSession.ID)
+	for key, value := range authContext {
+		flow.AddContext(key, value)
+	}
+	flow.AddContext("amr_values", sessionAMRValues(currentSession.AuthMethods))
+	return s.flowService.UpdateFlow(ctx, flow)
+}
+
+func mergeAuthContext(payload map[string]any, authContext map[string]string) {
+	if len(authContext) == 0 || payload == nil {
+		return
+	}
+	for key, value := range authContext {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		payload[key] = value
+	}
 }
 
 func acceptsJSON(r *http.Request) bool {

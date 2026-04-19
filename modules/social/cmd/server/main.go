@@ -15,6 +15,7 @@ import (
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
 	"github.com/aegion/aegion/modules/social/handler"
+	"github.com/aegion/aegion/modules/social/providers/catalog"
 	"github.com/aegion/aegion/modules/social/service"
 	"github.com/aegion/aegion/modules/social/store"
 )
@@ -31,6 +32,21 @@ const (
 )
 
 var runModuleServer = moduleserver.Run
+var buildRepositoryHook = buildRepository
+var newSocialServiceHook = func(repo store.Repository) runtimeSocialService { return service.New(repo) }
+var logFatal = log.Fatal
+var newPoolWithConfigHook = pgxpool.NewWithConfig
+var poolPingHook = func(ctx context.Context, pool *pgxpool.Pool) error { return pool.Ping(ctx) }
+var poolCloseHook = func(pool *pgxpool.Pool) { pool.Close() }
+var deriveCipherKeyHook = deriveCipherKey
+var newPostgresRepoHook = func(pool *pgxpool.Pool, cipherKey []byte) (store.Repository, error) {
+	return store.NewPostgres(pool, cipherKey)
+}
+
+type runtimeSocialService interface {
+	handler.SocialService
+	EnsurePresetProviders(ctx context.Context) error
+}
 
 func defaultListenAddr() string {
 	return moduleserver.EnvOrDefault(listenAddrEnv, defaultListen)
@@ -53,30 +69,37 @@ func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)
 }
 
 func main() {
-	listenAddr := flag.String("listen", defaultListenAddr(), "HTTP listen address")
-	flag.Parse()
+	if err := run(os.Args[1:]); err != nil {
+		logFatal(err)
+	}
+}
+
+func run(args []string) error {
+	fs := flag.NewFlagSet("social-server", flag.ContinueOnError)
+	listenAddr := fs.String("listen", defaultListenAddr(), "HTTP listen address")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	ctx := context.Background()
-	repo, cleanup, err := buildRepository(ctx)
+	repo, cleanup, err := buildRepositoryHook(ctx)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer cleanup()
 
-	socialSvc := service.New(repo)
+	socialSvc := newSocialServiceHook(repo)
 	if err := socialSvc.EnsurePresetProviders(ctx); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := bootstrapEnvProviders(ctx, socialSvc); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	h := handler.New(socialSvc, handler.Config{
 		ManagementToken: strings.TrimSpace(os.Getenv(managementTokenEnv)),
 	})
-	if err := runModuleServer(moduleConfig(*listenAddr, h.RegisterRoutes)); err != nil {
-		log.Fatal(err)
-	}
+	return runModuleServer(moduleConfig(*listenAddr, h.RegisterRoutes))
 }
 
 func buildRepository(ctx context.Context) (store.Repository, func(), error) {
@@ -95,29 +118,29 @@ func buildRepository(ctx context.Context) (store.Repository, func(), error) {
 	poolCfg.MaxConns = 10
 	poolCfg.MinConns = 1
 
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	pool, err := newPoolWithConfigHook(ctx, poolCfg)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := pool.Ping(pingCtx); err != nil {
-		pool.Close()
+	if err := poolPingHook(pingCtx, pool); err != nil {
+		poolCloseHook(pool)
 		return nil, nil, err
 	}
 
-	cipherKey, err := deriveCipherKey()
+	cipherKey, err := deriveCipherKeyHook()
 	if err != nil {
-		pool.Close()
+		poolCloseHook(pool)
 		return nil, nil, err
 	}
-	repo, err := store.NewPostgres(pool, cipherKey)
+	repo, err := newPostgresRepoHook(pool, cipherKey)
 	if err != nil {
-		pool.Close()
+		poolCloseHook(pool)
 		return nil, nil, err
 	}
-	return repo, pool.Close, nil
+	return repo, func() { poolCloseHook(pool) }, nil
 }
 
 func deriveCipherKey() ([]byte, error) {
@@ -132,8 +155,10 @@ func deriveCipherKey() ([]byte, error) {
 	return sum[:], nil
 }
 
-func bootstrapEnvProviders(ctx context.Context, svc *service.Service) error {
-	for _, slug := range []string{"google", "github", "apple", "microsoft", "gitlab", "roblox"} {
+func bootstrapEnvProviders(ctx context.Context, svc interface {
+	UpsertProvider(ctx context.Context, req service.ProviderUpsertRequest) (*store.Provider, error)
+}) error {
+	for _, slug := range catalog.Names() {
 		req := envProviderRequest(slug)
 		if req == nil {
 			continue

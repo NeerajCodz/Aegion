@@ -1,0 +1,21 @@
+{
+  "slug": "google",
+  "display_name": "Google",
+  "preset": "google",
+  "protocol": "oidc",
+  "issuer": "https://accounts.google.com",
+  "discovery_url": "https://accounts.google.com/.well-known/openid-configuration",
+  "scopes": ["openid", "email", "profile"],
+  "claim_mapping": {
+    "subject": "sub",
+    "email": "email",
+    "email_verified": "email_verified",
+    "name": "name",
+    "picture": "picture"
+  },
+  "pkce_method": "S256",
+  "auth_style": "client_secret_post",
+  "claim_source": "userinfo",
+  "enabled": false,
+  "trust_email_verified": true
+}

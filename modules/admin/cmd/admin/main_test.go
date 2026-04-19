@@ -459,6 +459,7 @@ func baseRunDeps(cfg *Config) (mainDeps, *bytes.Buffer, *testRuntimeServer) {
 		loadConfig: func(path string) (*Config, error) {
 			return cfg, nil
 		},
+		rustSelfCheck: func() error { return nil },
 		setupLogger:   func(logConfig LogConfig) {},
 		parseDBConfig: func(connString string) (*pgxpool.Config, error) { return &pgxpool.Config{}, nil },
 		newDBPool:     func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error) { return nil, nil },
@@ -506,6 +507,18 @@ func TestRun(t *testing.T) {
 		err := run(nil, deps)
 		if err == nil || !strings.Contains(err.Error(), "failed to load configuration") {
 			t.Fatalf("expected load config error, got %v", err)
+		}
+	})
+
+	t.Run("rust runtime self-check error", func(t *testing.T) {
+		deps, _, _ := baseRunDeps(baseRunConfig())
+		deps.rustSelfCheck = func() error {
+			return errors.New("ffi unavailable")
+		}
+
+		err := run(nil, deps)
+		if err == nil || !strings.Contains(err.Error(), "failed rust runtime self-check") {
+			t.Fatalf("expected rust runtime self-check error, got %v", err)
 		}
 	})
 
