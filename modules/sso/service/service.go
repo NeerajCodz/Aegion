@@ -162,18 +162,9 @@ func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, e
 		resolvedAttributes[key] = value
 	}
 	if rawSAML := stringValue(resolvedAttributes["_saml_response"]); rawSAML != "" {
-		parsed, err := parseSAMLResponse(rawSAML, connection, state.RequestID, s.now())
-		if err != nil {
-			return nil, err
-		}
-		subject = firstNonEmpty(parsed.Subject, subject)
-		email = firstNonEmpty(parsed.Email, email)
-		displayName = firstNonEmpty(parsed.DisplayName, displayName)
-		for key, value := range parsed.Attributes {
-			if _, ok := resolvedAttributes[key]; !ok {
-				resolvedAttributes[key] = value
-			}
-		}
+		// Reject raw SAML assertions until XML signature validation is implemented.
+		// Parsing untrusted assertions enables authentication bypass.
+		return nil, ErrInvalidSAMLResponse
 	}
 	if strings.TrimSpace(subject) == "" && connection.AttributeMapping.Subject != "" {
 		subject = stringValue(resolvedAttributes[connection.AttributeMapping.Subject])
