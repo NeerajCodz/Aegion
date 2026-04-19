@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/internal/platform/database"
 	magiclinkservice "github.com/aegion/aegion/modules/magic_link/service"
 	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
@@ -326,6 +327,16 @@ func TestHandleCompleteExternalLoginAdditionalBranches(t *testing.T) {
 	t.Run("returns execution failure when session creation fails", func(t *testing.T) {
 		s, _ := newFlowServer(t)
 		s.sessionManager = &stubRouteSessionManager{createErr: errors.New("session create failed")}
+		callback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"identity_id": uuid.New().String(),
+				"profile": map[string]any{
+					"email": "person@example.com",
+				},
+			})
+		}))
+		defer callback.Close()
+		registerTestModule(t, s, "social", registry.EndpointHTTP, callback.URL)
 
 		flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
 		if err != nil {
@@ -334,10 +345,12 @@ func TestHandleCompleteExternalLoginAdditionalBranches(t *testing.T) {
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
-			"flow_id":     flow.ID.String(),
-			"csrf_token":  flow.CSRFToken,
-			"identity_id": uuid.New().String(),
-			"method":      "social",
+			"flow_id":    flow.ID.String(),
+			"csrf_token": flow.CSRFToken,
+			"method":     "social",
+			"provider":   "github",
+			"state":      "state-123",
+			"code":       "code-123",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		s.handleCompleteExternalLogin(rec, req)
@@ -474,4 +487,3 @@ func TestHandleMagicLinkVerifyAdditionalBranches(t *testing.T) {
 		}
 	})
 }
-

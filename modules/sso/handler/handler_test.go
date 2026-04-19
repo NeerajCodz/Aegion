@@ -123,7 +123,7 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 	})
 }
 
-func TestHandleCallbackIgnoresUntrustedIdentityFields(t *testing.T) {
+func TestHandleCallbackRejectsUntrustedIdentityFields(t *testing.T) {
 	svc := &captureSSOService{}
 	h := New(svc)
 	mux := http.NewServeMux()
@@ -134,23 +134,10 @@ func TestHandleCallbackIgnoresUntrustedIdentityFields(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("expected %d, got %d", http.StatusSeeOther, rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
 	}
-	if svc.relayState != "relay-state" {
-		t.Fatalf("expected relay state to be forwarded, got %q", svc.relayState)
-	}
-	if svc.subject != "" || svc.email != "" || svc.displayName != "" {
-		t.Fatalf("expected callback identity fields to be stripped, got subject=%q email=%q display_name=%q", svc.subject, svc.email, svc.displayName)
-	}
-	if got := svc.attributes["_saml_response"]; got != "fake" {
-		t.Fatalf("expected SAML response to be forwarded, got %+v", got)
-	}
-	recipients, ok := svc.attributes["_expected_recipients"].([]string)
-	if !ok || len(recipients) == 0 {
-		t.Fatalf("expected callback recipients to be forwarded, got %+v", svc.attributes["_expected_recipients"])
-	}
-	if got := svc.attributes["attributes"]; got != nil {
-		t.Fatalf("expected untrusted attributes to be dropped, got %+v", got)
+	if svc.relayState != "" || svc.attributes != nil {
+		t.Fatalf("expected callback to be rejected before service invocation, got relay_state=%q attrs=%+v", svc.relayState, svc.attributes)
 	}
 }
