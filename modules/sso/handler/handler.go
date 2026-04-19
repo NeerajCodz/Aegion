@@ -138,8 +138,13 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		}
 	}
 	relayState := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("RelayState"), r.FormValue("RelayState"), r.URL.Query().Get("state")))
-	// Reject caller-supplied identity claims from callback request payloads.
-	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, "", "", "", nil)
+	attrs := map[string]interface{}{
+		"_expected_recipients": expectedRecipients(r),
+	}
+	if samlResponse := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("SAMLResponse"), r.FormValue("SAMLResponse"))); samlResponse != "" {
+		attrs["_saml_response"] = samlResponse
+	}
+	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, "", "", "", attrs)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid sso callback")
 		return
@@ -253,6 +258,55 @@ func withQuery(target string, additions map[string]string) string {
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func expectedRecipients(r *http.Request) []string {
+	if r == nil || r.URL == nil {
+		return nil
+	}
+	pathOnly := strings.TrimSpace(r.URL.Path)
+	proto := firstForwardedValue(r.Header.Get("X-Forwarded-Proto"))
+	if proto == "" {
+		if r.TLS != nil {
+			proto = "https"
+		} else {
+			proto = "http"
+		}
+	}
+	host := firstForwardedValue(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+
+	out := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+
+	if host != "" {
+		add(strings.ToLower(strings.TrimSpace(proto)) + "://" + host + pathOnly)
+	}
+	add(pathOnly)
+	return out
+}
+
+func firstForwardedValue(raw string) string {
+	parts := strings.Split(raw, ",")
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
 			return value
 		}
 	}
