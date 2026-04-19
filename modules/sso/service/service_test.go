@@ -113,7 +113,7 @@ func TestUpsertConnectionHydratesMetadata(t *testing.T) {
 	}
 }
 
-func TestCompleteAuthFromSAMLResponse(t *testing.T) {
+func TestCompleteAuthRejectsRawSAMLResponse(t *testing.T) {
 	repo := store.New()
 	svc := New(repo, []byte("01234567890123456789012345678901"))
 	ctx := context.Background()
@@ -143,14 +143,11 @@ func TestCompleteAuthFromSAMLResponse(t *testing.T) {
 	}
 	expires := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339)
 	xmlResponse := `<Response InResponseTo="` + state.RequestID + `"><Issuer>urn:test:idp</Issuer><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Issuer>urn:test:idp</Issuer><Subject><NameID>sub-xml</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="` + state.RequestID + `" NotOnOrAfter="` + expires + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + expires + `"/><AttributeStatement><Attribute Name="email"><AttributeValue>xml@example.com</AttributeValue></Attribute><Attribute Name="display_name"><AttributeValue>XML User</AttributeValue></Attribute></AttributeStatement></Assertion></Response>`
-	result, err := svc.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", map[string]interface{}{
+	_, err = svc.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", map[string]interface{}{
 		"_saml_response": base64.StdEncoding.EncodeToString([]byte(xmlResponse)),
 	})
-	if err != nil {
-		t.Fatalf("complete auth from saml response: %v", err)
-	}
-	if result.Subject != "sub-xml" || result.Email != "xml@example.com" || result.DisplayName != "XML User" {
-		t.Fatalf("unexpected callback result: %+v", result)
+	if err == nil {
+		t.Fatal("expected raw SAMLResponse to be rejected")
 	}
 }
 

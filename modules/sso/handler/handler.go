@@ -145,9 +145,6 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 	if raw := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("attributes"), r.FormValue("attributes"))); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &attrs)
 	}
-	if samlResponse := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("SAMLResponse"), r.FormValue("SAMLResponse"))); samlResponse != "" {
-		attrs["_saml_response"] = samlResponse
-	}
 	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, subject, email, displayName, attrs)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid sso callback")
