@@ -94,4 +94,13 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
 	})
+
+	t.Run("callback rejects caller supplied identity", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/self-service/sso/acme/callback?RelayState=relay&subject=attacker", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
 }
