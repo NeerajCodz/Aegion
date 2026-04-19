@@ -17,6 +17,8 @@ type mockAuthzStore struct {
 	client            *store.Client
 	clientErr         error
 	authCode          *store.AuthCode
+	sessionAuthCtx    *store.SessionAuthContext
+	getSessionAuthErr error
 	getLoginErr       error
 	getConsentErr     error
 	loginChallenge    *store.LoginChallenge
@@ -67,6 +69,16 @@ func (m *mockAuthzStore) MarkAuthCodeUsed(ctx context.Context, code string) erro
 		return nil
 	}
 	return store.ErrNotFound
+}
+
+func (m *mockAuthzStore) GetSessionAuthContext(ctx context.Context, sessionID string) (*store.SessionAuthContext, error) {
+	if m.getSessionAuthErr != nil {
+		return nil, m.getSessionAuthErr
+	}
+	if m.sessionAuthCtx != nil {
+		return m.sessionAuthCtx, nil
+	}
+	return nil, store.ErrNotFound
 }
 
 func (m *mockAuthzStore) CreateLoginChallenge(ctx context.Context, challenge *store.LoginChallenge) error {
@@ -155,6 +167,7 @@ func TestStartAuthorization(t *testing.T) {
 		req := &AuthorizeRequest{
 			ClientID:     "client-123",
 			RedirectURI:  "https://app.example.com/callback",
+			RequestURL:   "/oauth2/authorize?client_id=client-123&response_type=code",
 			ResponseType: "code",
 			Scope:        "openid profile",
 		}
@@ -163,6 +176,7 @@ func TestStartAuthorization(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.LoginChallenge)
 		assert.NotEmpty(t, mockStore.loginChallenge)
+		assert.Equal(t, req.RequestURL, mockStore.loginChallenge.RequestURL)
 	})
 
 	t.Run("InvalidClient", func(t *testing.T) {
@@ -320,6 +334,42 @@ func TestAcceptConsent(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.Code)
 		assert.Equal(t, "state-123", resp.State)
+	})
+
+	t.Run("DerivesAuthContextFromSession", func(t *testing.T) {
+		authTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+		mockStore := &mockAuthzStore{
+			sessionAuthCtx: &store.SessionAuthContext{
+				AAL:             "aal2",
+				AuthenticatedAt: authTime,
+				Methods:         []string{"password", "totp"},
+			},
+			loginChallenge: &store.LoginChallenge{
+				ID:        "lc_ctx",
+				ClientID:  "client-123",
+				State:     ptrString("state-ctx"),
+				ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+			},
+			consentChallenge: &store.ConsentChallenge{
+				ID:               "cc_ctx",
+				LoginChallengeID: "lc_ctx",
+				ClientID:         "client-123",
+				IdentityID:       "identity-ctx",
+				SessionID:        "session-ctx",
+				RequestedScopes:  []string{"openid"},
+				Handled:          false,
+				ExpiresAt:        time.Now().UTC().Add(10 * time.Minute),
+			},
+		}
+		svc := NewAuthorizationService(mockStore)
+
+		resp, err := svc.AcceptConsent(ctx, "cc_ctx", []string{"openid"}, false, nil)
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.Code)
+		require.NotNil(t, mockStore.authCode)
+		assert.Equal(t, "aal2", mockStore.authCode.ACR)
+		assert.Equal(t, []string{"pwd", "otp"}, mockStore.authCode.AMR)
+		assert.Equal(t, authTime, mockStore.authCode.AuthTime)
 	})
 }
 

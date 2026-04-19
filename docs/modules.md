@@ -2,8 +2,8 @@
 
 Every Aegion capability is a module. Every module is a standalone Docker image. `core` pulls and orchestrates them.
 
-> **Implementation status (current repo):** currently integrated modules are `password`, `magic_link`, and `admin` (plus `core`).
-> Additional module directories now exist for `oauth2`, `policy`, `mfa`, `passkeys`, `social`, `sso`, `introspection`, `proxy`, and `cli`, with implementation depth varying by phase.
+> **Implementation status (current repo):** module maturity is tracked in `build/release-maturity.json` and summarized in [release-maturity-matrix.md](release-maturity-matrix.md).
+> Aegion runs hybrid-first: core remains control-plane ingress while standalone modules are enabled by deployment needs and maturity gate.
 
 ---
 
@@ -56,7 +56,7 @@ The user never writes a compose entry for `aegion-mfa`. They never manage module
 | `aegion/aegion-social` | `social` | off | OAuth2/OIDC social login providers |
 | `aegion/aegion-sso` | `sso` | off | Enterprise SAML SSO + SCIM 2.0 provisioning |
 | `aegion/aegion-oauth2` | `oauth2` | off | OAuth2/OIDC authorization server |
-| `aegion/aegion-introspect` | `introspect` | off | RFC 7662 token introspection |
+| `aegion/aegion-introspection` | `introspection` | off | RFC 7662 token introspection |
 | `aegion/aegion-policy` | `policy` | off | RBAC + ABAC + ReBAC authorization engine |
 | `aegion/aegion-proxy` | `proxy` | off | Identity-aware ingress and policy enforcement |
 | `aegion/aegion-admin` | `admin` | on | Admin panel SPA + management APIs |

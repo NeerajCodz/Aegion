@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/bcrypt"
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 )
 
 // AdminCredentials represents admin login credentials

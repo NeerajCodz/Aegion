@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -110,6 +111,24 @@ func TestConstantTimeCompare(t *testing.T) {
 				t.Errorf("ConstantTimeCompare(%v, %v) = %v, want %v", tt.a, tt.b, result, tt.want)
 			}
 		})
+	}
+}
+
+func TestRuntimeSelfCheck(t *testing.T) {
+	if err := RuntimeSelfCheck(); err != nil {
+		t.Fatalf("RuntimeSelfCheck() error = %v, want nil", err)
+	}
+}
+
+func TestRuntimeSelfCheckFailure(t *testing.T) {
+	origCompare := runtimeSelfCheckCompare
+	t.Cleanup(func() { runtimeSelfCheckCompare = origCompare })
+
+	runtimeSelfCheckCompare = func(_, _ []byte) bool { return false }
+
+	err := RuntimeSelfCheck()
+	if !errors.Is(err, ErrRuntimeSelfCheck) {
+		t.Fatalf("RuntimeSelfCheck() error = %v, want %v", err, ErrRuntimeSelfCheck)
 	}
 }
 

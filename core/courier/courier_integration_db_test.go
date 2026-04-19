@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -14,53 +15,35 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+const courierIntegrationDatabaseURLEnv = "AEGION_COURIER_TEST_DATABASE_URL"
 
 // ============================================================================
 // DATABASE SETUP
 // ============================================================================
 
-// setupTestDB creates a test PostgreSQL container and returns connection pool
-func setupTestDB(ctx context.Context) (*pgxpool.Pool, testcontainers.Container, error) {
-	container, err := postgres.RunContainer(
-		ctx,
-		testcontainers.WithImage("postgres:15"),
-		postgres.WithDatabase("courier_test"),
-		postgres.WithUsername("postgres"),
-		postgres.WithPassword("password"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(10*time.Second),
-		),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to start postgres container: %w", err)
-	}
-
-	// Get connection string
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get connection string: %w", err)
+// setupTestDB uses an operator-provided PostgreSQL instance for integration tests.
+func setupTestDB(ctx context.Context) (*pgxpool.Pool, error) {
+	connStr := os.Getenv(courierIntegrationDatabaseURLEnv)
+	if connStr == "" {
+		return nil, fmt.Errorf("%s is not set", courierIntegrationDatabaseURLEnv)
 	}
 
 	// Create connection pool
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create connection pool: %w", err)
+		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
 	// Create tables
 	err = createTestTables(ctx, pool)
 	if err != nil {
 		pool.Close()
-		return nil, nil, fmt.Errorf("failed to create tables: %w", err)
+		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
-	return pool, container, nil
+	return pool, nil
 }
 
 // createTestTables creates the courier message table for testing
@@ -104,14 +87,14 @@ func TestQueueEmailIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
+	if os.Getenv(courierIntegrationDatabaseURLEnv) == "" {
+		t.Skipf("%s is not set", courierIntegrationDatabaseURLEnv)
+	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -187,14 +170,14 @@ func TestSendVerificationEmailIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test")
 	}
+	if os.Getenv(courierIntegrationDatabaseURLEnv) == "" {
+		t.Skipf("%s is not set", courierIntegrationDatabaseURLEnv)
+	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,

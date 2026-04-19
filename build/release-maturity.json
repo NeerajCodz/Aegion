@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-04-15",
+  "maturity_levels": ["GA", "Beta", "Not GA"],
+  "modules": {
+    "core": {
+      "status": "GA",
+      "deployment": "hybrid-control-plane",
+      "summary": "Primary ingress, orchestration, and shared auth/session runtime.",
+      "caveats": [],
+      "required_gates": ["ci", "security", "release-manifest", "release-maturity", "release-checklist"]
+    },
+    "password": {
+      "status": "GA",
+      "deployment": "embedded",
+      "summary": "Stable password flow integrated with core session lifecycle.",
+      "caveats": [],
+      "required_gates": ["ci", "security", "release-checklist", "auth-e2e"]
+    },
+    "magic_link": {
+      "status": "GA",
+      "deployment": "embedded",
+      "summary": "Stable passwordless and recovery delivery path in core.",
+      "caveats": [],
+      "required_gates": ["ci", "security", "release-checklist", "auth-e2e"]
+    },
+    "policy": {
+      "status": "Beta",
+      "deployment": "embedded-default",
+      "summary": "Policy is embedded by default at GA while extraction remains optional.",
+      "caveats": [
+        "Standalone extraction is not required in current GA train.",
+        "Operator-facing authoring/simulation hardening is in progress."
+      ],
+      "required_gates": ["ci", "security", "release-checklist", "policy-simulation"]
+    },
+    "admin": {
+      "status": "Beta",
+      "deployment": "standalone",
+      "summary": "Admin backend is broad; SPA parity and contract harmonization are still closing.",
+      "caveats": [
+        "Some backend surfaces are ahead of SPA coverage.",
+        "Uniform pagination/filter/error contracts are still being finalized."
+      ],
+      "required_gates": ["ci", "security", "release-checklist", "admin-e2e"]
+    },
+    "oauth2": {
+      "status": "Beta",
+      "deployment": "standalone",
+      "summary": "OAuth2/OIDC flows are implemented with remaining protocol-closure items.",
+      "caveats": [
+        "Request URL persistence and subject strategy closure are pending.",
+        "ACR/AMR/auth_time propagation is being finalized."
+      ],
+      "required_gates": ["ci", "security", "release-checklist", "oauth2-e2e"]
+    },
+    "social": {
+      "status": "Beta",
+      "deployment": "standalone",
+      "summary": "Provider registry and social flows are functional with remaining hardening.",
+      "caveats": [
+        "Final callback-completion convergence with core auth orchestration is in progress."
+      ],
+      "required_gates": ["ci", "security", "release-checklist", "auth-e2e"]
+    },
+    "sso": {
+      "status": "Beta",
+      "deployment": "standalone",
+      "summary": "SAML connection registry and callback model are present and being hardened.",
+      "caveats": [
+        "Enterprise-grade validation and lifecycle policy closure is in progress."
+      ],
+      "required_gates": ["ci", "security", "release-checklist", "enterprise-e2e"]
+    },
+    "introspection": {
+      "status": "Beta",
+      "deployment": "standalone",
+      "summary": "Token introspection service exists and depends on OAuth2 token-state alignment.",
+      "caveats": [
+        "Final consistency gates follow OAuth2 token model closure."
+      ],
+      "required_gates": ["ci", "security", "release-checklist", "oauth2-e2e"]
+    },
+    "proxy": {
+      "status": "Beta",
+      "deployment": "standalone",
+      "summary": "Proxy control-plane and route simulation exist with operator-hardening in progress.",
+      "caveats": [
+        "Policy attachment diagnostics and signed-header operator visibility are still maturing."
+      ],
+      "required_gates": ["ci", "security", "release-checklist", "proxy-simulation"]
+    },
+    "mfa": {
+      "status": "Not GA",
+      "deployment": "standalone",
+      "summary": "MFA module exists but is not release-hardened for GA support.",
+      "caveats": [
+        "Not approved for GA workloads."
+      ],
+      "required_gates": []
+    },
+    "passkeys": {
+      "status": "Not GA",
+      "deployment": "standalone",
+      "summary": "Passkeys module exists but is not release-hardened for GA support.",
+      "caveats": [
+        "Not approved for GA workloads."
+      ],
+      "required_gates": []
+    },
+    "cli": {
+      "status": "Not GA",
+      "deployment": "standalone",
+      "summary": "CLI gateway module exists but is not GA-scoped for production commitments.",
+      "caveats": [
+        "Not approved for GA workloads."
+      ],
+      "required_gates": []
+    }
+  }
+}

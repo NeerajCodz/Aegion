@@ -22,9 +22,32 @@ export function operatorHasPermission(operator: Operator | null | undefined, req
 
   const fallbackByRole: Record<string, string[]> = {
     super_admin: ['*'],
-    admin: ['identities:*', 'sessions:*', 'config:read', 'config:update', 'audit:read', 'operators:read', 'roles:read'],
-    operator: ['identities:read', 'identities:update', 'sessions:read', 'sessions:delete', 'audit:read'],
-    viewer: ['identities:read', 'sessions:read', 'config:read', 'audit:read'],
+    admin: [
+      'identities:*',
+      'sessions:*',
+      'config:read',
+      'config:update',
+      'audit:read',
+      'operators:read',
+      'roles:read',
+      'oauth2:clients:read',
+      'oauth2:clients:manage',
+      'oauth2:tokens:read',
+      'oauth2:tokens:revoke',
+      'security:read',
+      'security:create',
+      'security:delete',
+    ],
+    operator: ['identities:read', 'identities:update', 'sessions:read', 'sessions:delete', 'audit:read', 'security:read'],
+    viewer: [
+      'identities:read',
+      'sessions:read',
+      'config:read',
+      'audit:read',
+      'oauth2:clients:read',
+      'oauth2:tokens:read',
+      'security:read',
+    ],
   };
   const rolePermissions = fallbackByRole[operator.role.toLowerCase()] ?? [];
   return rolePermissions.some((permission) => matchesPermission(permission, required));

@@ -35,7 +35,9 @@ func (s *Store) CreateAuthCode(ctx context.Context, code *AuthCode) error {
 	}
 	now := nowUTC()
 	code.CreatedAt = now
-	code.AuthTime = now
+	if code.AuthTime.IsZero() {
+		code.AuthTime = now
+	}
 
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO oa2_auth_codes (

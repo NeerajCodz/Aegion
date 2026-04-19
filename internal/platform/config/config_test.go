@@ -336,6 +336,8 @@ func TestApplyDefaults(t *testing.T) {
 	assert.False(t, cfg.Proxy.TrustForwardedHeaders)
 	assert.Equal(t, "X-Aegion-Signature", cfg.Proxy.IdentitySignatureHeader)
 	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}, cfg.Proxy.SignedIdentityHeaders)
+	assert.Equal(t, "POST", cfg.Courier.SMS.Method)
+	assert.Equal(t, Duration(10*time.Second), cfg.Courier.SMS.Timeout)
 
 	// MFA / passkey defaults
 	assert.Equal(t, "Aegion", cfg.MFA.Issuer)
@@ -793,6 +795,26 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 			}(),
 			wantErr: "passkeys.rp_origin must use https in production",
 		},
+		{
+			name: "requires courier sms url when enabled",
+			cfg: func() *Config {
+				c := *valid
+				c.Courier.SMS.Enabled = true
+				c.Courier.SMS.URL = ""
+				return &c
+			}(),
+			wantErr: "courier.sms.url is required when sms delivery is enabled",
+		},
+		{
+			name: "requires https courier sms url in production",
+			cfg: func() *Config {
+				c := *valid
+				c.Courier.SMS.Enabled = true
+				c.Courier.SMS.URL = "http://sms.example.com/send"
+				return &c
+			}(),
+			wantErr: "courier.sms.url must use https in production",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1041,6 +1063,16 @@ security:
 
 func TestConfigYAMLTags_Phase3PolicyProxy(t *testing.T) {
 	yamlContent := `
+courier:
+  sms:
+    enabled: true
+    url: https://sms.example.com/send
+    method: POST
+    headers:
+      Authorization: Bearer token
+    body_template: '{"to":"{{.To}}","body":"{{.Body}}"}'
+    timeout: 5s
+
 policy:
   enabled: true
   default_model: rebac
@@ -1083,6 +1115,12 @@ proxy:
 	assert.Equal(t, "test-signing-secret", cfg.Proxy.IdentitySigningSecret)
 	assert.Equal(t, "X-Test-Signature", cfg.Proxy.IdentitySignatureHeader)
 	assert.Equal(t, []string{"X-User-ID", "X-User-Session-ID"}, cfg.Proxy.SignedIdentityHeaders)
+	assert.True(t, cfg.Courier.SMS.Enabled)
+	assert.Equal(t, "https://sms.example.com/send", cfg.Courier.SMS.URL)
+	assert.Equal(t, "POST", cfg.Courier.SMS.Method)
+	assert.Equal(t, "Bearer token", cfg.Courier.SMS.Headers["Authorization"])
+	assert.Equal(t, `{"to":"{{.To}}","body":"{{.Body}}"}`, cfg.Courier.SMS.BodyTemplate)
+	assert.Equal(t, Duration(5*time.Second), cfg.Courier.SMS.Timeout)
 }
 
 func TestLoad_Integration(t *testing.T) {

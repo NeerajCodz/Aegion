@@ -82,6 +82,13 @@ logs/
 # Local test/coverage artifacts
 coverage-focus
 coverage-store
+coverage-html
+coverage-profile
+coverage-raw
+coverage_out
+coverage_all
+local_cov
+oauth2_store_cov
 cover_router
 /handler
 /registry

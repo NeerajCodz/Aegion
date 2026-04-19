@@ -14,6 +14,7 @@ on:
 env:
   GO_VERSION: '1.25.9'
   RUST_VERSION: 'stable'
+  NODE_VERSION: '22'
   CARGO_TERM_COLOR: always
 
 permissions:
@@ -96,6 +97,102 @@ jobs:
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # Go Vulnerability Scanning
+  # ---------------------------------------------------------------------------
+  govulncheck:
+    name: Go Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: |
+          packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
+          if [ -z "$packages" ]; then
+            echo "No Go packages found for govulncheck"
+            exit 1
+          fi
+          govulncheck $packages
+
+  # ---------------------------------------------------------------------------
+  # Go Static Security Scan
+  # ---------------------------------------------------------------------------
+  gosec:
+    name: Go Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run gosec
+        uses: securego/gosec@v2.25.0
+        with:
+          args: -severity high -confidence high -exclude-generated ./...
+
+  # ---------------------------------------------------------------------------
+  # Rust Dependency Security Gates
+  # ---------------------------------------------------------------------------
+  cargo-security:
+    name: Rust Audit and Deny
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install cargo-audit and cargo-deny
+        run: |
+          cargo install --locked cargo-audit
+          cargo install --locked cargo-deny
+
+      - name: Run cargo audit
+        run: cargo audit --deny warnings
+
+      - name: Run cargo deny
+        run: cargo deny check advisories
+
+  # ---------------------------------------------------------------------------
+  # Secret Scanning
+  # ---------------------------------------------------------------------------
+  gitleaks:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ---------------------------------------------------------------------------
   # Determine Module Scope for Per-Module Checks
@@ -260,6 +357,85 @@ jobs:
 
       - name: Validate release manifest schema and coverage
         run: bash ./scripts/check-release-manifest.sh
+
+  # ---------------------------------------------------------------------------
+  # Release Maturity Matrix Discipline
+  # ---------------------------------------------------------------------------
+  release-maturity:
+    name: Release Maturity Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate release maturity matrix schema and coverage
+        run: bash ./scripts/check-release-maturity.sh
+
+  # ---------------------------------------------------------------------------
+  # Release Checklist Discipline
+  # ---------------------------------------------------------------------------
+  release-checklist:
+    name: Release Checklist Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate release checklist
+        run: bash ./scripts/check-release-checklist.sh
+
+  # ---------------------------------------------------------------------------
+  # Rust FFI Usage Discipline
+  # ---------------------------------------------------------------------------
+  rust-ffi-usage:
+    name: Rust FFI Usage Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate Rust-backed crypto/JWT usage
+        run: bash ./scripts/check-rust-ffi-usage.sh
+
+  # ---------------------------------------------------------------------------
+  # Admin SPA Build and Test
+  # ---------------------------------------------------------------------------
+  admin-spa:
+    name: Admin SPA Build/Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/admin/spa
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: modules/admin/spa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint SPA
+        run: npm run lint
+
+      - name: Build SPA
+        run: npm run build
+
+      - name: Run SPA tests (if present)
+        run: npm run test --if-present
 
   # ---------------------------------------------------------------------------
   # Go Tests with Coverage
@@ -433,6 +609,9 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      - name: Run workspace tests
+        run: cargo test --workspace
+
       - name: Run tests with coverage
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
 
@@ -455,10 +634,18 @@ jobs:
     needs:
       - go-lint
       - rust-lint
+      - govulncheck
+      - gosec
+      - cargo-security
+      - gitleaks
       - detect-modules
       - module-check
       - proto-consistency
       - release-manifest
+      - release-maturity
+      - release-checklist
+      - rust-ffi-usage
+      - admin-spa
       - go-test
       - go-test-full
       - integration-smoke
@@ -480,10 +667,18 @@ jobs:
 
           check_result "go-lint" "${{ needs.go-lint.result }}"
           check_result "rust-lint" "${{ needs.rust-lint.result }}"
+          check_result "govulncheck" "${{ needs.govulncheck.result }}"
+          check_result "gosec" "${{ needs.gosec.result }}"
+          check_result "cargo-security" "${{ needs.cargo-security.result }}"
+          check_result "gitleaks" "${{ needs.gitleaks.result }}"
           check_result "detect-modules" "${{ needs.detect-modules.result }}"
           check_result "module-check" "${{ needs.module-check.result }}"
           check_result "proto-consistency" "${{ needs.proto-consistency.result }}"
           check_result "release-manifest" "${{ needs.release-manifest.result }}"
+          check_result "release-maturity" "${{ needs.release-maturity.result }}"
+          check_result "release-checklist" "${{ needs.release-checklist.result }}"
+          check_result "rust-ffi-usage" "${{ needs.rust-ffi-usage.result }}"
+          check_result "admin-spa" "${{ needs.admin-spa.result }}"
           check_result "go-test" "${{ needs.go-test.result }}"
           check_result "go-test-full" "${{ needs.go-test-full.result }}"
           check_result "integration-smoke" "${{ needs.integration-smoke.result }}"

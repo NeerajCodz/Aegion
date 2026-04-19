@@ -144,7 +144,7 @@ This document tracks security hardening measures implemented and verified across
 - [x] Go modules with checksums (go.sum)
 - [x] Rust crate verification (Cargo.lock)
 - [ ] Software Bill of Materials (SBOM) generation
-- [ ] Dependency vulnerability scanning (Trivy, Snyk)
+- [x] Dependency vulnerability scanning (Trivy, govulncheck, cargo-audit/deny)
 - [ ] Automated dependency updates (Dependabot)
 
 ### 7.2 Build Pipeline
@@ -204,7 +204,7 @@ This document tracks security hardening measures implemented and verified across
 - [x] Integration tests for auth flows
 - [ ] Penetration testing (annual)
 - [ ] Security fuzzing
-- [ ] Static analysis (gosec)
+- [x] Static analysis (gosec)
 
 ### 10.2 Chaos Engineering
 - [ ] Module failure scenarios

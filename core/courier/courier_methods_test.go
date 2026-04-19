@@ -251,10 +251,10 @@ func TestSendSMSErrors(t *testing.T) {
 
 	courier := New(cfg)
 
-	// sendSMS should return an error since it's not implemented
+	// sendSMS should fail closed when no SMS gateway is configured
 	err := courier.sendSMS("+1234567890", "Test message")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "SMS delivery not implemented")
+	assert.Contains(t, err.Error(), "sms delivery is not configured")
 }
 
 // ============================================================================

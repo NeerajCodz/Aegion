@@ -3,6 +3,7 @@ package scim
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -312,7 +313,7 @@ func TestGetServiceProviderConfig(t *testing.T) {
 	assert.True(t, config.Filter.Supported)
 	assert.Equal(t, 1000, config.Filter.MaxResults)
 	assert.True(t, config.Sort.Supported)
-	assert.False(t, config.ETag.Supported)
+	assert.True(t, config.ETag.Supported)
 	assert.False(t, config.ChangePassword.Supported)
 }
 
@@ -415,7 +416,9 @@ func TestCreateUser(t *testing.T) {
 	assert.NotNil(t, createdUser.Meta.Created)
 	assert.NotNil(t, createdUser.Meta.LastModified)
 	assert.Equal(t, "User", createdUser.Meta.ResourceType)
-	assert.Equal(t, "1", createdUser.Meta.Version)
+	assert.NotEmpty(t, createdUser.Meta.Version)
+	_, parseErr := strconv.ParseInt(createdUser.Meta.Version, 10, 64)
+	assert.NoError(t, parseErr)
 	mockStore.AssertExpectations(t)
 }
 
@@ -844,6 +847,91 @@ func TestDeleteGroup(t *testing.T) {
 	mockStore.AssertExpectations(t)
 }
 
+// ============== MAPPING MANAGEMENT TESTS ==============
+
+func TestCreateSCIMMapping(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	ctx := context.Background()
+
+	mockStore.On("CreateSCIMMapping", ctx, mock.MatchedBy(func(mapping *SCIMMapping) bool {
+		return mapping.ID != uuid.Nil &&
+			mapping.Name == "Default Mapping" &&
+			mapping.UserNameSource == "email" &&
+			mapping.EmailSource == "primary"
+	})).Return(nil)
+
+	created, err := service.CreateSCIMMapping(ctx, &SCIMMapping{
+		Name: " Default Mapping ",
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, created)
+	assert.NotEqual(t, uuid.Nil, created.ID)
+	assert.Equal(t, "Default Mapping", created.Name)
+	assert.Equal(t, "email", created.UserNameSource)
+	assert.Equal(t, "primary", created.EmailSource)
+	assert.NotNil(t, created.NameMapping)
+	assert.NotNil(t, created.AttributeMapping)
+	assert.NotNil(t, created.GroupMapping)
+	mockStore.AssertExpectations(t)
+}
+
+func TestCreateSCIMMappingRequiresName(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	ctx := context.Background()
+
+	_, err := service.CreateSCIMMapping(ctx, &SCIMMapping{})
+
+	assert.ErrorIs(t, err, ErrRequiredMappingName)
+	mockStore.AssertNotCalled(t, "CreateSCIMMapping", mock.Anything, mock.Anything)
+}
+
+func TestUpdateSCIMMappingRequiresID(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	ctx := context.Background()
+
+	_, err := service.UpdateSCIMMapping(ctx, &SCIMMapping{
+		Name: "Existing Mapping",
+	})
+
+	assert.ErrorIs(t, err, ErrRequiredMappingID)
+	mockStore.AssertNotCalled(t, "UpdateSCIMMapping", mock.Anything, mock.Anything)
+}
+
+func TestListSCIMMappings(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	ctx := context.Background()
+
+	expected := []*SCIMMapping{
+		{ID: uuid.New(), Name: "Default Mapping"},
+	}
+	mockStore.On("ListSCIMMappings", ctx).Return(expected, nil)
+
+	mappings, err := service.ListSCIMMappings(ctx)
+
+	assert.NoError(t, err)
+	assert.Equal(t, expected, mappings)
+	mockStore.AssertExpectations(t)
+}
+
+func TestDeleteSCIMMapping(t *testing.T) {
+	mockStore := &MockStore{}
+	service := NewService(mockStore, nil)
+	ctx := context.Background()
+	mappingID := uuid.New()
+
+	mockStore.On("DeleteSCIMMapping", ctx, mappingID).Return(nil)
+
+	err := service.DeleteSCIMMapping(ctx, mappingID)
+
+	assert.NoError(t, err)
+	mockStore.AssertExpectations(t)
+}
+
 // ============== TOKEN MANAGEMENT TESTS ==============
 
 // Test Create SCIM Token
@@ -1219,6 +1307,39 @@ func TestListGroupsFilterError(t *testing.T) {
 
 	// Invalid filter format - should return error (only 1 part instead of 3)
 	_, err := service.ListGroups(ctx, "invalid", "", SortAscending, 1, 20)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid filter")
+}
+
+func TestListUsersFilterUnsupportedAttribute(t *testing.T) {
+	store := &NoOpStore{}
+	service := NewService(store, nil)
+	ctx := context.Background()
+
+	_, err := service.ListUsers(ctx, `id eq "123"`, "", SortAscending, 1, 20)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid filter")
+}
+
+func TestListUsersFilterUnsupportedOperator(t *testing.T) {
+	store := &NoOpStore{}
+	service := NewService(store, nil)
+	ctx := context.Background()
+
+	_, err := service.ListUsers(ctx, `userName ne "john"`, "", SortAscending, 1, 20)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid filter")
+}
+
+func TestListGroupsFilterUnsupportedAttribute(t *testing.T) {
+	store := &NoOpStore{}
+	service := NewService(store, nil)
+	ctx := context.Background()
+
+	_, err := service.ListGroups(ctx, `externalId eq "g1"`, "", SortAscending, 1, 20)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid filter")

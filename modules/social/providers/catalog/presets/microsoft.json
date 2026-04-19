@@ -1,0 +1,19 @@
+{
+  "slug": "microsoft",
+  "display_name": "Microsoft",
+  "preset": "microsoft",
+  "protocol": "oidc",
+  "discovery_url": "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration",
+  "scopes": ["openid", "email", "profile"],
+  "claim_mapping": {
+    "subject": "sub",
+    "email": "email|preferred_username",
+    "email_verified": "email_verified",
+    "name": "name"
+  },
+  "pkce_method": "S256",
+  "auth_style": "client_secret_post",
+  "claim_source": "userinfo",
+  "enabled": false,
+  "trust_email_verified": true
+}
