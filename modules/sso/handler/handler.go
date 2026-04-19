@@ -138,14 +138,8 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		}
 	}
 	relayState := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("RelayState"), r.FormValue("RelayState"), r.URL.Query().Get("state")))
-	subject := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("subject"), r.FormValue("subject"), r.URL.Query().Get("name_id"), r.FormValue("name_id")))
-	email := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("email"), r.FormValue("email")))
-	displayName := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("display_name"), r.FormValue("display_name")))
-	attrs := map[string]interface{}{}
-	if raw := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("attributes"), r.FormValue("attributes"))); raw != "" {
-		_ = json.Unmarshal([]byte(raw), &attrs)
-	}
-	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, subject, email, displayName, attrs)
+	// Reject caller-supplied identity claims from callback request payloads.
+	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, "", "", "", nil)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid sso callback")
 		return
