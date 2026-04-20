@@ -138,6 +138,10 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		}
 	}
 	relayState := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("RelayState"), r.FormValue("RelayState"), r.URL.Query().Get("state")))
+	if hasUntrustedIdentityInputs(r) {
+		writeError(w, http.StatusBadRequest, "identity attributes must not be supplied by callback caller")
+		return
+	}
 	attrs := map[string]interface{}{
 		"_expected_recipients": expectedRecipients(r),
 	}
@@ -159,6 +163,15 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func hasUntrustedIdentityInputs(r *http.Request) bool {
+	for _, key := range []string{"subject", "name_id", "email", "display_name", "attributes"} {
+		if strings.TrimSpace(firstNonEmpty(r.URL.Query().Get(key), r.FormValue(key))) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) handleAdminConnections(w http.ResponseWriter, r *http.Request) {

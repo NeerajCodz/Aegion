@@ -14,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/internal/platform/database"
 	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
 	mfaservice "github.com/aegion/aegion/modules/mfa/service"
 )
@@ -475,24 +477,45 @@ func TestHandleSubmitLoginUsesTrustedDeviceToBypassPrompt(t *testing.T) {
 	}
 }
 
-func TestHandleCompleteExternalLoginIssuesSession(t *testing.T) {
+func TestHandleCompleteExternalLoginVerifiesSocialCallbackAndIssuesSession(t *testing.T) {
 	s, store := newFlowServer(t)
 	sm := &stubRouteSessionManager{}
 	s.sessionManager = sm
+
+	identityID := uuid.New()
+	socialCallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/self-service/social/github/callback" {
+			t.Fatalf("unexpected callback path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("state"); got != "state-123" {
+			t.Fatalf("expected state-123 query param, got %q", got)
+		}
+		if got := r.URL.Query().Get("code"); got != "code-123" {
+			t.Fatalf("expected code-123 query param, got %q", got)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"identity_id": identityID.String(),
+			"profile": map[string]any{
+				"email": "person@example.com",
+			},
+		})
+	}))
+	defer socialCallback.Close()
+	registerTestModule(t, s, "social", registry.EndpointHTTP, socialCallback.URL)
 
 	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
 	if err != nil {
 		t.Fatalf("create login flow: %v", err)
 	}
 
-	identityID := uuid.New()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
-		"flow_id":     flow.ID.String(),
-		"csrf_token":  flow.CSRFToken,
-		"identity_id": identityID.String(),
-		"method":      "social",
-		"identifier":  "person@example.com",
+		"flow_id":    flow.ID.String(),
+		"csrf_token": flow.CSRFToken,
+		"method":     "social",
+		"provider":   "github",
+		"state":      "state-123",
+		"code":       "code-123",
 	}))
 	req.Header.Set("Content-Type", "application/json")
 	s.handleCompleteExternalLogin(rec, req)
@@ -522,12 +545,106 @@ func TestHandleCompleteExternalLoginIssuesSession(t *testing.T) {
 	}
 }
 
-func TestHandleCompleteExternalLoginSupportsMFAStepUp(t *testing.T) {
+func TestHandleCompleteExternalLoginVerifiesSAMLCallbackAndIssuesSession(t *testing.T) {
 	s, store := newFlowServer(t)
 	sm := &stubRouteSessionManager{}
-	mfa := &stubMFAFlowService{hasFactor: true}
 	s.sessionManager = sm
-	s.mfaAuth = mfa
+
+	expectedIdentity := uuid.New()
+	verifiedEmail := ""
+	s.db = &database.DB{}
+	s.dbQueryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
+		if strings.Contains(sql, "JOIN core_identity_addresses") {
+			return adminTestRow{scanFn: func(dest ...any) error {
+				*(dest[0].(*uuid.UUID)) = expectedIdentity
+				return nil
+			}}
+		}
+		return adminTestRow{scanFn: func(dest ...any) error { return pgx.ErrNoRows }}
+	}
+	s.dbExecFn = func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+		if strings.Contains(sql, "UPDATE core_identity_addresses") {
+			verifiedEmail = args[1].(string)
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}
+
+	forwardedHost := ""
+	forwardedProto := ""
+	ssoCallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/self-service/sso/acme/callback" {
+			t.Fatalf("unexpected callback path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("RelayState"); got != "relay-state-123" {
+			t.Fatalf("expected relay-state-123 query param, got %q", got)
+		}
+		if got := r.URL.Query().Get("SAMLResponse"); got != "saml-response-123" {
+			t.Fatalf("expected saml-response-123 query param, got %q", got)
+		}
+		forwardedHost = r.Header.Get("X-Forwarded-Host")
+		forwardedProto = r.Header.Get("X-Forwarded-Proto")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"email":         "person@example.com",
+			"jit_provision": false,
+		})
+	}))
+	defer ssoCallback.Close()
+	registerTestModule(t, s, "sso", registry.EndpointHTTP, ssoCallback.URL)
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
+		"flow_id":       flow.ID.String(),
+		"csrf_token":    flow.CSRFToken,
+		"method":        "saml",
+		"connection":    "acme",
+		"relay_state":   "relay-state-123",
+		"saml_response": "saml-response-123",
+	}))
+	req.Host = "login.example.com"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-Host", "attacker.example.com")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	s.handleCompleteExternalLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+	}
+	if len(sm.created) != 1 || sm.created[0].IdentityID != expectedIdentity {
+		t.Fatalf("expected session for %s, got %+v", expectedIdentity, sm.created)
+	}
+	if got := sm.created[0].AuthMethods[0].Method; got != session.AuthMethodSAML {
+		t.Fatalf("expected saml auth method, got %s", got)
+	}
+	if got := store.flows[flow.ID].State; got != flows.StateCompleted {
+		t.Fatalf("expected flow to be completed, got %s", got)
+	}
+	if verifiedEmail != "person@example.com" {
+		t.Fatalf("expected email verification update for person@example.com, got %q", verifiedEmail)
+	}
+	if forwardedHost != "login.example.com" || forwardedProto != "http" {
+		t.Fatalf("expected trusted forwarded values, got host=%q proto=%q", forwardedHost, forwardedProto)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["status"] != "authenticated" {
+		t.Fatalf("expected authenticated status, got %+v", body)
+	}
+	if body["amr"] != "federated" {
+		t.Fatalf("expected federated amr response, got %+v", body)
+	}
+}
+
+func TestHandleCompleteExternalLoginRejectsClientSuppliedIdentityID(t *testing.T) {
+	s, _ := newFlowServer(t)
+	s.sessionManager = &stubRouteSessionManager{}
 
 	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
 	if err != nil {
@@ -539,30 +656,13 @@ func TestHandleCompleteExternalLoginSupportsMFAStepUp(t *testing.T) {
 		"flow_id":     flow.ID.String(),
 		"csrf_token":  flow.CSRFToken,
 		"identity_id": uuid.New().String(),
-		"method":      "saml",
+		"method":      "social",
 	}))
 	req.Header.Set("Content-Type", "application/json")
 	s.handleCompleteExternalLogin(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
-	}
-	if len(sm.created) != 0 {
-		t.Fatalf("expected no session before MFA, got %+v", sm.created)
-	}
-	if got := store.flows[flow.ID].State; got != flows.StateActive {
-		t.Fatalf("expected flow to stay active, got %s", got)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body["status"] != "mfa_required" {
-		t.Fatalf("expected mfa_required status, got %+v", body)
-	}
-	if _, ok := body["flow"].(map[string]any); !ok {
-		t.Fatalf("expected flow payload in response, got %+v", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
 	}
 }
 
@@ -577,10 +677,9 @@ func TestHandleCompleteExternalLoginRejectsUnsupportedMethod(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
-		"flow_id":     flow.ID.String(),
-		"csrf_token":  flow.CSRFToken,
-		"identity_id": uuid.New().String(),
-		"method":      "oidc",
+		"flow_id":    flow.ID.String(),
+		"csrf_token": flow.CSRFToken,
+		"method":     "oidc",
 	}))
 	req.Header.Set("Content-Type", "application/json")
 	s.handleCompleteExternalLogin(rec, req)
