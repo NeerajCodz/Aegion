@@ -545,6 +545,47 @@ func TestHandleCompleteExternalLoginVerifiesSocialCallbackAndIssuesSession(t *te
 	}
 }
 
+func TestHandleCompleteExternalLoginRejectsInvalidSocialCallbackPayload(t *testing.T) {
+	s, store := newFlowServer(t)
+	sm := &stubRouteSessionManager{}
+	s.sessionManager = sm
+
+	socialCallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("invalid-json-payload"))
+	}))
+	defer socialCallback.Close()
+	registerTestModule(t, s, "social", registry.EndpointHTTP, socialCallback.URL)
+
+	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+	if err != nil {
+		t.Fatalf("create login flow: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
+		"flow_id":    flow.ID.String(),
+		"csrf_token": flow.CSRFToken,
+		"method":     "social",
+		"provider":   "github",
+		"state":      "state-123",
+		"code":       "code-123",
+	}))
+	req.Header.Set("Content-Type", "application/json")
+	s.handleCompleteExternalLogin(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected %d, got %d: %s", http.StatusBadGateway, rec.Code, rec.Body.String())
+	}
+	if len(sm.created) != 0 {
+		t.Fatalf("expected no session creation, got %+v", sm.created)
+	}
+	if got := store.flows[flow.ID].State; got != flows.StateActive {
+		t.Fatalf("expected flow to stay active, got %s", got)
+	}
+}
+
 func TestHandleCompleteExternalLoginVerifiesSAMLCallbackAndIssuesSession(t *testing.T) {
 	s, store := newFlowServer(t)
 	sm := &stubRouteSessionManager{}
@@ -644,7 +685,8 @@ func TestHandleCompleteExternalLoginVerifiesSAMLCallbackAndIssuesSession(t *test
 
 func TestHandleCompleteExternalLoginRejectsClientSuppliedIdentityID(t *testing.T) {
 	s, _ := newFlowServer(t)
-	s.sessionManager = &stubRouteSessionManager{}
+	sm := &stubRouteSessionManager{}
+	s.sessionManager = sm
 
 	flow, err := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
 	if err != nil {
@@ -663,6 +705,9 @@ func TestHandleCompleteExternalLoginRejectsClientSuppliedIdentityID(t *testing.T
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected %d, got %d: %s", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+	if len(sm.created) != 0 {
+		t.Fatalf("expected no session creation, got %+v", sm.created)
 	}
 }
 

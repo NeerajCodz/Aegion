@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -82,6 +83,11 @@ type ssoCallbackResponse struct {
 	Email        string `json:"email"`
 	JITProvision bool   `json:"jit_provision"`
 }
+
+const (
+	maxExternalCallbackBodyBytes int64         = 1 << 20
+	externalCallbackTimeout      time.Duration = 5 * time.Second
+)
 
 type flowHTTPError struct {
 	Status  int
@@ -1032,7 +1038,14 @@ func (s *Server) moduleCallbackURL(moduleID, modulePath string, query map[string
 }
 
 func (s *Server) fetchExternalCallback(ctx context.Context, callbackURL *url.URL, headers map[string]string, out interface{}) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, callbackURL.String(), nil)
+	requestCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		requestCtx, cancel = context.WithTimeout(ctx, externalCallbackTimeout)
+	}
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, callbackURL.String(), nil)
 	if err != nil {
 		return 0, err
 	}
@@ -1050,7 +1063,17 @@ func (s *Server) fetchExternalCallback(ctx context.Context, callbackURL *url.URL
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && out != nil {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		if !strings.Contains(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type"))), "application/json") {
+			return resp.StatusCode, errors.New("callback response must be application/json")
+		}
+		payload, err := io.ReadAll(io.LimitReader(resp.Body, maxExternalCallbackBodyBytes+1))
+		if err != nil {
+			return resp.StatusCode, err
+		}
+		if int64(len(payload)) > maxExternalCallbackBodyBytes {
+			return resp.StatusCode, errors.New("callback response exceeds size limit")
+		}
+		if err := json.Unmarshal(payload, out); err != nil {
 			return resp.StatusCode, err
 		}
 	}
