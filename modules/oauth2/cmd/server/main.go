@@ -43,16 +43,28 @@ const (
 )
 
 var (
-	loadConfigHook     = loadConfig
-	connectDBHook      = connectDB
-	buildHandlerHook   = buildHandler
-	newHTTPServerHook  = newHTTPServer
-	rustSelfCheckHook  = platformcrypto.RuntimeSelfCheck
-	notifySignalsHook  = signal.Notify
-	stopSignalsHook    = signal.Stop
-	listenAndServeHook = func(srv *http.Server) error {
-		return srv.ListenAndServe()
+	loadConfigHook        = loadConfig
+	connectDBHook         = connectDB
+	buildHandlerHook      = buildHandler
+	newHTTPServerHook     = newHTTPServer
+	rustSelfCheckHook     = platformcrypto.RuntimeSelfCheck
+	notifySignalsHook     = signal.Notify
+	stopSignalsHook       = signal.Stop
+	fatalHook             = func(err error, message string) { log.Fatal().Err(err).Msg(message) }
+	newPoolWithConfigHook = pgxpool.NewWithConfig
+	poolPingHook          = func(ctx context.Context, db *pgxpool.Pool) error { return db.Ping(ctx) }
+	poolCloseHook         = func(db *pgxpool.Pool) {
+		if db != nil {
+			db.Close()
+		}
 	}
+	generateSigningKeyPairHook  = platformjwt.GenerateECKeyPair
+	validateSigningKeyPairHook  = validateSigningKeyPair
+	toJWKHook                   = platformjwt.ToJWK
+	newOAuth2SigningKeyPairHook = newOAuth2SigningKeyPair
+	newStaticJWKSProviderHook   = newStaticJWKSProvider
+	listenAndServeHook          = (*http.Server).ListenAndServe
+	shutdownServerHook          = func(srv *http.Server, ctx context.Context) error { return srv.Shutdown(ctx) }
 )
 
 type Config struct {
@@ -87,18 +99,21 @@ func main() {
 		return
 	}
 	if err := rustSelfCheckHook(); err != nil {
-		log.Fatal().Err(err).Msg("Rust crypto runtime check failed")
+		fatalHook(err, "Rust crypto runtime check failed")
+		return
 	}
 
 	cfg, err := loadConfigHook(*configPath)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load config")
+		fatalHook(err, "Failed to load config")
+		return
 	}
 
 	ctx := context.Background()
 	db, err := connectDBHook(ctx, cfg)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect database")
+		fatalHook(err, "Failed to connect database")
+		return
 	}
 	defer db.Close()
 
@@ -112,14 +127,14 @@ func main() {
 	go func() {
 		log.Info().Str("addr", srv.Addr).Msg("OAuth2 module listening")
 		if err := listenAndServeHook(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal().Err(err).Msg("OAuth2 server failed")
+			fatalHook(err, "OAuth2 server failed")
 		}
 	}()
 
 	<-stop
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := shutdownServerHook(srv, shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("OAuth2 server shutdown failed")
 	}
 }
@@ -189,15 +204,15 @@ func connectDB(ctx context.Context, cfg *Config) (*pgxpool.Pool, error) {
 	poolCfg.MaxConns = cfg.Database.MaxConns
 	poolCfg.MinConns = cfg.Database.MinConns
 
-	db, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	db, err := newPoolWithConfigHook(ctx, poolCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := db.Ping(pingCtx); err != nil {
-		db.Close()
+	if err := poolPingHook(pingCtx, db); err != nil {
+		poolCloseHook(db)
 		return nil, err
 	}
 	return db, nil
@@ -487,14 +502,14 @@ func newOAuth2SigningKeyPair() (*platformjwt.KeyPair, error) {
 		if isProductionEnvironment() {
 			return nil, errors.New("production requires static OAuth2 signing keys via AEGION_OAUTH2_SIGNING_PRIVATE_KEY_B64 and AEGION_OAUTH2_SIGNING_PUBLIC_KEY_B64")
 		}
-		keyPair, err := platformjwt.GenerateECKeyPair(keyID)
+		keyPair, err := generateSigningKeyPairHook(keyID)
 		if err != nil {
 			return nil, fmt.Errorf("generate signing key pair: %w", err)
 		}
 		if keyPair.Algorithm == "" {
 			keyPair.Algorithm = defaultSigningAlgorithm
 		}
-		if err := validateSigningKeyPair(keyPair); err != nil {
+		if err := validateSigningKeyPairHook(keyPair); err != nil {
 			return nil, err
 		}
 		log.Warn().Str("key_id", keyPair.KeyID).Msg("Using ephemeral OAuth2 signing keys; configure static signing keys for production")
@@ -517,7 +532,7 @@ func newOAuth2SigningKeyPair() (*platformjwt.KeyPair, error) {
 			PrivateKey: privateKey,
 			PublicKey:  publicKey,
 		}
-		if err := validateSigningKeyPair(keyPair); err != nil {
+		if err := validateSigningKeyPairHook(keyPair); err != nil {
 			return nil, err
 		}
 
@@ -570,7 +585,7 @@ func decodeBase64Key(input string) ([]byte, error) {
 }
 
 func newStaticJWKSProvider(keyPair *platformjwt.KeyPair) (*staticJWKSProvider, error) {
-	jwkJSON, err := platformjwt.ToJWK(keyPair.Algorithm, keyPair.KeyID, keyPair.PublicKey)
+	jwkJSON, err := toJWKHook(keyPair.Algorithm, keyPair.KeyID, keyPair.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("build jwk: %w", err)
 	}
@@ -591,12 +606,12 @@ func newStaticJWKSProvider(keyPair *platformjwt.KeyPair) (*staticJWKSProvider, e
 }
 
 func buildHandler(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
-	keyPair, err := newOAuth2SigningKeyPair()
+	keyPair, err := newOAuth2SigningKeyPairHook()
 	if err != nil {
 		panic(fmt.Sprintf("initialize oauth2 signing keys: %v", err))
 	}
 	signer := &oauth2JWTSigner{keyPair: keyPair}
-	jwksProvider, err := newStaticJWKSProvider(keyPair)
+	jwksProvider, err := newStaticJWKSProviderHook(keyPair)
 	if err != nil {
 		panic(fmt.Sprintf("initialize oauth2 jwks provider: %v", err))
 	}
