@@ -37,6 +37,24 @@ func (stubSSOService) CompleteAuth(context.Context, string, string, string, stri
 	return &service.CallbackResult{Connection: "acme", Subject: "sub", RedirectTo: "/after"}, nil
 }
 
+type captureSSOService struct {
+	stubSSOService
+	relayState  string
+	subject     string
+	email       string
+	displayName string
+	attributes  map[string]interface{}
+}
+
+func (s *captureSSOService) CompleteAuth(_ context.Context, _ string, relayState, subject, email, displayName string, attributes map[string]interface{}) (*service.CallbackResult, error) {
+	s.relayState = relayState
+	s.subject = subject
+	s.email = email
+	s.displayName = displayName
+	s.attributes = attributes
+	return &service.CallbackResult{Connection: "acme", Subject: "sub", RedirectTo: "/after"}, nil
+}
+
 func TestSSOHandlersRequireManagementToken(t *testing.T) {
 	h := New(stubSSOService{})
 	mux := http.NewServeMux()
@@ -94,4 +112,32 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
 	})
+
+	t.Run("callback rejects caller supplied identity", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/self-service/sso/acme/callback?RelayState=relay&subject=attacker", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+}
+
+func TestHandleCallbackRejectsUntrustedIdentityFields(t *testing.T) {
+	svc := &captureSSOService{}
+	h := New(svc)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/self-service/sso/acme/callback?state=relay-state&subject=attacker&email=attacker@example.com&display_name=attacker", bytes.NewBufferString("attributes=%7B%22subject%22%3A%22attacker%22%7D&SAMLResponse=fake"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+	if svc.relayState != "" || svc.attributes != nil {
+		t.Fatalf("expected callback to be rejected before service invocation, got relay_state=%q attrs=%+v", svc.relayState, svc.attributes)
+	}
 }

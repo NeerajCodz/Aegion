@@ -27,8 +27,12 @@ import (
 var migrations embed.FS
 
 var (
-	version   = "dev"
-	buildTime = "unknown"
+	version                = "dev"
+	buildTime              = "unknown"
+	exitProcess            = os.Exit
+	listenAndServeHTTPHook = (*http.Server).ListenAndServe
+	listenAndServeTLSHook  = (*http.Server).ListenAndServeTLS
+	fatalHTTPServerHook    = (*logger.Logger).Fatal
 )
 
 // Command line flags
@@ -168,12 +172,12 @@ func defaultMainDeps() mainDeps {
 
 				var err error
 				if cfg.Server.TLS.Enabled {
-					err = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+					err = listenAndServeTLSHook(httpServer, cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
 				} else {
-					err = httpServer.ListenAndServe()
+					err = listenAndServeHTTPHook(httpServer)
 				}
 				if err != nil && err != http.ErrServerClosed {
-					log.Fatal().Err(err).Msg("HTTP server failed")
+					fatalHTTPServerHook(log).Err(err).Msg("HTTP server failed")
 				}
 			}()
 		},
@@ -182,7 +186,7 @@ func defaultMainDeps() mainDeps {
 
 func main() {
 	if code := run(os.Args[1:], defaultMainDeps()); code != 0 {
-		os.Exit(code)
+		exitProcess(code)
 	}
 }
 

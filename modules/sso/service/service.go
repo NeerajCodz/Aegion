@@ -151,6 +151,10 @@ func (s *Service) StartAuth(ctx context.Context, slug, redirectTo string) (*Star
 }
 
 func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, email, displayName string, attributes map[string]interface{}) (*CallbackResult, error) {
+	_ = subject
+	_ = email
+	_ = displayName
+
 	connection, err := s.repo.GetConnectionBySlug(ctx, slug)
 	if err != nil {
 		return nil, err
@@ -168,44 +172,24 @@ func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, e
 	if !s.consumeRequestID(state.RequestID, s.now()) {
 		return nil, ErrInvalidRelayState
 	}
-	resolvedAttributes := map[string]interface{}{}
-	for key, value := range attributes {
-		resolvedAttributes[key] = value
+
+	rawSAML := stringValue(attributes["_saml_response"])
+	if rawSAML == "" {
+		return nil, ErrInvalidSAMLResponse
 	}
-	if rawSAML := stringValue(resolvedAttributes["_saml_response"]); rawSAML != "" {
-		parsed, err := parseSAMLResponse(rawSAML, connection, state.RequestID, s.now())
-		if err != nil {
-			return nil, err
-		}
-		subject = firstNonEmpty(parsed.Subject, subject)
-		email = firstNonEmpty(parsed.Email, email)
-		displayName = firstNonEmpty(parsed.DisplayName, displayName)
-		for key, value := range parsed.Attributes {
-			if _, ok := resolvedAttributes[key]; !ok {
-				resolvedAttributes[key] = value
-			}
-		}
+	parsed, err := parseSAMLResponse(rawSAML, connection, state.RequestID, stringSliceValue(attributes["_expected_recipients"]), s.now())
+	if err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(subject) == "" && connection.AttributeMapping.Subject != "" {
-		subject = stringValue(resolvedAttributes[connection.AttributeMapping.Subject])
-	}
-	if strings.TrimSpace(email) == "" && connection.AttributeMapping.Email != "" {
-		email = stringValue(resolvedAttributes[connection.AttributeMapping.Email])
-	}
-	if strings.TrimSpace(displayName) == "" && connection.AttributeMapping.DisplayName != "" {
-		displayName = stringValue(resolvedAttributes[connection.AttributeMapping.DisplayName])
-	}
-	if strings.TrimSpace(subject) == "" {
-		return nil, ErrInvalidRelayState
-	}
+
 	return &CallbackResult{
 		Connection:   connection.Slug,
-		Subject:      strings.TrimSpace(subject),
-		Email:        strings.ToLower(strings.TrimSpace(email)),
-		DisplayName:  strings.TrimSpace(displayName),
+		Subject:      strings.TrimSpace(parsed.Subject),
+		Email:        strings.ToLower(strings.TrimSpace(parsed.Email)),
+		DisplayName:  strings.TrimSpace(parsed.DisplayName),
 		RedirectTo:   normalizeRedirect(firstNonEmpty(state.RedirectTo, connection.DefaultRedirectTo)),
 		JITProvision: connection.JITProvisioning,
-		Attributes:   resolvedAttributes,
+		Attributes:   parsed.Attributes,
 	}, nil
 }
 
@@ -417,23 +401,6 @@ func (s *Service) verifyRelayState(value string) (*callbackState, error) {
 	return &state, nil
 }
 
-func normalizeDomains(values []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value, "@")))
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
-}
-
 func (s *Service) consumeRequestID(requestID string, now time.Time) bool {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
@@ -442,7 +409,6 @@ func (s *Service) consumeRequestID(requestID string, now time.Time) bool {
 	if s == nil {
 		return false
 	}
-
 	const replayWindow = 30 * time.Minute
 	cutoff := now.Add(-replayWindow)
 
@@ -459,6 +425,40 @@ func (s *Service) consumeRequestID(requestID string, now time.Time) bool {
 	}
 	s.seenRequest[requestID] = now
 	return true
+}
+
+func stringSliceValue(value interface{}) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, raw := range v {
+			if s := stringValue(raw); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func normalizeDomains(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(value, "@")))
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 func normalizeExtra(in map[string]string) map[string]string {
@@ -527,11 +527,8 @@ type samlResponseEnvelope struct {
 			} `xml:"SubjectConfirmation"`
 		} `xml:"Subject"`
 		Conditions struct {
-			NotBefore           string `xml:"NotBefore,attr"`
-			NotOnOrAfter        string `xml:"NotOnOrAfter,attr"`
-			AudienceRestriction []struct {
-				Audience []string `xml:"Audience"`
-			} `xml:"AudienceRestriction"`
+			NotBefore    string `xml:"NotBefore,attr"`
+			NotOnOrAfter string `xml:"NotOnOrAfter,attr"`
 		} `xml:"Conditions"`
 		AttributeStatement struct {
 			Attributes []struct {
@@ -551,7 +548,14 @@ type parsedSAMLResponse struct {
 	Attributes  map[string]interface{}
 }
 
-func parseSAMLResponse(raw string, connection *store.Connection, expectedRequestID string, now time.Time) (*parsedSAMLResponse, error) {
+type samlSignatureScope int
+
+const (
+	signatureScopeResponse samlSignatureScope = iota + 1
+	signatureScopeAssertion
+)
+
+func parseSAMLResponse(raw string, connection *store.Connection, expectedRequestID string, expectedRecipients []string, now time.Time) (*parsedSAMLResponse, error) {
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
 		decoded, err = base64.RawStdEncoding.DecodeString(strings.TrimSpace(raw))
@@ -559,7 +563,8 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 			return nil, ErrInvalidSAMLResponse
 		}
 	}
-	if err := verifySAMLSignature(decoded, connection, now); err != nil {
+	signatureScope, err := verifySAMLSignature(decoded, connection)
+	if err != nil {
 		return nil, ErrInvalidSAMLResponse
 	}
 	var envelope samlResponseEnvelope
@@ -570,25 +575,36 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 		status != "urn:oasis:names:tc:SAML:2.0:status:Success" {
 		return nil, ErrInvalidSAMLResponse
 	}
-	if !matchesRequestID(expectedRequestID, envelope.InResponseTo, envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.InResponseTo) {
-		return nil, ErrInvalidSAMLResponse
-	}
-	if !matchesIssuer(connection, envelope.Issuer, envelope.Assertion.Issuer) {
+	assertionInResponseTo := envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.InResponseTo
+	assertionRecipient := envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.Recipient
+	switch signatureScope {
+	case signatureScopeAssertion:
+		if !matchesRequestID(expectedRequestID, assertionInResponseTo) {
+			return nil, ErrInvalidSAMLResponse
+		}
+		if !matchesIssuer(connection, envelope.Assertion.Issuer) {
+			return nil, ErrInvalidSAMLResponse
+		}
+		if !matchesRecipients(expectedRecipients, assertionRecipient) {
+			return nil, ErrInvalidSAMLResponse
+		}
+	case signatureScopeResponse:
+		if !matchesRequestID(expectedRequestID, envelope.InResponseTo, assertionInResponseTo) {
+			return nil, ErrInvalidSAMLResponse
+		}
+		if !matchesIssuer(connection, envelope.Issuer, envelope.Assertion.Issuer) {
+			return nil, ErrInvalidSAMLResponse
+		}
+		if !matchesRecipients(expectedRecipients, envelope.Destination, assertionRecipient) {
+			return nil, ErrInvalidSAMLResponse
+		}
+	default:
 		return nil, ErrInvalidSAMLResponse
 	}
 	if !validTimeWindow(now, envelope.Assertion.Conditions.NotBefore, envelope.Assertion.Conditions.NotOnOrAfter) {
 		return nil, ErrInvalidSAMLResponse
 	}
 	if !validNotOnOrAfter(now, envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.NotOnOrAfter) {
-		return nil, ErrInvalidSAMLResponse
-	}
-	if !validRecipientAndDestination(
-		envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.Recipient,
-		envelope.Destination,
-	) {
-		return nil, ErrInvalidSAMLResponse
-	}
-	if !validAudience(connection, envelope.Assertion.Conditions.AudienceRestriction) {
 		return nil, ErrInvalidSAMLResponse
 	}
 	result := &parsedSAMLResponse{
@@ -619,44 +635,45 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 	return result, nil
 }
 
-func verifySAMLSignature(decoded []byte, connection *store.Connection, now time.Time) error {
-	if connection == nil || strings.TrimSpace(connection.CertificatePEM) == "" {
-		return nil
+func verifySAMLSignature(rawXML []byte, connection *store.Connection) (samlSignatureScope, error) {
+	if connection == nil {
+		return 0, ErrInvalidSAMLResponse
 	}
-	certs, err := parseCertificates(connection.CertificatePEM)
+	certs, err := parseCertificatesPEM(connection.CertificatePEM)
 	if err != nil {
-		return err
+		return 0, ErrInvalidSAMLResponse
 	}
-	if err := verifyCertificateChain(certs, now); err != nil {
-		return err
-	}
+
 	doc := etree.NewDocument()
-	if err := doc.ReadFromBytes(decoded); err != nil {
-		return err
+	if err := doc.ReadFromBytes(rawXML); err != nil {
+		return 0, ErrInvalidSAMLResponse
 	}
-	store := &dsig.MemoryX509CertificateStore{Roots: certs}
-	ctx := dsig.NewDefaultValidationContext(store)
-	ctx.Clock = dsig.NewFakeClockAt(now)
-	if _, err := ctx.Validate(doc.Root()); err == nil {
-		return nil
+	root := doc.Root()
+	if root == nil {
+		return 0, ErrInvalidSAMLResponse
 	}
-	assertion := findElementByLocalName(doc.Root(), "Assertion")
-	if assertion == nil {
-		return ErrInvalidSAMLResponse
+
+	if verifySignedElement(root, certs) == nil {
+		return signatureScopeResponse, nil
 	}
-	_, err = ctx.Validate(assertion)
-	return err
+	if assertion := findElementByLocalName(root, "Assertion"); assertion != nil && verifySignedElement(assertion, certs) == nil {
+		return signatureScopeAssertion, nil
+	}
+	return 0, ErrInvalidSAMLResponse
 }
 
-func parseCertificates(pemBundle string) ([]*x509.Certificate, error) {
-	var certs []*x509.Certificate
-	data := []byte(pemBundle)
-	for {
-		var block *pem.Block
-		block, data = pem.Decode(data)
+func parseCertificatesPEM(certPEM string) ([]*x509.Certificate, error) {
+	remaining := []byte(strings.TrimSpace(certPEM))
+	if len(remaining) == 0 {
+		return nil, ErrInvalidSAMLResponse
+	}
+	certs := make([]*x509.Certificate, 0, 1)
+	for len(remaining) > 0 {
+		block, rest := pem.Decode(remaining)
 		if block == nil {
 			break
 		}
+		remaining = rest
 		if block.Type != "CERTIFICATE" {
 			continue
 		}
@@ -672,49 +689,21 @@ func parseCertificates(pemBundle string) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
-func verifyCertificateChain(certs []*x509.Certificate, now time.Time) error {
-	if len(certs) == 0 {
-		return ErrInvalidSAMLResponse
-	}
-	for _, cert := range certs {
-		if now.Before(cert.NotBefore.Add(-2*time.Minute)) || !now.Before(cert.NotAfter.Add(2*time.Minute)) {
-			return ErrInvalidSAMLResponse
-		}
-	}
-	if len(certs) == 1 {
-		// SAML operators often pin the IdP signing certificate directly rather
-		// than supplying a browser-style CA trust chain.
-		return nil
-	}
-	leaf := certs[0]
-	roots, _ := x509.SystemCertPool()
-	if roots == nil {
-		roots = x509.NewCertPool()
-	}
-	intermediates := x509.NewCertPool()
-	for i, cert := range certs[1:] {
-		if cert.IsCA || i == len(certs[1:])-1 {
-			roots.AddCert(cert)
-		} else {
-			intermediates.AddCert(cert)
-		}
-	}
-	if _, err := leaf.Verify(x509.VerifyOptions{
-		CurrentTime:   now,
-		Roots:         roots,
-		Intermediates: intermediates,
-		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	}); err != nil {
-		return err
-	}
-	return nil
+func verifySignedElement(element *etree.Element, certs []*x509.Certificate) error {
+	validationContext := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{Roots: certs})
+	_, err := validationContext.Validate(element)
+	return err
 }
 
 func findElementByLocalName(root *etree.Element, localName string) *etree.Element {
 	if root == nil {
 		return nil
 	}
-	if strings.EqualFold(root.Tag, localName) {
+	tag := root.Tag
+	if idx := strings.Index(tag, ":"); idx >= 0 {
+		tag = tag[idx+1:]
+	}
+	if strings.EqualFold(tag, localName) {
 		return root
 	}
 	for _, child := range root.ChildElements() {
@@ -755,6 +744,48 @@ func matchesIssuer(connection *store.Connection, issuers ...string) bool {
 	return false
 }
 
+func matchesRecipients(expectedRecipients []string, values ...string) bool {
+	allowed := map[string]struct{}{}
+	for _, recipient := range expectedRecipients {
+		normalized := normalizeRecipient(recipient)
+		if normalized != "" {
+			allowed[normalized] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, value := range values {
+		normalized := normalizeRecipient(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := allowed[normalized]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRecipient(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		if parsed.Path == "" {
+			return value
+		}
+		return parsed.Path
+	}
+	parsed.Fragment = ""
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host) + parsed.EscapedPath()
+}
+
 func validTimeWindow(now time.Time, notBeforeRaw, notOnOrAfterRaw string) bool {
 	const skew = 2 * time.Minute
 	if notBefore, ok := parseSAMLTimestamp(notBeforeRaw); ok && now.Add(skew).Before(notBefore) {
@@ -775,42 +806,6 @@ func validNotOnOrAfter(now time.Time, value string) bool {
 	return now.Before(t.Add(skew))
 }
 
-func validRecipientAndDestination(recipientRaw, destinationRaw string) bool {
-	recipient, recipientSet := parseAbsoluteURL(recipientRaw)
-	destination, destinationSet := parseAbsoluteURL(destinationRaw)
-
-	if !recipientSet && !destinationSet {
-		return true
-	}
-	if recipientSet && !destinationSet {
-		return true
-	}
-	if !recipientSet && destinationSet {
-		return true
-	}
-	return recipient == destination
-}
-
-func parseAbsoluteURL(raw string) (string, bool) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", false
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return "", false
-	}
-	if strings.TrimSpace(parsed.Host) == "" {
-		return "", false
-	}
-	switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
-	case "http", "https":
-	default:
-		return "", false
-	}
-	return parsed.String(), true
-}
-
 func parseSAMLTimestamp(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -823,34 +818,6 @@ func parseSAMLTimestamp(value string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
-}
-
-func validAudience(connection *store.Connection, restrictions []struct {
-	Audience []string `xml:"Audience"`
-}) bool {
-	expected := expectedAudience(connection)
-	if expected == "" || len(restrictions) == 0 {
-		return true
-	}
-	for _, restriction := range restrictions {
-		for _, audience := range restriction.Audience {
-			if strings.TrimSpace(audience) == expected {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func expectedAudience(connection *store.Connection) string {
-	if connection == nil {
-		return ""
-	}
-	slug := strings.TrimSpace(connection.Slug)
-	if slug == "" {
-		return ""
-	}
-	return "urn:aegion:sp:" + slug
 }
 
 func compactCertificate(value string) string {

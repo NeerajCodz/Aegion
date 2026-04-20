@@ -149,6 +149,16 @@ func assignScanDest(dest any, val any) error {
 			return fmt.Errorf("expected int64 value, got %T", val)
 		}
 		return nil
+	case *int:
+		switch v := val.(type) {
+		case int:
+			*d = v
+		case int64:
+			*d = int(v)
+		default:
+			return fmt.Errorf("expected int value, got %T", val)
+		}
+		return nil
 	case *uuid.UUID:
 		v, ok := val.(uuid.UUID)
 		if !ok {
@@ -179,6 +189,21 @@ func assignScanDest(dest any, val any) error {
 			*d = []byte(v)
 		default:
 			return fmt.Errorf("expected []byte/string value, got %T", val)
+		}
+		return nil
+	case **string:
+		if val == nil {
+			*d = nil
+			return nil
+		}
+		switch v := val.(type) {
+		case string:
+			cp := v
+			*d = &cp
+		case *string:
+			*d = v
+		default:
+			return fmt.Errorf("expected string/*string value, got %T", val)
 		}
 		return nil
 	case *time.Time:

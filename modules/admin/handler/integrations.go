@@ -19,6 +19,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var integrationJSONMarshal = json.Marshal
+
 type IntegrationOverviewResponse struct {
 	SocialProviders int64 `json:"social_providers"`
 	SocialLinks     int64 `json:"social_links"`
@@ -514,17 +516,17 @@ func (h *Handler) UpsertSSOConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	domainsRaw, err := json.Marshal(req.Domains)
+	domainsRaw, err := integrationJSONMarshal(req.Domains)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid domains")
 		return
 	}
-	mappingRaw, err := json.Marshal(req.AttributeMapping)
+	mappingRaw, err := integrationJSONMarshal(req.AttributeMapping)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid attribute mapping")
 		return
 	}
-	extraRaw, err := json.Marshal(req.ExtraAuthnContext)
+	extraRaw, err := integrationJSONMarshal(req.ExtraAuthnContext)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid extra authn context")
 		return
@@ -641,12 +643,12 @@ func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "name and url are required")
 		return
 	}
-	headersRaw, err := json.Marshal(req.Headers)
+	headersRaw, err := integrationJSONMarshal(req.Headers)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid headers")
 		return
 	}
-	cbRaw, err := json.Marshal(req.CircuitBreaker)
+	cbRaw, err := integrationJSONMarshal(req.CircuitBreaker)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid circuit breaker")
 		return
@@ -758,27 +760,27 @@ func (h *Handler) UpsertProxyRoute(w http.ResponseWriter, r *http.Request) {
 	if req.ID == "" {
 		req.ID = uuid.NewString()
 	}
-	methodsRaw, err := json.Marshal(req.Methods)
+	methodsRaw, err := integrationJSONMarshal(req.Methods)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid methods")
 		return
 	}
-	capsRaw, err := json.Marshal(req.Capabilities)
+	capsRaw, err := integrationJSONMarshal(req.Capabilities)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid capabilities")
 		return
 	}
-	rateRaw, err := json.Marshal(req.RateLimit)
+	rateRaw, err := integrationJSONMarshal(req.RateLimit)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid rate limit")
 		return
 	}
-	headersRaw, err := json.Marshal(req.Headers)
+	headersRaw, err := integrationJSONMarshal(req.Headers)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid headers")
 		return
 	}
-	rewriteRaw, err := json.Marshal(req.Rewrite)
+	rewriteRaw, err := integrationJSONMarshal(req.Rewrite)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid rewrite")
 		return
