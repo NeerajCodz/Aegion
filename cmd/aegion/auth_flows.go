@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,9 +17,11 @@ import (
 
 	"github.com/aegion/aegion/core/courier"
 	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/registry"
 	coresession "github.com/aegion/aegion/core/session"
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	magiclinkservice "github.com/aegion/aegion/modules/magic_link/service"
 	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
 	mfaservice "github.com/aegion/aegion/modules/mfa/service"
@@ -59,6 +63,24 @@ type flowExecutionResult struct {
 	KeepFlowActive bool
 	FlowPayload    interface{}
 	AuthContext    map[string]string
+}
+
+type externalLoginResolution struct {
+	IdentityID uuid.UUID
+	Identifier string
+	Method     coresession.AuthMethod
+}
+
+type socialCallbackResponse struct {
+	IdentityID string `json:"identity_id"`
+	Profile    struct {
+		Email string `json:"email"`
+	} `json:"profile"`
+}
+
+type ssoCallbackResponse struct {
+	Email        string `json:"email"`
+	JITProvision bool   `json:"jit_provision"`
 }
 
 type flowHTTPError struct {
@@ -790,21 +812,13 @@ func (s *Server) handleCompleteExternalLogin(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	identityIDValue := normalizedFlowValue(input.Values, "identity_id")
-	identityID, err := uuid.Parse(strings.TrimSpace(identityIDValue))
+	resolution, err := s.resolveExternalLogin(r.Context(), r, input.Values)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid identity id", err)
+		s.writeFlowExecutionError(w, err)
 		return
 	}
 
-	method, err := parseExternalAuthMethod(normalizedFlowValue(input.Values, "method", "auth_method"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error(), nil)
-		return
-	}
-	identifier := normalizedEmailValue(input.Values, "identifier", "email")
-
-	result, err := s.finishPrimaryAuthentication(r.Context(), w, r, flow, identityID, identifier, method)
+	result, err := s.finishPrimaryAuthentication(r.Context(), w, r, flow, resolution.IdentityID, resolution.Identifier, resolution.Method)
 	if err != nil {
 		s.writeFlowExecutionError(w, err)
 		return
@@ -848,6 +862,222 @@ func (s *Server) handleCompleteExternalLogin(w http.ResponseWriter, r *http.Requ
 		mergeAuthContext(response, result.AuthContext)
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) resolveExternalLogin(ctx context.Context, r *http.Request, values map[string]string) (*externalLoginResolution, error) {
+	if strings.TrimSpace(normalizedFlowValue(values, "identity_id")) != "" {
+		return nil, &flowHTTPError{Status: http.StatusBadRequest, Message: "identity_id is not accepted for external login completion"}
+	}
+
+	method, err := resolveExternalAuthMethod(values)
+	if err != nil {
+		return nil, &flowHTTPError{Status: http.StatusBadRequest, Message: err.Error()}
+	}
+
+	switch method {
+	case coresession.AuthMethodSocial:
+		return s.resolveExternalSocialLogin(ctx, values)
+	case coresession.AuthMethodSAML:
+		return s.resolveExternalSAMLLogin(ctx, r, values)
+	default:
+		return nil, &flowHTTPError{Status: http.StatusBadRequest, Message: "unsupported external auth method"}
+	}
+}
+
+func resolveExternalAuthMethod(values map[string]string) (coresession.AuthMethod, error) {
+	if methodValue := normalizedFlowValue(values, "method", "auth_method"); methodValue != "" {
+		return parseExternalAuthMethod(methodValue)
+	}
+	if normalizedFlowValue(values, "saml_response", "SAMLResponse", "relay_state", "RelayState", "connection", "sso_connection") != "" {
+		return coresession.AuthMethodSAML, nil
+	}
+	return coresession.AuthMethodSocial, nil
+}
+
+func (s *Server) resolveExternalSocialLogin(ctx context.Context, values map[string]string) (*externalLoginResolution, error) {
+	provider := normalizedFlowValue(values, "provider", "social_provider")
+	state := normalizedFlowValue(values, "state")
+	code := normalizedFlowValue(values, "code")
+	if provider == "" || state == "" || code == "" {
+		return nil, &flowHTTPError{Status: http.StatusBadRequest, Message: "provider, state, and code are required for social login completion"}
+	}
+
+	callbackURL, err := s.moduleCallbackURL("social", "/self-service/social/"+url.PathEscape(provider)+"/callback", map[string]string{
+		"state": state,
+		"code":  code,
+	})
+	if err != nil {
+		return nil, &flowHTTPError{Status: http.StatusServiceUnavailable, Message: "social authentication is not available"}
+	}
+
+	var callback socialCallbackResponse
+	status, err := s.fetchExternalCallback(ctx, callbackURL, nil, &callback)
+	if err != nil {
+		return nil, &flowHTTPError{Status: http.StatusBadGateway, Message: "failed to verify social login callback"}
+	}
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return nil, mapExternalCallbackStatus(status)
+	}
+
+	identityID, err := uuid.Parse(strings.TrimSpace(callback.IdentityID))
+	if err != nil {
+		return nil, &flowHTTPError{Status: http.StatusBadGateway, Message: "social callback did not return a valid identity"}
+	}
+	return &externalLoginResolution{
+		IdentityID: identityID,
+		Identifier: strings.ToLower(strings.TrimSpace(callback.Profile.Email)),
+		Method:     coresession.AuthMethodSocial,
+	}, nil
+}
+
+func (s *Server) resolveExternalSAMLLogin(ctx context.Context, r *http.Request, values map[string]string) (*externalLoginResolution, error) {
+	connection := normalizedFlowValue(values, "connection", "sso_connection", "provider")
+	relayState := normalizedFlowValue(values, "relay_state", "RelayState", "state")
+	samlResponse := normalizedFlowValue(values, "saml_response", "SAMLResponse")
+	if connection == "" || relayState == "" || samlResponse == "" {
+		return nil, &flowHTTPError{Status: http.StatusBadRequest, Message: "connection, relay_state, and saml_response are required for SSO login completion"}
+	}
+
+	callbackURL, err := s.moduleCallbackURL("sso", "/self-service/sso/"+url.PathEscape(connection)+"/callback", map[string]string{
+		"RelayState":   relayState,
+		"SAMLResponse": samlResponse,
+	})
+	if err != nil {
+		return nil, &flowHTTPError{Status: http.StatusServiceUnavailable, Message: "sso authentication is not available"}
+	}
+
+	headers := map[string]string{
+		"X-Forwarded-Proto": externalForwardedProto(s, r),
+		"X-Forwarded-Host":  externalForwardedHost(s, r),
+	}
+	var callback ssoCallbackResponse
+	status, err := s.fetchExternalCallback(ctx, callbackURL, headers, &callback)
+	if err != nil {
+		return nil, &flowHTTPError{Status: http.StatusBadGateway, Message: "failed to verify sso login callback"}
+	}
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return nil, mapExternalCallbackStatus(status)
+	}
+
+	email := strings.ToLower(strings.TrimSpace(callback.Email))
+	if email == "" {
+		return nil, &flowHTTPError{Status: http.StatusUnauthorized, Message: "sso callback did not provide an email address"}
+	}
+
+	identityID, err := s.lookupIdentityByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if identityID == nil {
+		if !callback.JITProvision {
+			return nil, &flowHTTPError{Status: http.StatusUnauthorized, Message: "sso account is not linked"}
+		}
+		createdIdentityID, createErr := s.createIdentity(ctx, email)
+		if createErr != nil {
+			return nil, createErr
+		}
+		identityID = &createdIdentityID
+	}
+
+	if err := s.markEmailVerified(ctx, *identityID, email); err != nil {
+		return nil, err
+	}
+
+	return &externalLoginResolution{
+		IdentityID: *identityID,
+		Identifier: email,
+		Method:     coresession.AuthMethodSAML,
+	}, nil
+}
+
+func (s *Server) moduleCallbackURL(moduleID, modulePath string, query map[string]string) (*url.URL, error) {
+	if s == nil || s.registry == nil {
+		return nil, errors.New("module registry unavailable")
+	}
+
+	module, err := s.registry.GetModule(moduleID)
+	if err != nil {
+		return nil, err
+	}
+	if module.Status != registry.StatusHealthy && module.Status != registry.StatusStarting {
+		return nil, errors.New("module is not healthy")
+	}
+
+	for _, endpoint := range module.Endpoints {
+		if endpoint.Type != registry.EndpointHTTP {
+			continue
+		}
+		parsed, parseErr := url.Parse(endpoint.URL)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return nil, errors.New("module endpoint must use http or https")
+		}
+		if strings.TrimSpace(parsed.Host) == "" {
+			return nil, errors.New("module endpoint is missing host")
+		}
+		parsed.Path = modulePath
+		values := parsed.Query()
+		for key, value := range query {
+			if strings.TrimSpace(value) == "" {
+				continue
+			}
+			values.Set(key, value)
+		}
+		parsed.RawQuery = values.Encode()
+		return parsed, nil
+	}
+	return nil, errors.New("module has no http endpoint")
+}
+
+func (s *Server) fetchExternalCallback(ctx context.Context, callbackURL *url.URL, headers map[string]string, out interface{}) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, callbackURL.String(), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	for key, value := range headers {
+		if strings.TrimSpace(value) != "" {
+			req.Header.Set(key, strings.TrimSpace(value))
+		}
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return resp.StatusCode, err
+		}
+	}
+	return resp.StatusCode, nil
+}
+
+func mapExternalCallbackStatus(status int) error {
+	switch {
+	case status == http.StatusBadRequest || status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusNotFound:
+		return &flowHTTPError{Status: http.StatusUnauthorized, Message: "invalid external authentication callback"}
+	case status == http.StatusServiceUnavailable:
+		return &flowHTTPError{Status: http.StatusServiceUnavailable, Message: "external authentication is currently unavailable"}
+	case status >= http.StatusInternalServerError:
+		return &flowHTTPError{Status: http.StatusBadGateway, Message: "external authentication upstream failed"}
+	default:
+		return &flowHTTPError{Status: http.StatusBadGateway, Message: "failed to verify external authentication callback"}
+	}
+}
+
+func externalForwardedProto(s *Server, r *http.Request) string {
+	trustForwarded := s != nil && s.cfg != nil && s.cfg.Proxy.TrustForwardedHeaders
+	return strings.ToLower(strings.TrimSpace(trustedproxy.ForwardedProto(r, trustForwarded, "AEGION_TRUSTED_PROXY_CIDRS")))
+}
+
+func externalForwardedHost(s *Server, r *http.Request) string {
+	trustForwarded := s != nil && s.cfg != nil && s.cfg.Proxy.TrustForwardedHeaders
+	return strings.TrimSpace(trustedproxy.ForwardedHost(r, trustForwarded, "AEGION_TRUSTED_PROXY_CIDRS"))
 }
 
 func (s *Server) handleMagicLinkRecoveryVerify(w http.ResponseWriter, r *http.Request) {
