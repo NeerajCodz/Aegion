@@ -32,7 +32,7 @@ func NewPostgres(pool *pgxpool.Pool) (*PostgresStore, error) {
 
 func (s *PostgresStore) ListUpstreams(ctx context.Context) ([]Upstream, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, url, health_check, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
+		SELECT id, name, url, health_check, health_check_expected_body, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
 		FROM proxy_upstreams
 		ORDER BY name ASC
 	`)
@@ -54,7 +54,7 @@ func (s *PostgresStore) ListUpstreams(ctx context.Context) ([]Upstream, error) {
 
 func (s *PostgresStore) GetUpstreamByName(ctx context.Context, name string) (*Upstream, error) {
 	upstream, err := scanUpstream(s.pool.QueryRow(ctx, `
-		SELECT id, name, url, health_check, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
+		SELECT id, name, url, health_check, health_check_expected_body, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
 		FROM proxy_upstreams
 		WHERE name = $1
 	`, normalizeName(name)))
@@ -85,14 +85,15 @@ func (s *PostgresStore) UpsertUpstream(ctx context.Context, upstream Upstream) (
 	)
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO proxy_upstreams (
-			id, name, url, health_check, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
+			id, name, url, health_check, health_check_expected_body, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
 		) VALUES (
 			COALESCE(NULLIF($1::text, '')::uuid, gen_random_uuid()),
-			$2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11
+			$2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10, $11, $12
 		)
 		ON CONFLICT (name) DO UPDATE SET
 			url = EXCLUDED.url,
 			health_check = EXCLUDED.health_check,
+			health_check_expected_body = EXCLUDED.health_check_expected_body,
 			timeout = EXCLUDED.timeout,
 			max_connections = EXCLUDED.max_connections,
 			headers = EXCLUDED.headers,
@@ -105,6 +106,7 @@ func (s *PostgresStore) UpsertUpstream(ctx context.Context, upstream Upstream) (
 		normalizeName(upstream.Name),
 		strings.TrimSpace(upstream.URL),
 		strings.TrimSpace(upstream.HealthCheck),
+		strings.TrimSpace(upstream.HealthCheckExpectedBody),
 		strings.TrimSpace(upstream.Timeout),
 		upstream.MaxConnections,
 		headersJSON,
@@ -276,6 +278,7 @@ func scanUpstream(scanner interface{ Scan(dest ...any) error }) (Upstream, error
 		&upstream.Name,
 		&upstream.URL,
 		&upstream.HealthCheck,
+		&upstream.HealthCheckExpectedBody,
 		&upstream.Timeout,
 		&upstream.MaxConnections,
 		&headers,

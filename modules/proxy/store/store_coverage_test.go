@@ -222,7 +222,7 @@ func TestScanUpstreamAndRouteBranches(t *testing.T) {
 	id := uuid.New()
 
 	upValues := []any{
-		id, "app", "https://app.example.com", "/health", "5s", 100,
+		id, "app", "https://app.example.com", "/health", "READY", "5s", 100,
 		[]byte(`{"x":"1"}`), []byte(`{"failure_threshold":5,"timeout":"10s","success_threshold":2}`),
 		true, now, now,
 	}
@@ -235,7 +235,7 @@ func TestScanUpstreamAndRouteBranches(t *testing.T) {
 	})
 	t.Run("scanUpstream headers json error", func(t *testing.T) {
 		values := append([]any(nil), upValues...)
-		values[6] = []byte(`{`)
+		values[7] = []byte(`{`)
 		_, err := scanUpstream(testScanProxy{values: values})
 		if err == nil {
 			t.Fatalf("scanUpstream(headers json error) expected error")
@@ -243,7 +243,7 @@ func TestScanUpstreamAndRouteBranches(t *testing.T) {
 	})
 	t.Run("scanUpstream circuit breaker json error", func(t *testing.T) {
 		values := append([]any(nil), upValues...)
-		values[7] = []byte(`{`)
+		values[8] = []byte(`{`)
 		_, err := scanUpstream(testScanProxy{values: values})
 		if err == nil {
 			t.Fatalf("scanUpstream(circuit breaker json error) expected error")
@@ -251,8 +251,8 @@ func TestScanUpstreamAndRouteBranches(t *testing.T) {
 	})
 	t.Run("scanUpstream success with empty maps", func(t *testing.T) {
 		values := append([]any(nil), upValues...)
-		values[6] = []byte(``)
-		values[7] = []byte(`{}`)
+		values[7] = []byte(``)
+		values[8] = []byte(`{}`)
 		got, err := scanUpstream(testScanProxy{values: values})
 		if err != nil {
 			t.Fatalf("scanUpstream(success) error = %v", err)

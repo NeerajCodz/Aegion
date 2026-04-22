@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -68,16 +69,14 @@ func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	// Database check placeholder
-	// TODO: Inject database connection and check
-	checks["database"] = ComponentStatus{
-		Status: "healthy",
+	checks["database"] = r.runDependencyCheck("database", r.databaseChecker)
+	if checks["database"].Status == "unhealthy" {
+		allHealthy = false
 	}
 
-	// Cache check placeholder
-	// TODO: Inject cache connection and check
-	checks["cache"] = ComponentStatus{
-		Status: "healthy",
+	checks["cache"] = r.runDependencyCheck("cache", r.cacheChecker)
+	if checks["cache"].Status == "unhealthy" {
+		allHealthy = false
 	}
 
 	// Determine overall status
@@ -161,6 +160,29 @@ func itoa(i int) string {
 	return string(buf[pos:])
 }
 
+func (r *Router) runDependencyCheck(name string, checker HealthChecker) ComponentStatus {
+	if checker == nil {
+		return ComponentStatus{
+			Status:  "disabled",
+			Message: name + " health check not configured",
+		}
+	}
+
+	start := time.Now()
+	if err := checker.Check(); err != nil {
+		return ComponentStatus{
+			Status:  "unhealthy",
+			Message: err.Error(),
+			Latency: time.Since(start).String(),
+		}
+	}
+
+	return ComponentStatus{
+		Status:  "healthy",
+		Latency: time.Since(start).String(),
+	}
+}
+
 // HealthChecker provides health check functionality for dependencies.
 type HealthChecker interface {
 	Check() error
@@ -179,7 +201,7 @@ func NewDatabaseHealthChecker(checkFn func() error) *DatabaseHealthChecker {
 // Check performs the database health check.
 func (c *DatabaseHealthChecker) Check() error {
 	if c.check == nil {
-		return nil
+		return errors.New("database health check is not configured")
 	}
 	return c.check()
 }
@@ -197,7 +219,7 @@ func NewCacheHealthChecker(checkFn func() error) *CacheHealthChecker {
 // Check performs the cache health check.
 func (c *CacheHealthChecker) Check() error {
 	if c.check == nil {
-		return nil
+		return errors.New("cache health check is not configured")
 	}
 	return c.check()
 }

@@ -608,21 +608,22 @@ func (h *Handler) DeleteSSOConnection(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListProxyUpstreams(w http.ResponseWriter, r *http.Request) {
 	h.listGenericRows(w, r, `
-		SELECT name, url, health_check, timeout, max_connections, enabled, created_at, updated_at
+		SELECT name, url, health_check, health_check_expected_body, timeout, max_connections, enabled, created_at, updated_at
 		FROM proxy_upstreams
 		ORDER BY name ASC
-	`, []string{"name", "url", "health_check", "timeout", "max_connections", "enabled", "created_at", "updated_at"}, "upstreams")
+	`, []string{"name", "url", "health_check", "health_check_expected_body", "timeout", "max_connections", "enabled", "created_at", "updated_at"}, "upstreams")
 }
 
 type ProxyUpstreamRequest struct {
-	Name           string                 `json:"name"`
-	URL            string                 `json:"url"`
-	HealthCheck    string                 `json:"health_check"`
-	Timeout        string                 `json:"timeout"`
-	MaxConnections int                    `json:"max_connections"`
-	Headers        map[string]string      `json:"headers"`
-	CircuitBreaker map[string]interface{} `json:"circuit_breaker"`
-	Enabled        bool                   `json:"enabled"`
+	Name                    string                 `json:"name"`
+	URL                     string                 `json:"url"`
+	HealthCheck             string                 `json:"health_check"`
+	HealthCheckExpectedBody string                 `json:"health_check_expected_body"`
+	Timeout                 string                 `json:"timeout"`
+	MaxConnections          int                    `json:"max_connections"`
+	Headers                 map[string]string      `json:"headers"`
+	CircuitBreaker          map[string]interface{} `json:"circuit_breaker"`
+	Enabled                 bool                   `json:"enabled"`
 }
 
 func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
@@ -638,6 +639,7 @@ func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	req.URL = strings.TrimSpace(req.URL)
 	req.HealthCheck = strings.TrimSpace(req.HealthCheck)
+	req.HealthCheckExpectedBody = strings.TrimSpace(req.HealthCheckExpectedBody)
 	req.Timeout = strings.TrimSpace(req.Timeout)
 	if req.Name == "" || req.URL == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "name and url are required")
@@ -658,13 +660,14 @@ func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
 	var id uuid.UUID
 	err = h.dbConn().QueryRow(r.Context(), `
 		INSERT INTO proxy_upstreams (
-			id, name, url, health_check, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
+			id, name, url, health_check, health_check_expected_body, timeout, max_connections, headers, circuit_breaker, enabled, created_at, updated_at
 		) VALUES (
-			gen_random_uuid(), $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10
+			gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11
 		)
 		ON CONFLICT (name) DO UPDATE SET
 			url = EXCLUDED.url,
 			health_check = EXCLUDED.health_check,
+			health_check_expected_body = EXCLUDED.health_check_expected_body,
 			timeout = EXCLUDED.timeout,
 			max_connections = EXCLUDED.max_connections,
 			headers = EXCLUDED.headers,
@@ -672,13 +675,14 @@ func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
 			enabled = EXCLUDED.enabled,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, created_at, updated_at
-	`, req.Name, req.URL, req.HealthCheck, req.Timeout, req.MaxConnections, string(headersRaw), string(cbRaw), req.Enabled, now, now).Scan(&id, &createdAt, &updatedAt)
+	`, req.Name, req.URL, req.HealthCheck, req.HealthCheckExpectedBody, req.Timeout, req.MaxConnections, string(headersRaw), string(cbRaw), req.Enabled, now, now).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save proxy upstream")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"id": id.String(), "name": req.Name, "url": req.URL, "health_check": req.HealthCheck, "timeout": req.Timeout,
+		"id": id.String(), "name": req.Name, "url": req.URL, "health_check": req.HealthCheck,
+		"health_check_expected_body": req.HealthCheckExpectedBody, "timeout": req.Timeout,
 		"max_connections": req.MaxConnections, "headers": req.Headers, "circuit_breaker": req.CircuitBreaker,
 		"enabled": req.Enabled, "created_at": createdAt, "updated_at": updatedAt,
 	})
@@ -978,23 +982,24 @@ func (h *Handler) SimulateProxyRoute(w http.ResponseWriter, r *http.Request) {
 
 	var upstream map[string]any
 	var (
-		name, url, healthCheck, timeout string
-		maxConnections                  int
-		enabled                         bool
+		name, url, healthCheck, healthCheckExpectedBody, timeout string
+		maxConnections                                           int
+		enabled                                                  bool
 	)
 	upstreamErr := h.dbConn().QueryRow(r.Context(), `
-		SELECT name, url, health_check, timeout, max_connections, enabled
+		SELECT name, url, health_check, health_check_expected_body, timeout, max_connections, enabled
 		FROM proxy_upstreams
 		WHERE name = $1
-	`, strings.ToLower(strings.TrimSpace(matchedRule.Target))).Scan(&name, &url, &healthCheck, &timeout, &maxConnections, &enabled)
+	`, strings.ToLower(strings.TrimSpace(matchedRule.Target))).Scan(&name, &url, &healthCheck, &healthCheckExpectedBody, &timeout, &maxConnections, &enabled)
 	if upstreamErr == nil {
 		upstream = map[string]any{
-			"name":            name,
-			"url":             url,
-			"health_check":    healthCheck,
-			"timeout":         timeout,
-			"max_connections": maxConnections,
-			"enabled":         enabled,
+			"name":                       name,
+			"url":                        url,
+			"health_check":               healthCheck,
+			"health_check_expected_body": healthCheckExpectedBody,
+			"timeout":                    timeout,
+			"max_connections":            maxConnections,
+			"enabled":                    enabled,
 		}
 	}
 

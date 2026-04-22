@@ -2,10 +2,10 @@ package router
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/rs/zerolog"
 
@@ -39,6 +39,17 @@ func TestReadyEndpointWithoutRegistry(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var body ReadinessStatus
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := body.Checks["database"].Status; got != "disabled" {
+		t.Fatalf("expected database check disabled, got %s", got)
+	}
+	if got := body.Checks["cache"].Status; got != "disabled" {
+		t.Fatalf("expected cache check disabled, got %s", got)
 	}
 }
 
@@ -90,16 +101,40 @@ func TestMetricsEndpoint(t *testing.T) {
 
 func TestDatabaseHealthCheckerAndCacheHealthChecker(t *testing.T) {
 	dbChecker := NewDatabaseHealthChecker(nil)
-	if err := dbChecker.Check(); err != nil {
-		t.Fatalf("expected nil error, got %v", err)
+	if err := dbChecker.Check(); err == nil {
+		t.Fatal("expected error for unconfigured database checker")
 	}
 
 	cacheChecker := NewCacheHealthChecker(func() error { return nil })
 	if err := cacheChecker.Check(); err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
+}
 
-	_ = time.Now()
+func TestReadyEndpointWithDependencyFailure(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DatabaseChecker = NewDatabaseHealthChecker(func() error { return errors.New("database unavailable") })
+	cfg.CacheChecker = NewCacheHealthChecker(func() error { return nil })
+
+	r := New(cfg, zerolog.Nop(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+
+	var body ReadinessStatus
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := body.Checks["database"].Status; got != "unhealthy" {
+		t.Fatalf("expected unhealthy database status, got %s", got)
+	}
+	if got := body.Checks["cache"].Status; got != "healthy" {
+		t.Fatalf("expected healthy cache status, got %s", got)
+	}
 }
 
 func TestItoa(t *testing.T) {

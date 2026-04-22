@@ -74,8 +74,8 @@ func TestHealthChecker_AdditionalBranches(t *testing.T) {
 	}
 
 	cacheChecker := NewCacheHealthChecker(nil)
-	if err := cacheChecker.Check(); err != nil {
-		t.Fatalf("expected nil error for nil cache check function, got %v", err)
+	if err := cacheChecker.Check(); err == nil {
+		t.Fatal("expected error for nil cache check function")
 	}
 }
 
