@@ -120,7 +120,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 	for key, value := range cfg.Env {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", key, value))
 	}
-	args = append(args, "-e", fmt.Sprintf("AEGION_AUTH_TOKEN=%s", authToken))
+	args = append(args, "-e", "AEGION_AUTH_TOKEN")
 	args = append(args, "-e", fmt.Sprintf("AEGION_MODULE_ID=%s", cfg.ID))
 
 	for _, p := range cfg.Ports {
@@ -170,7 +170,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 	}
 	args = append(args, imageRef)
 
-	stdout, err := d.run(ctx, args...)
+	stdout, err := d.runWithEnv(ctx, []string{fmt.Sprintf("AEGION_AUTH_TOKEN=%s", authToken)}, args...)
 	if err != nil {
 		return "", fmt.Errorf("creating container: %w", err)
 	}
@@ -327,11 +327,15 @@ func (d *DockerClient) runJSONLines(ctx context.Context, args ...string) ([]stri
 }
 
 func (d *DockerClient) run(ctx context.Context, args ...string) (string, error) {
+	return d.runWithEnv(ctx, nil, args...)
+}
+
+func (d *DockerClient) runWithEnv(ctx context.Context, extraEnv []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, d.bin, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), extraEnv...)
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {

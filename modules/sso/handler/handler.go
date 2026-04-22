@@ -138,17 +138,17 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		}
 	}
 	relayState := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("RelayState"), r.FormValue("RelayState"), r.URL.Query().Get("state")))
-	subject := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("subject"), r.FormValue("subject"), r.URL.Query().Get("name_id"), r.FormValue("name_id")))
-	email := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("email"), r.FormValue("email")))
-	displayName := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("display_name"), r.FormValue("display_name")))
-	attrs := map[string]interface{}{}
-	if raw := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("attributes"), r.FormValue("attributes"))); raw != "" {
-		_ = json.Unmarshal([]byte(raw), &attrs)
+	if hasUntrustedIdentityInputs(r) {
+		writeError(w, http.StatusBadRequest, "identity attributes must not be supplied by callback caller")
+		return
+	}
+	attrs := map[string]interface{}{
+		"_expected_recipients": expectedRecipients(r),
 	}
 	if samlResponse := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("SAMLResponse"), r.FormValue("SAMLResponse"))); samlResponse != "" {
 		attrs["_saml_response"] = samlResponse
 	}
-	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, subject, email, displayName, attrs)
+	resp, err := h.svc.CompleteAuth(r.Context(), connection, relayState, "", "", "", attrs)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid sso callback")
 		return
@@ -163,6 +163,15 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func hasUntrustedIdentityInputs(r *http.Request) bool {
+	for _, key := range []string{"subject", "name_id", "email", "display_name", "attributes"} {
+		if strings.TrimSpace(firstNonEmpty(r.URL.Query().Get(key), r.FormValue(key))) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) handleAdminConnections(w http.ResponseWriter, r *http.Request) {
@@ -262,6 +271,55 @@ func withQuery(target string, additions map[string]string) string {
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func expectedRecipients(r *http.Request) []string {
+	if r == nil || r.URL == nil {
+		return nil
+	}
+	pathOnly := strings.TrimSpace(r.URL.Path)
+	proto := firstForwardedValue(r.Header.Get("X-Forwarded-Proto"))
+	if proto == "" {
+		if r.TLS != nil {
+			proto = "https"
+		} else {
+			proto = "http"
+		}
+	}
+	host := firstForwardedValue(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+
+	out := make([]string, 0, 2)
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+
+	if host != "" {
+		add(strings.ToLower(strings.TrimSpace(proto)) + "://" + host + pathOnly)
+	}
+	add(pathOnly)
+	return out
+}
+
+func firstForwardedValue(raw string) string {
+	parts := strings.Split(raw, ",")
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
 			return value
 		}
 	}

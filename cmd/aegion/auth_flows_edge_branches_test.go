@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/registry"
 	coresession "github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/internal/platform/database"
 )
@@ -26,13 +27,13 @@ func (nilCreateSessionManager) Create(context.Context, uuid.UUID, coresession.Au
 func (nilCreateSessionManager) GetFromRequest(context.Context, *http.Request) (*coresession.Session, error) {
 	return nil, coresession.ErrSessionNotFound
 }
-func (nilCreateSessionManager) Revoke(context.Context, uuid.UUID) error                        { return nil }
-func (nilCreateSessionManager) RevokeAllForIdentity(context.Context, uuid.UUID) error          { return nil }
+func (nilCreateSessionManager) Revoke(context.Context, uuid.UUID) error               { return nil }
+func (nilCreateSessionManager) RevokeAllForIdentity(context.Context, uuid.UUID) error { return nil }
 func (nilCreateSessionManager) AddAuthMethod(context.Context, uuid.UUID, coresession.AuthMethod) error {
 	return nil
 }
 func (nilCreateSessionManager) SetCookie(http.ResponseWriter, *coresession.Session) {}
-func (nilCreateSessionManager) ClearCookie(http.ResponseWriter)                      {}
+func (nilCreateSessionManager) ClearCookie(http.ResponseWriter)                     {}
 
 func TestAuthFlowHelperEdgeBranches(t *testing.T) {
 	s, _ := newFlowServer(t)
@@ -337,14 +338,26 @@ func TestExternalAndMagicLinkErrorBranches(t *testing.T) {
 
 		s, store := newFlowServer(t)
 		s.sessionManager = nilCreateSessionManager{}
+		callback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"identity_id": uuid.New().String(),
+				"profile": map[string]any{
+					"email": "person@example.com",
+				},
+			})
+		}))
+		defer callback.Close()
+		registerTestModule(t, s, "social", registry.EndpointHTTP, callback.URL)
 		flow, _ := s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
 		store.updateErr = errors.New("complete-flow-failed")
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login/methods/external/complete", mustJSONBody(t, map[string]any{
-			"flow_id":     flow.ID.String(),
-			"csrf_token":  flow.CSRFToken,
-			"identity_id": uuid.New().String(),
-			"method":      "social",
+			"flow_id":    flow.ID.String(),
+			"csrf_token": flow.CSRFToken,
+			"method":     "social",
+			"provider":   "github",
+			"state":      "state-123",
+			"code":       "code-123",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		s.handleCompleteExternalLogin(rec, req)
@@ -450,9 +463,9 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/self-service/login/methods/passkey/start", mustJSONBody(t, map[string]any{
-			"flow_id":     "bad-flow-id",
-			"csrf_token":  "csrf",
-			"identifier":  "person@example.com",
+			"flow_id":    "bad-flow-id",
+			"csrf_token": "csrf",
+			"identifier": "person@example.com",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		s.handleStartLoginPasskey(rec, req)
@@ -462,9 +475,9 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/self-service/login/methods/passkey/start", mustJSONBody(t, map[string]any{
-			"flow_id":     uuid.New().String(),
-			"csrf_token":  "bad-csrf",
-			"identifier":  "person@example.com",
+			"flow_id":    uuid.New().String(),
+			"csrf_token": "bad-csrf",
+			"identifier": "person@example.com",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		s.handleStartLoginPasskey(rec, req)
@@ -478,9 +491,9 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 		}
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/self-service/login/methods/passkey/start", mustJSONBody(t, map[string]any{
-			"flow_id":     flow.ID.String(),
-			"csrf_token":  flow.CSRFToken,
-			"identifier":  "person@example.com",
+			"flow_id":    flow.ID.String(),
+			"csrf_token": flow.CSRFToken,
+			"identifier": "person@example.com",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		s.handleStartLoginPasskey(rec, req)
@@ -498,9 +511,9 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 		s.passkeyAuth = &stubPasskeyFlowService{beginAuthenticationErr: errors.New("begin-auth-failed")}
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/self-service/login/methods/passkey/start", mustJSONBody(t, map[string]any{
-			"flow_id":     flow.ID.String(),
-			"csrf_token":  flow.CSRFToken,
-			"identifier":  "person@example.com",
+			"flow_id":    flow.ID.String(),
+			"csrf_token": flow.CSRFToken,
+			"identifier": "person@example.com",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		s.handleStartLoginPasskey(rec, req)

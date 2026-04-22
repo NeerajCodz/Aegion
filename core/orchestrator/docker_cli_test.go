@@ -21,9 +21,11 @@ func writeFakeDockerCLI(t *testing.T, script string) string {
 
 func TestDockerCLI_CreateContainerPreservesExpectedFlags(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	tokenFile := filepath.Join(t.TempDir(), "token.txt")
 	fakeDocker := writeFakeDockerCLI(t, "@echo off\r\n"+
 		"setlocal EnableDelayedExpansion\r\n"+
 		"echo %* > \""+argsFile+"\"\r\n"+
+		"if \"%1\"==\"create\" echo %AEGION_AUTH_TOKEN% > \""+tokenFile+"\"\r\n"+
 		"if \"%1\"==\"image\" exit /b 1\r\n"+
 		"if \"%1\"==\"pull\" (\r\n"+
 		"  echo pulled\r\n"+
@@ -94,7 +96,7 @@ func TestDockerCLI_CreateContainerPreservesExpectedFlags(t *testing.T) {
 		"--network-alias password",
 		"--label aegion.module=true",
 		"-e FEATURE=on",
-		"-e AEGION_AUTH_TOKEN=auth-token",
+		"-e AEGION_AUTH_TOKEN",
 		"-e AEGION_MODULE_ID=password",
 		"-p 18080:8080/tcp",
 		"-v C:\\data:/data:ro",
@@ -107,6 +109,18 @@ func TestDockerCLI_CreateContainerPreservesExpectedFlags(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected args to contain %q, got %q", want, got)
 		}
+	}
+
+	if strings.Contains(got, "auth-token") {
+		t.Fatalf("expected auth token to be omitted from cli args, got %q", got)
+	}
+
+	token, err := os.ReadFile(tokenFile)
+	if err != nil {
+		t.Fatalf("read token file: %v", err)
+	}
+	if strings.TrimSpace(string(token)) != "auth-token" {
+		t.Fatalf("expected auth token in command env, got %q", strings.TrimSpace(string(token)))
 	}
 }
 
