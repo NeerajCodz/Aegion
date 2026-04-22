@@ -85,7 +85,7 @@ func (m *mockDeviceStore) MarkDeviceCodeUsed(ctx context.Context, deviceCode str
 
 func TestDeviceService_RequestDeviceAuthorization(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		st := &mockDeviceStore{client: &store.Client{ID: "client-1"}}
+		st := &mockDeviceStore{client: &store.Client{ID: "client-1", Scopes: []string{"openid", "profile"}}}
 		svc := NewDeviceService(st, 10*time.Minute, 7, "https://issuer.example.com/device")
 
 		resp, err := svc.RequestDeviceAuthorization(context.Background(), &DeviceAuthorizationRequest{
@@ -112,11 +112,25 @@ func TestDeviceService_RequestDeviceAuthorization(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidClient)
 
 		st = &mockDeviceStore{
-			client:    &store.Client{ID: "x"},
+			client: &store.Client{
+				ID:     "x",
+				Scopes: []string{"openid"},
+			},
+		}
+		svc = NewDeviceService(st, time.Minute, 5, "https://issuer/device")
+		_, err = svc.RequestDeviceAuthorization(context.Background(), &DeviceAuthorizationRequest{
+			ClientID: "x",
+			Scope:    "openid admin",
+		})
+		assert.ErrorIs(t, err, ErrInvalidScope)
+		assert.Nil(t, st.lastCreated)
+
+		st = &mockDeviceStore{
+			client:    &store.Client{ID: "x", Scopes: []string{"openid"}},
 			createErr: errors.New("db"),
 		}
 		svc = NewDeviceService(st, time.Minute, 5, "https://issuer/device")
-		_, err = svc.RequestDeviceAuthorization(context.Background(), &DeviceAuthorizationRequest{ClientID: "x"})
+		_, err = svc.RequestDeviceAuthorization(context.Background(), &DeviceAuthorizationRequest{ClientID: "x", Scope: "openid"})
 		assert.ErrorIs(t, err, st.createErr)
 	})
 }

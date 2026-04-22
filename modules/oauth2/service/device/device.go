@@ -18,6 +18,7 @@ var (
 	ErrExpiredToken         = errors.New("expired_token")
 	ErrAccessDenied         = errors.New("access_denied")
 	ErrInvalidClient        = errors.New("invalid_client")
+	ErrInvalidScope         = errors.New("invalid_scope")
 	ErrInvalidGrant         = errors.New("invalid_grant")
 )
 
@@ -78,6 +79,11 @@ func (s *DeviceService) RequestDeviceAuthorization(ctx context.Context, req *Dev
 
 	// Parse scopes
 	scopes := parseScopes(req.Scope)
+	for _, scope := range scopes {
+		if !client.HasScope(scope) {
+			return nil, fmt.Errorf("%w: scope '%s' not allowed for client", ErrInvalidScope, scope)
+		}
+	}
 
 	// Generate device code and user code
 	deviceCode := store.GenerateDeviceCode()
