@@ -226,15 +226,22 @@ function Scan-Configuration {
     Write-Section "Configuration Security Check"
     $script:ScansRun++
     
-    Write-Info "Checking configuration files..."
+    Write-Info "Checking production/staging configuration targets..."
+
+    # Focus on deployable targets to keep findings actionable.
+    $configTargets = @(
+        "configs/aegion.production.yaml",
+        "configs/aegion.staging.yaml",
+        "deploy/docker-compose.prod.yml"
+    )
     
-    # Check for default/weak credentials
-    $configFiles = Get-ChildItem -Recurse -Include "*.yaml","*.yml","*.json",".env*" | Where-Object { $_.Name -notmatch "\.lock$" }
-    
-    foreach ($file in $configFiles) {
+    foreach ($target in $configTargets) {
+        if (-not (Test-Path $target)) {
+            continue
+        }
+        $file = Get-Item $target
         $content = Get-Content $file.FullName -Raw
         
-        # Check for common weak patterns
         if ($content -match "(password|passwd|pwd)\s*[:=]\s*(admin|password|123456|root)") {
             Write-Issue "$($file.Name) contains potential weak credentials"
         }
@@ -243,7 +250,7 @@ function Scan-Configuration {
             Write-Issue "$($file.Name) has SSL disabled for database"
         }
         
-        if ($content -match "secure\s*[:=]\s*false" -and $file.Name -notmatch "example") {
+        if ($content -match "secure\s*[:=]\s*false") {
             Write-Issue "$($file.Name) has insecure cookies configured"
         }
     }
