@@ -28,7 +28,7 @@ pub fn hex_encode(input: &[u8]) -> String {
 }
 
 pub fn hex_decode(input: &str) -> Result<Vec<u8>, CryptoError> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return Err(CryptoError::InvalidSignature);
     }
 

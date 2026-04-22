@@ -24,9 +24,7 @@ pub fn verify_pkce(verifier: &str, challenge: &str, method: &str) -> Result<bool
 }
 
 fn normalize_method(method: &str) -> String {
-    if method.trim().is_empty() {
-        "plain".to_string()
-    } else if method.eq_ignore_ascii_case("plain") {
+    if method.trim().is_empty() || method.eq_ignore_ascii_case("plain") {
         "plain".to_string()
     } else if method.eq_ignore_ascii_case("s256") {
         "S256".to_string()
