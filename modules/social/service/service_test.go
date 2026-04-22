@@ -153,3 +153,26 @@ func TestCompleteAuthOIDCUserInfo(t *testing.T) {
 		t.Fatalf("unexpected redirect target: %s", result.RedirectTo)
 	}
 }
+
+func TestNormalizeRedirectTarget(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty defaults to root", in: "", want: "/"},
+		{name: "relative path allowed", in: "/dashboard", want: "/dashboard"},
+		{name: "relative path with query allowed", in: "/dashboard?tab=security", want: "/dashboard?tab=security"},
+		{name: "absolute URL blocked", in: "https://attacker.example/callback", want: "/"},
+		{name: "protocol relative blocked", in: "//attacker.example/callback", want: "/"},
+		{name: "plain token blocked", in: "dashboard", want: "/"},
+		{name: "newlines blocked", in: "/ok\r\nSet-Cookie:bad=1", want: "/"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeRedirectTarget(tc.in); got != tc.want {
+				t.Fatalf("normalizeRedirectTarget(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

@@ -98,6 +98,29 @@ func TestGetConnectionForDomain(t *testing.T) {
 	}
 }
 
+func TestNormalizeRedirect(t *testing.T) {
+	tests := []struct {
+		name  string
+		in    string
+		want  string
+	}{
+		{name: "empty defaults to root", in: "", want: "/"},
+		{name: "relative path allowed", in: "/after-login", want: "/after-login"},
+		{name: "relative path with query allowed", in: "/after-login?from=sso", want: "/after-login?from=sso"},
+		{name: "absolute URL blocked", in: "https://attacker.example/callback", want: "/"},
+		{name: "protocol relative blocked", in: "//attacker.example/callback", want: "/"},
+		{name: "plain token blocked", in: "after-login", want: "/"},
+		{name: "newlines blocked", in: "/ok\r\nSet-Cookie:bad=1", want: "/"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeRedirect(tc.in); got != tc.want {
+				t.Fatalf("normalizeRedirect(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUpsertConnectionHydratesMetadata(t *testing.T) {
 	metadata := `<?xml version="1.0"?>
 <EntityDescriptor entityID="urn:test:idp">
