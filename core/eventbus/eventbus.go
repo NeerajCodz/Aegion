@@ -250,7 +250,7 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 	}
 
 	// Get pending deliveries
-	rows, err := b.queryRows(ctx, fmt.Sprintf(`
+	rows, err := b.queryRows(ctx, `
 		SELECT d.id, d.event_id, d.attempt_count,
 			   e.event_type, e.source_module, e.entity_type, e.entity_id,
 			   e.identity_id, e.payload, e.metadata, e.occurred_at
@@ -260,9 +260,9 @@ func (b *Bus) ProcessPending(ctx context.Context, subscriber string) error {
 		  AND d.status IN ('pending', 'failed')
 		  AND d.next_retry_at <= NOW()
 		ORDER BY e.occurred_at
-		LIMIT %d
+		LIMIT $2
 		FOR UPDATE SKIP LOCKED
-	`, b.batchSize), subscriber)
+	`, subscriber, b.batchSize)
 	if err != nil {
 		return err
 	}

@@ -3,7 +3,7 @@ package proxy
 import (
 	"errors"
 	"net/http"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/aegion/aegion/core/session"
@@ -237,16 +237,30 @@ func (e *RuleEngine) sortRules() {
 }
 
 // matchesPattern checks if a path matches a glob pattern.
-func matchesPattern(path, pattern string) bool {
-	// Normalize paths
-	path = strings.TrimPrefix(path, "/")
-	pattern = strings.TrimPrefix(pattern, "/")
+func matchesPattern(urlPath, pattern string) bool {
+	// Support recursive matching for patterns ending in /*
+	// e.g. /api/* matches /api/v1/users
+	if strings.HasSuffix(pattern, "/*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		// Ensure both have leading slashes for comparison
+		p := path.Clean("/" + urlPath)
+		if !strings.HasSuffix(p, "/") {
+			p += "/"
+		}
+		if strings.HasPrefix(p, "/"+strings.TrimPrefix(prefix, "/")) {
+			return true
+		}
+	}
 
-	// Use filepath.Match for glob pattern matching
-	matched, err := filepath.Match(pattern, path)
+	// Normalize paths for Match
+	urlPath = path.Clean("/" + urlPath)
+	pattern = path.Clean("/" + pattern)
+
+	// Use path.Match for glob pattern matching (OS-agnostic for URLs)
+	matched, err := path.Match(pattern, urlPath)
 	if err != nil {
 		// If pattern is invalid, try exact match
-		return path == pattern
+		return urlPath == pattern
 	}
 
 	return matched
@@ -317,7 +331,7 @@ func (r *Rule) Validate() error {
 	}
 
 	// Validate glob pattern
-	if _, err := filepath.Match(r.Path, "test"); err != nil {
+	if _, err := path.Match(r.Path, "test"); err != nil {
 		return errors.New("invalid glob pattern in path: " + err.Error())
 	}
 

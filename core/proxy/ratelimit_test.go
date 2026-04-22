@@ -304,7 +304,7 @@ func TestGetClientIP(t *testing.T) {
 				"X-Forwarded-For": "192.168.1.100, 10.0.0.1, 172.16.0.1",
 			},
 			remoteAddr: "127.0.0.1:12345",
-			expectedIP: "192.168.1.100",
+			expectedIP: "172.16.0.1",
 		},
 		{
 			name: "X-Real-IP header",
@@ -720,8 +720,8 @@ func TestGetClientIP_XForwardedFor_Multiple(t *testing.T) {
 	req.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")
 
 	ip := getClientIP(req)
-	// Should use first IP in the list
-	assert.Equal(t, "10.0.0.1", ip)
+	// Should use last IP in the list (if all from right are trusted)
+	assert.Equal(t, "10.0.0.2", ip)
 }
 
 // TestGetClientIP_CFConnectingIP tests Cloudflare X-CF-Connecting-IP header
