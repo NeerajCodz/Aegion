@@ -80,13 +80,19 @@ function Scan-Dependencies {
     }
     
     Write-Info "Running govulncheck..."
-    $vulnOutput = govulncheck -json ./... 2>&1 | Out-String
-    
+    $vulnOutput = govulncheck ./... 2>&1 | Out-String
+    $govulnExitCode = $LASTEXITCODE
+
     if ($vulnOutput -match "No vulnerabilities found") {
         Write-Pass "No known vulnerabilities in dependencies"
-    } else {
+    } elseif ($vulnOutput -match "Your code is affected by") {
         Write-Issue "Found vulnerabilities in dependencies"
         Write-Host $vulnOutput
+    } elseif ($govulnExitCode -ne 0) {
+        Write-Issue "govulncheck failed to run (exit code $govulnExitCode)"
+        Write-Host $vulnOutput
+    } else {
+        Write-Pass "No known vulnerabilities in dependencies"
     }
 }
 
@@ -136,8 +142,21 @@ function Scan-Secrets {
         return
     }
     
+    # Remove generated scanner artifacts so gitleaks doesn't flag prior scan output as secrets.
+    @(
+        "security-govulncheck.json",
+        "security-gosec.json",
+        "security-gosec-high.json",
+        "security-trivy-fs.json",
+        "security-trivy-image.json"
+    ) | ForEach-Object {
+        if (Test-Path $_) {
+            Remove-Item $_ -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     Write-Info "Running gitleaks..."
-    $gitleaksResult = gitleaks detect --no-git --report-path=security-gitleaks.json 2>&1
+    $gitleaksResult = gitleaks detect --no-git --report-format json --report-path=security-gitleaks.json 2>&1
     $exitCode = $LASTEXITCODE
     
     if (Test-Path "security-gitleaks.json") {
