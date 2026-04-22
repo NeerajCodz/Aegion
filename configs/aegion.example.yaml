@@ -113,6 +113,7 @@ log:
 # ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap Operator
 # Created on first boot when no admin exists
+# Used only with -admin-bootstrap; placeholder password is blocked at runtime.
 # ─────────────────────────────────────────────────────────────────────────────
 operator:
   email: admin@localhost
