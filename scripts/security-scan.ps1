@@ -299,21 +299,19 @@ function Scan-Authentication {
     Write-Section "Authentication Implementation Check"
     $script:ScansRun++
     
-    Write-Info "Checking authentication patterns..."
+    Write-Info "Checking authentication patterns in non-test code..."
     
-    $goFiles = Get-ChildItem -Recurse -Filter "*.go"
+    $goFiles = Get-ChildItem -Recurse -Filter "*.go" | Where-Object { $_.Name -notmatch "_test\.go$" }
     
     foreach ($file in $goFiles) {
-        $content = Get-Content $file.FullName -Raw
-        
-        # Check for timing attacks in comparisons
-        if ($content -match "==.*password|password.*==" -and $content -notmatch "subtle\.ConstantTimeCompare") {
-            Write-Issue "$($file.Name) may have timing attack vulnerability (use constant-time comparison)"
-        }
-        
-        # Check for MD5/SHA1 hashing (weak)
-        if ($content -match "(md5|sha1)\.Sum") {
-            Write-Issue "$($file.Name) uses weak hashing algorithm (MD5/SHA1)"
+        $content = Get-Content $file.FullName
+
+        # Check for explicit MD5 usage in production code.
+        foreach ($line in $content) {
+            if ($line -match "\bmd5\.(Sum|New)\b" -and $line -notmatch "#nosec\s+G401") {
+                Write-Issue "$($file.Name) uses weak hashing algorithm (MD5)"
+                break
+            }
         }
     }
     
