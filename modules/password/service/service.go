@@ -356,12 +356,15 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 		if s.config.HIBPIgnoreNetworkErrors {
 			return nil
 		}
-		return nil
+		return fmt.Errorf("hibp request failed with status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
+		return fmt.Errorf("failed to read hibp response: %w", err)
 	}
 
 	// Check if suffix is in response
