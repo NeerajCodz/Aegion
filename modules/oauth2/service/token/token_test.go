@@ -970,6 +970,23 @@ func TestExchangeDeviceCode(t *testing.T) {
 		})
 		assert.ErrorIs(t, err, ErrInvalidClient)
 	})
+
+	t.Run("invalid scope", func(t *testing.T) {
+		st := &mockTokenStore{
+			client: &store.Client{
+				ID:         "client-1",
+				GrantTypes: []string{"urn:ietf:params:oauth:grant-type:device_code"},
+				Scopes:     []string{"openid", "profile"},
+			},
+		}
+		svc := NewTokenService(st, &MockJWTSigner{}, "https://issuer")
+		_, err := svc.ExchangeDeviceCode(ctx, &DeviceCodeTokenRequest{
+			ClientID:   "client-1",
+			IdentityID: "identity-1",
+			Scopes:     []string{"admin"},
+		})
+		assert.ErrorIs(t, err, ErrInvalidScope)
+	})
 }
 
 func TestRevokeToken(t *testing.T) {
