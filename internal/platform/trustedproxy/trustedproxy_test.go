@@ -7,13 +7,26 @@ import (
 )
 
 func TestClientIPTrustsOnlyAllowlistedPeers(t *testing.T) {
-	t.Setenv("AEGION_TEST_TRUSTED_PROXY_CIDRS", "192.0.2.0/24")
+	t.Setenv("AEGION_TEST_TRUSTED_PROXY_CIDRS", "192.0.2.0/24,198.51.100.0/24")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "192.0.2.10:1234"
-	req.Header.Set("X-Forwarded-For", "198.51.100.9")
-	if got := ClientIP(req, true, "AEGION_TEST_TRUSTED_PROXY_CIDRS"); got != "198.51.100.9" {
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	if got := ClientIP(req, true, "AEGION_TEST_TRUSTED_PROXY_CIDRS"); got != "1.2.3.4" {
 		t.Fatalf("expected forwarded IP from trusted peer, got %q", got)
+	}
+
+	// Test IP Spoofing
+	// 198.51.100.9 is a trusted proxy. 1.2.3.4 is the client.
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 198.51.100.9")
+	if got := ClientIP(req, true, "AEGION_TEST_TRUSTED_PROXY_CIDRS"); got != "1.2.3.4" {
+		t.Fatalf("expected untrusted IP before trusted proxy, got %q", got)
+	}
+
+	// 198.51.100.9 is trusted. 198.51.100.10 is trusted. 1.2.3.4 is the client. 8.8.8.8 is spoofed.
+	req.Header.Set("X-Forwarded-For", "8.8.8.8, 1.2.3.4, 198.51.100.10, 198.51.100.9")
+	if got := ClientIP(req, true, "AEGION_TEST_TRUSTED_PROXY_CIDRS"); got != "1.2.3.4" {
+		t.Fatalf("expected first untrusted IP from right, got %q", got)
 	}
 
 	req.RemoteAddr = "203.0.113.10:1234"
@@ -43,8 +56,8 @@ func TestForwardedAccessorsAndFallbacks(t *testing.T) {
 	if got := ForwardedHost(req, true, "AEGION_TEST_TRUSTED_PROXY_CIDRS"); got != "proxy.example.com" {
 		t.Fatalf("unexpected forwarded host: %q", got)
 	}
-	if got := ClientIP(req, true, "AEGION_TEST_TRUSTED_PROXY_CIDRS"); got != "198.51.100.10" {
-		t.Fatalf("expected first forwarded-for IP, got %q", got)
+	if got := ClientIP(req, true, "AEGION_TEST_TRUSTED_PROXY_CIDRS"); got != "198.51.100.11" {
+		t.Fatalf("expected rightmost untrusted forwarded-for IP, got %q", got)
 	}
 
 	xffOnlySpaces := httptest.NewRequest("GET", "/", nil)
