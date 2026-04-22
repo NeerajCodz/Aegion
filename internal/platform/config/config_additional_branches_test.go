@@ -114,4 +114,13 @@ secrets:
 			t.Fatal("expected empty placeholder input to be false")
 		}
 	})
+
+	t.Run("is placeholder value detects known defaults", func(t *testing.T) {
+		if !IsPlaceholderValue("admin123!") {
+			t.Fatal("expected admin123! to be treated as placeholder")
+		}
+		if IsPlaceholderValue("Str0ng-P@ssword!") {
+			t.Fatal("expected strong password to not be treated as placeholder")
+		}
+	})
 }

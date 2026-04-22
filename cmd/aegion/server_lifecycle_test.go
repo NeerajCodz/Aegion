@@ -276,6 +276,31 @@ func TestBootstrapAdmin_PropagatesProvisioningError(t *testing.T) {
 	}
 }
 
+func TestBootstrapAdmin_RejectsPlaceholderPassword(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.Operator.Email = "admin@example.com"
+	s.cfg.Operator.Password = "admin123!"
+
+	origBootstrap := ensureBootstrapAdminOperator
+	t.Cleanup(func() {
+		ensureBootstrapAdminOperator = origBootstrap
+	})
+
+	bootstrapCalls := 0
+	ensureBootstrapAdminOperator = func(ctx context.Context, db *database.DB, email, password string) (bootstrapAdminOutcome, error) {
+		bootstrapCalls++
+		return bootstrapAdminOutcome{}, nil
+	}
+
+	err := s.bootstrapAdmin(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "placeholder value") {
+		t.Fatalf("expected placeholder credential error, got %v", err)
+	}
+	if bootstrapCalls != 0 {
+		t.Fatalf("expected bootstrap to be blocked for placeholder password")
+	}
+}
+
 func TestNewServerInitializesCoreComponents(t *testing.T) {
 	log := testLogger()
 

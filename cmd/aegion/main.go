@@ -86,7 +86,7 @@ func parseFlags() *flags {
 	flag.StringVar(&f.configPath, "config", "aegion.yaml", "Path to configuration file")
 	flag.BoolVar(&f.migrateOnly, "migrate", false, "Run migrations and exit")
 	flag.BoolVar(&f.showVersion, "version", false, "Show version and exit")
-	flag.BoolVar(&f.adminBootstrap, "admin-bootstrap", true, "Bootstrap admin user on startup")
+	flag.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
 	flag.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
 	flag.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "Graceful shutdown timeout")
 	flag.Parse()
@@ -101,7 +101,7 @@ func parseFlagsWithArgs(args []string) (*flags, error) {
 	fs.StringVar(&f.configPath, "config", "aegion.yaml", "Path to configuration file")
 	fs.BoolVar(&f.migrateOnly, "migrate", false, "Run migrations and exit")
 	fs.BoolVar(&f.showVersion, "version", false, "Show version and exit")
-	fs.BoolVar(&f.adminBootstrap, "admin-bootstrap", true, "Bootstrap admin user on startup")
+	fs.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
 	fs.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
 	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "Graceful shutdown timeout")
 
