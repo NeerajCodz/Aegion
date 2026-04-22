@@ -479,6 +479,12 @@ func normalizeRedirect(value string) string {
 	if value == "" {
 		return "/"
 	}
+	if strings.ContainsAny(value, "\r\n") {
+		return "/"
+	}
+	if !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") {
+		return "/"
+	}
 	return value
 }
 
