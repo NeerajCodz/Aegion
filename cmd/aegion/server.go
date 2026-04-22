@@ -465,6 +465,9 @@ func (s *Server) bootstrapAdmin(ctx context.Context) error {
 		s.log.Info().Msg("Admin bootstrap skipped: no operator credentials configured")
 		return nil
 	}
+	if config.IsPlaceholderValue(password) {
+		return errors.New("admin bootstrap blocked: operator.password must be rotated from placeholder value")
+	}
 
 	s.log.Info().
 		Str("email", email).

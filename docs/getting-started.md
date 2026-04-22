@@ -52,6 +52,8 @@ operator:
 go run ./cmd/aegion -admin-bootstrap -config configs/aegion.yaml
 ```
 
+`-admin-bootstrap` is explicit opt-in and rejects placeholder passwords (for example `admin123!` or values containing `change-me`).
+
 ### 4. Access the Admin Panel
 
 Navigate to [http://localhost:8080/aegion](http://localhost:8080/aegion) and log in with your admin credentials.
@@ -190,5 +192,7 @@ docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml log
 # Force bootstrap manually
 go run ./cmd/aegion -admin-bootstrap -config configs/aegion.yaml
 ```
+
+Ensure `operator.password` is set to a non-placeholder value before running bootstrap.
 
 For more help, check the [GitHub Issues](https://github.com/NeerajCodz/Aegion/issues) or create a new one.

@@ -112,10 +112,11 @@ log:
 # ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap Operator
 # Created on first boot when no admin exists
+# Used only with -admin-bootstrap; placeholder password is blocked at runtime.
 # ─────────────────────────────────────────────────────────────────────────────
 operator:
-  email: admin@localhost
-  password: admin123!
+  email: admin@example.com
+  password: change-me-before-bootstrap
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Courier (Email/SMS)
