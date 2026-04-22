@@ -187,28 +187,50 @@ function Scan-ContainerBestPractices {
     
     foreach ($dockerfile in $dockerfiles) {
         Write-Info "Checking $($dockerfile.FullName)..."
-        $content = Get-Content $dockerfile.FullName -Raw
-        
-        # Check for common issues
+        if ($dockerfile.Name -eq "Dockerfile.base") {
+            Write-Info "$($dockerfile.Name) is a build-base image; skipping runtime checks"
+            continue
+        }
+
+        $lines = Get-Content $dockerfile.FullName
+        if ($lines.Count -eq 0) {
+            Write-Info "$($dockerfile.Name) is empty; skipping"
+            continue
+        }
+
+        $fromIndices = @()
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^\s*FROM\s+") {
+                $fromIndices += $i
+            }
+        }
+        if ($fromIndices.Count -eq 0) {
+            Write-Info "$($dockerfile.Name) has no FROM directive; skipping"
+            continue
+        }
+
+        # Evaluate only final runtime stage to avoid builder-stage false positives.
+        $runtimeStart = $fromIndices[-1]
+        $runtimeFrom = $lines[$runtimeStart]
+        $runtimeContent = ($lines[$runtimeStart..($lines.Count - 1)] -join "`n")
+
         $issues = @()
-        
-        if ($content -notmatch "USER\s+\w+") {
+
+        $runtimeNonRootBase = $runtimeFrom -match "(?i):nonroot(\s|$)"
+        $runtimeHasUser = $runtimeContent -match "(?m)^\s*USER\s+\S+"
+        if (-not ($runtimeNonRootBase -or $runtimeHasUser)) {
             $issues += "No USER directive (may run as root)"
         }
         
-        if ($content -match "COPY\s+\.\s+\.") {
+        if ($runtimeContent -match "(?m)^\s*COPY\s+\.\s+\.") {
             $issues += "Copies entire context (should be selective)"
         }
-        
-        if ($content -match "RUN\s+.*&&.*&&.*&&") {
-            # This is actually good (layer optimization)
-        }
-        
-        if ($content -match "EXPOSE\s+22") {
+
+        if ($runtimeContent -match "(?m)^\s*EXPOSE\s+22(\s|$)") {
             $issues += "Exposes SSH port (security risk)"
         }
         
-        if ($content -match "ADD\s+http") {
+        if ($runtimeContent -match "(?m)^\s*ADD\s+https?://") {
             $issues += "Uses ADD with URL (prefer curl/wget in RUN)"
         }
         
