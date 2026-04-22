@@ -5,6 +5,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+)
+
+var (
+	cidrCache sync.Map // map[string][]*net.IPNet
 )
 
 func ClientIP(r *http.Request, trustForwarded bool, envVar string) string {
@@ -17,7 +22,17 @@ func ClientIP(r *http.Request, trustForwarded bool, envVar string) string {
 		return remoteIP
 	}
 
-	trustedCIDRs := parseCIDRs(os.Getenv(envVar))
+	var trustedCIDRs []*net.IPNet
+	if envVar != "" {
+		raw := os.Getenv(envVar)
+		if val, ok := cidrCache.Load(raw); ok {
+			trustedCIDRs = val.([]*net.IPNet)
+		} else {
+			trustedCIDRs = parseCIDRs(raw)
+			cidrCache.Store(raw, trustedCIDRs)
+		}
+	}
+
 	if len(trustedCIDRs) == 0 {
 		return remoteIP
 	}
