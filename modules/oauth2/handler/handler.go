@@ -328,6 +328,10 @@ func (h *OAuth2Handler) HandleDeviceAuthorization(w http.ResponseWriter, r *http
 			writeError(w, "invalid_client", "Client authentication failed", http.StatusUnauthorized)
 			return
 		}
+		if errors.Is(err, device.ErrInvalidScope) {
+			writeError(w, "invalid_scope", "Requested scope is not allowed for this client", http.StatusBadRequest)
+			return
+		}
 		writeError(w, "invalid_request", "Invalid device authorization request", http.StatusBadRequest)
 		return
 	}

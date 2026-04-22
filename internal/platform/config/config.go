@@ -829,6 +829,11 @@ func isProductionEnvironment() bool {
 	return false
 }
 
+// IsPlaceholderValue reports whether the provided value looks like a sample/default secret.
+func IsPlaceholderValue(value string) bool {
+	return containsPlaceholderValue(value)
+}
+
 func containsPlaceholderValue(value string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	if normalized == "" {

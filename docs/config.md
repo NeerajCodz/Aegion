@@ -282,6 +282,8 @@ Current enforced checks:
 - module versions must be pinned (no `latest` tags in `module_versions`)
 - placeholder bootstrap credentials/secrets (for example `change-me`, `admin123!`) are rejected
 
+Independent of production mode, `-admin-bootstrap` refuses to create an operator when `operator.password` is still a placeholder value.
+
 This is a hard fail-fast gate to prevent accidental production deployments with development defaults.
 
 ---

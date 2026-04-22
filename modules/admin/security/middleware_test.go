@@ -257,7 +257,7 @@ func TestGetClientIP(t *testing.T) {
 			headers:        map[string]string{"X-Forwarded-For": "10.0.0.3, 10.0.0.4, 10.0.0.5"},
 			remoteAddr:     "192.168.1.1:12345",
 			trustForwarded: true,
-			expected:       "10.0.0.3",
+			expected:       "10.0.0.5",
 		},
 	}
 

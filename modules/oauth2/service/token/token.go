@@ -305,6 +305,11 @@ func (s *TokenService) ExchangeDeviceCode(ctx context.Context, req *DeviceCodeTo
 		!client.HasGrantType("device_code") {
 		return nil, ErrUnauthorizedClient
 	}
+	for _, requestedScope := range req.Scopes {
+		if !client.HasScope(requestedScope) {
+			return nil, ErrInvalidScope
+		}
+	}
 
 	authTime := req.AuthTime
 	if authTime.IsZero() {

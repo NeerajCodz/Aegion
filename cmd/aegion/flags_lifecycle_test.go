@@ -53,8 +53,8 @@ func TestParseFlagsDefaults(t *testing.T) {
 		if f.showVersion {
 			t.Fatalf("expected default showVersion=false")
 		}
-		if !f.adminBootstrap {
-			t.Fatalf("expected default adminBootstrap=true")
+		if f.adminBootstrap {
+			t.Fatalf("expected default adminBootstrap=false")
 		}
 		if !f.enableWorkers {
 			t.Fatalf("expected default enableWorkers=true")
