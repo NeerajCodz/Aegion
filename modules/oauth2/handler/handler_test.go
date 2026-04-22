@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/service/device"
 	"github.com/aegion/aegion/modules/oauth2/service/grants"
@@ -22,7 +23,6 @@ import (
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 )
 
 func TestOAuth2Handler_MethodGuards(t *testing.T) {
@@ -1068,6 +1068,25 @@ func TestOAuth2Handler_TargetedUncoveredBranches(t *testing.T) {
 		h.HandleDeviceAuthorization(rec, req)
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 		assert.Contains(t, rec.Body.String(), "Invalid device authorization request")
+
+		deviceStore = &handlerDeviceStore{
+			client: &store.Client{
+				ID:                      "client-1",
+				TokenEndpointAuthMethod: "none",
+				Scopes:                  []string{"openid"},
+			},
+		}
+		h.deviceSvc = device.NewDeviceService(deviceStore, 10*time.Minute, 5, "https://issuer/device")
+
+		form = url.Values{}
+		form.Set("client_id", "client-1")
+		form.Set("scope", "openid admin")
+		req = httptest.NewRequest(http.MethodPost, "/oauth2/device/authorize", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec = httptest.NewRecorder()
+		h.HandleDeviceAuthorization(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "\"error\":\"invalid_scope\"")
 	})
 }
 
