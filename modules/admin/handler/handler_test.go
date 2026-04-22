@@ -72,7 +72,7 @@ func TestGetClientIP(t *testing.T) {
 		req.RemoteAddr = "192.0.2.10:12345"
 
 		ip := getClientIP(req)
-		assert.Equal(t, "1.1.1.1", ip)
+		assert.Equal(t, "2.2.2.2", ip)
 	})
 }
 

@@ -85,13 +85,13 @@ func TestGetClientIP(t *testing.T) {
 			name:       "x-forwarded-for multiple ips",
 			headers:    map[string]string{"X-Forwarded-For": "203.0.113.1, 192.168.1.100, 10.0.0.1"},
 			remoteAddr: "10.0.0.1:8080",
-			expected:   "203.0.113.1", // should return first IP
+			expected:   "192.168.1.100", // should return first untrusted IP from right
 		},
 		{
 			name:       "x-forwarded-for with spaces",
-			headers:    map[string]string{"X-Forwarded-For": "  203.0.113.1  , 192.168.1.100"},
+			headers:    map[string]string{"X-Forwarded-For": "  203.0.113.1  , 192.168.1.100, 10.0.0.1"},
 			remoteAddr: "10.0.0.1:8080",
-			expected:   "203.0.113.1", // should trim spaces
+			expected:   "192.168.1.100", // should trim spaces and return untrusted
 		},
 		{
 			name:       "x-real-ip header",
