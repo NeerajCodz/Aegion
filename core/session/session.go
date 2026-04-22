@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -478,13 +477,13 @@ func (m *Manager) Cleanup(ctx context.Context) (int64, error) {
 	expiredDays := int(m.cleanupExpiredAfter.Hours() / 24)
 	inactiveHours := int(m.cleanupInactiveAfter.Hours())
 
-	sql := fmt.Sprintf(`
+	sql := `
 		DELETE FROM core_sessions
-		WHERE expires_at < NOW() - INTERVAL '%d days'
-		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '%d hours')
-	`, expiredDays, inactiveHours)
+		WHERE expires_at < NOW() - (INTERVAL '1 day' * $1)
+		   OR (active = FALSE AND updated_at < NOW() - (INTERVAL '1 hour' * $2))
+	`
 
-	result, err := m.execStmt(ctx, sql)
+	result, err := m.execStmt(ctx, sql, expiredDays, inactiveHours)
 	if err != nil {
 		return 0, err
 	}

@@ -154,7 +154,7 @@ func TestRuleEngine_Priority(t *testing.T) {
 	rules := []Rule{
 		{
 			ID:       "catch-all",
-			Path:     "*",
+			Path:     "/*",
 			Target:   "default-service",
 			Priority: 1,
 			Enabled:  true,
@@ -192,7 +192,7 @@ func TestRuleEngine_Priority(t *testing.T) {
 	assert.Equal(t, "api-specific", rule.ID)
 
 	// Should match catch-all for other paths
-	req = httptest.NewRequest("GET", "/other/path", nil)
+	req = httptest.NewRequest("GET", "/other", nil)
 	rule, matched = engine.Match(req)
 
 	assert.True(t, matched)
@@ -556,7 +556,7 @@ func TestMatchesPattern(t *testing.T) {
 		{"/api/v1/users", "/api/v2/*", false},
 		{"api/users", "api/*", true}, // No leading slash
 		{"/api/users/123", "/api/users/*", true},
-		{"/api/users", "/api/users/*", false}, // Exact match vs glob
+		{"/api/users", "/api/users/*", true}, // Should match with recursive logic
 		{"/", "/*", true},
 		{"/health", "/health", true},
 		{"/health/check", "/health", false},

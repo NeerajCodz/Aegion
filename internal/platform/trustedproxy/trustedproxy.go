@@ -12,25 +12,62 @@ func ClientIP(r *http.Request, trustForwarded bool, envVar string) string {
 		return ""
 	}
 
-	if canTrustForwardedHeaders(r, trustForwarded, envVar) {
-		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-			for _, ip := range strings.Split(xff, ",") {
-				if candidate := strings.TrimSpace(ip); candidate != "" {
-					return candidate
-				}
+	remoteIP := RemoteIP(r.RemoteAddr)
+	if !trustForwarded {
+		return remoteIP
+	}
+
+	trustedCIDRs := parseCIDRs(os.Getenv(envVar))
+	if len(trustedCIDRs) == 0 {
+		return remoteIP
+	}
+
+	if !isTrusted(remoteIP, trustedCIDRs) {
+		return remoteIP
+	}
+
+	// RemoteAddr is trusted, so we can look at X-Forwarded-For.
+	// We must traverse from right to left to prevent IP spoofing.
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		ips := strings.Split(xff, ",")
+		for i := len(ips) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(ips[i])
+			if candidate == "" {
+				continue
 			}
-		}
-
-		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
-			return xri
-		}
-
-		if cfip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfip != "" {
-			return cfip
+			if !isTrusted(candidate, trustedCIDRs) {
+				return candidate
+			}
+			// If we're at the leftmost IP and it's still a trusted proxy,
+			// we return it as the best we have.
+			if i == 0 {
+				return candidate
+			}
 		}
 	}
 
-	return RemoteIP(r.RemoteAddr)
+	if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+		return xri
+	}
+
+	if cfip := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfip != "" {
+		return cfip
+	}
+
+	return remoteIP
+}
+
+func isTrusted(ipStr string, trustedCIDRs []*net.IPNet) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	for _, cidr := range trustedCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func PriorForwardedFor(r *http.Request, trustForwarded bool, envVar string) string {
