@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/aegion/aegion/internal/platform/observability"
 )
 
 const maxSCIMJSONBodyBytes int64 = 1 << 20
@@ -125,6 +127,8 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 
 		// Store token in context
 		ctx := contextWithSCIMToken(r.Context(), scimToken)
+		ctx = observability.WithUserID(ctx, "scim:"+scimToken.ID.String())
+		ctx = observability.WithSessionID(ctx, scimToken.ID.String())
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

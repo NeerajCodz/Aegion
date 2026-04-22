@@ -56,15 +56,15 @@ func TestServerAdditionalRoutingAndObservabilityBranches(t *testing.T) {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
 
-		var probes []dashboardObservabilityProbe
-		if err := json.NewDecoder(rec.Body).Decode(&probes); err != nil {
+		var resp dashboardObservabilityResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode probes: %v", err)
 		}
-		if len(probes) == 0 {
+		if len(resp.Stack) == 0 {
 			t.Fatal("expected probes in response")
 		}
-		if !strings.Contains(strings.ToLower(probes[0].Message), "missing protocol scheme") {
-			t.Fatalf("expected invalid URL probe message, got %q", probes[0].Message)
+		if !strings.Contains(strings.ToLower(resp.Stack[0].Message), "missing protocol scheme") {
+			t.Fatalf("expected invalid URL probe message, got %q", resp.Stack[0].Message)
 		}
 	})
 }
@@ -116,4 +116,3 @@ func TestProbeDashboardObservabilityRequestCreationBranch(t *testing.T) {
 		t.Fatalf("unexpected probe result: %#v", res)
 	}
 }
-

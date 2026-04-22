@@ -31,6 +31,20 @@ The admin module is configured through YAML files and environment variables.
 | `AEGION_ADMIN_OBS_GRAFANA_URL` | Grafana health URL | `http://grafana:3000/api/health` |
 | `AEGION_ADMIN_OBS_TEMPO_URL` | Tempo readiness URL | `http://tempo:3200/ready` |
 | `AEGION_ADMIN_OBS_LOKI_URL` | Loki readiness URL | `http://loki:3100/ready` |
+| `OTEL_SERVICE_NAME` | Telemetry service name surfaced in admin observability | `aegion` |
+| `AEGION_SERVICE_VERSION` | Telemetry service version surfaced in admin observability | `v1.0.0` |
+| `AEGION_ENVIRONMENT` | Telemetry environment label | `development` |
+| `AEGION_INSTANCE_ID` | Telemetry instance identifier | Hostname |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP traces export endpoint | `http://localhost:4318` |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | OTLP metrics export endpoint | `http://localhost:4318` |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OTLP logs export endpoint | `http://localhost:4318` |
+| `OTEL_TRACES_SAMPLER_ARG` | Trace sampling ratio | `1.0` |
+| `OTEL_METRIC_EXPORT_INTERVAL` | Metrics export interval | `30s` |
+| `OTEL_BSP_EXPORT_TIMEOUT` | Trace export timeout | `10s` |
+| `OTEL_EXPORTER_OTLP_INSECURE` | Allow insecure OTLP transport | `false` |
+| `AEGION_OBS_ENABLE_TRACES` | Enable traces signal | `true` |
+| `AEGION_OBS_ENABLE_METRICS` | Enable metrics signal | `true` |
+| `AEGION_OBS_ENABLE_LOGS` | Enable logs signal | `true` |
 
 ### Configuration File Structure
 
@@ -66,6 +80,21 @@ observability:
     grafana: "${AEGION_ADMIN_OBS_GRAFANA_URL:-http://grafana:3000/api/health}"
     tempo: "${AEGION_ADMIN_OBS_TEMPO_URL:-http://tempo:3200/ready}"
     loki: "${AEGION_ADMIN_OBS_LOKI_URL:-http://loki:3100/ready}"
+  telemetry:
+    service_name: "${OTEL_SERVICE_NAME:-aegion}"
+    service_version: "${AEGION_SERVICE_VERSION:-v1.0.0}"
+    environment: "${AEGION_ENVIRONMENT:-development}"
+    instance_id: "${AEGION_INSTANCE_ID:-}"
+    traces_endpoint: "${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://localhost:4318}"
+    metrics_endpoint: "${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-http://localhost:4318}"
+    logs_endpoint: "${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-http://localhost:4318}"
+    trace_sampling_ratio: 1.0
+    metric_export_interval: 30s
+    trace_export_timeout: 10s
+    insecure: false
+    enable_traces: true
+    enable_metrics: true
+    enable_logs: true
 
 log:
   level: "info"  # debug, info, warn, error
@@ -115,7 +144,7 @@ All admin API endpoints are mounted at `/api/admin/*` and require authentication
 #### Audit & Monitoring
 - `GET /api/admin/audit` - View audit logs
 - `GET /api/admin/dashboard/stats` - System statistics
-- `GET /api/admin/dashboard/observability` - Observability stack health probes
+- `GET /api/admin/dashboard/observability` - Authenticated observability summary with stack probes, telemetry config, SCIM posture, and guardrail warnings
 
 ### Web Interface
 The SPA is served at `/admin/*` and provides a complete administrative interface.

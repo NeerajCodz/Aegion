@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
+	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	admin "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/scim"
@@ -73,6 +74,64 @@ type dashboardObservabilityProbe struct {
 	ResponseTimeMS int64  `json:"response_time_ms"`
 	Message        string `json:"message"`
 	CheckedAt      string `json:"checked_at"`
+}
+
+type dashboardTelemetrySummary struct {
+	ServiceName            string  `json:"service_name"`
+	ServiceVersion         string  `json:"service_version"`
+	Environment            string  `json:"environment"`
+	InstanceID             string  `json:"instance_id"`
+	TracesEnabled          bool    `json:"traces_enabled"`
+	MetricsEnabled         bool    `json:"metrics_enabled"`
+	LogsEnabled            bool    `json:"logs_enabled"`
+	TracesEndpoint         string  `json:"traces_endpoint"`
+	MetricsEndpoint        string  `json:"metrics_endpoint"`
+	LogsEndpoint           string  `json:"logs_endpoint"`
+	TraceSamplingRatio     float64 `json:"trace_sampling_ratio"`
+	MetricExportInterval   string  `json:"metric_export_interval"`
+	TraceExportTimeout     string  `json:"trace_export_timeout"`
+	InsecureExporter       bool    `json:"insecure_exporter"`
+	TracesEndpointPresent  bool    `json:"traces_endpoint_present"`
+	MetricsEndpointPresent bool    `json:"metrics_endpoint_present"`
+	LogsEndpointPresent    bool    `json:"logs_endpoint_present"`
+}
+
+type dashboardGuardrailsSummary struct {
+	AdminAuthRequired         bool     `json:"admin_auth_required"`
+	ObservabilityRBAC         bool     `json:"observability_rbac"`
+	AdminRateLimiting         bool     `json:"admin_rate_limiting"`
+	AdminCSRFProtection       bool     `json:"admin_csrf_protection"`
+	StrictTransportSecurity   bool     `json:"strict_transport_security"`
+	TrustedProxyHeaders       bool     `json:"trusted_proxy_headers"`
+	SCIMBearerAuth            bool     `json:"scim_bearer_auth"`
+	SCIMUnknownFieldRejection bool     `json:"scim_unknown_field_rejection"`
+	SCIMBodyLimitBytes        int64    `json:"scim_body_limit_bytes"`
+	TelemetrySecretsRedacted  bool     `json:"telemetry_secrets_redacted"`
+	Warnings                  []string `json:"warnings"`
+}
+
+type dashboardSCIMSummary struct {
+	Enabled            bool     `json:"enabled"`
+	BasePath           string   `json:"base_path"`
+	MappingCount       int      `json:"mapping_count"`
+	TokenCount         int      `json:"token_count"`
+	ActiveTokenCount   int      `json:"active_token_count"`
+	ExpiredTokenCount  int      `json:"expired_token_count"`
+	ExpiringTokenCount int      `json:"expiring_token_count"`
+	WildcardTokenCount int      `json:"wildcard_token_count"`
+	WriteTokenCount    int      `json:"write_token_count"`
+	LastTokenUsedAt    string   `json:"last_token_used_at,omitempty"`
+	TokenPrefix        string   `json:"token_prefix"`
+	Warnings           []string `json:"warnings"`
+}
+
+type dashboardObservabilityResponse struct {
+	Enabled     bool                          `json:"enabled"`
+	GeneratedAt string                        `json:"generated_at"`
+	Telemetry   dashboardTelemetrySummary     `json:"telemetry"`
+	Guardrails  dashboardGuardrailsSummary    `json:"guardrails"`
+	SCIM        *dashboardSCIMSummary         `json:"scim,omitempty"`
+	Stack       []dashboardObservabilityProbe `json:"stack"`
 }
 
 func (s *Server) setupRouter() chi.Router {
@@ -160,13 +219,19 @@ func (s *Server) logRequest(next http.Handler) http.Handler {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
 		defer func() {
-			log.Info().
+			event := log.Info().
 				Str("method", r.Method).
 				Str("path", r.URL.Path).
 				Int("status", ww.Status()).
 				Int("bytes", ww.BytesWritten()).
-				Dur("duration", time.Since(start)).
-				Msg("request completed")
+				Dur("duration", time.Since(start))
+			if requestID := middleware.GetReqID(r.Context()); requestID != "" {
+				event = event.Str("request_id", requestID)
+			}
+			if operator := handler.OperatorFromContext(r.Context()); operator != nil {
+				event = event.Str("operator_id", operator.ID.String())
+			}
+			event.Msg("request completed")
 		}()
 
 		next.ServeHTTP(ww, r)
@@ -243,24 +308,241 @@ func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDashboardObservability(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if !s.Config.Observability.Enabled {
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode([]dashboardObservabilityProbe{})
-		return
-	}
-
-	timeout := s.Config.Observability.ProbeTimeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-
-	results := make([]dashboardObservabilityProbe, 0, 5)
-	for _, endpoint := range s.dashboardObservabilityEndpoints() {
-		results = append(results, s.probeDashboardObservability(r.Context(), endpoint, timeout))
-	}
+	response := s.buildDashboardObservabilityResponse(r.Context())
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(results)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) buildDashboardObservabilityResponse(ctx context.Context) dashboardObservabilityResponse {
+	response := dashboardObservabilityResponse{
+		Enabled:     s.Config.Observability.Enabled,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Telemetry:   s.dashboardTelemetrySummary(),
+		Guardrails:  s.dashboardGuardrailsSummary(),
+		Stack:       []dashboardObservabilityProbe{},
+	}
+
+	if s.Config.Observability.Enabled {
+		timeout := s.Config.Observability.ProbeTimeout
+		if timeout <= 0 {
+			timeout = 5 * time.Second
+		}
+
+		response.Stack = make([]dashboardObservabilityProbe, 0, 5)
+		for _, endpoint := range s.dashboardObservabilityEndpoints() {
+			response.Stack = append(response.Stack, s.probeDashboardObservability(ctx, endpoint, timeout))
+		}
+	}
+
+	if s.SCIMService != nil && s.Config.Admin.SCIM.Enabled {
+		response.SCIM = s.dashboardSCIMSummary(ctx)
+		response.Guardrails.Warnings = append(response.Guardrails.Warnings, response.SCIM.Warnings...)
+	}
+
+	return response
+}
+
+func (s *Server) dashboardTelemetrySummary() dashboardTelemetrySummary {
+	cfg := s.Config.Observability.Telemetry
+	defaults := platformobservability.DefaultConfig()
+
+	serviceName := strings.TrimSpace(cfg.ServiceName)
+	if serviceName == "" {
+		serviceName = defaults.ServiceName
+	}
+	serviceVersion := strings.TrimSpace(cfg.ServiceVersion)
+	if serviceVersion == "" {
+		serviceVersion = defaults.ServiceVersion
+	}
+	environment := strings.TrimSpace(cfg.Environment)
+	if environment == "" {
+		environment = defaults.Environment
+	}
+	instanceID := strings.TrimSpace(cfg.InstanceID)
+	if instanceID == "" {
+		instanceID = defaults.InstanceID
+	}
+	tracesEndpoint := strings.TrimSpace(cfg.TracesEndpoint)
+	if tracesEndpoint == "" {
+		tracesEndpoint = defaults.TracesEndpoint
+	}
+	metricsEndpoint := strings.TrimSpace(cfg.MetricsEndpoint)
+	if metricsEndpoint == "" {
+		metricsEndpoint = defaults.MetricsEndpoint
+	}
+	logsEndpoint := strings.TrimSpace(cfg.LogsEndpoint)
+	if logsEndpoint == "" {
+		logsEndpoint = defaults.LogsEndpoint
+	}
+	traceSamplingRatio := cfg.TraceSamplingRatio
+	if traceSamplingRatio == 0 {
+		traceSamplingRatio = defaults.TraceSamplingRatio
+	}
+	metricExportInterval := cfg.MetricExportInterval
+	if metricExportInterval == 0 {
+		metricExportInterval = defaults.MetricExportInterval
+	}
+	traceExportTimeout := cfg.TraceExportTimeout
+	if traceExportTimeout == 0 {
+		traceExportTimeout = defaults.TraceExportTimeout
+	}
+	tracesEnabled := cfg.EnableTraces
+	metricsEnabled := cfg.EnableMetrics
+	logsEnabled := cfg.EnableLogs
+	if !tracesEnabled && !metricsEnabled && !logsEnabled {
+		tracesEnabled = defaults.EnableTraces
+		metricsEnabled = defaults.EnableMetrics
+		logsEnabled = defaults.EnableLogs
+	}
+
+	return dashboardTelemetrySummary{
+		ServiceName:            serviceName,
+		ServiceVersion:         serviceVersion,
+		Environment:            environment,
+		InstanceID:             instanceID,
+		TracesEnabled:          tracesEnabled,
+		MetricsEnabled:         metricsEnabled,
+		LogsEnabled:            logsEnabled,
+		TracesEndpoint:         tracesEndpoint,
+		MetricsEndpoint:        metricsEndpoint,
+		LogsEndpoint:           logsEndpoint,
+		TraceSamplingRatio:     traceSamplingRatio,
+		MetricExportInterval:   metricExportInterval.String(),
+		TraceExportTimeout:     traceExportTimeout.String(),
+		InsecureExporter:       cfg.Insecure,
+		TracesEndpointPresent:  tracesEndpoint != "",
+		MetricsEndpointPresent: metricsEndpoint != "",
+		LogsEndpointPresent:    logsEndpoint != "",
+	}
+}
+
+func (s *Server) dashboardGuardrailsSummary() dashboardGuardrailsSummary {
+	warnings := make([]string, 0, 3)
+	if s.Config.Observability.Telemetry.Insecure {
+		warnings = append(warnings, "OTLP export is configured as insecure")
+	}
+	if securityEnabled := securityEnabledFromEnv(); !securityEnabled {
+		warnings = append(warnings, "strict transport security is disabled outside production")
+	}
+	if securityAllowForwardedHeaders() {
+		warnings = append(warnings, "trusted proxy headers are enabled; verify proxy CIDR allowlist")
+	}
+
+	return dashboardGuardrailsSummary{
+		AdminAuthRequired:         true,
+		ObservabilityRBAC:         true,
+		AdminRateLimiting:         true,
+		AdminCSRFProtection:       true,
+		StrictTransportSecurity:   securityEnabledFromEnv(),
+		TrustedProxyHeaders:       securityAllowForwardedHeaders(),
+		SCIMBearerAuth:            s.SCIMService != nil && s.Config.Admin.SCIM.Enabled,
+		SCIMUnknownFieldRejection: true,
+		SCIMBodyLimitBytes:        1 << 20,
+		TelemetrySecretsRedacted:  true,
+		Warnings:                  warnings,
+	}
+}
+
+func (s *Server) dashboardSCIMSummary(ctx context.Context) *dashboardSCIMSummary {
+	summary := &dashboardSCIMSummary{
+		Enabled:     true,
+		BasePath:    normalizeMountedPath(s.Config.Admin.SCIM.BasePath),
+		TokenPrefix: s.Config.Admin.SCIM.TokenPrefix,
+	}
+
+	tokens, err := s.SCIMService.ListSCIMTokens(ctx)
+	if err != nil {
+		summary.Warnings = append(summary.Warnings, "SCIM token inventory unavailable")
+		return summary
+	}
+	mappings, err := s.SCIMService.ListSCIMMappings(ctx)
+	if err != nil {
+		summary.Warnings = append(summary.Warnings, "SCIM mapping inventory unavailable")
+	} else {
+		summary.MappingCount = len(mappings)
+	}
+
+	now := time.Now().UTC()
+	var latestUse time.Time
+	for _, token := range tokens {
+		if token == nil {
+			continue
+		}
+		summary.TokenCount++
+		if token.Active {
+			summary.ActiveTokenCount++
+		}
+		if token.ExpiresAt != nil {
+			if token.ExpiresAt.Before(now) {
+				summary.ExpiredTokenCount++
+			} else if token.ExpiresAt.Before(now.Add(7 * 24 * time.Hour)) {
+				summary.ExpiringTokenCount++
+			}
+		}
+		if token.LastUsedAt != nil && token.LastUsedAt.After(latestUse) {
+			latestUse = token.LastUsedAt.UTC()
+		}
+		if hasSCIMPermission(token, "*") {
+			summary.WildcardTokenCount++
+		}
+		if hasAnySCIMPermission(token, "users:write", "groups:write", "users:*", "groups:*", "*") {
+			summary.WriteTokenCount++
+		}
+	}
+
+	if !latestUse.IsZero() {
+		summary.LastTokenUsedAt = latestUse.Format(time.RFC3339)
+	}
+	if summary.WildcardTokenCount > 0 {
+		summary.Warnings = append(summary.Warnings, "one or more SCIM tokens have wildcard permissions")
+	}
+	if summary.ExpiredTokenCount > 0 {
+		summary.Warnings = append(summary.Warnings, "expired SCIM tokens should be removed")
+	}
+	if summary.MappingCount == 0 {
+		summary.Warnings = append(summary.Warnings, "SCIM is enabled without any attribute mappings")
+	}
+
+	return summary
+}
+
+func hasSCIMPermission(token *scim.SCIMToken, permission string) bool {
+	if token == nil {
+		return false
+	}
+	for _, candidate := range token.Permissions {
+		if candidate == permission {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnySCIMPermission(token *scim.SCIMToken, permissions ...string) bool {
+	for _, permission := range permissions {
+		if hasSCIMPermission(token, permission) {
+			return true
+		}
+	}
+	return false
+}
+
+func securityEnabledFromEnv() bool {
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ENV")))
+	if env == "" {
+		env = strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ENVIRONMENT")))
+	}
+	return env == "prod" || env == "production"
+}
+
+func securityAllowForwardedHeaders() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AEGION_ADMIN_TRUST_FORWARDED_HEADERS"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) dashboardObservabilityEndpoints() []dashboardObservabilityEndpoint {
