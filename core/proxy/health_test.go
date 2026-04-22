@@ -88,8 +88,52 @@ func TestHealthChecker_FailedCheck(t *testing.T) {
 	assert.Equal(t, int64(1), metrics.CheckCount)
 	assert.Equal(t, int64(1), metrics.FailureCount)
 	assert.Equal(t, float64(0.0), metrics.SuccessRate)
-	assert.Nil(t, metrics.LastError) // No network error, just wrong status code
+	assert.EqualError(t, metrics.LastError, "unexpected health status 500")
 	assert.False(t, metrics.IsHealthy())
+}
+
+func TestHealthChecker_ExpectedBodyMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("not-ok"))
+	}))
+	defer server.Close()
+
+	hc := NewHealthChecker(HealthCheckerConfig{
+		URL:            server.URL + "/health",
+		Timeout:        time.Second,
+		ExpectedStatus: http.StatusOK,
+		ExpectedBody:   "OK",
+		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+	})
+
+	hc.performCheck()
+
+	metrics := hc.GetMetrics()
+	assert.Equal(t, HealthStatusUnhealthy, metrics.Status)
+	assert.EqualError(t, metrics.LastError, "unexpected health response body")
+}
+
+func TestHealthChecker_ExpectedBodyMatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("READY"))
+	}))
+	defer server.Close()
+
+	hc := NewHealthChecker(HealthCheckerConfig{
+		URL:            server.URL + "/health",
+		Timeout:        time.Second,
+		ExpectedStatus: http.StatusOK,
+		ExpectedBody:   "READY",
+		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+	})
+
+	hc.performCheck()
+
+	metrics := hc.GetMetrics()
+	assert.Equal(t, HealthStatusHealthy, metrics.Status)
+	assert.Nil(t, metrics.LastError)
 }
 
 func TestHealthChecker_NetworkError(t *testing.T) {

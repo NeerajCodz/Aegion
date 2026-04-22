@@ -54,6 +54,9 @@ type Upstream struct {
 	// HealthCheck endpoint path for health checks
 	HealthCheck string `json:"health_check" yaml:"health_check"`
 
+	// HealthCheckExpectedBody is the exact expected response body for health checks.
+	HealthCheckExpectedBody string `json:"health_check_expected_body,omitempty" yaml:"health_check_expected_body,omitempty"`
+
 	// Weight for load balancing (not implemented yet, future extension)
 	Weight int `json:"weight" yaml:"weight"`
 

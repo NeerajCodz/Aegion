@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -201,11 +203,21 @@ func (hc *HealthChecker) performCheck() {
 
 	// Check status code
 	if resp.StatusCode != hc.config.ExpectedStatus {
-		hc.recordFailure(err)
+		hc.recordFailure(fmt.Errorf("unexpected health status %d", resp.StatusCode))
 		return
 	}
 
-	// TODO: Check response body if ExpectedBody is configured
+	if hc.config.ExpectedBody != "" {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			hc.recordFailure(fmt.Errorf("read health response body: %w", err))
+			return
+		}
+		if string(body) != hc.config.ExpectedBody {
+			hc.recordFailure(fmt.Errorf("unexpected health response body"))
+			return
+		}
+	}
 
 	// Health check successful
 	hc.recordSuccess()

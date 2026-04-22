@@ -20,8 +20,10 @@ type Router struct {
 	logger zerolog.Logger
 
 	// Dependencies
-	registry *registry.Registry
-	policy   policyChecker
+	registry        *registry.Registry
+	policy          policyChecker
+	databaseChecker HealthChecker
+	cacheChecker    HealthChecker
 }
 
 type policyChecker interface {
@@ -62,6 +64,10 @@ type Config struct {
 
 	// Optional in-process policy checker for module proxy authorization.
 	PolicyChecker policyChecker
+
+	// Optional dependency health checks for readiness.
+	DatabaseChecker HealthChecker
+	CacheChecker    HealthChecker
 }
 
 // CORSConfig holds CORS settings.
@@ -110,11 +116,13 @@ func DefaultConfig() Config {
 // New creates a new Router with the default middleware stack.
 func New(cfg Config, logger zerolog.Logger, reg *registry.Registry) *Router {
 	r := &Router{
-		mux:      chi.NewRouter(),
-		config:   cfg,
-		logger:   logger.With().Str("component", "router").Logger(),
-		registry: reg,
-		policy:   cfg.PolicyChecker,
+		mux:             chi.NewRouter(),
+		config:          cfg,
+		logger:          logger.With().Str("component", "router").Logger(),
+		registry:        reg,
+		policy:          cfg.PolicyChecker,
+		databaseChecker: cfg.DatabaseChecker,
+		cacheChecker:    cfg.CacheChecker,
 	}
 
 	r.setupMiddleware()

@@ -212,6 +212,7 @@ export interface ProxyUpstreamSummary {
   name: string;
   url: string;
   health_check?: string;
+  health_check_expected_body?: string;
   timeout?: string;
   max_connections: number;
   enabled: boolean;
