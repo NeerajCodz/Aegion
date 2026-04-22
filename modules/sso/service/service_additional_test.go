@@ -12,6 +12,8 @@ import (
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/sso/store"
+	"github.com/beevik/etree"
+	dsig "github.com/russellhaering/goxmldsig"
 )
 
 type ssoRepoStub struct {
@@ -70,6 +72,65 @@ func (readErrCloser) Read(_ []byte) (int, error) {
 }
 
 func (readErrCloser) Close() error { return nil }
+
+func mustEncodeSignedSAMLResponse(t *testing.T, signer *samlTestSigner, requestID, issuer string, attributes map[string]string, includeNameID bool, statusCode string) string {
+	t.Helper()
+	if strings.TrimSpace(issuer) == "" {
+		issuer = "urn:test:idp"
+	}
+	if strings.TrimSpace(statusCode) == "" {
+		statusCode = "urn:oasis:names:tc:SAML:2.0:status:Success"
+	}
+	now := time.Now().UTC()
+
+	doc := etree.NewDocument()
+	response := doc.CreateElement("Response")
+	response.CreateAttr("ID", "_response-id")
+	response.CreateAttr("InResponseTo", requestID)
+	response.CreateAttr("IssueInstant", now.Format(time.RFC3339))
+	response.CreateElement("Issuer").SetText(issuer)
+	status := response.CreateElement("Status")
+	status.CreateElement("StatusCode").CreateAttr("Value", statusCode)
+
+	assertion := response.CreateElement("Assertion")
+	assertion.CreateAttr("ID", "_assertion-id")
+	assertion.CreateElement("Issuer").SetText(issuer)
+	subject := assertion.CreateElement("Subject")
+	if includeNameID {
+		subject.CreateElement("NameID").SetText(strings.TrimSpace(attributes["subject"]))
+	}
+	confirmation := subject.CreateElement("SubjectConfirmation")
+	confirmationData := confirmation.CreateElement("SubjectConfirmationData")
+	confirmationData.CreateAttr("InResponseTo", requestID)
+	confirmationData.CreateAttr("NotOnOrAfter", now.Add(5*time.Minute).Format(time.RFC3339))
+
+	conditions := assertion.CreateElement("Conditions")
+	conditions.CreateAttr("NotBefore", now.Add(-1*time.Minute).Format(time.RFC3339))
+	conditions.CreateAttr("NotOnOrAfter", now.Add(5*time.Minute).Format(time.RFC3339))
+
+	attributeStatement := assertion.CreateElement("AttributeStatement")
+	for key, value := range attributes {
+		attribute := attributeStatement.CreateElement("Attribute")
+		attribute.CreateAttr("Name", key)
+		attribute.CreateElement("AttributeValue").SetText(value)
+	}
+
+	signingContext, err := dsig.NewSigningContext(signer.privateKey, [][]byte{signer.certificateDER})
+	if err != nil {
+		t.Fatalf("create signing context: %v", err)
+	}
+	root, err := signingContext.SignEnveloped(response)
+	if err != nil {
+		t.Fatalf("sign saml response: %v", err)
+	}
+	doc.SetRoot(root)
+
+	xmlBytes, err := doc.WriteToBytes()
+	if err != nil {
+		t.Fatalf("serialize saml response: %v", err)
+	}
+	return base64.StdEncoding.EncodeToString(xmlBytes)
+}
 
 func TestServiceAdditionalStartAndCompleteErrorBranches(t *testing.T) {
 	secret := []byte("01234567890123456789012345678901")
@@ -181,12 +242,14 @@ func TestServiceAdditionalStartAndCompleteErrorBranches(t *testing.T) {
 	})
 
 	t.Run("complete auth attribute mapping fallback and missing subject", func(t *testing.T) {
+		signer := newSAMLTestSigner(t)
 		connection := &store.Connection{
 			Slug:        "acme",
 			Enabled:     true,
 			DisplayName: "Acme",
 			EntityID:    "urn:test:idp",
 			SSOURL:      "https://idp.example.com/sso",
+			CertificatePEM: signer.certificatePEM,
 			AttributeMapping: store.AttributeMapping{
 				Subject:     "sub_attr",
 				Email:       "mail_attr",
@@ -209,9 +272,11 @@ func TestServiceAdditionalStartAndCompleteErrorBranches(t *testing.T) {
 			t.Fatalf("signRelayState(mapping): %v", err)
 		}
 		got, err := svc.CompleteAuth(ctx, "acme", relay, "", "", "", map[string]interface{}{
-			"sub_attr":  "subject-from-map",
-			"mail_attr": "USER@EXAMPLE.COM",
-			"name_attr": "  User Name  ",
+			"_saml_response": mustEncodeSignedSAMLResponse(t, signer, "_req-map", "urn:test:idp", map[string]string{
+				"sub_attr":  "subject-from-map",
+				"mail_attr": "USER@EXAMPLE.COM",
+				"name_attr": "  User Name  ",
+			}, false, ""),
 		})
 		if err != nil {
 			t.Fatalf("CompleteAuth(mapping success): %v", err)
@@ -229,8 +294,10 @@ func TestServiceAdditionalStartAndCompleteErrorBranches(t *testing.T) {
 			t.Fatalf("signRelayState(mapping missing): %v", err)
 		}
 		if _, err := svc.CompleteAuth(ctx, "acme", relay, "", "", "", map[string]interface{}{
-			"mail_attr": "user@example.com",
-		}); !errors.Is(err, ErrInvalidRelayState) {
+			"_saml_response": mustEncodeSignedSAMLResponse(t, signer, "_req-map-missing", "urn:test:idp", map[string]string{
+				"mail_attr": "user@example.com",
+			}, false, ""),
+		}); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("CompleteAuth(mapping missing subject) = %v", err)
 		}
 	})
@@ -395,76 +462,93 @@ func TestServiceAdditionalRelayAndHelperBranches(t *testing.T) {
 
 func TestServiceAdditionalParseAndValidationHelpers(t *testing.T) {
 	now := time.Now().UTC()
-	future := now.Add(5 * time.Minute).Format(time.RFC3339)
 
 	t.Run("parse saml response decode and validation branches", func(t *testing.T) {
-		if _, err := parseSAMLResponse("%%%bad%%%", nil, "_req", now); !errors.Is(err, ErrInvalidSAMLResponse) {
+		signer := newSAMLTestSigner(t)
+		conn := &store.Connection{EntityID: "urn:test:idp", CertificatePEM: signer.certificatePEM}
+
+		if _, err := parseSAMLResponse("%%%bad%%%", nil, "_req", nil, now); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("parseSAMLResponse(invalid base64) = %v", err)
 		}
 
-		if _, err := parseSAMLResponse(base64.StdEncoding.EncodeToString([]byte("<Response>")), nil, "_req", now); !errors.Is(err, ErrInvalidSAMLResponse) {
+		if _, err := parseSAMLResponse(base64.StdEncoding.EncodeToString([]byte("<Response>")), conn, "_req", nil, now); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("parseSAMLResponse(xml unmarshal error) = %v", err)
 		}
 
-		nonSuccess := `<Response InResponseTo="_req"><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Responder"/></Status><Assertion><Subject><NameID>sub</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="_req" NotOnOrAfter="` + future + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + future + `"/></Assertion></Response>`
-		if _, err := parseSAMLResponse(base64.StdEncoding.EncodeToString([]byte(nonSuccess)), nil, "_req", now); !errors.Is(err, ErrInvalidSAMLResponse) {
+		nonSuccess := mustEncodeSignedSAMLResponse(t, signer, "_req", "urn:test:idp", map[string]string{
+			"subject": "sub",
+		}, true, "urn:oasis:names:tc:SAML:2.0:status:Responder")
+		if _, err := parseSAMLResponse(nonSuccess, conn, "_req", nil, now); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("parseSAMLResponse(non-success status) = %v", err)
 		}
 
-		rawStd := `<Response InResponseTo="_req"><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Subject><NameID>subject-raw</NameID><SubjectConfirmation><SubjectConfirmationData InResponseTo="_req" NotOnOrAfter="` + future + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + future + `"/></Assertion></Response>`
-		parsed, err := parseSAMLResponse(base64.RawStdEncoding.EncodeToString([]byte(rawStd)), nil, "_req", now)
+		rawStdSigned := mustEncodeSignedSAMLResponse(t, signer, "_req", "urn:test:idp", map[string]string{
+			"subject": "subject-raw",
+		}, true, "")
+		rawStdXML, err := base64.StdEncoding.DecodeString(rawStdSigned)
+		if err != nil {
+			t.Fatalf("DecodeString(raw std fixture) = %v", err)
+		}
+		parsed, err := parseSAMLResponse(base64.RawStdEncoding.EncodeToString(rawStdXML), conn, "_req", nil, now)
 		if err != nil || parsed.Subject != "subject-raw" {
 			t.Fatalf("parseSAMLResponse(raw std base64) parsed=%+v err=%v", parsed, err)
 		}
 
-		if _, err := parseSAMLResponse(base64.StdEncoding.EncodeToString([]byte(rawStd)), nil, "_other", now); !errors.Is(err, ErrInvalidSAMLResponse) {
+		if _, err := parseSAMLResponse(rawStdSigned, conn, "_other", nil, now); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("parseSAMLResponse(request mismatch) = %v", err)
 		}
 	})
 
 	t.Run("parse saml response attribute fallback and missing subject", func(t *testing.T) {
-		xmlWithAttrs := `<Response InResponseTo="_req-map"><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Subject><SubjectConfirmation><SubjectConfirmationData InResponseTo="_req-map" NotOnOrAfter="` + future + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + future + `"/><AttributeStatement><Attribute Name="subject_attr"><AttributeValue>sub-attr</AttributeValue></Attribute><Attribute Name="email_attr"><AttributeValue>user@example.com</AttributeValue></Attribute><Attribute Name="display_attr"><AttributeValue>User Name</AttributeValue></Attribute><Attribute Name=""><AttributeValue>skip</AttributeValue></Attribute><Attribute Name="empty_value"><AttributeValue> </AttributeValue></Attribute></AttributeStatement></Assertion></Response>`
+		signer := newSAMLTestSigner(t)
 		conn := &store.Connection{
+			EntityID:       "urn:test:idp",
+			CertificatePEM: signer.certificatePEM,
 			AttributeMapping: store.AttributeMapping{
 				Subject:     "subject_attr",
 				Email:       "email_attr",
 				DisplayName: "display_attr",
 			},
 		}
-		parsed, err := parseSAMLResponse(base64.StdEncoding.EncodeToString([]byte(xmlWithAttrs)), conn, "_req-map", now)
+		xmlWithAttrs := mustEncodeSignedSAMLResponse(t, signer, "_req-map", "urn:test:idp", map[string]string{
+			"subject_attr": "sub-attr",
+			"email_attr":   "user@example.com",
+			"display_attr": "User Name",
+			"empty_value":  " ",
+		}, false, "")
+		parsed, err := parseSAMLResponse(xmlWithAttrs, conn, "_req-map", nil, now)
 		if err != nil {
 			t.Fatalf("parseSAMLResponse(attribute fallback) = %v", err)
 		}
 		if parsed.Subject != "sub-attr" || parsed.Email != "user@example.com" || parsed.DisplayName != "User Name" {
 			t.Fatalf("parseSAMLResponse(attribute fallback) unexpected parsed value: %+v", parsed)
 		}
-		if _, ok := parsed.Attributes[""]; ok {
-			t.Fatalf("parseSAMLResponse(attribute fallback) should skip empty attribute names")
-		}
 		if _, ok := parsed.Attributes["empty_value"]; ok {
 			t.Fatalf("parseSAMLResponse(attribute fallback) should skip empty attribute values")
 		}
 
-		xmlNoSubject := `<Response InResponseTo="_req-none"><Status><StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></Status><Assertion><Subject><SubjectConfirmation><SubjectConfirmationData InResponseTo="_req-none" NotOnOrAfter="` + future + `"/></SubjectConfirmation></Subject><Conditions NotOnOrAfter="` + future + `"/><AttributeStatement><Attribute Name="email_attr"><AttributeValue>user@example.com</AttributeValue></Attribute></AttributeStatement></Assertion></Response>`
-		if _, err := parseSAMLResponse(base64.StdEncoding.EncodeToString([]byte(xmlNoSubject)), conn, "_req-none", now); !errors.Is(err, ErrInvalidSAMLResponse) {
+		xmlNoSubject := mustEncodeSignedSAMLResponse(t, signer, "_req-none", "urn:test:idp", map[string]string{
+			"email_attr": "user@example.com",
+		}, false, "")
+		if _, err := parseSAMLResponse(xmlNoSubject, conn, "_req-none", nil, now); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("parseSAMLResponse(missing subject) = %v", err)
 		}
 	})
 
 	t.Run("certificate parsing and signature verification branches", func(t *testing.T) {
-		if _, err := parseCertificates("-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----"); err == nil {
-			t.Fatalf("parseCertificates(invalid cert bytes) expected error")
+		if _, err := parseCertificatesPEM("-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----"); err == nil {
+			t.Fatalf("parseCertificatesPEM(invalid cert bytes) expected error")
 		}
-		if _, err := parseCertificates("-----BEGIN NOTCERT-----\nYWJj\n-----END NOTCERT-----"); !errors.Is(err, ErrInvalidSAMLResponse) {
-			t.Fatalf("parseCertificates(non-cert blocks) = %v", err)
+		if _, err := parseCertificatesPEM("-----BEGIN NOTCERT-----\nYWJj\n-----END NOTCERT-----"); !errors.Is(err, ErrInvalidSAMLResponse) {
+			t.Fatalf("parseCertificatesPEM(non-cert blocks) = %v", err)
 		}
 
-		_, certPEM := buildSignedResponse(t, "urn:test:idp", "_req-signature", "sub", "user@example.com", "User", now.Add(5*time.Minute))
-		conn := &store.Connection{CertificatePEM: certPEM}
-		if err := verifySAMLSignature([]byte("<"), conn, now); err == nil {
+		signer := newSAMLTestSigner(t)
+		conn := &store.Connection{CertificatePEM: signer.certificatePEM}
+		if _, err := verifySAMLSignature([]byte("<"), conn); err == nil {
 			t.Fatalf("verifySAMLSignature(invalid xml bytes) expected error")
 		}
-		if err := verifySAMLSignature([]byte(`<Response><Issuer>urn:test:idp</Issuer></Response>`), conn, now); !errors.Is(err, ErrInvalidSAMLResponse) {
+		if _, err := verifySAMLSignature([]byte(`<Response><Issuer>urn:test:idp</Issuer></Response>`), conn); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("verifySAMLSignature(no assertion) = %v", err)
 		}
 	})
@@ -490,28 +574,24 @@ func TestServiceAdditionalParseAndValidationHelpers(t *testing.T) {
 		if !validNotOnOrAfter(now, "not-a-time") {
 			t.Fatalf("validNotOnOrAfter(invalid timestamp) expected true")
 		}
-		if !validRecipientAndDestination("https://sp.example.com/cb", "") {
-			t.Fatalf("validRecipientAndDestination(recipient only) expected true")
+		if matchesRecipients([]string{"https://sp.example.com/cb"}, "") {
+			t.Fatalf("matchesRecipients(empty values) expected false when recipients are required")
 		}
-		if !validRecipientAndDestination("", "https://sp.example.com/cb") {
-			t.Fatalf("validRecipientAndDestination(destination only) expected true")
+		if !matchesRecipients([]string{"https://sp.example.com/cb"}, "https://sp.example.com/cb") {
+			t.Fatalf("matchesRecipients(exact recipient) expected true")
 		}
-		if _, ok := parseAbsoluteURL("http://[::1"); ok {
-			t.Fatalf("parseAbsoluteURL(parse error) expected false")
+		if normalizeRecipient(" http://[::1") != "http://[::1" {
+			t.Fatalf("normalizeRecipient(parse error) should preserve original text")
 		}
-		if _, ok := parseAbsoluteURL("ftp://sp.example.com/cb"); ok {
-			t.Fatalf("parseAbsoluteURL(unsupported scheme) expected false")
+		if normalizeRecipient("ftp://sp.example.com/cb") != "ftp://sp.example.com/cb" {
+			t.Fatalf("normalizeRecipient(unsupported scheme) should preserve full url")
 		}
 		if _, ok := parseSAMLTimestamp("invalid"); ok {
 			t.Fatalf("parseSAMLTimestamp(invalid) expected false")
 		}
 
-		if !validAudience(&store.Connection{Slug: "acme"}, []struct {
-			Audience []string `xml:"Audience"`
-		}{
-			{Audience: []string{"urn:aegion:sp:acme"}},
-		}) {
-			t.Fatalf("validAudience(match) expected true")
+		if !matchesRecipients([]string{"https://sp.example.com/cb"}, "https://SP.EXAMPLE.COM/cb#fragment") {
+			t.Fatalf("matchesRecipients(normalized url) expected true")
 		}
 	})
 }

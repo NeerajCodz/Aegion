@@ -29,6 +29,23 @@ if [ -z "$PROTOC_BIN" ]; then
     exit 1
 fi
 
+# Git Bash can discover Windows executables through WSL-style absolute paths,
+# but invoking the executable name through PATH is more reliable there.
+if [[ "$PROTOC_BIN" == *.exe ]]; then
+    case "$PROTOC_BIN" in
+        /mnt/*|[A-Za-z]:\\*)
+            PROTOC_BIN="$(basename "$PROTOC_BIN")"
+            ;;
+    esac
+fi
+if ! command -v "$PROTOC_BIN" >/dev/null 2>&1; then
+    PROTOC_BIN="$(basename "$PROTOC_BIN")"
+    if ! command -v "$PROTOC_BIN" >/dev/null 2>&1; then
+        echo "resolved protoc executable '$PROTOC_BIN' is not runnable in this shell"
+        exit 1
+    fi
+fi
+
 proto_files=()
 while IFS= read -r file; do
     proto_files+=("$file")
