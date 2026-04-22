@@ -15,7 +15,7 @@ import (
 func TestPasswordHandlerAdditionalHelperBranches(t *testing.T) {
 	t.Run("with session header secret clears when empty", func(t *testing.T) {
 		h := &Handler{}
-		WithSessionHeaderSecret([]byte("0123456789abcdef0123456789abcdef"))(h)
+		WithSessionHeaderSecret([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))(h)
 		if len(h.sessionHeaderSecret) == 0 {
 			t.Fatal("expected secret to be set")
 		}
@@ -59,7 +59,7 @@ func TestPasswordHandlerAdditionalHelperBranches(t *testing.T) {
 	})
 
 	t.Run("identity id from request rejects invalid signed session headers", func(t *testing.T) {
-		h := New(&MockService{}, WithSessionHeaderSecret([]byte("0123456789abcdef0123456789abcdef")))
+		h := New(&MockService{}, WithSessionHeaderSecret([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
 		req := httptest.NewRequest(http.MethodPost, "/change-password", nil)
 		req.Header.Set(coresession.HeaderPrefix+"Session-ID", uuid.NewString())
 		req.Header.Set(coresession.HeaderPrefix+"Identity-ID", uuid.NewString())

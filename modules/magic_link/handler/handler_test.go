@@ -461,7 +461,7 @@ func TestHandler_HandleSendVerificationCode(t *testing.T) {
 	t.Run("accepts signed session headers", func(t *testing.T) {
 		identityID := uuid.New()
 		sessionID := uuid.New()
-		secret := []byte("0123456789abcdef0123456789abcdef")
+		secret := []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 		svc := &MockService{}
 		svc.On("SendVerificationCode", mock.Anything, "user@example.com", identityID).Return(nil).Once()
 

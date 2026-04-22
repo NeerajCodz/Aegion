@@ -20,7 +20,7 @@ func TestTOTPEnrollmentAndVerificationFlow(t *testing.T) {
 		TOTPAllowedTimeWindows: 1,
 		BackupCodeCount:        4,
 		TrustedDeviceTTL:       time.Hour,
-		CipherKey:              []byte("0123456789abcdef0123456789abcdef"),
+		CipherKey:              []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 	})
 
 	start, err := svc.StartTOTPEnrollment(context.Background(), "identity-1", "user@example.com")
@@ -67,7 +67,7 @@ func TestTOTPEnrollmentAndVerificationFlow(t *testing.T) {
 func TestTrustedDeviceLifecycle(t *testing.T) {
 	repo := store.New()
 	svc := New(repo, Config{
-		CipherKey:        []byte("0123456789abcdef0123456789abcdef"),
+		CipherKey:        []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 		TrustedDeviceTTL: time.Hour,
 	})
 
@@ -102,7 +102,7 @@ func TestTrustedDeviceLifecycle(t *testing.T) {
 func TestGetStatusAndFactors(t *testing.T) {
 	repo := store.New()
 	svc := New(repo, Config{
-		CipherKey: []byte("0123456789abcdef0123456789abcdef"),
+		CipherKey: []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 	})
 	if err := repo.UpsertTOTPFactor(store.TOTPFactor{
 		IdentityID:       "identity-1",
@@ -141,7 +141,7 @@ func TestRegenerateBackupCodesAndResetIdentity(t *testing.T) {
 		TOTPAllowedTimeWindows: 1,
 		BackupCodeCount:        3,
 		TrustedDeviceTTL:       time.Hour,
-		CipherKey:              []byte("0123456789abcdef0123456789abcdef"),
+		CipherKey:              []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 	})
 
 	if _, err := svc.RegenerateBackupCodes(context.Background(), " "); !errors.Is(err, ErrInvalidIdentity) {
@@ -189,7 +189,7 @@ func TestRegenerateBackupCodesAndResetIdentity(t *testing.T) {
 
 func TestTrustedDeviceInputValidationBranches(t *testing.T) {
 	svc := New(store.New(), Config{
-		CipherKey:        []byte("0123456789abcdef0123456789abcdef"),
+		CipherKey:        []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 		TrustedDeviceTTL: time.Hour,
 	})
 
