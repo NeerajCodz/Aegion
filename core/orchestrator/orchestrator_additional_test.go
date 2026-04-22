@@ -63,7 +63,7 @@ func TestOrchestratorAdditionalNewBranches(t *testing.T) {
 		configPath := writeMinimalMainConfig(t, t.TempDir())
 		o, err := New(Config{
 			ConfigPath:  configPath,
-			TokenSecret: []byte("0123456789abcdef0123456789abcdef"),
+			TokenSecret: []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 		})
 		if err != nil {
 			t.Fatalf("New(success) error = %v", err)
@@ -81,7 +81,7 @@ func TestOrchestratorAdditionalWrapperFallbacksAndStatusBranches(t *testing.T) {
 
 	o, err := New(Config{
 		ConfigPath:  configPath,
-		TokenSecret: []byte("0123456789abcdef0123456789abcdef"),
+		TokenSecret: []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

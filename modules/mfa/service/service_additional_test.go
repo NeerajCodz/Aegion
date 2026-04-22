@@ -127,7 +127,7 @@ func (m *mfaRepoStub) ListFactorsByIdentity(identityID string) ([]store.Factor, 
 }
 
 func TestMFAServiceAdditionalStartCompleteAndVerifyBranches(t *testing.T) {
-	const key = "0123456789abcdef0123456789abcdef"
+	const key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	keyBytes := []byte(key)
 	now := time.Now().UTC()
 
@@ -350,7 +350,7 @@ func TestMFAServiceAdditionalStartCompleteAndVerifyBranches(t *testing.T) {
 }
 
 func TestMFAServiceAdditionalTrustedDeviceAndHelpers(t *testing.T) {
-	const key = "0123456789abcdef0123456789abcdef"
+	const key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	now := time.Now().UTC()
 
 	t.Run("trusted device and factor-list error branches", func(t *testing.T) {
