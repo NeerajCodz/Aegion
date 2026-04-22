@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aegion/aegion/modules/sso/service"
@@ -44,6 +45,17 @@ type captureSSOService struct {
 	email       string
 	displayName string
 	attributes  map[string]interface{}
+}
+
+type unsafeRedirectSSOService struct{ stubSSOService }
+
+func (unsafeRedirectSSOService) CompleteAuth(context.Context, string, string, string, string, string, map[string]interface{}) (*service.CallbackResult, error) {
+	return &service.CallbackResult{
+		Connection: "acme",
+		Subject:    "sub",
+		Email:      "user@example.com",
+		RedirectTo: "https://attacker.example/post-login",
+	}, nil
 }
 
 func (s *captureSSOService) CompleteAuth(_ context.Context, _ string, relayState, subject, email, displayName string, attributes map[string]interface{}) (*service.CallbackResult, error) {
@@ -119,6 +131,22 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
+		}
+	})
+
+	t.Run("callback enforces browser-safe local redirect", func(t *testing.T) {
+		h := New(unsafeRedirectSSOService{}, Config{ManagementToken: "secret"})
+		mux := http.NewServeMux()
+		h.RegisterRoutes(mux)
+
+		req := httptest.NewRequest(http.MethodGet, "/self-service/sso/acme/callback?RelayState=relay", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("expected %d, got %d", http.StatusSeeOther, rec.Code)
+		}
+		if location := rec.Header().Get("Location"); !strings.HasPrefix(location, "/") {
+			t.Fatalf("expected local redirect target, got %q", location)
 		}
 	})
 }
