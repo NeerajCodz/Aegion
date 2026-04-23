@@ -101,15 +101,17 @@ type proxyFakeRows struct {
 	err  error
 }
 
-func (r *proxyFakeRows) Close()                                        {}
-func (r *proxyFakeRows) Err() error                                    { return r.err }
-func (r *proxyFakeRows) CommandTag() pgconn.CommandTag                 { return pgconn.NewCommandTag("SELECT 0") }
-func (r *proxyFakeRows) FieldDescriptions() []pgconn.FieldDescription  { return nil }
-func (r *proxyFakeRows) Next() bool                                    { r.idx++; return r.idx <= len(r.data) }
-func (r *proxyFakeRows) RawValues() [][]byte                           { return nil }
-func (r *proxyFakeRows) Conn() *pgx.Conn                               { return nil }
-func (r *proxyFakeRows) Values() ([]any, error)                        { return nil, errors.New("not implemented") }
-func (r *proxyFakeRows) Scan(dest ...any) error                        { return proxyFakeRow{vals: r.data[r.idx-1]}.Scan(dest...) }
+func (r *proxyFakeRows) Close()                                       {}
+func (r *proxyFakeRows) Err() error                                   { return r.err }
+func (r *proxyFakeRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
+func (r *proxyFakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *proxyFakeRows) Next() bool                                   { r.idx++; return r.idx <= len(r.data) }
+func (r *proxyFakeRows) RawValues() [][]byte                          { return nil }
+func (r *proxyFakeRows) Conn() *pgx.Conn                              { return nil }
+func (r *proxyFakeRows) Values() ([]any, error)                       { return nil, errors.New("not implemented") }
+func (r *proxyFakeRows) Scan(dest ...any) error {
+	return proxyFakeRow{vals: r.data[r.idx-1]}.Scan(dest...)
+}
 
 func TestPostgresStoreProxyStubCoverage(t *testing.T) {
 	now := time.Now().UTC()
@@ -119,7 +121,7 @@ func TestPostgresStoreProxyStubCoverage(t *testing.T) {
 		queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			if strings.Contains(sql, "proxy_upstreams") {
 				return &proxyFakeRows{data: [][]any{{
-					upstreamID, "api", "https://api.example.com", "/healthz", "5s", 10,
+					upstreamID, "api", "https://api.example.com", "/healthz", "READY", "5s", 10,
 					[]byte(`{"x-env":"prod"}`), []byte(`{"failure_threshold":5}`), true, now, now,
 				}}}, nil
 			}
@@ -133,7 +135,7 @@ func TestPostgresStoreProxyStubCoverage(t *testing.T) {
 			switch {
 			case strings.Contains(sql, "FROM proxy_upstreams") && strings.Contains(sql, "WHERE name"):
 				return proxyFakeRow{vals: []any{
-					upstreamID, "api", "https://api.example.com", "/healthz", "5s", 10,
+					upstreamID, "api", "https://api.example.com", "/healthz", "READY", "5s", 10,
 					[]byte(`{"x-env":"prod"}`), []byte(`{"failure_threshold":5}`), true, now, now,
 				}}
 			case strings.Contains(sql, "INSERT INTO proxy_upstreams"):
@@ -188,7 +190,9 @@ func TestPostgresStoreProxyStubCoverage(t *testing.T) {
 	}
 
 	s.pool = &proxyFakeDB{
-		queryFn:    func(context.Context, string, ...any) (pgx.Rows, error) { return &proxyFakeRows{data: [][]any{{"bad"}}}, nil },
+		queryFn: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &proxyFakeRows{data: [][]any{{"bad"}}}, nil
+		},
 		queryRowFn: func(context.Context, string, ...any) pgx.Row { return proxyFakeRow{err: pgx.ErrNoRows} },
 	}
 	if _, err := s.ListUpstreams(context.Background()); err == nil {
@@ -259,7 +263,7 @@ func TestPostgresStoreProxyStubCoverage(t *testing.T) {
 	}
 
 	if _, err := scanUpstream(proxyFakeRow{vals: []any{
-		upstreamID, "api", "https://api.example.com", "/healthz", "5s", 10, []byte(`{`), []byte(`{}`), true, now, now,
+		upstreamID, "api", "https://api.example.com", "/healthz", "READY", "5s", 10, []byte(`{`), []byte(`{}`), true, now, now,
 	}}); err == nil {
 		t.Fatal("scanUpstream(invalid headers json) expected error")
 	}
@@ -276,4 +280,3 @@ func TestPostgresStoreProxyStubCoverage(t *testing.T) {
 		t.Fatal("uuidText(nil) should be empty")
 	}
 }
-

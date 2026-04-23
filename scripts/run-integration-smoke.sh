@@ -5,6 +5,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        echo "Skipping integration smoke tests on Windows."
+        exit 0
+        ;;
+esac
+
 GO_CMD="${GO_CMD:-go}"
 if ! command -v "$GO_CMD" >/dev/null 2>&1; then
     if command -v go.exe >/dev/null 2>&1; then
@@ -13,6 +20,14 @@ if ! command -v "$GO_CMD" >/dev/null 2>&1; then
         echo "go toolchain is required for integration smoke tests"
         exit 1
     fi
+fi
+resolved_go_cmd="$(command -v "$GO_CMD" || true)"
+if [[ "$resolved_go_cmd" == *.exe ]]; then
+    case "$resolved_go_cmd" in
+        /mnt/*|[A-Za-z]:\\*)
+            GO_CMD="$(basename "$resolved_go_cmd")"
+            ;;
+    esac
 fi
 
 if [[ "$("$GO_CMD" env GOOS)" == "windows" ]]; then

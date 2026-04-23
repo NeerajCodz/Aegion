@@ -46,16 +46,13 @@ func TestCatalogAdditionalBranches(t *testing.T) {
 
 func TestCatalogErrorFallbackBranches(t *testing.T) {
 	origFS := presetFS
-	origOnce := loadOnce
-	origErr := loadErr
-	origBySlug := presetBySlug
-	origOrder := presetOrder
 	t.Cleanup(func() {
 		presetFS = origFS
-		loadOnce = origOnce
-		loadErr = origErr
-		presetBySlug = origBySlug
-		presetOrder = origOrder
+		loadOnce = sync.Once{}
+		loadErr = nil
+		presetBySlug = nil
+		presetOrder = nil
+		_ = ensureLoaded()
 	})
 
 	// Force ensureLoaded to read from an empty embedded FS to exercise load-error paths.
@@ -89,17 +86,14 @@ func (e stubDirEntry) Info() (fs.FileInfo, error) { return nil, errors.New("not 
 func TestCatalogLoaderHookBranches(t *testing.T) {
 	origReadDir := readPresetsDirHook
 	origReadFile := readPresetFileHook
-	origOnce := loadOnce
-	origErr := loadErr
-	origBySlug := presetBySlug
-	origOrder := presetOrder
 	t.Cleanup(func() {
 		readPresetsDirHook = origReadDir
 		readPresetFileHook = origReadFile
-		loadOnce = origOnce
-		loadErr = origErr
-		presetBySlug = origBySlug
-		presetOrder = origOrder
+		loadOnce = sync.Once{}
+		loadErr = nil
+		presetBySlug = nil
+		presetOrder = nil
+		_ = ensureLoaded()
 	})
 
 	reset := func() {

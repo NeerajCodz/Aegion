@@ -635,7 +635,7 @@ func TestCheckHIBPBranchCoverage(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("non-200 responses are tolerated", func(t *testing.T) {
+	t.Run("non-200 responses return error when strict mode enabled", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}))
@@ -644,6 +644,23 @@ func TestCheckHIBPBranchCoverage(t *testing.T) {
 		s := New(newMemoryStore(), &mockHasher{}, Config{
 			HIBPEnabled:             true,
 			HIBPIgnoreNetworkErrors: false,
+			HIBPBaseURL:             srv.URL + "/range/",
+		})
+
+		err := s.checkHIBP(context.Background(), password)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "hibp request failed with status 503")
+	})
+
+	t.Run("non-200 responses are tolerated when ignore-network-errors is enabled", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		s := New(newMemoryStore(), &mockHasher{}, Config{
+			HIBPEnabled:             true,
+			HIBPIgnoreNetworkErrors: true,
 			HIBPBaseURL:             srv.URL + "/range/",
 		})
 

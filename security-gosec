@@ -1,0 +1,1164 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int32",
+			"file": "C:\\Users\\gskne\\AppData\\Local\\go-build\\63\\632530e58b1ee04dc987bf8fe220472de8e18c8ef447f20a5398ba76033b56e7-d",
+			"code": "157: \tkp := \u0026KeyPair{\n158: \t\tAlgorithm:  ( /*line :155:15*/_Cfunc_GoString /*line :155:24*/)(result.algorithm),\n159: \t\tKeyID:      ( /*line :156:15*/_Cfunc_GoString /*line :156:24*/)(result.key_id),\n",
+			"line": "158",
+			"column": "65",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int32",
+			"file": "C:\\Users\\gskne\\AppData\\Local\\go-build\\63\\632530e58b1ee04dc987bf8fe220472de8e18c8ef447f20a5398ba76033b56e7-d",
+			"code": "156: \n157: \tkp := \u0026KeyPair{\n158: \t\tAlgorithm:  ( /*line :155:15*/_Cfunc_GoString /*line :155:24*/)(result.algorithm),\n",
+			"line": "157",
+			"column": "66",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int32",
+			"file": "C:\\Users\\gskne\\AppData\\Local\\go-build\\62\\62580deb4776a9f50a8cbe2878ea52ceeb6980640d1a553a004dca3baaddb02d-d",
+			"code": "221: \tif result.len \u003e  /*line :218:18*/_Ctype_size_t /*line :218:26*/(math.MaxInt32) {\n222: \t\treturn nil, ErrDecryptFailed\n223: \t}\n",
+			"line": "222",
+			"column": "53",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion uint64 -\u003e int",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\platform\\crypto\\random.go",
+			"code": "58: \t\tif r \u003c limit {\n59: \t\t\treturn int(r % max), nil\n60: \t\t}\n",
+			"line": "59",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int64 -\u003e uint64",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\mfa\\service\\service.go",
+			"code": "459: \tmsg := make([]byte, 8)\n460: \tbinary.BigEndian.PutUint64(msg, uint64(counter))\n461: \tmac := hmac.New(sha1.New, secret)\n",
+			"line": "460",
+			"column": "40",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint64",
+			"file": "C:\\Users\\gskne\\AppData\\Local\\go-build\\62\\62580deb4776a9f50a8cbe2878ea52ceeb6980640d1a553a004dca3baaddb02d-d",
+			"code": "268: \n269: func cOpaquePrefix(token string, length int) (string, error) {\n270: \tcToken := ( /*line :267:12*/_Cfunc_CString /*line :267:20*/)(token)\n",
+			"line": "269",
+			"column": "63",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint",
+			"file": "E:\\Qypher\\Projects\\aegion\\core\\eventbus\\eventbus.go",
+			"code": "336: \t\t// Schedule retry with exponential backoff\n337: \t\tretryDelay := b.retryDelay * time.Duration(1\u003c\u003cuint(attemptCount))\n338: \t\t_, _ = b.execStmt(ctx, `\n",
+			"line": "337",
+			"column": "53",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\sso\\cmd\\server\\main.go",
+			"code": "28: \tmanagementTokenEnv = \"AEGION_SSO_MANAGEMENT_TOKEN\"\n29: \tstateSecretEnv     = \"AEGION_SSO_STATE_SECRET\"\n30: \tlegacyStateEnv     = \"AEGION_SECRETS_INTERNAL\"\n",
+			"line": "29",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\sso\\cmd\\server\\main.go",
+			"code": "27: \tlegacyDBURLEnv     = \"AEGION_DATABASE_URL\"\n28: \tmanagementTokenEnv = \"AEGION_SSO_MANAGEMENT_TOKEN\"\n29: \tstateSecretEnv     = \"AEGION_SSO_STATE_SECRET\"\n",
+			"line": "28",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\social\\providers\\github\\github.go",
+			"code": "5: func Preset() store.Provider {\n6: \treturn store.Provider{\n7: \t\tSlug:              \"github\",\n8: \t\tDisplayName:       \"GitHub\",\n9: \t\tPreset:            \"github\",\n10: \t\tProtocol:          store.ProtocolOAuth,\n11: \t\tAuthorizeEndpoint: \"https://github.com/login/oauth/authorize\",\n12: \t\tTokenEndpoint:     \"https://github.com/login/oauth/access_token\",\n13: \t\tUserInfoEndpoint:  \"https://api.github.com/user\",\n14: \t\tScopes:            []string{\"read:user\", \"user:email\"},\n15: \t\tClaimMapping: store.ClaimMapping{\n16: \t\t\tSubject: \"id\",\n17: \t\t\tEmail:   \"email\",\n18: \t\t\tName:    \"name|login\",\n19: \t\t\tPicture: \"avatar_url\",\n20: \t\t},\n21: \t\tPKCEMethod:         store.PKCES256,\n22: \t\tAuthStyle:          store.AuthStyleClientSecretPost,\n23: \t\tClaimSource:        store.ClaimSourceGitHubUser,\n24: \t\tEnabled:            false,\n25: \t\tTrustEmailVerified: true,\n26: \t}\n27: }\n",
+			"line": "6-26",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\social\\cmd\\server\\main.go",
+			"code": "29: \tmanagementTokenEnv = \"AEGION_SOCIAL_PROVIDER_MANAGEMENT_TOKEN\"\n30: \tcipherSecretEnv    = \"AEGION_SECRETS_CIPHER\"\n31: \tlegacyCipherEnv    = \"AEGION_SECRET_CIPHER_1\"\n",
+			"line": "30",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\social\\cmd\\server\\main.go",
+			"code": "28: \tlegacyDBURLEnv     = \"AEGION_DATABASE_URL\"\n29: \tmanagementTokenEnv = \"AEGION_SOCIAL_PROVIDER_MANAGEMENT_TOKEN\"\n30: \tcipherSecretEnv    = \"AEGION_SECRETS_CIPHER\"\n",
+			"line": "29",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\proxy\\cmd\\server\\main.go",
+			"code": "26: \tlegacyDBURLEnv     = \"AEGION_DATABASE_URL\"\n27: \tmanagementTokenEnv = \"AEGION_PROXY_MANAGEMENT_TOKEN\"\n28: )\n",
+			"line": "27",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\cli\\cmd\\server\\main.go",
+			"code": "26: \tlegacyDBURLEnv     = \"AEGION_DATABASE_URL\"\n27: \tmanagementTokenEnv = \"AEGION_CLI_MANAGEMENT_TOKEN\"\n28: )\n",
+			"line": "27",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\service\\capability.go",
+			"code": "140: \tPermOAuth2TokensRead    = \"oauth2:tokens:read\"\n141: \tPermOAuth2TokensRevoke  = \"oauth2:tokens:revoke\"\n142: \tPermOAuth2All           = \"oauth2:*\"\n",
+			"line": "141",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\service\\capability.go",
+			"code": "139: \tPermOAuth2ClientsManage = \"oauth2:clients:manage\"\n140: \tPermOAuth2TokensRead    = \"oauth2:tokens:read\"\n141: \tPermOAuth2TokensRevoke  = \"oauth2:tokens:revoke\"\n",
+			"line": "140",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\service\\capability.go",
+			"code": "113: \t// API Key permissions\n114: \tPermAPIKeysRead   = \"api_keys:read\"\n115: \tPermAPIKeysCreate = \"api_keys:create\"\n",
+			"line": "114",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\scim\\service.go",
+			"code": "56: func DefaultConfig() Config {\n57: \treturn Config{\n58: \t\tBasePath:                   \"/scim/v2\",\n59: \t\tTokenPrefix:                \"aegion_scim_\",\n60: \t\tTokenLookupPrefixLen:       12,\n61: \t\tTokenEntropyBytes:          32,\n62: \t\tDefaultPageSize:            20,\n63: \t\tMaxPageSize:                1000,\n64: \t\tTokenLastUsedUpdateTimeout: 2 * time.Second,\n65: \t}\n66: }\n",
+			"line": "57-65",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\scim\\context.go",
+			"code": "10: const (\n11: \tcontextKeySCIMToken contextKey = \"aegion.scim.token\"\n12: )\n",
+			"line": "11",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\capability\\types.go",
+			"code": "71: \tCapSCIMGroupsWrite  Capability = \"scim.groups.write\"\n72: \tCapSCIMTokensManage Capability = \"scim.tokens.manage\"\n73: \tCapSCIMAll          Capability = \"scim.*\"\n",
+			"line": "72",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\capability\\types.go",
+			"code": "39: \tCapOAuth2TokensRead    Capability = \"oauth2.tokens.read\"\n40: \tCapOAuth2TokensRevoke  Capability = \"oauth2.tokens.revoke\"\n41: \tCapOAuth2All           Capability = \"oauth2.*\"\n",
+			"line": "40",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\capability\\types.go",
+			"code": "38: \tCapOAuth2ClientsManage Capability = \"oauth2.clients.manage\"\n39: \tCapOAuth2TokensRead    Capability = \"oauth2.tokens.read\"\n40: \tCapOAuth2TokensRevoke  Capability = \"oauth2.tokens.revoke\"\n",
+			"line": "39",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\audit\\logger.go",
+			"code": "108: \tEntityTypeOAuth2Client = \"oauth2_client\"\n109: \tEntityTypeOAuth2Token  = \"oauth2_token\"\n110: \tEntityTypePolicy       = \"policy\"\n",
+			"line": "109",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\audit\\logger.go",
+			"code": "88: \tActionSCIMTokenDeleted = \"scim.token.deleted\"\n89: \tActionSCIMTokenUsed    = \"scim.token.used\"\n90: \n",
+			"line": "89",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\audit\\logger.go",
+			"code": "87: \tActionSCIMTokenCreated = \"scim.token.created\"\n88: \tActionSCIMTokenDeleted = \"scim.token.deleted\"\n89: \tActionSCIMTokenUsed    = \"scim.token.used\"\n",
+			"line": "88",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\audit\\logger.go",
+			"code": "86: \tActionSCIMGroupDeleted = \"scim.group.deleted\"\n87: \tActionSCIMTokenCreated = \"scim.token.created\"\n88: \tActionSCIMTokenDeleted = \"scim.token.deleted\"\n",
+			"line": "87",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\admin\\audit\\logger.go",
+			"code": "54: \tActionOAuth2ClientDeleted = \"oauth2.client.deleted\"\n55: \tActionOAuth2TokenRevoked  = \"oauth2.token.revoked\"\n56: \n",
+			"line": "55",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\oauth2\\v1\\tokens_grpc.pb.go",
+			"code": "23: \tTokenStore_Revoke_FullMethodName           = \"/aegion.oauth2.v1.TokenStore/Revoke\"\n24: \tTokenStore_InvalidateFamily_FullMethodName = \"/aegion.oauth2.v1.TokenStore/InvalidateFamily\"\n25: )\n",
+			"line": "24",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\oauth2\\v1\\tokens_grpc.pb.go",
+			"code": "22: \tTokenStore_Introspect_FullMethodName       = \"/aegion.oauth2.v1.TokenStore/Introspect\"\n23: \tTokenStore_Revoke_FullMethodName           = \"/aegion.oauth2.v1.TokenStore/Revoke\"\n24: \tTokenStore_InvalidateFamily_FullMethodName = \"/aegion.oauth2.v1.TokenStore/InvalidateFamily\"\n",
+			"line": "23",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\oauth2\\v1\\tokens_grpc.pb.go",
+			"code": "21: const (\n22: \tTokenStore_Introspect_FullMethodName       = \"/aegion.oauth2.v1.TokenStore/Introspect\"\n23: \tTokenStore_Revoke_FullMethodName           = \"/aegion.oauth2.v1.TokenStore/Revoke\"\n",
+			"line": "22",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\internal_token_grpc.pb.go",
+			"code": "23: \tInternalTokenService_GetCurrent_FullMethodName        = \"/aegion.core.internal_token.InternalTokenService/GetCurrent\"\n24: \tInternalTokenService_SubscribeRotation_FullMethodName = \"/aegion.core.internal_token.InternalTokenService/SubscribeRotation\"\n25: )\n",
+			"line": "24",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\internal_token_grpc.pb.go",
+			"code": "22: \tInternalTokenService_Validate_FullMethodName          = \"/aegion.core.internal_token.InternalTokenService/Validate\"\n23: \tInternalTokenService_GetCurrent_FullMethodName        = \"/aegion.core.internal_token.InternalTokenService/GetCurrent\"\n24: \tInternalTokenService_SubscribeRotation_FullMethodName = \"/aegion.core.internal_token.InternalTokenService/SubscribeRotation\"\n",
+			"line": "23",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\internal_token_grpc.pb.go",
+			"code": "21: const (\n22: \tInternalTokenService_Validate_FullMethodName          = \"/aegion.core.internal_token.InternalTokenService/Validate\"\n23: \tInternalTokenService_GetCurrent_FullMethodName        = \"/aegion.core.internal_token.InternalTokenService/GetCurrent\"\n",
+			"line": "22",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\core\\flows\\nodes.go",
+			"code": "76: const (\n77: \tErrIDInvalidCredentials  = \"error.invalid_credentials\"\n78: \tErrIDAccountNotFound     = \"error.account_not_found\"\n",
+			"line": "77",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\core\\authtoken\\rotator.go",
+			"code": "14: \tEventSecretRotationStarted   = \"authtoken.rotation.started\"\n15: \tEventSecretRotationCompleted = \"authtoken.rotation.completed\"\n16: )\n",
+			"line": "15",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\core\\authtoken\\rotator.go",
+			"code": "13: const (\n14: \tEventSecretRotationStarted   = \"authtoken.rotation.started\"\n15: \tEventSecretRotationCompleted = \"authtoken.rotation.completed\"\n",
+			"line": "14",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "LOW",
+			"cwe": {
+				"id": "798",
+				"url": "https://cwe.mitre.org/data/definitions/798.html"
+			},
+			"rule_id": "G101",
+			"details": "Potential hardcoded credentials",
+			"file": "E:\\Qypher\\Projects\\aegion\\core\\authtoken\\middleware.go",
+			"code": "12: \t// HeaderInternalToken is the header name for internal auth tokens.\n13: \tHeaderInternalToken = \"X-Aegion-Internal-Token\"\n14: )\n",
+			"line": "13",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "614",
+				"url": "https://cwe.mitre.org/data/definitions/614.html"
+			},
+			"rule_id": "G124",
+			"details": "http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute",
+			"file": "E:\\Qypher\\Projects\\aegion\\cmd\\aegion\\auth_flows.go",
+			"code": "673: \t}\n674: \thttp.SetCookie(w, \u0026http.Cookie{\n675: \t\tName:     strings.TrimSpace(s.cfg.MFA.TrustedDeviceCookieName),\n",
+			"line": "674",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "78",
+				"url": "https://cwe.mitre.org/data/definitions/78.html"
+			},
+			"rule_id": "G204",
+			"details": "Subprocess launched with a potential tainted input or cmd arguments",
+			"file": "E:\\Qypher\\Projects\\aegion\\core\\orchestrator\\docker_cli.go",
+			"code": "333: func (d *DockerClient) runWithEnv(ctx context.Context, extraEnv []string, args ...string) (string, error) {\n334: \tcmd := exec.CommandContext(ctx, d.bin, args...)\n335: \tvar stdout, stderr bytes.Buffer\n",
+			"line": "334",
+			"column": "9",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "327",
+				"url": "https://cwe.mitre.org/data/definitions/327.html"
+			},
+			"rule_id": "G505",
+			"details": "Blocklisted import crypto/sha1: weak cryptographic primitive",
+			"file": "E:\\Qypher\\Projects\\aegion\\modules\\mfa\\service\\service.go",
+			"code": "5: \t\"crypto/hmac\"\n6: \t\"crypto/sha1\"\n7: \t\"encoding/base32\"\n",
+			"line": "6",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\policy\\v1\\policy.pb.go",
+			"code": "430: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n431: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_policy_policy_proto_rawDesc), len(file_policy_policy_proto_rawDesc)),\n432: \t\t\tNumEnums:      0,\n",
+			"line": "431",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\policy\\v1\\policy.pb.go",
+			"code": "430: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n431: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_policy_policy_proto_rawDesc), len(file_policy_policy_proto_rawDesc)),\n432: \t\t\tNumEnums:      0,\n",
+			"line": "431",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\policy\\v1\\policy.pb.go",
+			"code": "389: \tfile_policy_policy_proto_rawDescOnce.Do(func() {\n390: \t\tfile_policy_policy_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_policy_policy_proto_rawDesc), len(file_policy_policy_proto_rawDesc)))\n391: \t})\n",
+			"line": "390",
+			"column": "67",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\policy\\v1\\policy.pb.go",
+			"code": "389: \tfile_policy_policy_proto_rawDescOnce.Do(func() {\n390: \t\tfile_policy_policy_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_policy_policy_proto_rawDesc), len(file_policy_policy_proto_rawDesc)))\n391: \t})\n",
+			"line": "390",
+			"column": "80",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\oauth2\\v1\\tokens.pb.go",
+			"code": "418: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n419: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_oauth2_tokens_proto_rawDesc), len(file_oauth2_tokens_proto_rawDesc)),\n420: \t\t\tNumEnums:      0,\n",
+			"line": "419",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\oauth2\\v1\\tokens.pb.go",
+			"code": "418: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n419: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_oauth2_tokens_proto_rawDesc), len(file_oauth2_tokens_proto_rawDesc)),\n420: \t\t\tNumEnums:      0,\n",
+			"line": "419",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\oauth2\\v1\\tokens.pb.go",
+			"code": "381: \tfile_oauth2_tokens_proto_rawDescOnce.Do(func() {\n382: \t\tfile_oauth2_tokens_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_oauth2_tokens_proto_rawDesc), len(file_oauth2_tokens_proto_rawDesc)))\n383: \t})\n",
+			"line": "382",
+			"column": "67",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\oauth2\\v1\\tokens.pb.go",
+			"code": "381: \tfile_oauth2_tokens_proto_rawDescOnce.Do(func() {\n382: \t\tfile_oauth2_tokens_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_oauth2_tokens_proto_rawDesc), len(file_oauth2_tokens_proto_rawDesc)))\n383: \t})\n",
+			"line": "382",
+			"column": "80",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\mfa\\v1\\mfa.pb.go",
+			"code": "384: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n385: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_mfa_mfa_proto_rawDesc), len(file_mfa_mfa_proto_rawDesc)),\n386: \t\t\tNumEnums:      0,\n",
+			"line": "385",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\mfa\\v1\\mfa.pb.go",
+			"code": "384: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n385: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_mfa_mfa_proto_rawDesc), len(file_mfa_mfa_proto_rawDesc)),\n386: \t\t\tNumEnums:      0,\n",
+			"line": "385",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\mfa\\v1\\mfa.pb.go",
+			"code": "349: \tfile_mfa_mfa_proto_rawDescOnce.Do(func() {\n350: \t\tfile_mfa_mfa_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_mfa_mfa_proto_rawDesc), len(file_mfa_mfa_proto_rawDesc)))\n351: \t})\n",
+			"line": "350",
+			"column": "74",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\mfa\\v1\\mfa.pb.go",
+			"code": "349: \tfile_mfa_mfa_proto_rawDescOnce.Do(func() {\n350: \t\tfile_mfa_mfa_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_mfa_mfa_proto_rawDesc), len(file_mfa_mfa_proto_rawDesc)))\n351: \t})\n",
+			"line": "350",
+			"column": "61",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\session.pb.go",
+			"code": "1374: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n1375: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_session_proto_rawDesc), len(file_core_session_proto_rawDesc)),\n1376: \t\t\tNumEnums:      0,\n",
+			"line": "1375",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\session.pb.go",
+			"code": "1374: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n1375: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_session_proto_rawDesc), len(file_core_session_proto_rawDesc)),\n1376: \t\t\tNumEnums:      0,\n",
+			"line": "1375",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\session.pb.go",
+			"code": "1307: \tfile_core_session_proto_rawDescOnce.Do(func() {\n1308: \t\tfile_core_session_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_session_proto_rawDesc), len(file_core_session_proto_rawDesc)))\n1309: \t})\n",
+			"line": "1308",
+			"column": "79",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\session.pb.go",
+			"code": "1307: \tfile_core_session_proto_rawDescOnce.Do(func() {\n1308: \t\tfile_core_session_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_session_proto_rawDesc), len(file_core_session_proto_rawDesc)))\n1309: \t})\n",
+			"line": "1308",
+			"column": "66",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\registry.pb.go",
+			"code": "894: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n895: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_registry_proto_rawDesc), len(file_core_registry_proto_rawDesc)),\n896: \t\t\tNumEnums:      1,\n",
+			"line": "895",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\registry.pb.go",
+			"code": "894: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n895: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_registry_proto_rawDesc), len(file_core_registry_proto_rawDesc)),\n896: \t\t\tNumEnums:      1,\n",
+			"line": "895",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\registry.pb.go",
+			"code": "845: \tfile_core_registry_proto_rawDescOnce.Do(func() {\n846: \t\tfile_core_registry_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_registry_proto_rawDesc), len(file_core_registry_proto_rawDesc)))\n847: \t})\n",
+			"line": "846",
+			"column": "80",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\registry.pb.go",
+			"code": "845: \tfile_core_registry_proto_rawDescOnce.Do(func() {\n846: \t\tfile_core_registry_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_registry_proto_rawDesc), len(file_core_registry_proto_rawDesc)))\n847: \t})\n",
+			"line": "846",
+			"column": "67",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\internal_token.pb.go",
+			"code": "527: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n528: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_internal_token_proto_rawDesc), len(file_core_internal_token_proto_rawDesc)),\n529: \t\t\tNumEnums:      0,\n",
+			"line": "528",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\internal_token.pb.go",
+			"code": "527: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n528: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_internal_token_proto_rawDesc), len(file_core_internal_token_proto_rawDesc)),\n529: \t\t\tNumEnums:      0,\n",
+			"line": "528",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\internal_token.pb.go",
+			"code": "486: \tfile_core_internal_token_proto_rawDescOnce.Do(func() {\n487: \t\tfile_core_internal_token_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_internal_token_proto_rawDesc), len(file_core_internal_token_proto_rawDesc)))\n488: \t})\n",
+			"line": "487",
+			"column": "86",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\internal_token.pb.go",
+			"code": "486: \tfile_core_internal_token_proto_rawDescOnce.Do(func() {\n487: \t\tfile_core_internal_token_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_internal_token_proto_rawDesc), len(file_core_internal_token_proto_rawDesc)))\n488: \t})\n",
+			"line": "487",
+			"column": "73",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\events.pb.go",
+			"code": "602: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n603: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_events_proto_rawDesc), len(file_core_events_proto_rawDesc)),\n604: \t\t\tNumEnums:      0,\n",
+			"line": "603",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\events.pb.go",
+			"code": "602: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n603: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_events_proto_rawDesc), len(file_core_events_proto_rawDesc)),\n604: \t\t\tNumEnums:      0,\n",
+			"line": "603",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\events.pb.go",
+			"code": "561: \tfile_core_events_proto_rawDescOnce.Do(func() {\n562: \t\tfile_core_events_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_events_proto_rawDesc), len(file_core_events_proto_rawDesc)))\n563: \t})\n",
+			"line": "562",
+			"column": "78",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\events.pb.go",
+			"code": "561: \tfile_core_events_proto_rawDescOnce.Do(func() {\n562: \t\tfile_core_events_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_events_proto_rawDesc), len(file_core_events_proto_rawDesc)))\n563: \t})\n",
+			"line": "562",
+			"column": "65",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\courier.pb.go",
+			"code": "681: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n682: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_courier_proto_rawDesc), len(file_core_courier_proto_rawDesc)),\n683: \t\t\tNumEnums:      2,\n",
+			"line": "682",
+			"column": "32",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\courier.pb.go",
+			"code": "681: \t\t\tGoPackagePath: reflect.TypeOf(x{}).PkgPath(),\n682: \t\t\tRawDescriptor: unsafe.Slice(unsafe.StringData(file_core_courier_proto_rawDesc), len(file_core_courier_proto_rawDesc)),\n683: \t\t\tNumEnums:      2,\n",
+			"line": "682",
+			"column": "19",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\courier.pb.go",
+			"code": "637: \tfile_core_courier_proto_rawDescOnce.Do(func() {\n638: \t\tfile_core_courier_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_courier_proto_rawDesc), len(file_core_courier_proto_rawDesc)))\n639: \t})\n",
+			"line": "638",
+			"column": "66",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "242",
+				"url": "https://cwe.mitre.org/data/definitions/242.html"
+			},
+			"rule_id": "G103",
+			"details": "Use of unsafe calls should be audited",
+			"file": "E:\\Qypher\\Projects\\aegion\\internal\\proto\\core\\courier.pb.go",
+			"code": "637: \tfile_core_courier_proto_rawDescOnce.Do(func() {\n638: \t\tfile_core_courier_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_core_courier_proto_rawDesc), len(file_core_courier_proto_rawDesc)))\n639: \t})\n",
+			"line": "638",
+			"column": "79",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 192,
+		"lines": 59727,
+		"nosec": 11,
+		"found": 72
+	},
+	"GosecVersion": "dev"
+}

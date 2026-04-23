@@ -182,21 +182,11 @@ func GetUserID(ctx context.Context) string {
 // Helper functions to extract IDs from context (these would be implemented based on your session/auth middleware)
 
 func getSessionIDFromContext(ctx context.Context) string {
-	// This should be implemented to extract session ID from your session middleware
-	// For example, if you store session info in context:
-	// if session, ok := ctx.Value("session").(*Session); ok {
-	//     return session.ID
-	// }
-	return ""
+	return GetSessionID(ctx)
 }
 
 func getUserIDFromContext(ctx context.Context) string {
-	// This should be implemented to extract user ID from your auth middleware
-	// For example, if you store user info in context:
-	// if user, ok := ctx.Value("user").(*User); ok {
-	//     return user.ID
-	// }
-	return ""
+	return GetUserID(ctx)
 }
 
 // DatabaseMiddleware wraps database operations with observability

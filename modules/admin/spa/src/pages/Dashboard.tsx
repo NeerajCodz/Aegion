@@ -141,7 +141,11 @@ export function Dashboard() {
   const recentSessions = recentSessionsQuery.data?.data ?? []
   const operators = operatorsQuery.data?.data ?? []
   const healthChecks = healthQuery.data ?? []
-  const observabilityChecks = observabilityQuery.data ?? []
+  const observability = observabilityQuery.data
+  const observabilityChecks = observability?.stack ?? []
+  const telemetry = observability?.telemetry
+  const guardrails = observability?.guardrails
+  const scimObservability = observability?.scim
 
   const totalIdentities = stats?.total_identities ?? 0
   const activeSessions = stats?.active_sessions ?? 0
@@ -251,8 +255,21 @@ export function Dashboard() {
       value:
         observabilityChecks.length > 0
           ? `${healthyObservabilityChecks}/${observabilityChecks.length}`
+          : observability?.enabled
+          ? "0/0"
           : "Disabled",
-      trend: observabilityQuery.error ? "Probe fetch failed" : "Grafana, Prometheus, Tempo, Loki",
+      trend: observabilityQuery.error
+        ? "Probe fetch failed"
+        : telemetry
+        ? `${telemetry.service_name || "aegion"} in ${telemetry.environment || "unknown"}`
+        : "Grafana, Prometheus, Tempo, Loki",
+    },
+    {
+      metric: "SCIM 2.0",
+      value: scimObservability?.enabled ? `${scimObservability.active_token_count}/${scimObservability.token_count}` : "Disabled",
+      trend: scimObservability
+        ? `${scimObservability.mapping_count} mappings • ${scimObservability.wildcard_token_count} wildcard tokens`
+        : "Provisioning not enabled",
     },
   ]
 
@@ -544,7 +561,7 @@ export function Dashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {observabilityChecks.length === 0 ? (
+                  {observabilityChecks.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-muted-foreground">
                           Observability probes are disabled or unavailable.
@@ -578,10 +595,128 @@ export function Dashboard() {
                           </TableCell>
                         </TableRow>
                       ))
-                    )}
-                  </TableBody>
-                </Table>
+                  )}
+                </TableBody>
+              </Table>
               </div>
+
+              {telemetry && (
+                <>
+                  <Separator className="my-6" />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">Telemetry Configuration</p>
+                      {telemetry.insecure_exporter && <Badge variant="warning">Insecure exporter</Badge>}
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Signal</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Endpoint</TableHead>
+                          <TableHead className="text-right">Config</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {[
+                          {
+                            key: "traces",
+                            enabled: telemetry.traces_enabled,
+                            endpoint: telemetry.traces_endpoint,
+                            present: telemetry.traces_endpoint_present,
+                            detail: `sample ${telemetry.trace_sampling_ratio}`,
+                          },
+                          {
+                            key: "metrics",
+                            enabled: telemetry.metrics_enabled,
+                            endpoint: telemetry.metrics_endpoint,
+                            present: telemetry.metrics_endpoint_present,
+                            detail: telemetry.metric_export_interval,
+                          },
+                          {
+                            key: "logs",
+                            enabled: telemetry.logs_enabled,
+                            endpoint: telemetry.logs_endpoint,
+                            present: telemetry.logs_endpoint_present,
+                            detail: telemetry.trace_export_timeout,
+                          },
+                        ].map((item) => (
+                          <TableRow key={item.key}>
+                            <TableCell className="font-medium capitalize">{item.key}</TableCell>
+                            <TableCell>
+                              <Badge variant={item.enabled && item.present ? "success" : "warning"}>
+                                {item.enabled && item.present ? "configured" : item.enabled ? "missing endpoint" : "disabled"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="max-w-48 truncate text-muted-foreground">
+                              {item.endpoint || "Not configured"}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">{item.detail}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
+              )}
+
+              {scimObservability && (
+                <>
+                  <Separator className="my-6" />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">SCIM 2.0 Provisioning Posture</p>
+                      <Badge variant={scimObservability.wildcard_token_count > 0 ? "warning" : "success"}>
+                        {scimObservability.base_path}
+                      </Badge>
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Metric</TableHead>
+                          <TableHead>Value</TableHead>
+                          <TableHead className="text-right">Interpretation</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        <TableRow>
+                          <TableCell className="font-medium">Mappings</TableCell>
+                          <TableCell>{scimObservability.mapping_count}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">Attribute translation rules</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell className="font-medium">Active tokens</TableCell>
+                          <TableCell>{scimObservability.active_token_count}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">
+                            {scimObservability.expired_token_count} expired • {scimObservability.expiring_token_count} expiring soon
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell className="font-medium">Write-capable tokens</TableCell>
+                          <TableCell>{scimObservability.write_token_count}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">
+                            {scimObservability.wildcard_token_count} wildcard grants
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell className="font-medium">Last token activity</TableCell>
+                          <TableCell>{scimObservability.last_token_used_at ? formatRelativeTime(scimObservability.last_token_used_at) : "Never"}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">
+                            Prefix {scimObservability.token_prefix}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                    {scimObservability.warnings.length > 0 && (
+                      <Alert variant="warning">
+                        <AlertCircle className="size-4" />
+                        <AlertTitle>SCIM guardrail warnings</AlertTitle>
+                        <AlertDescription>{scimObservability.warnings.join(" • ")}</AlertDescription>
+                      </Alert>
+                    )}
+                  </div>
+                </>
+              )}
 
               <div className="mt-6 rounded-lg border bg-muted/30 p-4">
                 <div className="flex items-center gap-2 text-sm font-medium">
@@ -592,6 +727,19 @@ export function Dashboard() {
                   Current risk score is <span className="font-medium text-foreground">{riskScore}</span>. Keep
                   MFA above 80% and session pressure below 1.5 to remain in a strong posture range.
                 </p>
+                {guardrails && (
+                  <div className="mt-4 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+                    <div>Admin auth required: {guardrails.admin_auth_required ? "Yes" : "No"}</div>
+                    <div>RBAC on observability: {guardrails.observability_rbac ? "Yes" : "No"}</div>
+                    <div>CSRF protection: {guardrails.admin_csrf_protection ? "Yes" : "No"}</div>
+                    <div>Rate limiting: {guardrails.admin_rate_limiting ? "Yes" : "No"}</div>
+                    <div>SCIM bearer auth: {guardrails.scim_bearer_auth ? "Yes" : "No"}</div>
+                    <div>JSON body limit: {guardrails.scim_body_limit_bytes.toLocaleString()} bytes</div>
+                  </div>
+                )}
+                {guardrails && guardrails.warnings.length > 0 && (
+                  <p className="mt-3 text-sm text-amber-700">{guardrails.warnings.join(" • ")}</p>
+                )}
               </div>
             </CardContent>
           </Card>

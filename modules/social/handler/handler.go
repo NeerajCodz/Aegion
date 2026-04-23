@@ -153,8 +153,9 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, provide
 		return
 	}
 
-	if !acceptsJSON(r) && strings.TrimSpace(resp.RedirectTo) != "" {
-		redirectTo := withQuery(resp.RedirectTo, map[string]string{
+	redirectTarget := safeBrowserRedirectTarget(resp.RedirectTo)
+	if !acceptsJSON(r) && redirectTarget != "" {
+		redirectTo := withQuery(redirectTarget, map[string]string{
 			"social_provider": resp.Provider,
 			"identity_id":     resp.IdentityID,
 			"social_status":   "authenticated",
@@ -260,6 +261,20 @@ func withQuery(target string, additions map[string]string) string {
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func safeBrowserRedirectTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	if strings.ContainsAny(target, "\r\n") {
+		return "/"
+	}
+	if !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") {
+		return "/"
+	}
+	return target
 }
 
 func firstNonEmpty(values ...string) string {

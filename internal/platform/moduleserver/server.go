@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -103,7 +103,11 @@ func Run(cfg Config) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("[%s] listening on %s", cfg.Module, cfg.ListenAddr)
+		slog.Info("module server listening",
+			"module", cfg.Module,
+			"listen_addr", cfg.ListenAddr,
+			"version", cfg.Version,
+		)
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err

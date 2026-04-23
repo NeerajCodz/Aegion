@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/aegion/aegion/modules/sso/service"
 	"github.com/aegion/aegion/modules/sso/store"
 )
@@ -17,7 +18,8 @@ import (
 const maxJSONBodyBytes int64 = 1 << 20
 
 type Config struct {
-	ManagementToken string
+	ManagementToken       string
+	TrustForwardedHeaders bool
 }
 
 type SSOService interface {
@@ -32,8 +34,9 @@ type SSOService interface {
 }
 
 type Handler struct {
-	svc             SSOService
-	managementToken string
+	svc                   SSOService
+	managementToken       string
+	trustForwardedHeaders bool
 }
 
 func New(svc SSOService, cfgOverride ...Config) *Handler {
@@ -41,7 +44,11 @@ func New(svc SSOService, cfgOverride ...Config) *Handler {
 	if len(cfgOverride) > 0 {
 		cfg = cfgOverride[0]
 	}
-	return &Handler{svc: svc, managementToken: strings.TrimSpace(cfg.ManagementToken)}
+	return &Handler{
+		svc:                   svc,
+		managementToken:       strings.TrimSpace(cfg.ManagementToken),
+		trustForwardedHeaders: cfg.TrustForwardedHeaders,
+	}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -143,7 +150,7 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		return
 	}
 	attrs := map[string]interface{}{
-		"_expected_recipients": expectedRecipients(r),
+		"_expected_recipients": expectedRecipients(r, h.trustForwardedHeaders),
 	}
 	if samlResponse := strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("SAMLResponse"), r.FormValue("SAMLResponse"))); samlResponse != "" {
 		attrs["_saml_response"] = samlResponse
@@ -153,8 +160,9 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		writeError(w, http.StatusBadRequest, "invalid sso callback")
 		return
 	}
-	if !acceptsJSON(r) && strings.TrimSpace(resp.RedirectTo) != "" {
-		redirectTo := withQuery(resp.RedirectTo, map[string]string{
+	redirectTarget := safeBrowserRedirectTarget(resp.RedirectTo)
+	if !acceptsJSON(r) && redirectTarget != "" {
+		redirectTo := withQuery(redirectTarget, map[string]string{
 			"sso_connection": resp.Connection,
 			"sso_status":     "authenticated",
 			"email":          resp.Email,
@@ -268,6 +276,20 @@ func withQuery(target string, additions map[string]string) string {
 	return parsed.String()
 }
 
+func safeBrowserRedirectTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	if strings.ContainsAny(target, "\r\n") {
+		return "/"
+	}
+	if !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") {
+		return "/"
+	}
+	return target
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -277,23 +299,18 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func expectedRecipients(r *http.Request) []string {
+func expectedRecipients(r *http.Request, trustForwardedHeaders bool) []string {
 	if r == nil || r.URL == nil {
 		return nil
 	}
 	pathOnly := strings.TrimSpace(r.URL.Path)
-	proto := firstForwardedValue(r.Header.Get("X-Forwarded-Proto"))
+	proto := firstForwardedValue(trustedproxy.ForwardedProto(r, trustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"))
+	proto = strings.ToLower(strings.TrimSpace(proto))
 	if proto == "" {
-		if r.TLS != nil {
-			proto = "https"
-		} else {
-			proto = "http"
-		}
+		proto = "http"
 	}
-	host := firstForwardedValue(r.Header.Get("X-Forwarded-Host"))
-	if host == "" {
-		host = strings.TrimSpace(r.Host)
-	}
+	host := firstForwardedValue(trustedproxy.ForwardedHost(r, trustForwardedHeaders, "AEGION_TRUSTED_PROXY_CIDRS"))
+	host = strings.TrimSpace(host)
 
 	out := make([]string, 0, 2)
 	seen := map[string]struct{}{}

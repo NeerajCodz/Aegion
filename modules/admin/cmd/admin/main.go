@@ -28,6 +28,7 @@ import (
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/scim"
@@ -101,6 +102,22 @@ type Config struct {
 			Tempo         string `yaml:"tempo"`
 			Loki          string `yaml:"loki"`
 		} `yaml:"endpoints"`
+		Telemetry struct {
+			ServiceName          string        `yaml:"service_name"`
+			ServiceVersion       string        `yaml:"service_version"`
+			Environment          string        `yaml:"environment"`
+			InstanceID           string        `yaml:"instance_id"`
+			TracesEndpoint       string        `yaml:"traces_endpoint"`
+			MetricsEndpoint      string        `yaml:"metrics_endpoint"`
+			LogsEndpoint         string        `yaml:"logs_endpoint"`
+			TraceSamplingRatio   float64       `yaml:"trace_sampling_ratio"`
+			MetricExportInterval time.Duration `yaml:"metric_export_interval"`
+			TraceExportTimeout   time.Duration `yaml:"trace_export_timeout"`
+			Insecure             bool          `yaml:"insecure"`
+			EnableTraces         bool          `yaml:"enable_traces"`
+			EnableMetrics        bool          `yaml:"enable_metrics"`
+			EnableLogs           bool          `yaml:"enable_logs"`
+		} `yaml:"telemetry"`
 	} `yaml:"observability"`
 	Log LogConfig `yaml:"log"`
 }
@@ -473,6 +490,7 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Observability.Endpoints.Loki == "" {
 		cfg.Observability.Endpoints.Loki = "http://loki:3100/ready"
 	}
+	applyObservabilityTelemetryDefaults(&cfg)
 
 	// Override with environment variables
 	if dbURL := getEnv("DATABASE_URL", ""); dbURL != "" {
@@ -495,8 +513,78 @@ func loadConfig(path string) (*Config, error) {
 	if value := getEnv("AEGION_ADMIN_OBS_LOKI_URL", ""); value != "" {
 		cfg.Observability.Endpoints.Loki = value
 	}
+	if value := getEnv("OTEL_SERVICE_NAME", ""); value != "" {
+		cfg.Observability.Telemetry.ServiceName = value
+	}
+	if value := getEnv("AEGION_SERVICE_VERSION", ""); value != "" {
+		cfg.Observability.Telemetry.ServiceVersion = value
+	}
+	if value := getEnv("AEGION_ENVIRONMENT", ""); value != "" {
+		cfg.Observability.Telemetry.Environment = value
+	}
+	if value := getEnv("AEGION_INSTANCE_ID", ""); value != "" {
+		cfg.Observability.Telemetry.InstanceID = value
+	}
+	if value := getEnv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", ""); value != "" {
+		cfg.Observability.Telemetry.TracesEndpoint = value
+	}
+	if value := getEnv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", ""); value != "" {
+		cfg.Observability.Telemetry.MetricsEndpoint = value
+	}
+	if value := getEnv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", ""); value != "" {
+		cfg.Observability.Telemetry.LogsEndpoint = value
+	}
+	cfg.Observability.Telemetry.TraceSamplingRatio = getEnvFloat64("OTEL_TRACES_SAMPLER_ARG", cfg.Observability.Telemetry.TraceSamplingRatio)
+	cfg.Observability.Telemetry.MetricExportInterval = getEnvDuration("OTEL_METRIC_EXPORT_INTERVAL", cfg.Observability.Telemetry.MetricExportInterval)
+	cfg.Observability.Telemetry.TraceExportTimeout = getEnvDuration("OTEL_BSP_EXPORT_TIMEOUT", cfg.Observability.Telemetry.TraceExportTimeout)
+	cfg.Observability.Telemetry.Insecure = getEnvBool("OTEL_EXPORTER_OTLP_INSECURE", cfg.Observability.Telemetry.Insecure)
+	cfg.Observability.Telemetry.EnableTraces = getEnvBool("AEGION_OBS_ENABLE_TRACES", cfg.Observability.Telemetry.EnableTraces)
+	cfg.Observability.Telemetry.EnableMetrics = getEnvBool("AEGION_OBS_ENABLE_METRICS", cfg.Observability.Telemetry.EnableMetrics)
+	cfg.Observability.Telemetry.EnableLogs = getEnvBool("AEGION_OBS_ENABLE_LOGS", cfg.Observability.Telemetry.EnableLogs)
 
 	return &cfg, nil
+}
+
+func applyObservabilityTelemetryDefaults(cfg *Config) {
+	defaults := platformobservability.DefaultConfig()
+
+	if cfg.Observability.Telemetry.ServiceName == "" {
+		cfg.Observability.Telemetry.ServiceName = defaults.ServiceName
+	}
+	if cfg.Observability.Telemetry.ServiceVersion == "" {
+		cfg.Observability.Telemetry.ServiceVersion = defaults.ServiceVersion
+	}
+	if cfg.Observability.Telemetry.Environment == "" {
+		cfg.Observability.Telemetry.Environment = defaults.Environment
+	}
+	if cfg.Observability.Telemetry.InstanceID == "" {
+		cfg.Observability.Telemetry.InstanceID = defaults.InstanceID
+	}
+	if cfg.Observability.Telemetry.TracesEndpoint == "" {
+		cfg.Observability.Telemetry.TracesEndpoint = defaults.TracesEndpoint
+	}
+	if cfg.Observability.Telemetry.MetricsEndpoint == "" {
+		cfg.Observability.Telemetry.MetricsEndpoint = defaults.MetricsEndpoint
+	}
+	if cfg.Observability.Telemetry.LogsEndpoint == "" {
+		cfg.Observability.Telemetry.LogsEndpoint = defaults.LogsEndpoint
+	}
+	if cfg.Observability.Telemetry.TraceSamplingRatio == 0 {
+		cfg.Observability.Telemetry.TraceSamplingRatio = defaults.TraceSamplingRatio
+	}
+	if cfg.Observability.Telemetry.MetricExportInterval == 0 {
+		cfg.Observability.Telemetry.MetricExportInterval = defaults.MetricExportInterval
+	}
+	if cfg.Observability.Telemetry.TraceExportTimeout == 0 {
+		cfg.Observability.Telemetry.TraceExportTimeout = defaults.TraceExportTimeout
+	}
+	if !cfg.Observability.Telemetry.EnableTraces &&
+		!cfg.Observability.Telemetry.EnableMetrics &&
+		!cfg.Observability.Telemetry.EnableLogs {
+		cfg.Observability.Telemetry.EnableTraces = defaults.EnableTraces
+		cfg.Observability.Telemetry.EnableMetrics = defaults.EnableMetrics
+		cfg.Observability.Telemetry.EnableLogs = defaults.EnableLogs
+	}
 }
 
 func isAegionSuperConfig(data []byte) bool {
@@ -841,6 +929,20 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	}
 
 	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
+}
+
+func getEnvFloat64(key string, defaultValue float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
 		return defaultValue
 	}

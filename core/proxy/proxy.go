@@ -103,10 +103,12 @@ func NewProxy(config Config, rules *RuleEngine, logger zerolog.Logger) *Proxy {
 		// Initialize health checker if enabled
 		if config.EnableHealthChecks {
 			proxy.healthCheckers[name] = NewHealthChecker(HealthCheckerConfig{
-				URL:      upstream.URL + upstream.HealthCheck,
-				Interval: config.HealthCheckInterval,
-				Timeout:  config.Transport.DialTimeout,
-				Logger:   logger,
+				URL:            upstream.URL + upstream.HealthCheck,
+				Interval:       config.HealthCheckInterval,
+				Timeout:        config.Transport.DialTimeout,
+				Logger:         logger,
+				ExpectedBody:   upstream.HealthCheckExpectedBody,
+				ExpectedStatus: http.StatusOK,
 			})
 		}
 	}

@@ -267,6 +267,7 @@ func normalizeUpstream(upstream store.Upstream) (store.Upstream, error) {
 	}
 	upstream.URL = strings.TrimRight(upstream.URL, "/")
 	upstream.HealthCheck = strings.TrimSpace(upstream.HealthCheck)
+	upstream.HealthCheckExpectedBody = strings.TrimSpace(upstream.HealthCheckExpectedBody)
 	if upstream.HealthCheck == "" {
 		upstream.HealthCheck = "/health"
 	}

@@ -113,8 +113,12 @@ func TestSocialHandlerAdditionalBranches(t *testing.T) {
 		if rec.Code != http.StatusSeeOther {
 			t.Fatalf("expected %d, got %d", http.StatusSeeOther, rec.Code)
 		}
-		if !strings.Contains(rec.Header().Get("Location"), "social_status=authenticated") {
-			t.Fatalf("expected social redirect query params, got %q", rec.Header().Get("Location"))
+		location := rec.Header().Get("Location")
+		if !strings.HasPrefix(location, "/") {
+			t.Fatalf("expected browser-safe local redirect target, got %q", location)
+		}
+		if !strings.Contains(location, "social_status=authenticated") {
+			t.Fatalf("expected social redirect query params, got %q", location)
 		}
 
 		rec = httptest.NewRecorder()
