@@ -128,14 +128,86 @@ type SyncConfig struct {
 	// Enabled determines if sync is active
 	Enabled bool `yaml:"enabled"`
 
-	// BatchSize is how many records to sync at a time
+	// Strategies lists active sync strategies (e.g., "real_time", "batch", "async")
+	Strategies []string `yaml:"strategies"`
+
+	// Real-time sync configuration
+	RealTime RealTimeSyncConfig `yaml:"real_time"`
+
+	// Batch sync configuration
+	Batch BatchSyncConfig `yaml:"batch"`
+
+	// Async sync configuration
+	Async AsyncSyncConfig `yaml:"async"`
+}
+
+// RealTimeSyncConfig holds real-time CDC/trigger sync settings.
+type RealTimeSyncConfig struct {
+	// Enabled determines if real-time sync is active
+	Enabled bool `yaml:"enabled"`
+
+	// BatchSize is how many events to batch before flushing
 	BatchSize int `yaml:"batch_size"`
 
-	// Interval is how often to run the sync
-	Interval time.Duration `yaml:"interval"`
+	// FlushIntervalMs is the max time to wait before flushing batched events
+	FlushIntervalMs int `yaml:"flush_interval_ms"`
 
-	// Tables defines which tables to sync
+	// MaxRetries for failed events
+	MaxRetries int `yaml:"max_retries"`
+
+	// RetryBackoffMs is the initial backoff for retries (exponential)
+	RetryBackoffMs int `yaml:"retry_backoff_ms"`
+}
+
+// BatchSyncConfig holds batch scheduler sync settings.
+type BatchSyncConfig struct {
+	// Enabled determines if batch sync is active
+	Enabled bool `yaml:"enabled"`
+
+	// Interval is the cron-like interval (e.g., "1h", "1d", "@hourly")
+	Interval string `yaml:"interval"`
+
+	// StartTime is when to start the first batch (e.g., "02:00" for 2 AM)
+	StartTime string `yaml:"start_time"`
+
+	// Tables defines which tables to sync in batch mode
 	Tables []string `yaml:"tables"`
+
+	// BatchSize is how many records to sync per batch
+	BatchSize int `yaml:"batch_size"`
+
+	// ChunkSize is the internal chunk size for bulk inserts
+	ChunkSize int `yaml:"chunk_size"`
+}
+
+// AsyncSyncConfig holds message queue based sync settings.
+type AsyncSyncConfig struct {
+	// Enabled determines if async sync is active
+	Enabled bool `yaml:"enabled"`
+
+	// Broker type: "kafka", "rabbitmq", "redis", "memory"
+	Broker string `yaml:"broker"`
+
+	// Topic or queue name
+	Topic string `yaml:"topic"`
+
+	// Partitions for Kafka-style brokers
+	Partitions int `yaml:"partitions"`
+
+	// ConsumerGroup for coordinated consumption
+	ConsumerGroup string `yaml:"consumer_group"`
+
+	// WorkerCount is the number of concurrent workers
+	WorkerCount int `yaml:"worker_count"`
+
+	// RetryBackoffMs is the initial backoff for retries
+	RetryBackoffMs int `yaml:"retry_backoff_ms"`
+
+	// MaxRetries for failed events
+	MaxRetries int `yaml:"max_retries"`
+
+	// BrokerConfig holds broker-specific settings (JSON for flexibility)
+	BrokerConfig map[string]interface{} `yaml:"broker_config,omitempty"`
 }
 
 // Validate checks if the configuration is valid.
@@ -210,9 +282,33 @@ func DefaultConfig() *Config {
 			LocalPath: "./analytics_data",
 		},
 		Sync: SyncConfig{
-			Enabled:   false,
-			BatchSize: 1000,
-			Interval:  1 * time.Hour,
+			Enabled:    false,
+			Strategies: []string{"batch"},
+			RealTime: RealTimeSyncConfig{
+				Enabled:        false,
+				BatchSize:      100,
+				FlushIntervalMs: 5000,
+				MaxRetries:     3,
+				RetryBackoffMs: 100,
+			},
+			Batch: BatchSyncConfig{
+				Enabled:   false,
+				Interval:  "1h",
+				StartTime: "02:00",
+				Tables:    []string{"audit_events", "sessions"},
+				BatchSize: 1000,
+				ChunkSize: 100,
+			},
+			Async: AsyncSyncConfig{
+				Enabled:        false,
+				Broker:         "memory",
+				Topic:          "analytics-events",
+				Partitions:     3,
+				ConsumerGroup:  "aegion-analytics",
+				WorkerCount:    4,
+				RetryBackoffMs: 1000,
+				MaxRetries:     5,
+			},
 		},
 	}
 }
