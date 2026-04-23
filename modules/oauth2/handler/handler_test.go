@@ -387,6 +387,22 @@ func (s *handlerGrantStore) CreateAccessToken(ctx context.Context, token *store.
 	return nil
 }
 
+type handlerMultiClientGrantStore struct {
+	clients map[string]*store.Client
+}
+
+func (s *handlerMultiClientGrantStore) GetClient(ctx context.Context, id string) (*store.Client, error) {
+	client, ok := s.clients[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return client, nil
+}
+
+func (s *handlerMultiClientGrantStore) CreateAccessToken(ctx context.Context, token *store.AccessToken) error {
+	return nil
+}
+
 type handlerRevocationStore struct {
 	client       *store.Client
 	refreshToken *store.RefreshToken
@@ -455,6 +471,12 @@ func (s *handlerDeviceStore) MarkDeviceCodeUsed(ctx context.Context, deviceCode 
 
 func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 	now := time.Now().UTC()
+	
+	// Generate a valid secret hash for the confidential client
+	secretHash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	secretHashStr := string(secretHash)
+	
 	authCode := &store.AuthCode{
 		Code:        "ac-1",
 		ClientID:    "client-1",
@@ -487,8 +509,19 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		GrantTypes: []string{
 			"authorization_code",
 			"refresh_token",
-			"client_credentials",
 			"urn:ietf:params:oauth:grant-type:device_code",
+		},
+	}
+	
+	// Confidential client for client_credentials and jwt-bearer grants
+	confClient := &store.Client{
+		ID:                      "client-confidential",
+		Scopes:                  []string{"read", "write"},
+		AccessTokenTTL:          900,
+		TokenEndpointAuthMethod: "client_secret_basic",
+		SecretHash:              &secretHashStr,
+		GrantTypes: []string{
+			"client_credentials",
 			"urn:ietf:params:oauth:grant-type:jwt-bearer",
 		},
 	}
@@ -499,13 +532,21 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		authCode:     authCode,
 		refreshToken: refreshToken,
 	}, &tokenSvc.MockJWTSigner{}, "https://issuer.example.com")
+	
+	// Multi-client grant store for testing both public and confidential clients
+	multiClientGrantStore := &handlerMultiClientGrantStore{
+		clients: map[string]*store.Client{
+			"client-1":             client,
+			"client-confidential":  confClient,
+		},
+	}
 	clientCredsSvc := grants.NewClientCredentialsService(
-		&handlerGrantStore{client: client},
+		multiClientGrantStore,
 		&tokenSvc.MockJWTSigner{},
 		"https://issuer.example.com",
 	)
 	jwtBearerSvc := grants.NewJWTBearerService(
-		&handlerGrantStore{client: client},
+		multiClientGrantStore,
 		&tokenSvc.MockJWTSigner{},
 		"https://issuer.example.com",
 		&grants.MockJWTValidator{},
@@ -574,9 +615,10 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 	t.Run("client_credentials grant", func(t *testing.T) {
 		form := url.Values{}
 		form.Set("grant_type", "client_credentials")
-		form.Set("client_id", "client-1")
 		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		// Use Basic auth header for client authentication
+		req.SetBasicAuth("client-confidential", "secret")
 		rec := httptest.NewRecorder()
 		h.HandleToken(rec, req)
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -586,9 +628,10 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		form := url.Values{}
 		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
 		form.Set("assertion", "assert")
-		form.Set("client_id", "client-1")
 		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		// Use Basic auth header for client authentication
+		req.SetBasicAuth("client-confidential", "secret")
 		rec := httptest.NewRecorder()
 		h.HandleToken(rec, req)
 		assert.Equal(t, http.StatusOK, rec.Code)
@@ -807,7 +850,7 @@ func TestOAuth2Handler_AdditionalErrorBranches(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec = httptest.NewRecorder()
 		h.HandleToken(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 
 		form = url.Values{}
 		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
@@ -817,7 +860,7 @@ func TestOAuth2Handler_AdditionalErrorBranches(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec = httptest.NewRecorder()
 		h.HandleToken(rec, req)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 
 	t.Run("device grant denied and expired mapping", func(t *testing.T) {

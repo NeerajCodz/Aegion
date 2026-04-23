@@ -6,10 +6,10 @@ import (
 	"errors"
 	"testing"
 
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 	"github.com/aegion/aegion/modules/oauth2/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 )
 
 type mockRevocationStore struct {

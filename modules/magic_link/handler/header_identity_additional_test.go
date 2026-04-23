@@ -48,4 +48,3 @@ func TestMagicLinkHeaderIdentityAdditionalBranches(t *testing.T) {
 		t.Fatalf("requestIP(raw fallback) got %q", got)
 	}
 }
-

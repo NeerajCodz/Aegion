@@ -331,4 +331,3 @@ func TestSCIMStoreAdditionalMappingTokenAndScanBranches(t *testing.T) {
 		}
 	})
 }
-

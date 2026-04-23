@@ -190,8 +190,8 @@ func TestOAuthJWTAndClaimHelpers(t *testing.T) {
 
 	svc := New(store.New()).WithHTTPClient(server.Client())
 	provider := store.Provider{
-		Slug:       "oidc",
-		ClientID:   "client-1",
+		Slug:        "oidc",
+		ClientID:    "client-1",
 		ClaimSource: store.ClaimSourceIDToken,
 		ClaimMapping: store.ClaimMapping{
 			Subject:       "sub",
@@ -336,8 +336,8 @@ func TestOAuthFlowBranchesAndProviderLoading(t *testing.T) {
 			Name:          "name",
 			Picture:       "picture",
 		},
-		PKCEMethod: store.PKCES256,
-		AuthStyle:  store.AuthStyleClientSecretPost,
+		PKCEMethod:  store.PKCES256,
+		AuthStyle:   store.AuthStyleClientSecretPost,
 		ClaimSource: store.ClaimSourceUserInfo,
 		Enabled:     true,
 	}
@@ -385,7 +385,7 @@ func TestOAuthFlowBranchesAndProviderLoading(t *testing.T) {
 	}
 
 	githubProvider := store.Provider{
-		Slug:       "github",
+		Slug:        "github",
 		ClaimSource: store.ClaimSourceGitHubUser,
 		ClaimMapping: store.ClaimMapping{
 			Subject: "id",

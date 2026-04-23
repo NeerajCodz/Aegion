@@ -110,4 +110,3 @@ func TestPasskeyHandlerAdditionalBranches(t *testing.T) {
 		}
 	})
 }
-

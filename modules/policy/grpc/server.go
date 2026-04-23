@@ -9,7 +9,8 @@ import (
 	"sync"
 
 	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/checker/decls"
+	"github.com/google/cel-go/common/decls"
+	"github.com/google/cel-go/common/types"
 
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 	policystore "github.com/aegion/aegion/modules/policy/store"
@@ -36,11 +37,11 @@ var errReBACTraversalLimitExceeded = errors.New("rebac traversal limit exceeded"
 // NewServer creates a new policy server adapter.
 func NewServer(store PolicyStore) *Server {
 	env, err := cel.NewEnv(
-		cel.Declarations(
-			decls.NewVar("subject", decls.NewMapType(decls.String, decls.Dyn)),
-			decls.NewVar("resource", decls.NewMapType(decls.String, decls.Dyn)),
-			decls.NewVar("action", decls.String),
-			decls.NewVar("request", decls.NewMapType(decls.String, decls.Dyn)),
+		cel.VariableDecls(
+			decls.NewVariable("subject", types.NewMapType(types.StringType, types.DynType)),
+			decls.NewVariable("resource", types.NewMapType(types.StringType, types.DynType)),
+			decls.NewVariable("action", types.StringType),
+			decls.NewVariable("request", types.NewMapType(types.StringType, types.DynType)),
 		),
 	)
 	if err != nil {

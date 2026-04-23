@@ -138,4 +138,3 @@ server:
 		t.Fatalf("unexpected observability endpoints: %#v", cfg.Observability.Endpoints)
 	}
 }
-
