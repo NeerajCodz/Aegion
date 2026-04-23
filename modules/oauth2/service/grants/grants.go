@@ -70,6 +70,9 @@ func (s *ClientCredentialsService) IssueClientCredentials(ctx context.Context, r
 	if err != nil {
 		return nil, ErrInvalidClient
 	}
+	if client.TokenEndpointAuthMethod == "" || client.TokenEndpointAuthMethod == "none" {
+		return nil, ErrInvalidClient
+	}
 	if err := authenticateClient(client, req.ClientSecret); err != nil {
 		return nil, err
 	}
@@ -191,6 +194,9 @@ func (s *JWTBearerService) IssueJWTBearer(ctx context.Context, req *JWTBearerReq
 	// Validate client
 	client, err := s.store.GetClient(ctx, req.ClientID)
 	if err != nil {
+		return nil, ErrInvalidClient
+	}
+	if client.TokenEndpointAuthMethod == "" || client.TokenEndpointAuthMethod == "none" {
 		return nil, ErrInvalidClient
 	}
 	if err := authenticateClient(client, req.ClientSecret); err != nil {
