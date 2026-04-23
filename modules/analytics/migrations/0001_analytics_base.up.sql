@@ -35,6 +35,10 @@ CREATE INDEX IF NOT EXISTS idx_analytics_events_session_id
 CREATE INDEX IF NOT EXISTS idx_analytics_events_data 
     ON analytics_events USING GIN(data);
 
+-- Index for created_at (for sync position tracking)
+CREATE INDEX IF NOT EXISTS idx_analytics_events_created_at 
+    ON analytics_events(created_at DESC);
+
 -- Analytics Metrics Table (aggregated data)
 CREATE TABLE IF NOT EXISTS analytics_metrics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
