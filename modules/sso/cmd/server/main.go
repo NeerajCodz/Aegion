@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,12 +92,25 @@ func buildRuntime(ctx context.Context) (*moduleRuntime, error) {
 	stateSecret := deriveStateSecret()
 	ssoSvc := service.New(repo, stateSecret)
 	h := handler.New(ssoSvc, handler.Config{
-		ManagementToken: strings.TrimSpace(os.Getenv(managementTokenEnv)),
+		ManagementToken:       strings.TrimSpace(os.Getenv(managementTokenEnv)),
+		TrustForwardedHeaders: parseTrustForwardedHeaders(),
 	})
 	return &moduleRuntime{
 		registerHTTPRoutes: h.RegisterRoutes,
 		cleanup:            cleanup,
 	}, nil
+}
+
+func parseTrustForwardedHeaders() bool {
+	raw := strings.TrimSpace(os.Getenv("AEGION_PROXY_TRUST_FORWARDED_HEADERS"))
+	if raw == "" {
+		return false
+	}
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return parsed
 }
 
 func buildRepository(ctx context.Context) (store.Repository, func(), error) {
