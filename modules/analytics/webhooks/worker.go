@@ -3,6 +3,8 @@ package webhooks
 import (
 	"context"
 	"time"
+
+	analytics "github.com/aegion/aegion/modules/analytics"
 )
 
 // DeliveryWorker processes webhook delivery jobs.
@@ -72,7 +74,7 @@ func (w *DeliveryWorker) processJob(ctx context.Context, job *DeliveryJob) {
 		w.queue.Remove(job.ID)
 
 		// Move to DLQ
-		dlqEvent := &DLQWebhookEvent{
+		dlqEvent := &analytics.DLQWebhookEvent{
 			ID:         job.ID,
 			WebhookID:  job.WebhookID,
 			EventID:    job.EventID,
@@ -87,14 +89,14 @@ func (w *DeliveryWorker) processJob(ctx context.Context, job *DeliveryJob) {
 	}
 
 	// Get or create delivery record
-	var delivery *WebhookDelivery
+	var delivery *analytics.WebhookDelivery
 
 	// Try to deliver
 	result := w.dispatcher.Deliver(ctx, webhook.URL, job.Payload, job.Headers)
 
 	// Create or update delivery record
 	now := time.Now()
-	delivery = &WebhookDelivery{
+	delivery = &analytics.WebhookDelivery{
 		ID:            job.ID,
 		WebhookID:     job.WebhookID,
 		EventID:       job.EventID,
@@ -148,7 +150,7 @@ func (w *DeliveryWorker) processJob(ctx context.Context, job *DeliveryJob) {
 			w.logger.Error("webhook circuit breaker triggered", "webhook_id", job.WebhookID)
 
 			// Move to DLQ
-			dlqEvent := &DLQWebhookEvent{
+			dlqEvent := &analytics.DLQWebhookEvent{
 				ID:         job.ID,
 				WebhookID:  job.WebhookID,
 				EventID:    job.EventID,
