@@ -211,6 +211,7 @@ export function Integrations() {
       name: String(formData.get('name') ?? '').trim().toLowerCase(),
       url: String(formData.get('url') ?? '').trim(),
       health_check: String(formData.get('health_check') ?? '').trim() || undefined,
+      health_check_expected_body: String(formData.get('health_check_expected_body') ?? '').trim() || undefined,
       timeout: String(formData.get('timeout') ?? '').trim() || undefined,
       max_connections: Number.parseInt(String(formData.get('max_connections') ?? '0'), 10) || 0,
       enabled: String(formData.get('enabled') ?? 'true') === 'true',
@@ -609,6 +610,12 @@ export function Integrations() {
             <input
               name="health_check"
               placeholder="/health"
+              className="input"
+              disabled={!canUpdateConfig || upsertUpstreamMutation.isPending}
+            />
+            <input
+              name="health_check_expected_body"
+              placeholder="Expected health body (optional)"
               className="input"
               disabled={!canUpdateConfig || upsertUpstreamMutation.isPending}
             />

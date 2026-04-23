@@ -9,7 +9,7 @@ import type {
   DashboardConfig,
   ModuleHealthStatus,
   HealthState,
-  ObservabilityProbeStatus,
+  ObservabilitySummary,
 } from '../types';
 
 const HEALTH_TIMEOUT_MS = 8000;
@@ -230,8 +230,8 @@ export const dashboardApi = {
     return probes;
   },
 
-  getObservability: async (): Promise<ObservabilityProbeStatus[]> => {
-    const response = await apiClient.get<ObservabilityProbeStatus[]>('/admin/dashboard/observability');
+  getObservability: async (): Promise<ObservabilitySummary> => {
+    const response = await apiClient.get<ObservabilitySummary>('/admin/dashboard/observability');
     return response.data;
   },
 };

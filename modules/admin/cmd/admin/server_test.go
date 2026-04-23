@@ -497,7 +497,9 @@ type authOnlyHandlerService struct {
 
 func (s *authOnlyHandlerService) Store() adminservice.Store { return s.store }
 
-func (s *authOnlyHandlerService) EvaluateCapability(context.Context, uuid.UUID, string) error { return nil }
+func (s *authOnlyHandlerService) EvaluateCapability(context.Context, uuid.UUID, string) error {
+	return nil
+}
 
 func TestHandleReady(t *testing.T) {
 	t.Run("healthy db", func(t *testing.T) {
@@ -624,12 +626,15 @@ func TestHandleDashboardObservabilityDisabled(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	var probes []dashboardObservabilityProbe
-	if err := json.NewDecoder(rec.Body).Decode(&probes); err != nil {
+	var resp dashboardObservabilityResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if len(probes) != 0 {
-		t.Fatalf("expected 0 probes when disabled, got %d", len(probes))
+	if resp.Enabled {
+		t.Fatalf("expected observability to be disabled")
+	}
+	if len(resp.Stack) != 0 {
+		t.Fatalf("expected 0 probes when disabled, got %d", len(resp.Stack))
 	}
 }
 
@@ -663,16 +668,19 @@ func TestHandleDashboardObservability(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	var probes []dashboardObservabilityProbe
-	if err := json.NewDecoder(rec.Body).Decode(&probes); err != nil {
+	var resp dashboardObservabilityResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if len(probes) != 5 {
-		t.Fatalf("expected 5 probes, got %d", len(probes))
+	if !resp.Enabled {
+		t.Fatalf("expected observability to be enabled")
+	}
+	if len(resp.Stack) != 5 {
+		t.Fatalf("expected 5 probes, got %d", len(resp.Stack))
 	}
 
-	statusByKey := make(map[string]dashboardObservabilityProbe, len(probes))
-	for _, probe := range probes {
+	statusByKey := make(map[string]dashboardObservabilityProbe, len(resp.Stack))
+	for _, probe := range resp.Stack {
 		statusByKey[probe.Key] = probe
 	}
 
@@ -687,6 +695,65 @@ func TestHandleDashboardObservability(t *testing.T) {
 	}
 	if got := statusByKey["tempo"]; got.Status != "offline" || got.Message != "endpoint not configured" {
 		t.Fatalf("expected offline tempo probe due missing endpoint, got status=%q message=%q", got.Status, got.Message)
+	}
+	if resp.Telemetry.ServiceName == "" {
+		t.Fatal("expected telemetry summary to be populated")
+	}
+	if !resp.Guardrails.AdminAuthRequired || !resp.Guardrails.ObservabilityRBAC {
+		t.Fatal("expected observability guardrails to be enabled")
+	}
+}
+
+func TestDashboardSCIMSummary(t *testing.T) {
+	now := time.Now().UTC()
+	expiringSoon := now.Add(48 * time.Hour)
+	expired := now.Add(-48 * time.Hour)
+	lastUsed := now.Add(-time.Hour)
+
+	s := &Server{
+		Config: &Config{},
+		SCIMService: scim.NewService(&serverSCIMStore{
+			listTokensFn: func(context.Context) ([]*scim.SCIMToken, error) {
+				return []*scim.SCIMToken{
+					{
+						ID:          uuid.New(),
+						Permissions: []string{"*"},
+						Active:      true,
+						ExpiresAt:   &expiringSoon,
+						LastUsedAt:  &lastUsed,
+					},
+					{
+						ID:          uuid.New(),
+						Permissions: []string{"users:write"},
+						Active:      true,
+						ExpiresAt:   &expired,
+					},
+				}, nil
+			},
+			listMappingsFn: func(context.Context) ([]*scim.SCIMMapping, error) {
+				return []*scim.SCIMMapping{{ID: uuid.New(), Name: "default"}}, nil
+			},
+		}, nil),
+	}
+	s.Config.Admin.SCIM.Enabled = true
+	s.Config.Admin.SCIM.BasePath = "/scim/v2"
+	s.Config.Admin.SCIM.TokenPrefix = "aegion_scim_"
+
+	summary := s.dashboardSCIMSummary(context.Background())
+	if summary == nil {
+		t.Fatal("expected SCIM summary")
+	}
+	if summary.TokenCount != 2 || summary.ActiveTokenCount != 2 {
+		t.Fatalf("unexpected token counts: %+v", summary)
+	}
+	if summary.WildcardTokenCount != 1 || summary.WriteTokenCount != 2 {
+		t.Fatalf("unexpected permission counts: %+v", summary)
+	}
+	if summary.ExpiredTokenCount != 1 || summary.ExpiringTokenCount != 1 {
+		t.Fatalf("unexpected expiry counts: %+v", summary)
+	}
+	if summary.LastTokenUsedAt == "" {
+		t.Fatal("expected last token used timestamp")
 	}
 }
 

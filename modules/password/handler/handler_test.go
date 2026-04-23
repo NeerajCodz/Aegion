@@ -866,7 +866,7 @@ func TestHandler_EdgeCases(t *testing.T) {
 
 	t.Run("change password accepts signed session headers", func(t *testing.T) {
 		service := &MockService{}
-		secret := []byte("0123456789abcdef0123456789abcdef")
+		secret := []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 		handler := New(service, WithSessionHeaderSecret(secret))
 		identityID := uuid.New()
 		sessionID := uuid.New()

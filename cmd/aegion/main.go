@@ -165,19 +165,25 @@ func defaultMainDeps() mainDeps {
 		notifySignals: signal.Notify,
 		stopSignals:   signal.Stop,
 		startHTTPServer: func(cfg *config.Config, log *logger.Logger, httpServer *http.Server) {
+			tlsEnabled := cfg.Server.TLS.Enabled
+			certFile := cfg.Server.TLS.CertFile
+			keyFile := cfg.Server.TLS.KeyFile
+			serveHTTP := listenAndServeHTTPHook
+			serveTLS := listenAndServeTLSHook
+			fatalHTTP := fatalHTTPServerHook
 			go func() {
 				log.Info().
 					Str("addr", httpServer.Addr).
 					Msg("HTTP server listening")
 
 				var err error
-				if cfg.Server.TLS.Enabled {
-					err = listenAndServeTLSHook(httpServer, cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+				if tlsEnabled {
+					err = serveTLS(httpServer, certFile, keyFile)
 				} else {
-					err = listenAndServeHTTPHook(httpServer)
+					err = serveHTTP(httpServer)
 				}
 				if err != nil && err != http.ErrServerClosed {
-					fatalHTTPServerHook(log).Err(err).Msg("HTTP server failed")
+					fatalHTTP(log).Err(err).Msg("HTTP server failed")
 				}
 			}()
 		},

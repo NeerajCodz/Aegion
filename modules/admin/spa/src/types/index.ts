@@ -103,6 +103,64 @@ export interface ObservabilityProbeStatus {
   checked_at: string;
 }
 
+export interface ObservabilityTelemetrySummary {
+  service_name: string;
+  service_version: string;
+  environment: string;
+  instance_id: string;
+  traces_enabled: boolean;
+  metrics_enabled: boolean;
+  logs_enabled: boolean;
+  traces_endpoint: string;
+  metrics_endpoint: string;
+  logs_endpoint: string;
+  trace_sampling_ratio: number;
+  metric_export_interval: string;
+  trace_export_timeout: string;
+  insecure_exporter: boolean;
+  traces_endpoint_present: boolean;
+  metrics_endpoint_present: boolean;
+  logs_endpoint_present: boolean;
+}
+
+export interface ObservabilityGuardrailsSummary {
+  admin_auth_required: boolean;
+  observability_rbac: boolean;
+  admin_rate_limiting: boolean;
+  admin_csrf_protection: boolean;
+  strict_transport_security: boolean;
+  trusted_proxy_headers: boolean;
+  scim_bearer_auth: boolean;
+  scim_unknown_field_rejection: boolean;
+  scim_body_limit_bytes: number;
+  telemetry_secrets_redacted: boolean;
+  warnings: string[];
+}
+
+export interface ObservabilitySCIMSummary {
+  enabled: boolean;
+  base_path: string;
+  mapping_count: number;
+  token_count: number;
+  active_token_count: number;
+  expired_token_count: number;
+  expiring_token_count: number;
+  wildcard_token_count: number;
+  write_token_count: number;
+  last_token_used_at?: string;
+  token_prefix: string;
+  warnings: string[];
+}
+
+export interface ObservabilitySummary {
+  enabled: boolean;
+  generated_at: string;
+  telemetry: ObservabilityTelemetrySummary;
+  guardrails: ObservabilityGuardrailsSummary;
+  scim?: ObservabilitySCIMSummary;
+  stack: ObservabilityProbeStatus[];
+}
+
 export interface AuthState {
   operator: Operator | null;
   token: string | null;
@@ -212,6 +270,7 @@ export interface ProxyUpstreamSummary {
   name: string;
   url: string;
   health_check?: string;
+  health_check_expected_body?: string;
   timeout?: string;
   max_connections: number;
   enabled: boolean;

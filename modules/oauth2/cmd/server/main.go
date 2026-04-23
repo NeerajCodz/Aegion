@@ -123,10 +123,11 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	notifySignalsHook(stop, os.Interrupt, syscall.SIGTERM)
 	defer stopSignalsHook(stop)
+	serve := listenAndServeHook
 
 	go func() {
 		log.Info().Str("addr", srv.Addr).Msg("OAuth2 module listening")
-		if err := listenAndServeHook(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := serve(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fatalHook(err, "OAuth2 server failed")
 		}
 	}()

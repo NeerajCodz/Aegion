@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
+	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/modules/admin/store"
 )
 
@@ -125,6 +126,7 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	ctx = context.WithValue(ctx, contextKeyIPAddress, getClientIP(r))
 	ctx = context.WithValue(ctx, contextKeyAuthMethod, "api_key")
 	ctx = context.WithValue(ctx, contextKeyAuthKeyID, key.ID.String())
+	ctx = observability.WithUserID(ctx, operator.ID.String())
 
 	h.log.InfoContext(ctx, "admin api key auth success",
 		"operator_id", operator.ID.String(),

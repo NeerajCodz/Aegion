@@ -3,9 +3,11 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aegion/aegion/modules/sso/service"
@@ -44,6 +46,17 @@ type captureSSOService struct {
 	email       string
 	displayName string
 	attributes  map[string]interface{}
+}
+
+type unsafeRedirectSSOService struct{ stubSSOService }
+
+func (unsafeRedirectSSOService) CompleteAuth(context.Context, string, string, string, string, string, map[string]interface{}) (*service.CallbackResult, error) {
+	return &service.CallbackResult{
+		Connection: "acme",
+		Subject:    "sub",
+		Email:      "user@example.com",
+		RedirectTo: "https://attacker.example/post-login",
+	}, nil
 }
 
 func (s *captureSSOService) CompleteAuth(_ context.Context, _ string, relayState, subject, email, displayName string, attributes map[string]interface{}) (*service.CallbackResult, error) {
@@ -121,6 +134,22 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
 		}
 	})
+
+	t.Run("callback enforces browser-safe local redirect", func(t *testing.T) {
+		h := New(unsafeRedirectSSOService{}, Config{ManagementToken: "secret"})
+		mux := http.NewServeMux()
+		h.RegisterRoutes(mux)
+
+		req := httptest.NewRequest(http.MethodGet, "/self-service/sso/acme/callback?RelayState=relay", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("expected %d, got %d", http.StatusSeeOther, rec.Code)
+		}
+		if location := rec.Header().Get("Location"); !strings.HasPrefix(location, "/") {
+			t.Fatalf("expected local redirect target, got %q", location)
+		}
+	})
 }
 
 func TestHandleCallbackRejectsUntrustedIdentityFields(t *testing.T) {
@@ -140,4 +169,64 @@ func TestHandleCallbackRejectsUntrustedIdentityFields(t *testing.T) {
 	if svc.relayState != "" || svc.attributes != nil {
 		t.Fatalf("expected callback to be rejected before service invocation, got relay_state=%q attrs=%+v", svc.relayState, svc.attributes)
 	}
+}
+
+func TestExpectedRecipientsTrustForwardedHeaders(t *testing.T) {
+	t.Setenv("AEGION_TRUSTED_PROXY_CIDRS", "198.51.100.0/24")
+
+	t.Run("ignores forwarded headers when trust disabled", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "https://service.example.com/self-service/sso/acme/callback", nil)
+		req.Host = "service.example.com"
+		req.RemoteAddr = "198.51.100.10:1234"
+		req.TLS = &tls.ConnectionState{}
+		req.Header.Set("X-Forwarded-Host", "attacker.example")
+		req.Header.Set("X-Forwarded-Proto", "https")
+
+		recipients := expectedRecipients(req, false)
+		if containsRecipient(recipients, "https://attacker.example/self-service/sso/acme/callback") {
+			t.Fatalf("expected forwarded host to be ignored when trust is disabled")
+		}
+		if !containsRecipient(recipients, "https://service.example.com/self-service/sso/acme/callback") {
+			t.Fatalf("expected local host recipient when trust is disabled, got %v", recipients)
+		}
+	})
+
+	t.Run("uses forwarded headers when trusted", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "http://service.example.com/self-service/sso/acme/callback", nil)
+		req.Host = "service.example.com"
+		req.RemoteAddr = "198.51.100.10:1234"
+		req.Header.Set("X-Forwarded-Host", "sso.example.com")
+		req.Header.Set("X-Forwarded-Proto", "https")
+
+		recipients := expectedRecipients(req, true)
+		if !containsRecipient(recipients, "https://sso.example.com/self-service/sso/acme/callback") {
+			t.Fatalf("expected forwarded host recipient when trusted, got %v", recipients)
+		}
+	})
+
+	t.Run("falls back when proxy untrusted", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "https://service.example.com/self-service/sso/acme/callback", nil)
+		req.Host = "service.example.com"
+		req.RemoteAddr = "203.0.113.10:1234"
+		req.TLS = &tls.ConnectionState{}
+		req.Header.Set("X-Forwarded-Host", "sso.example.com")
+		req.Header.Set("X-Forwarded-Proto", "https")
+
+		recipients := expectedRecipients(req, true)
+		if containsRecipient(recipients, "https://sso.example.com/self-service/sso/acme/callback") {
+			t.Fatalf("expected forwarded host to be ignored when proxy is untrusted")
+		}
+		if !containsRecipient(recipients, "https://service.example.com/self-service/sso/acme/callback") {
+			t.Fatalf("expected local host recipient when proxy is untrusted, got %v", recipients)
+		}
+	})
+}
+
+func containsRecipient(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

@@ -24,17 +24,18 @@ type CircuitBreaker struct {
 }
 
 type Upstream struct {
-	ID             uuid.UUID         `json:"id"`
-	Name           string            `json:"name"`
-	URL            string            `json:"url"`
-	HealthCheck    string            `json:"health_check,omitempty"`
-	Timeout        string            `json:"timeout,omitempty"`
-	MaxConnections int               `json:"max_connections,omitempty"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	CircuitBreaker *CircuitBreaker   `json:"circuit_breaker,omitempty"`
-	Enabled        bool              `json:"enabled"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	ID                      uuid.UUID         `json:"id"`
+	Name                    string            `json:"name"`
+	URL                     string            `json:"url"`
+	HealthCheck             string            `json:"health_check,omitempty"`
+	HealthCheckExpectedBody string            `json:"health_check_expected_body,omitempty"`
+	Timeout                 string            `json:"timeout,omitempty"`
+	MaxConnections          int               `json:"max_connections,omitempty"`
+	Headers                 map[string]string `json:"headers,omitempty"`
+	CircuitBreaker          *CircuitBreaker   `json:"circuit_breaker,omitempty"`
+	Enabled                 bool              `json:"enabled"`
+	CreatedAt               time.Time         `json:"created_at"`
+	UpdatedAt               time.Time         `json:"updated_at"`
 }
 
 type Rewrite struct {
