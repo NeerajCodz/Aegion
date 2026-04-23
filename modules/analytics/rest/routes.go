@@ -61,6 +61,22 @@ func Router(h *Handler, logger zerolog.Logger) chi.Router {
 			r.Get("/{id}", h.GetReport)
 			r.Get("/{id}/download", h.DownloadReport)
 		})
+
+		// Webhooks endpoints
+		r.Route("/webhooks", func(r chi.Router) {
+			r.Post("/", h.RegisterWebhook)
+			r.Get("/", h.ListWebhooks)
+			r.Get("/{id}", h.GetWebhook)
+			r.Put("/{id}", h.UpdateWebhook)
+			r.Delete("/{id}", h.DeleteWebhook)
+			r.Post("/{id}/test", h.TestWebhook)
+			r.Get("/{id}/deliveries", h.GetWebhookDeliveries)
+		})
+
+		// Webhook deliveries endpoints
+		r.Route("/webhooks/deliveries", func(r chi.Router) {
+			r.Post("/{id}/replay", h.ReplayDelivery)
+		})
 	})
 
 	return r

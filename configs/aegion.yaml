@@ -236,6 +236,25 @@ analytics:
     interval: 1h
     # Tables to sync (if empty, all tables with analytics prefix)
     tables: []
+  
+  retention:
+    enabled: true
+    default_policy: tiered
+    hot_ttl_days: 7
+    warm_ttl_days: 90
+    cold_ttl_days: 730
+    archival_interval: 24h
+    cleanup_interval: 168h
+    tiering_interval: 6h
+    categories:
+      audit_events:
+        hot_days: 30
+        warm_days: 180
+        cold_days: 730
+      authentication:
+        hot_days: 14
+        warm_days: 60
+        cold_days: 365
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Module Enable Flags
