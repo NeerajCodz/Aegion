@@ -28,6 +28,9 @@ type Config struct {
 
 	// Sync settings for syncing data from PostgreSQL
 	Sync SyncConfig `yaml:"sync"`
+
+	// GraphQL API configuration
+	GraphQL GraphQLAPIConfig `yaml:"api"`
 }
 
 // DuckDBConfig holds DuckDB-specific settings.
@@ -210,6 +213,33 @@ type AsyncSyncConfig struct {
 	BrokerConfig map[string]interface{} `yaml:"broker_config,omitempty"`
 }
 
+// GraphQLAPIConfig holds GraphQL API configuration.
+type GraphQLAPIConfig struct {
+	// Enabled determines if GraphQL API is active
+	Enabled bool `yaml:"enabled"`
+
+	// Endpoint is the HTTP path for GraphQL queries
+	Endpoint string `yaml:"endpoint"`
+
+	// EnableIntrospection enables schema introspection
+	Introspection bool `yaml:"introspection"`
+
+	// EnablePlayground enables GraphQL Playground
+	Playground bool `yaml:"playground"`
+
+	// MaxQueryDepth limits the depth of queries
+	MaxQueryDepth int `yaml:"max_query_depth"`
+
+	// MaxQueryComplexity limits the complexity score of queries
+	MaxQueryComplexity int `yaml:"max_query_complexity"`
+
+	// QueryTimeoutSeconds is the timeout for query execution
+	QueryTimeoutSeconds int `yaml:"query_timeout_seconds"`
+
+	// RateLimitPerMinute limits requests per minute
+	RateLimitPerMinute int `yaml:"rate_limit_per_minute"`
+}
+
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
 	if !c.Enabled {
@@ -309,6 +339,16 @@ func DefaultConfig() *Config {
 				RetryBackoffMs: 1000,
 				MaxRetries:     5,
 			},
+		},
+		GraphQL: GraphQLAPIConfig{
+			Enabled:             true,
+			Endpoint:            "/graphql",
+			Introspection:       true,
+			Playground:          true,
+			MaxQueryDepth:       10,
+			MaxQueryComplexity:  1000,
+			QueryTimeoutSeconds: 30,
+			RateLimitPerMinute:  100,
 		},
 	}
 }
