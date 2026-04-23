@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	analytics "github.com/aegion/aegion/modules/analytics"
 )
 
 // Store manages webhook persistence.
@@ -26,7 +28,7 @@ func NewStore(db DB) *Store {
 }
 
 // CreateWebhook stores a new webhook.
-func (s *Store) CreateWebhook(ctx context.Context, webhook *Webhook) error {
+func (s *Store) CreateWebhook(ctx context.Context, webhook *analytics.Webhook) error {
 	eventTypesJSON, _ := json.Marshal(webhook.EventTypes)
 	categoriesJSON, _ := json.Marshal(webhook.Categories)
 	customFilterJSON, _ := json.Marshal(webhook.CustomFilter)
@@ -45,14 +47,14 @@ func (s *Store) CreateWebhook(ctx context.Context, webhook *Webhook) error {
 }
 
 // GetWebhook retrieves a webhook by ID.
-func (s *Store) GetWebhook(ctx context.Context, webhookID string) (*Webhook, error) {
+func (s *Store) GetWebhook(ctx context.Context, webhookID string) (*analytics.Webhook, error) {
 	query := `
 		SELECT id, user_id, url, event_types, categories, custom_filter, secret, active, failure_count, created_at, updated_at
 		FROM webhooks WHERE id = ?
 	`
 
 	row := s.db.QueryRowContext(ctx, query, webhookID)
-	webhook := &Webhook{}
+	webhook := &analytics.Webhook{}
 
 	var eventTypesJSON, categoriesJSON, customFilterJSON string
 
@@ -74,7 +76,7 @@ func (s *Store) GetWebhook(ctx context.Context, webhookID string) (*Webhook, err
 }
 
 // ListWebhooks retrieves all webhooks for a user.
-func (s *Store) ListWebhooks(ctx context.Context, userID string) ([]*Webhook, error) {
+func (s *Store) ListWebhooks(ctx context.Context, userID string) ([]*analytics.Webhook, error) {
 	query := `
 		SELECT id, user_id, url, event_types, categories, custom_filter, secret, active, failure_count, created_at, updated_at
 		FROM webhooks WHERE user_id = ? ORDER BY created_at DESC
@@ -86,9 +88,9 @@ func (s *Store) ListWebhooks(ctx context.Context, userID string) ([]*Webhook, er
 	}
 	defer rows.Close()
 
-	var webhooks []*Webhook
+	var webhooks []*analytics.Webhook
 	for rows.Next() {
-		webhook := &Webhook{}
+		webhook := &analytics.Webhook{}
 		var eventTypesJSON, categoriesJSON, customFilterJSON string
 
 		err := rows.Scan(&webhook.ID, &webhook.UserID, &webhook.URL, &eventTypesJSON, &categoriesJSON, &customFilterJSON,
@@ -109,7 +111,7 @@ func (s *Store) ListWebhooks(ctx context.Context, userID string) ([]*Webhook, er
 }
 
 // UpdateWebhook updates an existing webhook.
-func (s *Store) UpdateWebhook(ctx context.Context, webhook *Webhook) error {
+func (s *Store) UpdateWebhook(ctx context.Context, webhook *analytics.Webhook) error {
 	eventTypesJSON, _ := json.Marshal(webhook.EventTypes)
 	categoriesJSON, _ := json.Marshal(webhook.Categories)
 	customFilterJSON, _ := json.Marshal(webhook.CustomFilter)
@@ -177,7 +179,7 @@ func (s *Store) ResetFailureCount(ctx context.Context, webhookID string) error {
 }
 
 // SaveDelivery stores a webhook delivery record.
-func (s *Store) SaveDelivery(ctx context.Context, delivery *WebhookDelivery) error {
+func (s *Store) SaveDelivery(ctx context.Context, delivery *analytics.WebhookDelivery) error {
 	query := `
 		INSERT INTO webhook_deliveries (id, webhook_id, event_id, status, status_code, response_body, error, attempts, max_retries, next_retry_at, last_attempt_at, completed_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -193,7 +195,7 @@ func (s *Store) SaveDelivery(ctx context.Context, delivery *WebhookDelivery) err
 }
 
 // UpdateDelivery updates a delivery record.
-func (s *Store) UpdateDelivery(ctx context.Context, delivery *WebhookDelivery) error {
+func (s *Store) UpdateDelivery(ctx context.Context, delivery *analytics.WebhookDelivery) error {
 	query := `
 		UPDATE webhook_deliveries
 		SET status = ?, status_code = ?, response_body = ?, error = ?, attempts = ?, next_retry_at = ?, last_attempt_at = ?, completed_at = ?, updated_at = ?
@@ -209,14 +211,14 @@ func (s *Store) UpdateDelivery(ctx context.Context, delivery *WebhookDelivery) e
 }
 
 // GetDelivery retrieves a delivery record.
-func (s *Store) GetDelivery(ctx context.Context, deliveryID string) (*WebhookDelivery, error) {
+func (s *Store) GetDelivery(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error) {
 	query := `
 		SELECT id, webhook_id, event_id, status, status_code, response_body, error, attempts, max_retries, next_retry_at, last_attempt_at, completed_at, created_at, updated_at
 		FROM webhook_deliveries WHERE id = ?
 	`
 
 	row := s.db.QueryRowContext(ctx, query, deliveryID)
-	delivery := &WebhookDelivery{}
+	delivery := &analytics.WebhookDelivery{}
 
 	err := row.Scan(&delivery.ID, &delivery.WebhookID, &delivery.EventID, &delivery.Status, &delivery.StatusCode,
 		&delivery.ResponseBody, &delivery.Error, &delivery.Attempts, &delivery.MaxRetries,
@@ -233,7 +235,7 @@ func (s *Store) GetDelivery(ctx context.Context, deliveryID string) (*WebhookDel
 }
 
 // ListDeliveries retrieves delivery history for a webhook.
-func (s *Store) ListDeliveries(ctx context.Context, webhookID string, limit int) ([]*WebhookDelivery, error) {
+func (s *Store) ListDeliveries(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -249,9 +251,9 @@ func (s *Store) ListDeliveries(ctx context.Context, webhookID string, limit int)
 	}
 	defer rows.Close()
 
-	var deliveries []*WebhookDelivery
+	var deliveries []*analytics.WebhookDelivery
 	for rows.Next() {
-		delivery := &WebhookDelivery{}
+		delivery := &analytics.WebhookDelivery{}
 		err := rows.Scan(&delivery.ID, &delivery.WebhookID, &delivery.EventID, &delivery.Status, &delivery.StatusCode,
 			&delivery.ResponseBody, &delivery.Error, &delivery.Attempts, &delivery.MaxRetries,
 			&delivery.NextRetryAt, &delivery.LastAttemptAt, &delivery.CompletedAt, &delivery.CreatedAt, &delivery.UpdatedAt)
@@ -267,7 +269,7 @@ func (s *Store) ListDeliveries(ctx context.Context, webhookID string, limit int)
 }
 
 // SaveDLQEvent saves a failed event to the dead letter queue.
-func (s *Store) SaveDLQEvent(ctx context.Context, dlqEvent *DLQWebhookEvent) error {
+func (s *Store) SaveDLQEvent(ctx context.Context, dlqEvent *analytics.DLQWebhookEvent) error {
 	eventDataJSON, _ := json.Marshal(dlqEvent.EventData)
 
 	query := `

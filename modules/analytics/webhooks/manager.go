@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	analytics "github.com/aegion/aegion/modules/analytics"
 )
 
 // Manager orchestrates webhook registration, event matching, and delivery.
@@ -143,7 +144,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 }
 
 // RegisterWebhook registers a new webhook for a user.
-func (m *Manager) RegisterWebhook(ctx context.Context, userID string, req *WebhookRequest) (*Webhook, error) {
+func (m *Manager) RegisterWebhook(ctx context.Context, userID string, req *WebhookRequest) (*analytics.Webhook, error) {
 	// Validate request
 	if err := ValidateWebhookRequest(req, m.config.MaxCustomFilterDepth); err != nil {
 		return nil, err
@@ -165,7 +166,7 @@ func (m *Manager) RegisterWebhook(ctx context.Context, userID string, req *Webho
 	}
 
 	// Create webhook
-	webhook := &Webhook{
+	webhook := &analytics.Webhook{
 		ID:           uuid.New().String(),
 		UserID:       userID,
 		URL:          req.URL,
@@ -188,7 +189,7 @@ func (m *Manager) RegisterWebhook(ctx context.Context, userID string, req *Webho
 }
 
 // UpdateWebhook updates an existing webhook.
-func (m *Manager) UpdateWebhook(ctx context.Context, userID, webhookID string, req *WebhookRequest) (*Webhook, error) {
+func (m *Manager) UpdateWebhook(ctx context.Context, userID, webhookID string, req *WebhookRequest) (*analytics.Webhook, error) {
 	// Validate request
 	if err := ValidateWebhookRequest(req, m.config.MaxCustomFilterDepth); err != nil {
 		return nil, err
@@ -231,12 +232,12 @@ func (m *Manager) DeleteWebhook(ctx context.Context, userID, webhookID string) e
 }
 
 // ListWebhooks lists all webhooks for a user.
-func (m *Manager) ListWebhooks(ctx context.Context, userID string) ([]*Webhook, error) {
+func (m *Manager) ListWebhooks(ctx context.Context, userID string) ([]*analytics.Webhook, error) {
 	return m.store.ListWebhooks(ctx, userID)
 }
 
 // GetWebhook retrieves a specific webhook.
-func (m *Manager) GetWebhook(ctx context.Context, webhookID string) (*Webhook, error) {
+func (m *Manager) GetWebhook(ctx context.Context, webhookID string) (*analytics.Webhook, error) {
 	return m.store.GetWebhook(ctx, webhookID)
 }
 
@@ -258,7 +259,7 @@ func (m *Manager) PublishEvent(ctx context.Context, eventID, eventType, category
 
 // DispatchEvent queues webhook deliveries for a specific event.
 // This is called internally when a matching event occurs.
-func (m *Manager) DispatchEvent(ctx context.Context, eventID, eventType, category string, data map[string]interface{}, webhooks []*Webhook) error {
+func (m *Manager) DispatchEvent(ctx context.Context, eventID, eventType, category string, data map[string]interface{}, webhooks []*analytics.Webhook) error {
 	for _, webhook := range webhooks {
 		if !webhook.Active {
 			continue
@@ -325,7 +326,7 @@ func (m *Manager) TestWebhook(ctx context.Context, webhookID string) (string, er
 	result := m.dispatcher.Deliver(ctx, webhook.URL, payload, headers)
 
 	deliveryID := uuid.New().String()
-	delivery := &WebhookDelivery{
+	delivery := &analytics.WebhookDelivery{
 		ID:            deliveryID,
 		WebhookID:     webhook.ID,
 		EventID:       "test-event",
@@ -351,7 +352,7 @@ func (m *Manager) TestWebhook(ctx context.Context, webhookID string) (string, er
 }
 
 // GetDeliveryHistory retrieves delivery history for a webhook.
-func (m *Manager) GetDeliveryHistory(ctx context.Context, webhookID string, limit int) ([]*WebhookDelivery, error) {
+func (m *Manager) GetDeliveryHistory(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error) {
 	return m.store.ListDeliveries(ctx, webhookID, limit)
 }
 

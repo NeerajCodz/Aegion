@@ -236,6 +236,24 @@ analytics:
     interval: 1h
     # Tables to sync (if empty, all tables with analytics prefix)
     tables: []
+
+  webhooks:
+    # Enable webhook system for real-time event notifications
+    enabled: true
+    # Maximum webhooks per user
+    max_per_user: 50
+    # Maximum retry attempts
+    max_retries: 5
+    # Initial retry backoff in milliseconds
+    retry_backoff_base_ms: 1000
+    # HTTP request timeout in seconds
+    timeout_seconds: 30
+    # Delivery queue batch size
+    batch_size: 100
+    # Concurrent delivery workers
+    worker_threads: 10
+    # How long to keep delivery history in days
+    store_delivery_history_days: 30
   
   retention:
     enabled: true
