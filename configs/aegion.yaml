@@ -177,6 +177,67 @@ security:
     lockout_duration: 15m
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Analytics Module
+# ─────────────────────────────────────────────────────────────────────────────
+analytics:
+  enabled: true
+  
+  duckdb:
+    # Path to the DuckDB database file (use ":memory:" for in-memory)
+    path: analytics.duckdb
+    # Maximum memory in MB for DuckDB to use
+    max_memory: 4096
+    # Number of threads DuckDB will use
+    threads: 4
+    # Connection pool size
+    connection_pool_size: 10
+    # Health check interval
+    health_check_interval: 30s
+    # Create schema on startup
+    initialize_on_startup: true
+  
+  storage:
+    # Storage backend type: local, s3, iceberg, k8s
+    type: local
+    
+    # Local storage configuration
+    local_path: ./analytics_data
+    
+    # S3 storage configuration (used when type is "s3")
+    s3:
+      bucket: analytics
+      region: us-east-1
+      prefix: duckdb
+      endpoint_url: ${AEGION_ANALYTICS_S3_ENDPOINT_URL:-}
+      use_path_style: false
+      access_key_id: ${AEGION_ANALYTICS_S3_ACCESS_KEY_ID:-}
+      secret_access_key: ${AEGION_ANALYTICS_S3_SECRET_ACCESS_KEY:-}
+    
+    # Iceberg storage configuration (used when type is "iceberg")
+    iceberg:
+      catalog_type: hive
+      warehouse_path: ./iceberg_warehouse
+      catalog_name: analytics
+      nessie_uri: ${AEGION_ANALYTICS_NESSIE_URI:-}
+    
+    # Kubernetes storage configuration (used when type is "k8s")
+    k8s:
+      pvc_name: analytics-storage
+      mount_path: /data/analytics
+      storage_class: standard
+      size: 10Gi
+  
+  sync:
+    # Enable syncing from PostgreSQL
+    enabled: false
+    # Batch size for sync operations
+    batch_size: 1000
+    # Sync interval
+    interval: 1h
+    # Tables to sync (if empty, all tables with analytics prefix)
+    tables: []
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Module Enable Flags
 # ─────────────────────────────────────────────────────────────────────────────
 password:
