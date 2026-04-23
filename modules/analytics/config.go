@@ -29,8 +29,41 @@ type Config struct {
 	// Sync settings for syncing data from PostgreSQL
 	Sync SyncConfig `yaml:"sync"`
 
+	// REST API configuration
+	REST RestAPIConfig `yaml:"rest"`
+
 	// GraphQL API configuration
-	GraphQL GraphQLAPIConfig `yaml:"api"`
+	GraphQL GraphQLAPIConfig `yaml:"graphql"`
+
+	// gRPC API configuration
+	GRPC gRPCAPIConfig `yaml:"grpc"`
+
+	// Webhooks configuration
+	Webhooks WebhooksConfig `yaml:"webhooks"`
+
+	// Retention configuration
+	Retention RetentionConfig `yaml:"retention"`
+}
+
+// RestAPIConfig holds REST API configuration.
+type RestAPIConfig struct {
+	// Enabled determines if REST API is active
+	Enabled bool `yaml:"enabled"`
+
+	// Endpoint is the base path for REST endpoints
+	Endpoint string `yaml:"endpoint"`
+
+	// QueryTimeoutSeconds is the timeout for queries
+	QueryTimeoutSeconds int `yaml:"query_timeout_seconds"`
+
+	// RateLimitPerMinute limits requests per minute
+	RateLimitPerMinute int `yaml:"rate_limit_per_minute"`
+
+	// MaxPageSize limits result page size
+	MaxPageSize int `yaml:"max_page_size"`
+
+	// DefaultPageSize is the default result page size
+	DefaultPageSize int `yaml:"default_page_size"`
 }
 
 // DuckDBConfig holds DuckDB-specific settings.
@@ -240,6 +273,63 @@ type GraphQLAPIConfig struct {
 	RateLimitPerMinute int `yaml:"rate_limit_per_minute"`
 }
 
+// gRPCAPIConfig holds gRPC API configuration.
+type gRPCAPIConfig struct {
+	// Enabled determines if gRPC API is active
+	Enabled bool `yaml:"enabled"`
+
+	// Port is the TCP port for gRPC server
+	Port int `yaml:"port"`
+
+	// MaxConcurrentStreams limits concurrent streams
+	MaxConcurrentStreams int `yaml:"max_concurrent_streams"`
+
+	// KeepaliveTimeSeconds is the keepalive ping interval
+	KeepaliveTimeSeconds int `yaml:"keepalive_time_seconds"`
+
+	// KeepaliveTimeoutSeconds is the keepalive ping timeout
+	KeepaliveTimeoutSeconds int `yaml:"keepalive_timeout_seconds"`
+
+	// MaxConnectionIdleSeconds is the max idle time for connections
+	MaxConnectionIdleSeconds int `yaml:"max_connection_idle_seconds"`
+
+	// EnableAuth requires service authentication
+	EnableAuth bool `yaml:"enable_auth"`
+
+	// EnableLogging enables request/response logging
+	EnableLogging bool `yaml:"enable_logging"`
+
+	// EnableTracing enables OpenTelemetry tracing
+	EnableTracing bool `yaml:"enable_tracing"`
+}
+
+// WebhooksConfig holds webhook system configuration.
+type WebhooksConfig struct {
+	// Enabled determines if webhook system is active
+	Enabled bool `yaml:"enabled"`
+
+	// MaxPerUser limits the number of webhooks per user
+	MaxPerUser int `yaml:"max_per_user"`
+
+	// MaxRetries is the maximum number of retry attempts
+	MaxRetries int `yaml:"max_retries"`
+
+	// RetryBackoffBaseMs is the initial backoff time in milliseconds
+	RetryBackoffBaseMs int `yaml:"retry_backoff_base_ms"`
+
+	// TimeoutSeconds is the HTTP request timeout
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+
+	// BatchSize for processing webhooks
+	BatchSize int `yaml:"batch_size"`
+
+	// WorkerThreads is the number of concurrent delivery workers
+	WorkerThreads int `yaml:"worker_threads"`
+
+	// StoreDeliveryHistoryDays is how long to keep delivery history
+	StoreDeliveryHistoryDays int `yaml:"store_delivery_history_days"`
+}
+
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
 	if !c.Enabled {
@@ -340,6 +430,14 @@ func DefaultConfig() *Config {
 				MaxRetries:     5,
 			},
 		},
+		REST: RestAPIConfig{
+			Enabled:             true,
+			Endpoint:            "/api/v1/analytics",
+			QueryTimeoutSeconds: 30,
+			RateLimitPerMinute:  100,
+			MaxPageSize:         1000,
+			DefaultPageSize:     50,
+		},
 		GraphQL: GraphQLAPIConfig{
 			Enabled:             true,
 			Endpoint:            "/graphql",
@@ -350,5 +448,77 @@ func DefaultConfig() *Config {
 			QueryTimeoutSeconds: 30,
 			RateLimitPerMinute:  100,
 		},
+		GRPC: gRPCAPIConfig{
+			Enabled:                  true,
+			Port:                     50051,
+			MaxConcurrentStreams:     100,
+			KeepaliveTimeSeconds:     20,
+			KeepaliveTimeoutSeconds:  10,
+			MaxConnectionIdleSeconds: 300,
+			EnableAuth:               true,
+			EnableLogging:            true,
+			EnableTracing:            true,
+		},
+		Webhooks: WebhooksConfig{
+			Enabled:                  true,
+			MaxPerUser:               50,
+			MaxRetries:               5,
+			RetryBackoffBaseMs:       1000,
+			TimeoutSeconds:           30,
+			BatchSize:                100,
+			WorkerThreads:            10,
+			StoreDeliveryHistoryDays: 30,
+		},
+		Retention: RetentionConfig{
+			Enabled:           true,
+			DefaultPolicy:     "tiered",
+			HotTTLDays:        7,
+			WarmTTLDays:       90,
+			ColdTTLDays:       730,
+			ArchivalInterval:  "24h",
+			CleanupInterval:   "168h",
+			TieringInterval:   "6h",
+			Categories: map[string]CategoryConfig{
+				"audit_events": {
+					HotDays:  30,
+					WarmDays: 180,
+					ColdDays: 730,
+				},
+				"authentication": {
+					HotDays:  14,
+					WarmDays: 60,
+					ColdDays: 365,
+				},
+			},
+		},
 	}
+}
+
+// RetentionConfig holds retention and tiering configuration.
+type RetentionConfig struct {
+	// Enabled determines if retention management is active
+	Enabled bool `yaml:"enabled"`
+
+	// DefaultPolicy for retention (e.g., "tiered")
+	DefaultPolicy string `yaml:"default_policy"`
+
+	// TTL for each tier
+	HotTTLDays  int `yaml:"hot_ttl_days"`
+	WarmTTLDays int `yaml:"warm_ttl_days"`
+	ColdTTLDays int `yaml:"cold_ttl_days"`
+
+	// Scheduling intervals
+	ArchivalInterval string `yaml:"archival_interval"`
+	CleanupInterval  string `yaml:"cleanup_interval"`
+	TieringInterval  string `yaml:"tiering_interval"`
+
+	// Category-specific overrides
+	Categories map[string]CategoryConfig `yaml:"categories,omitempty"`
+}
+
+// CategoryConfig defines retention settings for a specific event category.
+type CategoryConfig struct {
+	HotDays  int `yaml:"hot_days"`
+	WarmDays int `yaml:"warm_days"`
+	ColdDays int `yaml:"cold_days"`
 }

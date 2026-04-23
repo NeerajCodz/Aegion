@@ -49,15 +49,61 @@ type Query struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// Webhook represents a webhook for analytics events.
+// Webhook represents a webhook subscription for analytics events.
 type Webhook struct {
-	ID        string    `json:"id"`
-	URL       string    `json:"url"`
-	EventType string    `json:"event_type"`
-	Secret    string    `json:"secret"`
-	Active    bool      `json:"active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string                 `json:"id"`
+	UserID      string                 `json:"user_id"`
+	URL         string                 `json:"url"`
+	EventTypes  []string               `json:"event_types"`           // Support for multiple event types
+	Categories  []string               `json:"categories,omitempty"`  // Support for category filters
+	CustomFilter map[string]interface{} `json:"custom_filter,omitempty"` // Advanced JSON filters
+	Secret      string                 `json:"secret"`
+	Active      bool                   `json:"active"`
+	FailureCount int                    `json:"failure_count"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
+}
+
+// WebhookEventPayload is the payload sent to webhook endpoints.
+type WebhookEventPayload struct {
+	ID         string                 `json:"id"`
+	Timestamp  time.Time              `json:"timestamp"`
+	EventType  string                 `json:"event_type"`
+	Category   string                 `json:"category"`
+	Data       map[string]interface{} `json:"data"`
+	Attempts   int                    `json:"attempts"`
+	Signatures map[string]string      `json:"signatures"`
+}
+
+// WebhookDelivery tracks a webhook delivery attempt.
+type WebhookDelivery struct {
+	ID             string     `json:"id"`
+	WebhookID      string     `json:"webhook_id"`
+	EventID        string     `json:"event_id"`
+	Status         string     `json:"status"` // "pending", "success", "failed", "retrying"
+	StatusCode     int        `json:"status_code,omitempty"`
+	ResponseBody   string     `json:"response_body,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	Attempts       int        `json:"attempts"`
+	MaxRetries     int        `json:"max_retries"`
+	NextRetryAt    *time.Time `json:"next_retry_at,omitempty"`
+	LastAttemptAt  time.Time  `json:"last_attempt_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// DLQWebhookEvent represents a webhook event that failed and was moved to DLQ.
+type DLQWebhookEvent struct {
+	ID          string                 `json:"id"`
+	WebhookID   string                 `json:"webhook_id"`
+	EventID     string                 `json:"event_id"`
+	EventData   map[string]interface{} `json:"event_data"`
+	ErrorMsg    string                 `json:"error_msg"`
+	RetryCount  int                    `json:"retry_count"`
+	LastErrorAt time.Time              `json:"last_error_at"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   time.Time              `json:"updated_at"`
 }
 
 // HealthStatus represents the health check status.
