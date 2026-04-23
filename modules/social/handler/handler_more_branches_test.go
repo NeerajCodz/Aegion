@@ -78,4 +78,3 @@ func TestSocialHandlerMoreBranches(t *testing.T) {
 		}
 	})
 }
-

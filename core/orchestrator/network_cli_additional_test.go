@@ -259,4 +259,3 @@ func TestNetworkManagerAdditionalExistsDisconnectRemoveBranches(t *testing.T) {
 		}
 	})
 }
-

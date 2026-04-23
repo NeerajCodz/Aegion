@@ -48,9 +48,9 @@ func (f *mfaFakeDB) Begin(ctx context.Context) (pgx.Tx, error) {
 }
 
 type mfaFakeTx struct {
-	execFn    func(context.Context, string, ...any) (pgconn.CommandTag, error)
+	execFn     func(context.Context, string, ...any) (pgconn.CommandTag, error)
 	queryRowFn func(context.Context, string, ...any) pgx.Row
-	commitFn  func(context.Context) error
+	commitFn   func(context.Context) error
 }
 
 func (t *mfaFakeTx) Begin(context.Context) (pgx.Tx, error) { return nil, errors.New("not implemented") }
@@ -59,12 +59,14 @@ func (t *mfaFakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.Copy
 	return 0, errors.New("not implemented")
 }
 func (t *mfaFakeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (t *mfaFakeTx) LargeObjects() pgx.LargeObjects                          { return pgx.LargeObjects{} }
+func (t *mfaFakeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
 func (t *mfaFakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, errors.New("not implemented")
 }
-func (t *mfaFakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) { return &mfaFakeRows{}, nil }
-func (t *mfaFakeTx) Conn() *pgx.Conn                                         { return nil }
+func (t *mfaFakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return &mfaFakeRows{}, nil
+}
+func (t *mfaFakeTx) Conn() *pgx.Conn { return nil }
 func (t *mfaFakeTx) Commit(ctx context.Context) error {
 	if t.commitFn != nil {
 		return t.commitFn(ctx)
@@ -138,7 +140,7 @@ func (r *mfaFakeRows) Close() {}
 func (r *mfaFakeRows) Err() error {
 	return r.err
 }
-func (r *mfaFakeRows) CommandTag() pgconn.CommandTag            { return pgconn.NewCommandTag("SELECT 0") }
+func (r *mfaFakeRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
 func (r *mfaFakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *mfaFakeRows) Next() bool {
 	if r.idx >= len(r.data) {
@@ -270,4 +272,3 @@ func TestPostgresStoreStubCoverageBranches(t *testing.T) {
 		t.Fatalf("ListFactorsByIdentity(success) factors=%#v err=%v", factors, err)
 	}
 }
-

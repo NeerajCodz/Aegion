@@ -17,11 +17,11 @@ import (
 )
 
 type ssoRepoStub struct {
-	listConnectionsFn    func(ctx context.Context, includeDisabled bool) ([]store.Connection, error)
-	getConnectionSlugFn  func(ctx context.Context, slug string) (*store.Connection, error)
+	listConnectionsFn     func(ctx context.Context, includeDisabled bool) ([]store.Connection, error)
+	getConnectionSlugFn   func(ctx context.Context, slug string) (*store.Connection, error)
 	getConnectionDomainFn func(ctx context.Context, domain string) (*store.Connection, error)
-	upsertConnectionFn   func(ctx context.Context, connection store.Connection) (*store.Connection, error)
-	deleteConnectionFn   func(ctx context.Context, slug string) error
+	upsertConnectionFn    func(ctx context.Context, connection store.Connection) (*store.Connection, error)
+	deleteConnectionFn    func(ctx context.Context, slug string) error
 }
 
 func (s *ssoRepoStub) ListConnections(ctx context.Context, includeDisabled bool) ([]store.Connection, error) {
@@ -244,11 +244,11 @@ func TestServiceAdditionalStartAndCompleteErrorBranches(t *testing.T) {
 	t.Run("complete auth attribute mapping fallback and missing subject", func(t *testing.T) {
 		signer := newSAMLTestSigner(t)
 		connection := &store.Connection{
-			Slug:        "acme",
-			Enabled:     true,
-			DisplayName: "Acme",
-			EntityID:    "urn:test:idp",
-			SSOURL:      "https://idp.example.com/sso",
+			Slug:           "acme",
+			Enabled:        true,
+			DisplayName:    "Acme",
+			EntityID:       "urn:test:idp",
+			SSOURL:         "https://idp.example.com/sso",
 			CertificatePEM: signer.certificatePEM,
 			AttributeMapping: store.AttributeMapping{
 				Subject:     "sub_attr",
@@ -595,4 +595,3 @@ func TestServiceAdditionalParseAndValidationHelpers(t *testing.T) {
 		}
 	})
 }
-

@@ -108,4 +108,3 @@ func TestIntrospectionHandlerAdditionalBranches(t *testing.T) {
 		}
 	})
 }
-

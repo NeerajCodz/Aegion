@@ -140,4 +140,3 @@ func TestOrchestratorAdditionalRegistryAndRestartBranches(t *testing.T) {
 		t.Fatalf("RestartModule(start failure) = %v", err)
 	}
 }
-

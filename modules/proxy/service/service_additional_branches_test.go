@@ -134,11 +134,11 @@ func TestProxyServiceAdditionalBranches(t *testing.T) {
 
 	svc = New(&proxyRepoStub{upstreams: []store.Upstream{{Name: "api", URL: "https://api.example.com", Enabled: true}}})
 	normalized, err := svc.normalizeRoute(ctx, store.Route{
-		ID:       "route-1",
-		Path:     "/x/*",
-		Target:   "api",
-		Methods:  []string{"get", "GET"},
-		Rewrite:  &store.Rewrite{StripPrefix: " ", AddPrefix: " "},
+		ID:      "route-1",
+		Path:    "/x/*",
+		Target:  "api",
+		Methods: []string{"get", "GET"},
+		Rewrite: &store.Rewrite{StripPrefix: " ", AddPrefix: " "},
 		RateLimit: &store.RateLimit{
 			RequestsPerSecond: 0,
 			BurstSize:         0,
@@ -167,4 +167,3 @@ func TestProxyServiceAdditionalBranches(t *testing.T) {
 		t.Fatalf("normalizeUpstream(createdAt default) upstream=%#v err=%v", up, err)
 	}
 }
-

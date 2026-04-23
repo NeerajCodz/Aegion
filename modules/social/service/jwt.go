@@ -75,7 +75,7 @@ func (s *Service) verifyAndDecodeIDToken(ctx context.Context, token, clientID, i
 	return parseJWTPayload(token)
 }
 
-func (s *Service) fetchJWKS(ctx context.Context, jwksURI string) ([]jwk, error) {
+func (s *Service) fetchJWKS(ctx context.Context, jwksURI string) (keys []jwk, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
 	if err != nil {
 		return nil, err
@@ -86,13 +86,17 @@ func (s *Service) fetchJWKS(ctx context.Context, jwksURI string) ([]jwk, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("jwks fetch failed with status %d", resp.StatusCode)
 	}
 
 	var doc jwksDocument
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&doc); err != nil {
 		return nil, err
 	}
 	return doc.Keys, nil

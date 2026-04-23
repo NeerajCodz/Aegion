@@ -1,0 +1,466 @@
+ok  	github.com/aegion/aegion/cmd/aegion	10.574s
+ok  	github.com/aegion/aegion/core/authtoken	2.960s
+ok  	github.com/aegion/aegion/core/courier	0.679s
+ok  	github.com/aegion/aegion/core/eventbus	2.482s
+ok  	github.com/aegion/aegion/core/flows	2.181s
+ok  	github.com/aegion/aegion/core/orchestrator	9.103s
+ok  	github.com/aegion/aegion/core/proxy	8.006s
+{"level":"info","module_id":"single-instance","name":"single-service","version":"","endpoints":1,"time":"2026-04-23T14:59:44+05:30","message":"module registered"}
+{"level":"info","module_id":"ticker-module","name":"ticker-module","version":"","endpoints":1,"time":"2026-04-23T14:59:44+05:30","message":"module registered"}
+{"level":"info","interval":10,"timeout":100,"time":"2026-04-23T14:59:44+05:30","message":"health checker started"}
+{"level":"debug","module_count":1,"time":"2026-04-23T14:59:44+05:30","message":"starting health checks"}
+{"level":"info","module_id":"ticker-module","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:44+05:30","message":"module status changed"}
+{"level":"debug","healthy":1,"unhealthy":0,"time":"2026-04-23T14:59:44+05:30","message":"health checks completed"}
+{"level":"info","time":"2026-04-23T14:59:44+05:30","message":"health checker stopped"}
+{"level":"info","module_id":"ephemeral-module","name":"ephemeral-module","version":"","endpoints":1,"time":"2026-04-23T14:59:44+05:30","message":"module registered"}
+{"level":"info","module_id":"unknown-health","name":"unknown-health","version":"","endpoints":1,"time":"2026-04-23T14:59:44+05:30","message":"module registered"}
+{"level":"debug","module_count":2,"time":"2026-04-23T14:59:44+05:30","message":"starting health checks"}
+{"level":"info","module_id":"unknown-health","old_status":"starting","new_status":"unknown","time":"2026-04-23T14:59:44+05:30","message":"module status changed"}
+{"level":"info","module_id":"ephemeral-module","name":"ephemeral-module","time":"2026-04-23T14:59:44+05:30","message":"module deregistered"}
+{"level":"warn","error":"module not found","module_id":"ephemeral-module","time":"2026-04-23T14:59:44+05:30","message":"failed to update module status"}
+{"level":"debug","healthy":1,"unhealthy":1,"time":"2026-04-23T14:59:44+05:30","message":"health checks completed"}
+{"level":"warn","module_id":"bad-url-module","name":"bad-url-module","error":"parse \"://invalid-url\": missing protocol scheme","latency":0,"time":"2026-04-23T14:59:45+05:30","message":"module became unhealthy"}
+{"level":"info","module_id":"recovering-module","name":"recovering-module","latency":7.0752,"time":"2026-04-23T14:59:45+05:30","message":"module recovered"}
+{"level":"info","module_id":"checknow-disappears","name":"checknow-disappears","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"checknow-disappears","name":"checknow-disappears","time":"2026-04-23T14:59:45+05:30","message":"module deregistered"}
+--- FAIL: TestDiscoveryAndHealthChecker_AdditionalCoverageBranches (0.21s)
+    --- FAIL: TestDiscoveryAndHealthChecker_AdditionalCoverageBranches/run_loop_executes_ticker_branch (0.07s)
+        coverage_additional_test.go:61: expected at least 2 checks (initial + ticker), got 1
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":3,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-0","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-0","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-0","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-1","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-2","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-2","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-0","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-0","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-1","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-2","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-2","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"service-0","name":"Service 0","version":"","endpoints":2,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"service-0","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"service-1","name":"Service 1","version":"","endpoints":2,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"service-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"service-0","name":"Service 0","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"service-0","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"1.0.0","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-1","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-2","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-2","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-1","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":3,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"service-0","name":"Service 0","version":"","endpoints":4,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"service-0","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"service-1","name":"Service 1","version":"","endpoints":4,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"service-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-0","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-0","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-1","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":3,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":3,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":2,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":2,"time":"2026-04-23T14:59:45+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:45+05:30","message":"module status changed"}
+{"level":"info","interval":1000,"timeout":1000,"time":"2026-04-23T14:59:45+05:30","message":"health checker started"}
+{"level":"info","time":"2026-04-23T14:59:45+05:30","message":"health checker stopped"}
+{"level":"info","interval":1000,"timeout":1000,"time":"2026-04-23T14:59:45+05:30","message":"health checker started"}
+{"level":"info","time":"2026-04-23T14:59:46+05:30","message":"health checker stopped"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"health check returned non-2xx status","latency":5.868,"time":"2026-04-23T14:59:46+05:30","message":"module became unhealthy"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"Get \"http://127.0.0.1:17597\": context deadline exceeded","latency":105.6444,"time":"2026-04-23T14:59:46+05:30","message":"module became unhealthy"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"Get \"http://invalid.local/health\": context deadline exceeded","latency":1001.8221,"time":"2026-04-23T14:59:47+05:30","message":"module became unhealthy"}
+{"level":"info","module_id":"test-module","name":"Test Module","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"info","module_id":"test-module","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"info","interval":30000,"time":"2026-04-23T14:59:47+05:30","message":"health check interval updated"}
+{"level":"info","timeout":10000,"time":"2026-04-23T14:59:47+05:30","message":"health check timeout updated"}
+{"level":"info","module_id":"module-\u0000","name":"Module \u0000","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001","name":"Module \u0001","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002","name":"Module \u0002","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"debug","module_count":3,"time":"2026-04-23T14:59:47+05:30","message":"starting health checks"}
+{"level":"info","module_id":"module-\u0001","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0000","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0002","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"debug","healthy":3,"unhealthy":0,"time":"2026-04-23T14:59:47+05:30","message":"health checks completed"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"health check returned non-2xx status","latency":5.8088,"time":"2026-04-23T14:59:47+05:30","message":"module became unhealthy"}
+{"level":"info","module_id":"module-0","name":"Module 0","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"info","module_id":"module-1","name":"Module 1","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"info","module_id":"module-2","name":"Module 2","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"info","module_id":"module-3","name":"Module 3","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"info","module_id":"module-4","name":"Module 4","version":"","endpoints":1,"time":"2026-04-23T14:59:47+05:30","message":"module registered"}
+{"level":"debug","module_count":5,"time":"2026-04-23T14:59:47+05:30","message":"starting health checks"}
+{"level":"info","module_id":"module-0","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-4","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-2","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-3","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:47+05:30","message":"module status changed"}
+{"level":"debug","healthy":5,"unhealthy":0,"time":"2026-04-23T14:59:47+05:30","message":"health checks completed"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"Get \"http://127.0.0.1:17625\": context deadline exceeded","latency":132.2556,"time":"2026-04-23T14:59:47+05:30","message":"module became unhealthy"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"health check returned non-2xx status","latency":15.0794,"time":"2026-04-23T14:59:47+05:30","message":"module became unhealthy"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"health check returned non-2xx status","latency":10.2976,"time":"2026-04-23T14:59:47+05:30","message":"module became unhealthy"}
+{"level":"warn","module_id":"test-module","name":"Test Module","error":"health check returned non-2xx status","latency":0.7225,"time":"2026-04-23T14:59:47+05:30","message":"module became unhealthy"}
+{"level":"info","module_id":"test-module","name":"Test Module","version":"","endpoints":1,"time":"2026-04-23T14:59:48+05:30","message":"module registered"}
+{"level":"info","module_id":"test-module","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:48+05:30","message":"module status changed"}
+{"level":"info","interval":30000,"timeout":5000,"time":"2026-04-23T14:59:48+05:30","message":"health checker started"}
+{"level":"info","time":"2026-04-23T14:59:48+05:30","message":"service registry started"}
+{"level":"info","time":"2026-04-23T14:59:53+05:30","message":"health checker stopped"}
+{"level":"info","time":"2026-04-23T14:59:53+05:30","message":"service registry stopped"}
+{"level":"info","interval":30000,"timeout":5000,"time":"2026-04-23T14:59:53+05:30","message":"health checker started"}
+{"level":"info","time":"2026-04-23T14:59:53+05:30","message":"service registry started"}
+{"level":"info","time":"2026-04-23T14:59:53+05:30","message":"service registry started"}
+{"level":"info","time":"2026-04-23T14:59:58+05:30","message":"health checker stopped"}
+{"level":"info","time":"2026-04-23T14:59:58+05:30","message":"service registry stopped"}
+{"level":"info","time":"2026-04-23T14:59:58+05:30","message":"service registry stopped"}
+{"level":"info","time":"2026-04-23T14:59:58+05:30","message":"service registry stopped"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","time":"2026-04-23T14:59:58+05:30","message":"service registry stopped"}
+{"level":"info","module_id":"module-\u0004-\t","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0005","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0006","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0007","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\b","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\t","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0005","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0006","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0007","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\b","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\t","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0005","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0005","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0006","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0007","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\b","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\t","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0006","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\u0007","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\b","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0003-\t","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0005","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0007","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\u0006","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0004-\b","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-0","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-1","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-2","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-3","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-4","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-5","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-6","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-7","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-8","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-9","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0000","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0000-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0003","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0000-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0005","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0006","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0006","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0000-\u0007","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\b","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\t","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\t","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0001-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0002","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0001-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0005","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0005","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0001-\u0006","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0007","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\b","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\b","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0001-\t","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-0","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-1","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-2","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-3","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-4","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-5","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-6","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-7","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-8","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-9","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-9","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-0","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-2","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-3","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-4","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-5","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-6","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-7","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-8","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0000-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0000","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0000-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0002","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0000-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0000-\u0004","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0001-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0001","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0001-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0001-\u0003","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0001-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0000","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0000","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0002-\u0001","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0002","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0002","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-\u0002-\u0003","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0004","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-\u0002-\u0004","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"1.0.0","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":2,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","name":"API","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-2","name":"API","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-2","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"db-1","name":"Database","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"db-1","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"web-1","name":"Web","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"1.0.0","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","time":"2026-04-23T14:59:58+05:30","message":"module deregistered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"service-v0","name":"Service","version":"1.0.0","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"service-v1","name":"Service","version":"2.0.0","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"service-v2","name":"Service","version":"1.5.3","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","old_status":"healthy","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"single-endpoint","name":"Single Endpoint","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"multi-endpoint","name":"Multi Endpoint","version":"","endpoints":3,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"api-service","name":"API Service","time":"2026-04-23T14:59:58+05:30","message":"module deregistered"}
+{"level":"info","module_id":"module-00","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-00","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-01","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-02","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-03","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-03","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-04","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-05","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-06","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-06","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-07","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-08","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-09","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-09","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-10","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-11","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-12","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-12","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module-13","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-14","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-0","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-1","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-2","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-3","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module-4","name":"Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"test-module","name":"Test Module","version":"1.0.0","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"test-module","name":"Test Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"test-module","name":"Test Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"test-module","name":"Test Module","time":"2026-04-23T14:59:58+05:30","message":"module deregistered"}
+{"level":"info","module_id":"test-module","name":"Test Module","version":"1.0.0","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module1","name":"Module 1","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module2","name":"Module 2","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module3","name":"Different Name","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module2","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"test-module","name":"Test Module","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"test-module","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"test-module","old_status":"healthy","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module0","name":"Module 0","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module1","name":"Module 1","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module2","name":"Module 2","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module1","name":"module1","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module2","name":"module2","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module3","name":"module3","version":"","endpoints":1,"time":"2026-04-23T14:59:58+05:30","message":"module registered"}
+{"level":"info","module_id":"module1","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module2","old_status":"starting","new_status":"healthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","module_id":"module3","old_status":"starting","new_status":"unhealthy","time":"2026-04-23T14:59:58+05:30","message":"module status changed"}
+{"level":"info","time":"2026-04-23T14:59:58+05:30","message":"service registry stopped"}
+FAIL
+FAIL	github.com/aegion/aegion/core/registry	19.024s
+ok  	github.com/aegion/aegion/core/router	10.049s
+ok  	github.com/aegion/aegion/core/session	2.322s
+ok  	github.com/aegion/aegion/core/workers	69.273s
+ok  	github.com/aegion/aegion/internal/platform/bcryptcompat	2.212s
+ok  	github.com/aegion/aegion/internal/platform/config	4.117s
+ok  	github.com/aegion/aegion/internal/platform/crypto	2.443s
+ok  	github.com/aegion/aegion/internal/platform/database	6.677s
+ok  	github.com/aegion/aegion/internal/platform/jwt	1.623s
+ok  	github.com/aegion/aegion/internal/platform/logger	0.871s
+ok  	github.com/aegion/aegion/internal/platform/moduleserver	3.150s
+ok  	github.com/aegion/aegion/internal/platform/observability	0.909s
+ok  	github.com/aegion/aegion/internal/platform/secrettoken	1.774s
+ok  	github.com/aegion/aegion/internal/platform/trustedproxy	3.815s
+ok  	github.com/aegion/aegion/internal/proto/core	0.809s
+ok  	github.com/aegion/aegion/internal/proto/mfa/v1	0.815s
+ok  	github.com/aegion/aegion/internal/proto/oauth2/v1	0.798s
+ok  	github.com/aegion/aegion/internal/proto/policy/v1	0.771s
+ok  	github.com/aegion/aegion/modules/admin	5.894s
+ok  	github.com/aegion/aegion/modules/admin/audit	4.495s
+ok  	github.com/aegion/aegion/modules/admin/capability	4.542s
+ok  	github.com/aegion/aegion/modules/admin/cmd/admin	0.735s
+ok  	github.com/aegion/aegion/modules/admin/handler	2.704s
+ok  	github.com/aegion/aegion/modules/admin/scim	11.665s
+ok  	github.com/aegion/aegion/modules/admin/security	4.643s
+ok  	github.com/aegion/aegion/modules/admin/service	11.609s
+?   	github.com/aegion/aegion/modules/admin/spa/node_modules/flatted/golang/pkg/flatted	[no test files]
+ok  	github.com/aegion/aegion/modules/admin/store	12.130s
+ok  	github.com/aegion/aegion/modules/cli/cmd/server	5.689s
+ok  	github.com/aegion/aegion/modules/cli/grpc	3.351s
+ok  	github.com/aegion/aegion/modules/cli/handler	2.363s
+ok  	github.com/aegion/aegion/modules/cli/service	4.132s
+ok  	github.com/aegion/aegion/modules/cli/store	8.379s
+ok  	github.com/aegion/aegion/modules/introspection/cmd/server	8.757s
+ok  	github.com/aegion/aegion/modules/introspection/grpc	3.431s
+ok  	github.com/aegion/aegion/modules/introspection/handler	2.413s
+ok  	github.com/aegion/aegion/modules/introspection/service	2.181s
+ok  	github.com/aegion/aegion/modules/introspection/store	5.487s
+ok  	github.com/aegion/aegion/modules/magic_link/handler	10.107s
+ok  	github.com/aegion/aegion/modules/magic_link/service	9.462s
+ok  	github.com/aegion/aegion/modules/magic_link/store	12.241s
+ok  	github.com/aegion/aegion/modules/mfa/cmd/server	2.933s
+ok  	github.com/aegion/aegion/modules/mfa/grpc	1.090s
+ok  	github.com/aegion/aegion/modules/mfa/handler	8.819s
+ok  	github.com/aegion/aegion/modules/mfa/service	15.803s
+ok  	github.com/aegion/aegion/modules/mfa/store	8.165s
+ok  	github.com/aegion/aegion/modules/oauth2/cmd/server	8.819s
+ok  	github.com/aegion/aegion/modules/oauth2/grpc	8.849s
+--- FAIL: TestOAuth2Handler_AdditionalErrorBranches (0.00s)
+    --- FAIL: TestOAuth2Handler_AdditionalErrorBranches/grant_handlers_error_responses (0.00s)
+        handler_test.go:812: 
+            	Error Trace:	E:/Qypher/Projects/aegion/modules/oauth2/handler/handler_test.go:812
+            	Error:      	Not equal: 
+            	            	expected: 401
+            	            	actual  : 400
+            	Test:       	TestOAuth2Handler_AdditionalErrorBranches/grant_handlers_error_responses
+        handler_test.go:822: 
+            	Error Trace:	E:/Qypher/Projects/aegion/modules/oauth2/handler/handler_test.go:822
+            	Error:      	Not equal: 
+            	            	expected: 401
+            	            	actual  : 400
+            	Test:       	TestOAuth2Handler_AdditionalErrorBranches/grant_handlers_error_responses
+FAIL
+FAIL	github.com/aegion/aegion/modules/oauth2/handler	3.242s
+ok  	github.com/aegion/aegion/modules/oauth2/service	4.046s
+ok  	github.com/aegion/aegion/modules/oauth2/service/authorization	2.178s
+ok  	github.com/aegion/aegion/modules/oauth2/service/device	2.110s
+--- FAIL: TestClientCredentialsService_IssueClientCredentials (1.34s)
+    --- FAIL: TestClientCredentialsService_IssueClientCredentials/public_clients_cannot_use_client_credentials (0.00s)
+        grants_test.go:156: 
+            	Error Trace:	E:/Qypher/Projects/aegion/modules/oauth2/service/grants/grants_test.go:156
+            	Error:      	Expected error with "invalid_client" in chain but got nil.
+            	Test:       	TestClientCredentialsService_IssueClientCredentials/public_clients_cannot_use_client_credentials
+--- FAIL: TestJWTBearerService_IssueJWTBearer (1.08s)
+    --- FAIL: TestJWTBearerService_IssueJWTBearer/public_clients_cannot_use_jwt_bearer (0.00s)
+        grants_test.go:323: 
+            	Error Trace:	E:/Qypher/Projects/aegion/modules/oauth2/service/grants/grants_test.go:323
+            	Error:      	Target error should be in err chain:
+            	            	expected: "invalid_client"
+            	            	in chain: "invalid_scope"
+            	Test:       	TestJWTBearerService_IssueJWTBearer/public_clients_cannot_use_jwt_bearer
+FAIL
+FAIL	github.com/aegion/aegion/modules/oauth2/service/grants	4.489s
+ok  	github.com/aegion/aegion/modules/oauth2/service/introspection	2.107s
+ok  	github.com/aegion/aegion/modules/oauth2/service/oidc	5.209s
+ok  	github.com/aegion/aegion/modules/oauth2/service/revocation	4.619s
+ok  	github.com/aegion/aegion/modules/oauth2/service/token	5.915s
+ok  	github.com/aegion/aegion/modules/oauth2/service/webhook	6.657s
+ok  	github.com/aegion/aegion/modules/oauth2/store	3.400s
+ok  	github.com/aegion/aegion/modules/passkeys/cmd/server	6.061s
+ok  	github.com/aegion/aegion/modules/passkeys/grpc	3.196s
+ok  	github.com/aegion/aegion/modules/passkeys/handler	4.502s
+ok  	github.com/aegion/aegion/modules/passkeys/service	4.182s
+ok  	github.com/aegion/aegion/modules/passkeys/store	7.985s
+ok  	github.com/aegion/aegion/modules/password/handler	4.130s
+ok  	github.com/aegion/aegion/modules/password/service	9.668s
+ok  	github.com/aegion/aegion/modules/password/store	5.238s
+ok  	github.com/aegion/aegion/modules/policy/grpc	0.801s
+ok  	github.com/aegion/aegion/modules/policy/store	5.033s
+ok  	github.com/aegion/aegion/modules/proxy/cmd/server	7.441s
+ok  	github.com/aegion/aegion/modules/proxy/grpc	3.857s
+ok  	github.com/aegion/aegion/modules/proxy/handler	3.106s
+ok  	github.com/aegion/aegion/modules/proxy/service	2.584s
+ok  	github.com/aegion/aegion/modules/proxy/store	7.035s
+ok  	github.com/aegion/aegion/modules/social/cmd/server	4.661s
+ok  	github.com/aegion/aegion/modules/social/grpc	2.241s
+ok  	github.com/aegion/aegion/modules/social/handler	1.988s
+ok  	github.com/aegion/aegion/modules/social/providers/apple	1.962s
+ok  	github.com/aegion/aegion/modules/social/providers/catalog	1.935s
+ok  	github.com/aegion/aegion/modules/social/providers/github	1.827s
+ok  	github.com/aegion/aegion/modules/social/providers/gitlab	1.826s
+ok  	github.com/aegion/aegion/modules/social/providers/google	1.879s
+ok  	github.com/aegion/aegion/modules/social/providers/microsoft	1.849s
+ok  	github.com/aegion/aegion/modules/social/providers/roblox	1.891s
+ok  	github.com/aegion/aegion/modules/social/service	2.915s
+ok  	github.com/aegion/aegion/modules/social/store	2.834s
+ok  	github.com/aegion/aegion/modules/sso/cmd/server	3.294s
+ok  	github.com/aegion/aegion/modules/sso/grpc	1.369s
+ok  	github.com/aegion/aegion/modules/sso/handler	1.060s
+ok  	github.com/aegion/aegion/modules/sso/service	3.101s
+ok  	github.com/aegion/aegion/modules/sso/store	2.803s
+FAIL
