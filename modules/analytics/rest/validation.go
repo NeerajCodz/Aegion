@@ -181,6 +181,78 @@ func (v *Validator) ValidateExportRequest(req ExportRequest) error {
 	return nil
 }
 
+// ValidateEmail validates email format
+func (v *Validator) ValidateEmail(email string) error {
+	if email == "" {
+		return fmt.Errorf("email is required")
+	}
+
+	if len(email) > 255 {
+		return fmt.Errorf("email exceeds maximum of 255 characters")
+	}
+
+	// Basic email validation (more strict validation in production)
+	emailRe := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	if !emailRe.MatchString(email) {
+		return fmt.Errorf("invalid email format")
+	}
+
+	return nil
+}
+
+// ValidateURL validates URL format and scheme
+func (v *Validator) ValidateURL(urlStr string, requireHTTPS bool) error {
+	if urlStr == "" {
+		return fmt.Errorf("URL is required")
+	}
+
+	if len(urlStr) > 2048 {
+		return fmt.Errorf("URL exceeds maximum of 2048 characters")
+	}
+
+	// Check for dangerous protocols
+	if strings.HasPrefix(urlStr, "javascript:") || strings.HasPrefix(urlStr, "data:") {
+		return fmt.Errorf("invalid URL scheme")
+	}
+
+	if requireHTTPS && !strings.HasPrefix(urlStr, "https://") {
+		return fmt.Errorf("URL must use HTTPS scheme")
+	}
+
+	return nil
+}
+
+// ValidateInputLength validates that input doesn't exceed maximum length
+func (v *Validator) ValidateInputLength(input string, maxLength int) error {
+	if len(input) > maxLength {
+		return fmt.Errorf("input exceeds maximum length of %d characters", maxLength)
+	}
+	return nil
+}
+
+// ValidateQueryComplexity validates query complexity limits
+func (v *Validator) ValidateQueryComplexity(req QueryRequest, maxFields int) error {
+	fieldCount := len(req.Fields)
+	if fieldCount > maxFields {
+		return fmt.Errorf("query exceeds maximum of %d fields", maxFields)
+	}
+
+	filterCount := len(req.Filters)
+	if filterCount > 100 {
+		return fmt.Errorf("query exceeds maximum of 100 filters")
+	}
+
+	if len(req.Aggregate) > 50 {
+		return fmt.Errorf("query exceeds maximum of 50 aggregations")
+	}
+
+	if len(req.Sort) > 10 {
+		return fmt.Errorf("query exceeds maximum of 10 sort fields")
+	}
+
+	return nil
+}
+
 // Helper validation functions
 
 func (v *Validator) validateFilters(filters map[string]interface{}) error {

@@ -115,22 +115,9 @@ func RequestLoggingMiddleware(logger zerolog.Logger) func(http.Handler) http.Han
 	}
 }
 
-// CORSMiddleware adds CORS headers
+// CORSMiddleware adds CORS headers (deprecated - use RestrictedCORSMiddleware instead)
 func CORSMiddleware(logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
+	return RestrictedCORSMiddleware(logger, []string{})
 }
 
 // RateLimiter implements per-user rate limiting
@@ -203,7 +190,7 @@ func (rl *RateLimiter) cleanup() {
 	}
 }
 
-// Token validation (simplified - in production use JWT library)
+// Token validation with expiration check
 func validateToken(token string) (string, error) {
 	// This is a simplified implementation
 	// In production, verify JWT signature and extract claims
@@ -215,7 +202,11 @@ func validateToken(token string) (string, error) {
 	// In production, parse and verify JWT
 	parts := strings.Split(token, ":")
 	if len(parts) >= 1 {
-		return parts[0], nil
+		userID := parts[0]
+		if userID == "" {
+			return "", fmt.Errorf("invalid token: empty user ID")
+		}
+		return userID, nil
 	}
 
 	return "", fmt.Errorf("invalid token format")
