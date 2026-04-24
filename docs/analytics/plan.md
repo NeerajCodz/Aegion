@@ -55,6 +55,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] REST webhook handlers are wired to the webhook manager when the manager dependency is configured
 - [x] GraphQL analytics package exists
 - [x] GraphQL auth middleware now rejects protected unauthenticated requests and populates real user context from bearer/session tokens
+- [x] GraphQL resolvers now enforce analytics RBAC permissions for events, dashboards, queries, reports, webhooks, and ad-hoc query execution
 - [x] gRPC analytics package exists with generated/internal proto
 - [x] gRPC saved-query execution resolves and executes stored read-only SQL
 - [x] Dashboard query exports now resolve real stored/common queries with time-range and filter composition
@@ -71,7 +72,6 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 ## Partial or incomplete on `beta`
 
 ### Backend gaps confirmed in code
-- [ ] GraphQL RBAC is fully enforced for analytics operations
 - [ ] Iceberg storage external catalog integration is production-ready across deployed catalog backends
 
 ### Config and contract alignment
@@ -129,7 +129,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 ### Tranche C - Remaining backend gaps
 - [x] Finish REST webhook CRUD/test/history/replay wiring
 - [x] Replace GraphQL placeholder auth/token parsing with real Aegion auth integration
-- [ ] Enforce analytics RBAC consistently in GraphQL
+- [x] Enforce analytics RBAC consistently in GraphQL
 - [x] Complete gRPC saved-query execution
 - [x] Replace Iceberg stub behavior with a real local implementation and focused tests
 - [ ] Deepen Iceberg external catalog integration and production verification
@@ -167,7 +167,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 ### Backend
 - [x] Webhook REST endpoints stop returning `NOT_IMPLEMENTED`
 - [x] GraphQL rejects bad auth and sets a real identity context
-- [ ] GraphQL authorization is no longer placeholder-only
+- [x] GraphQL authorization is no longer placeholder-only
 - [x] gRPC query execution returns real results instead of `Unimplemented`
 - [x] Iceberg support is functional locally with meaningful tests
 - [ ] Iceberg support is fully production-ready for external catalog deployments
