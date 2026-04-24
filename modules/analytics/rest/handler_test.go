@@ -618,6 +618,53 @@ func TestHandlerDeleteDashboard_DeletesFromAnalyticsDashboards(t *testing.T) {
 	assert.Equal(t, 2, call)
 }
 
+func TestHandlerSaveQuery_PersistsAnalyticsQueriesRow(t *testing.T) {
+	db := &MockDatabase{
+		queryFn: func(ctx context.Context, sql string) ([]map[string]interface{}, error) {
+			assert.Contains(t, sql, "INSERT INTO analytics_queries")
+			assert.Contains(t, sql, "SELECT count(*) FROM analytics_events")
+			return []map[string]interface{}{
+				{"id": "query-1", "name": "Total Events", "owner_id": "user1"},
+			}, nil
+		},
+	}
+	h := newTestHandler(db)
+
+	req := httptest.NewRequest(http.MethodPost, "/queries", strings.NewReader(`{"name":"Total Events","description":"All events","sql":"SELECT count(*) FROM analytics_events"}`))
+	req = req.WithContext(withUserID(req.Context(), "user1"))
+	w := httptest.NewRecorder()
+
+	h.SaveQuery(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+func TestHandlerDeleteQuery_DeletesFromAnalyticsQueries(t *testing.T) {
+	call := 0
+	db := &MockDatabase{
+		queryFn: func(ctx context.Context, sql string) ([]map[string]interface{}, error) {
+			call++
+			if call == 1 {
+				assert.Contains(t, sql, "SELECT owner_id FROM analytics_queries")
+				return []map[string]interface{}{{"owner_id": "user1"}}, nil
+			}
+			assert.Contains(t, sql, "DELETE FROM analytics_queries")
+			return []map[string]interface{}{{"id": "query-1"}}, nil
+		},
+	}
+	h := newTestHandler(db)
+
+	req := httptest.NewRequest(http.MethodDelete, "/queries/query-1", nil)
+	req.SetPathValue("id", "query-1")
+	req = req.WithContext(withUserID(req.Context(), "user1"))
+	w := httptest.NewRecorder()
+
+	h.DeleteQuery(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, 2, call)
+}
+
 func TestRegisterWebhook_Success(t *testing.T) {
 	manager := &mockWebhookManager{
 		registerFn: func(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error) {

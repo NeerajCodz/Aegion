@@ -217,7 +217,7 @@ func (h *Handler) ListQueries(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 
-	sql := fmt.Sprintf(`SELECT * FROM queries WHERE owner_id = '%s' ORDER BY updated_at DESC LIMIT 100`, sanitizeID(userID))
+	sql := fmt.Sprintf(`SELECT id, name, description, sql, owner_id, created_at, updated_at FROM analytics_queries WHERE owner_id = '%s' ORDER BY updated_at DESC LIMIT 100`, sanitizeID(userID))
 
 	rows, err := h.queries.ExecuteQuery(ctx, sql)
 	if err != nil {
@@ -250,19 +250,28 @@ func (h *Handler) SaveQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := map[string]interface{}{
-		"id":          fmt.Sprintf("query_%d", time.Now().Unix()),
-		"name":        req.Name,
-		"description": req.Description,
-		"sql":         req.SQL,
-		"owner_id":    userID,
-		"created_at":  time.Now(),
-		"updated_at":  time.Now(),
+	insertSQL := fmt.Sprintf(`
+		INSERT INTO analytics_queries (name, description, sql, owner_id, created_at, updated_at)
+		VALUES ('%s', '%s', '%s', '%s', NOW(), NOW())
+		RETURNING id, name, description, sql, owner_id, created_at, updated_at
+	`,
+		sanitizeSQLLiteral(req.Name),
+		sanitizeSQLLiteral(req.Description),
+		sanitizeSQLLiteral(req.SQL),
+		sanitizeID(userID),
+	)
+
+	rows, err := h.queries.ExecuteQuery(r.Context(), insertSQL)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "QUERY_FAILED", "failed to save query", err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		h.writeError(w, http.StatusInternalServerError, "QUERY_FAILED", "query save returned no rows", "")
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(query)
+	h.writeResponse(w, http.StatusCreated, rows[0], nil, 0, false)
 }
 
 // ExecuteQuery handles GET /queries/:id/execute
@@ -284,7 +293,7 @@ func (h *Handler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Fetch saved query
-	sql := fmt.Sprintf(`SELECT sql FROM queries WHERE id = '%s' AND owner_id = '%s'`, sanitizeID(id), sanitizeID(userID))
+	sql := fmt.Sprintf(`SELECT sql FROM analytics_queries WHERE id = '%s' AND owner_id = '%s'`, sanitizeID(id), sanitizeID(userID))
 	rows, err := h.queries.ExecuteQuery(ctx, sql)
 	if err != nil || len(rows) == 0 {
 		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "query not found", "")
@@ -309,9 +318,41 @@ func (h *Handler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 
 // DeleteQuery handles DELETE /queries/:id
 func (h *Handler) DeleteQuery(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
 	id := r.PathValue("id")
 	if id == "" {
 		h.writeError(w, http.StatusBadRequest, "MISSING_PARAM", "missing id parameter", "")
+		return
+	}
+
+	userID, ok := userIDFromContext(r.Context())
+	if !ok || userID == "" {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
+
+	checkSQL := fmt.Sprintf(`SELECT owner_id FROM analytics_queries WHERE id = '%s'`, sanitizeID(id))
+	rows, err := h.queries.ExecuteQuery(ctx, checkSQL)
+	if err != nil || len(rows) == 0 {
+		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "query not found", "")
+		return
+	}
+
+	if fmt.Sprintf("%v", rows[0]["owner_id"]) != userID {
+		h.writeError(w, http.StatusForbidden, "FORBIDDEN", "cannot delete query owned by another user", "")
+		return
+	}
+
+	deleteSQL := fmt.Sprintf(`DELETE FROM analytics_queries WHERE id = '%s' RETURNING id`, sanitizeID(id))
+	rows, err = h.queries.ExecuteQuery(ctx, deleteSQL)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "QUERY_FAILED", "failed to delete query", err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "query not found", "")
 		return
 	}
 
