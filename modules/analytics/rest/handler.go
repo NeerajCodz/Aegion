@@ -302,7 +302,8 @@ func (h *Handler) ListDashboards(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sql := fmt.Sprintf(`
-		SELECT * FROM dashboards 
+		SELECT id, name, description, config, owner_id, public, pinned, created_at, updated_at
+		FROM analytics_dashboards 
 		WHERE public = true OR owner_id = '%s'
 		ORDER BY updated_at DESC
 		LIMIT 100
@@ -334,7 +335,8 @@ func (h *Handler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sql := fmt.Sprintf(`
-		SELECT * FROM dashboards 
+		SELECT id, name, description, config, owner_id, public, pinned, created_at, updated_at
+		FROM analytics_dashboards 
 		WHERE id = '%s' AND (public = true OR owner_id = '%s')
 		LIMIT 1
 	`, sanitizeID(id), sanitizeID(userID))
@@ -372,21 +374,35 @@ func (h *Handler) CreateDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In real implementation, this would INSERT and return the created dashboard
-	// For now, just return a success response
-	dashboard := map[string]interface{}{
-		"id":         fmt.Sprintf("dashboard_%d", time.Now().Unix()),
-		"name":       req.Name,
-		"config":     req.Config,
-		"owner_id":   userID,
-		"public":     req.Public,
-		"created_at": time.Now(),
-		"updated_at": time.Now(),
+	configJSON, err := marshalDashboardConfig(req.Config)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_DASHBOARD", "invalid dashboard config", err.Error())
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(dashboard)
+	sql := fmt.Sprintf(`
+		INSERT INTO analytics_dashboards (name, description, config, owner_id, public, pinned, created_at, updated_at)
+		VALUES ('%s', '%s', '%s', '%s', %t, false, NOW(), NOW())
+		RETURNING id, name, description, config, owner_id, public, pinned, created_at, updated_at
+	`,
+		sanitizeSQLLiteral(req.Name),
+		sanitizeSQLLiteral(req.Description),
+		sanitizeSQLLiteral(configJSON),
+		sanitizeID(userID),
+		req.Public,
+	)
+
+	rows, err := h.queries.ExecuteQuery(r.Context(), sql)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "QUERY_FAILED", "failed to create dashboard", err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		h.writeError(w, http.StatusInternalServerError, "QUERY_FAILED", "dashboard creation returned no rows", "")
+		return
+	}
+
+	h.writeResponse(w, http.StatusCreated, rows[0], nil, 0, false)
 }
 
 // Stats handles GET /stats
@@ -490,4 +506,20 @@ func sanitizeID(id string) string {
 func sanitizeInput(input string) string {
 	// Basic sanitization
 	return strings.ReplaceAll(input, "'", "''")
+}
+
+func sanitizeSQLLiteral(input string) string {
+	return strings.ReplaceAll(input, "'", "''")
+}
+
+func marshalDashboardConfig(config map[string]interface{}) (string, error) {
+	if config == nil {
+		config = map[string]interface{}{}
+	}
+
+	body, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }

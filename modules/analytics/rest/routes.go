@@ -116,7 +116,7 @@ func (h *Handler) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify ownership
-	checkSQL := fmt.Sprintf(`SELECT owner_id FROM dashboards WHERE id = '%s'`, sanitizeID(id))
+	checkSQL := fmt.Sprintf(`SELECT owner_id FROM analytics_dashboards WHERE id = '%s'`, sanitizeID(id))
 	rows, err := h.queries.ExecuteQuery(ctx, checkSQL)
 	if err != nil || len(rows) == 0 {
 		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "dashboard not found", "")
@@ -128,18 +128,36 @@ func (h *Handler) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update dashboard (in production, use prepared statements)
-	dashboard := map[string]interface{}{
-		"id":         id,
-		"name":       req.Name,
-		"config":     req.Config,
-		"public":     req.Public,
-		"updated_at": time.Now(),
+	configJSON, err := marshalDashboardConfig(req.Config)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_DASHBOARD", "invalid dashboard config", err.Error())
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(dashboard)
+	updateSQL := fmt.Sprintf(`
+		UPDATE analytics_dashboards
+		SET name = '%s', description = '%s', config = '%s', public = %t, updated_at = NOW()
+		WHERE id = '%s'
+		RETURNING id, name, description, config, owner_id, public, pinned, created_at, updated_at
+	`,
+		sanitizeSQLLiteral(req.Name),
+		sanitizeSQLLiteral(req.Description),
+		sanitizeSQLLiteral(configJSON),
+		req.Public,
+		sanitizeID(id),
+	)
+
+	rows, err = h.queries.ExecuteQuery(ctx, updateSQL)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "QUERY_FAILED", "failed to update dashboard", err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "dashboard not found", "")
+		return
+	}
+
+	h.writeResponse(w, http.StatusOK, rows[0], nil, 0, false)
 }
 
 // DeleteDashboard handles DELETE /dashboards/:id
@@ -160,7 +178,7 @@ func (h *Handler) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify ownership
-	checkSQL := fmt.Sprintf(`SELECT owner_id FROM dashboards WHERE id = '%s'`, sanitizeID(id))
+	checkSQL := fmt.Sprintf(`SELECT owner_id FROM analytics_dashboards WHERE id = '%s'`, sanitizeID(id))
 	rows, err := h.queries.ExecuteQuery(ctx, checkSQL)
 	if err != nil || len(rows) == 0 {
 		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "dashboard not found", "")
@@ -169,6 +187,17 @@ func (h *Handler) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
 
 	if fmt.Sprintf("%v", rows[0]["owner_id"]) != userID {
 		h.writeError(w, http.StatusForbidden, "FORBIDDEN", "cannot delete dashboard owned by another user", "")
+		return
+	}
+
+	deleteSQL := fmt.Sprintf(`DELETE FROM analytics_dashboards WHERE id = '%s' RETURNING id`, sanitizeID(id))
+	rows, err = h.queries.ExecuteQuery(ctx, deleteSQL)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "QUERY_FAILED", "failed to delete dashboard", err.Error())
+		return
+	}
+	if len(rows) == 0 {
+		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "dashboard not found", "")
 		return
 	}
 
