@@ -14,7 +14,7 @@ Migrate Aegion's analytics layer to DuckDB while maintaining PostgreSQL for core
 
 This plan now tracks the *actual* `beta` branch state (not just intentions).
 
-- **Last verified head:** `6d84682`
+- **Last verified head:** `7715408`
 - **Verified working slices (tests passing):**
   - `modules/analytics/{dashboards,rest,graphql,grpc,integration,e2e,store,retention,sync,webhooks}`
   - `internal/proto/analytics` exists (gRPC contract alignment for `modules/analytics/grpc`)
@@ -24,6 +24,7 @@ This plan now tracks the *actual* `beta` branch state (not just intentions).
   - Test hygiene / explicit skips: `2ed9522`
   - REST validation + query hardening: `c8a8432`
   - CI module matrix includes analytics: `6d84682`
+  - REST validator micro-perf cleanup: `7715408`
 - **Remaining roadmap focus (not blockers):**
   - Reduce remaining placeholder logic (REST dashboard/query persistence, GraphQL auth)
   - Improve performance and simplify implementations once correctness/CI is stable
