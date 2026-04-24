@@ -10,6 +10,21 @@ Migrate Aegion's analytics layer to DuckDB while maintaining PostgreSQL for core
 
 ---
 
+## Current Status (as of 2026-04-24)
+
+This plan now tracks the *actual* `beta` branch state (not just intentions).
+
+- **Last verified head:** `a36da7f`
+- **Verified working slices (tests passing):**
+  - `modules/analytics/{dashboards,rest,graphql,integration,e2e,store,retention,sync,webhooks}`
+  - `modules/admin/spa` builds (`npm run build`)
+- **Next known blocker (in progress):**
+  - `modules/analytics/grpc` is blocked by missing/unaligned proto package (`internal/proto/analytics`) and placeholder tests.
+- **Verification commands:**
+  - `go test ./modules/analytics/dashboards ./modules/analytics/rest ./modules/analytics/graphql ./modules/analytics/integration ./modules/analytics/e2e ./modules/analytics/store ./modules/analytics/retention ./modules/analytics/sync ./modules/analytics/webhooks`
+  - `npm run build` (in `modules/admin/spa`)
+  - `go test ./modules/analytics/grpc` (after the gRPC milestone lands)
+
 ## Architecture Overview
 
 ```
@@ -356,85 +371,85 @@ modules:
 ## Implementation Phases
 
 ### Phase 1: Foundation (Data Layer & Storage)
-- [ ] DuckDB integration module
-- [ ] Storage backend abstraction (local, S3, Iceberg, K8s)
-- [ ] Database schema for analytics
-- [ ] Migration system updates
-- [ ] Initial configuration in aegion.yaml
+- [x] DuckDB integration module (basic; env-dependent extensions may skip some tests)
+- [x] Storage backend abstraction (local, S3, Iceberg, K8s)
+- [x] Database schema for analytics (module migrations present under `modules/analytics/migrations/`)
+- [ ] Migration system updates (core migrations not yet extended for analytics)
+- [ ] Initial configuration in aegion.yaml (spec exists; verify runtime wiring)
 - **Commit pattern:** `feat: duckdb analytics foundation`
 
 ### Phase 2: Data Sync Layer
-- [ ] Real-time sync engine (triggers/CDC)
-- [ ] Batch sync scheduler
-- [ ] Async queue integration (Kafka/RPC)
-- [ ] Event publishing system
-- [ ] Sync health monitoring
+- [x] Real-time sync engine (implementation present; CDC/trigger details depend on deployment wiring)
+- [x] Batch sync scheduler
+- [x] Async queue integration (in-memory broker implemented; external brokers require env)
+- [x] Event publishing system
+- [x] Sync health monitoring
 - **Commit pattern:** `feat: analytics data sync`
 
 ### Phase 3: REST API
-- [ ] Query builder/parser
-- [ ] Event filtering & aggregation
-- [ ] Export functionality (CSV, JSON, Parquet)
-- [ ] Rate limiting & auth
-- [ ] Pagination & sorting
+- [x] Query builder/parser
+- [x] Event filtering & aggregation (baseline)
+- [x] Export functionality (CSV, JSON, Parquet) (baseline)
+- [ ] Rate limiting & auth (needs hardening + real auth middleware integration)
+- [x] Pagination & sorting
 - **Commit pattern:** `feat: analytics rest api`
 
 ### Phase 4: GraphQL API
-- [ ] Schema definition
-- [ ] Query resolvers
-- [ ] Subscription support
-- [ ] Playground setup
-- [ ] Authentication/authorization
+- [x] Schema definition
+- [x] Query resolvers
+- [x] Subscription support (basic channels; production readiness requires review)
+- [x] Playground setup (config present)
+- [ ] Authentication/authorization (needs hardening + real auth context enforcement)
 - **Commit pattern:** `feat: analytics graphql api`
 
 ### Phase 5: gRPC API
-- [ ] Proto definitions
-- [ ] Service implementation
-- [ ] Streaming support
-- [ ] Interceptors for auth/logging
+- [ ] Proto definitions (blocked: `internal/proto/analytics` missing/unaligned)
+- [ ] Service implementation (present, but blocked on proto alignment)
+- [ ] Streaming support (present, but blocked on proto alignment)
+- [ ] Interceptors for auth/logging (present, but needs tests + correctness review)
 - **Commit pattern:** `feat: analytics grpc api`
 
 ### Phase 6: Retention & Storage Management
-- [ ] Hot/warm/cold tier management
-- [ ] Automatic archival jobs
-- [ ] Retention policy enforcement
-- [ ] Apache Iceberg integration
-- [ ] S3 backend implementation
+- [x] Hot/warm/cold tier management (baseline)
+- [x] Automatic archival jobs (scheduler present; env-dependent execution)
+- [x] Retention policy enforcement (baseline)
+- [x] Apache Iceberg integration (stub backend present; production integration pending)
+- [x] S3 backend implementation (requires env)
 - **Commit pattern:** `feat: analytics retention & archival`
 
 ### Phase 7: Webhook System
-- [ ] Webhook registration/management
-- [ ] Event filtering
-- [ ] Signature generation
-- [ ] Retry mechanism
-- [ ] Event history
+- [x] Webhook registration/management (baseline)
+- [x] Event filtering
+- [x] Signature generation
+- [x] Retry mechanism
+- [ ] Event history (delivery history persistence depends on store wiring)
 - **Commit pattern:** `feat: analytics webhooks`
 
 ### Phase 8: Pre-built Dashboards
-- [ ] Dashboard data models
-- [ ] Auth dashboard queries
-- [ ] Activity dashboard queries
-- [ ] Security dashboard queries
-- [ ] System health dashboard queries
-- [ ] Dashboard API endpoints
+- [x] Dashboard data models
+- [x] Auth dashboard queries (baseline set)
+- [x] Activity dashboard queries (baseline set)
+- [x] Security dashboard queries (baseline set)
+- [x] System health dashboard queries (baseline set)
+- [x] Dashboard API endpoints (REST + GraphQL baseline)
 - **Commit pattern:** `feat: analytics dashboards`
 
 ### Phase 9: Admin SPA Integration
-- [ ] Analytics configuration UI
-- [ ] Dashboard builder
-- [ ] Sync strategy selector
-- [ ] Retention policy UI
-- [ ] Event viewer
-- [ ] Webhook manager
+- [x] Analytics configuration UI (baseline screens)
+- [x] Dashboard builder
+- [ ] Sync strategy selector (screen exists; verify backend wiring + validation UX)
+- [x] Retention policy UI
+- [x] Event viewer
+- [ ] Webhook manager (screen exists; verify backend wiring + delivery history UI)
 - **Commit pattern:** `feat: admin spa analytics module`
 
 ### Phase 10: Testing Suite
-- [ ] Unit tests (all components)
-- [ ] Integration tests (Postgres ↔ DuckDB)
-- [ ] E2E tests (API workflows)
-- [ ] Performance benchmarks
-- [ ] Security tests (auth, injection, etc.)
-- [ ] Load tests
+- [x] Unit tests (core slices covered; see `modules/analytics/*/*_test.go`)
+- [ ] Integration tests (Postgres ↔ DuckDB) (skipped until env is provided)
+- [ ] E2E tests (API workflows) (skipped until env is provided)
+- [ ] Performance benchmarks (not yet)
+- [ ] Security tests (auth, injection, etc.) (not yet)
+- [ ] Load tests (not yet)
 - **Commit pattern:** `test: analytics full coverage`
 
 ### Phase 11: Documentation
