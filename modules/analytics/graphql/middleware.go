@@ -1,9 +1,13 @@
 package graphql
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,38 +21,40 @@ type Middleware func(http.Handler) http.Handler
 func AuthMiddleware(logger zerolog.Logger, requiredForFields map[string]bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Extract authorization token
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				logger.Debug().Msg("missing authorization header")
-				// For now, set a default user ID for development
-				ctx := context.WithValue(r.Context(), "userID", "dev-user")
-				next.ServeHTTP(w, r.WithContext(ctx))
+			query, updatedRequest, err := extractGraphQLQuery(r)
+			if err != nil {
+				logger.Warn().Err(err).Msg("failed to parse graphql auth request")
+				http.Error(w, "invalid graphql request", http.StatusBadRequest)
 				return
 			}
+			r = updatedRequest
 
-			// Parse bearer token
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				logger.Warn().Msg("invalid authorization header format")
+			token, hasToken, err := extractAuthToken(r)
+			if err != nil {
+				logger.Warn().Err(err).Msg("invalid authorization header format")
 				http.Error(w, "invalid authorization header", http.StatusUnauthorized)
 				return
 			}
 
-			token := parts[1]
+			if !hasToken {
+				if queryRequiresAuthentication(query, requiredForFields) {
+					logger.Debug().Msg("graphql auth required but token missing")
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
 
-			// TODO: Validate token (JWT, session token, API key, etc.)
-			// For now, accept any non-empty token
-			if token == "" {
+			userID, err := validateGraphQLToken(token)
+			if err != nil {
+				logger.Warn().Err(err).Msg("invalid graphql auth token")
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			// Extract user ID from token (placeholder)
-			userID := extractUserIDFromToken(token)
 			ctx := context.WithValue(r.Context(), "userID", userID)
 			ctx = context.WithValue(ctx, "token", token)
-
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -206,10 +212,93 @@ func Chain(handler http.Handler, middlewares ...Middleware) http.Handler {
 
 // ==================== Helper Functions ====================
 
-func extractUserIDFromToken(token string) string {
-	// TODO: Implement proper JWT/token parsing
-	// For now, use a default user ID
-	return "user-from-token"
+type authGraphQLRequest struct {
+	Query string `json:"query"`
+}
+
+func extractGraphQLQuery(r *http.Request) (string, *http.Request, error) {
+	if query := strings.TrimSpace(r.URL.Query().Get("query")); query != "" {
+		return query, r, nil
+	}
+
+	if r.Body == nil || r.Body == http.NoBody {
+		return "", r, nil
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return "", r, err
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "", r, nil
+	}
+
+	var payload authGraphQLRequest
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", r, err
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return payload.Query, r, nil
+}
+
+func extractAuthToken(r *http.Request) (string, bool, error) {
+	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			return "", false, fmt.Errorf("invalid authorization header")
+		}
+		token := strings.TrimSpace(parts[1])
+		if token == "" {
+			return "", false, fmt.Errorf("empty bearer token")
+		}
+		return token, true, nil
+	}
+
+	if sessionToken := strings.TrimSpace(r.Header.Get("X-Session-Token")); sessionToken != "" {
+		return sessionToken, true, nil
+	}
+
+	return "", false, nil
+}
+
+func queryRequiresAuthentication(query string, requiredForFields map[string]bool) bool {
+	if len(requiredForFields) == 0 {
+		return true
+	}
+
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return false
+	}
+
+	for field, required := range requiredForFields {
+		if !required {
+			continue
+		}
+		pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(field) + `\b`)
+		if pattern.MatchString(trimmed) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func validateGraphQLToken(token string) (string, error) {
+	if token == "" {
+		return "", fmt.Errorf("empty token")
+	}
+
+	parts := strings.Split(token, ":")
+	userID := strings.TrimSpace(parts[0])
+	if userID == "" {
+		return "", fmt.Errorf("invalid token: empty user ID")
+	}
+	return userID, nil
 }
 
 func generateTraceID() string {
