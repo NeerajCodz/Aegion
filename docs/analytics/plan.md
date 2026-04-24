@@ -57,6 +57,8 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] GraphQL auth middleware now rejects protected unauthenticated requests and populates real user context from bearer/session tokens
 - [x] gRPC analytics package exists with generated/internal proto
 - [x] gRPC saved-query execution resolves and executes stored read-only SQL
+- [x] Dashboard query exports now resolve real stored/common queries with time-range and filter composition
+- [x] Dashboard persistence now round-trips real JSON config, pinned state, and cached query metadata without placeholder helpers
 - [x] Dashboard, event, report, health, and config screens exist in the Admin SPA
 - [x] SPA client methods exist for storage, sync, retention, dashboards, reports, events, and webhooks
 
@@ -71,7 +73,6 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 ### Backend gaps confirmed in code
 - [ ] GraphQL RBAC is fully enforced for analytics operations
 - [ ] Iceberg storage external catalog integration is production-ready across deployed catalog backends
-- [ ] Dashboard/query persistence paths are fully implemented without placeholder logic
 
 ### Config and contract alignment
 - [ ] `configs/aegion.yaml` matches the richer runtime analytics config model in `modules/analytics/config.go`
@@ -132,7 +133,6 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] Complete gRPC saved-query execution
 - [x] Replace Iceberg stub behavior with a real local implementation and focused tests
 - [ ] Deepen Iceberg external catalog integration and production verification
-- [ ] Finish remaining dashboard/query placeholder plumbing
 
 **Focused verification**
 - `go test ./modules/analytics/rest`
@@ -140,6 +140,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - `go test ./modules/analytics/grpc`
 - `go test ./modules/analytics/webhooks`
 - `go test ./modules/analytics/store`
+- `go test ./modules/analytics/dashboards`
 
 ### Tranche D - Frontend and docs completion
 - [ ] Remove or disable SPA controls that call placeholder endpoints

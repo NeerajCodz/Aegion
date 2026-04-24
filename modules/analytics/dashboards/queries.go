@@ -1,7 +1,9 @@
 package dashboards
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -83,13 +85,22 @@ type ExportQuery struct {
 
 // ExportToCSV generates CSV export SQL.
 func ExportToCSV(query *ExportQuery, dashboardQueries map[string]*DashboardQuery) (string, error) {
-	// Placeholder implementation - would need more context for real CSV generation
-	return fmt.Sprintf("SELECT * FROM analytics_events WHERE dashboard_id = '%s'", query.DashboardID), nil
+	baseQuery, err := resolveExportBaseQuery(query, dashboardQueries)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("SELECT * FROM (%s) export_rows", baseQuery), nil
 }
 
 // ExportToJSON generates JSON export SQL.
 func ExportToJSON(query *ExportQuery, dashboardQueries map[string]*DashboardQuery) (string, error) {
-	return fmt.Sprintf("SELECT row_to_json(t) FROM analytics_events t WHERE dashboard_id = '%s'", query.DashboardID), nil
+	baseQuery, err := resolveExportBaseQuery(query, dashboardQueries)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("SELECT COALESCE(json_agg(export_rows), '[]'::json) AS data FROM (%s) export_rows", baseQuery), nil
 }
 
 // TimeRangeQuery represents a query with a time range.
@@ -124,25 +135,31 @@ type AggregateQuery struct {
 func (aq *AggregateQuery) Build() string {
 	selectParts := []string{}
 	for _, dim := range aq.Dimensions {
-		selectParts = append(selectParts, dim)
+		selectParts = append(selectParts, sanitizeIdentifierExpression(dim))
 	}
 	for _, metric := range aq.Metrics {
 		selectParts = append(selectParts, metric)
 	}
 
-	query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectParts, ", "), aq.Table)
+	query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selectParts, ", "), sanitizeIdentifierExpression(aq.Table))
 
 	if len(aq.Filters) > 0 {
 		query += " WHERE "
 		whereParts := []string{}
-		for key, value := range aq.Filters {
-			whereParts = append(whereParts, fmt.Sprintf("%s = '%v'", key, value))
+		keys := sortedKeys(aq.Filters)
+		for _, key := range keys {
+			value := aq.Filters[key]
+			whereParts = append(whereParts, fmt.Sprintf("%s = %s", sanitizeIdentifierExpression(key), formatSQLValue(value)))
 		}
 		query += strings.Join(whereParts, " AND ")
 	}
 
 	if len(aq.Dimensions) > 0 {
-		query += fmt.Sprintf(" GROUP BY %s", strings.Join(aq.Dimensions, ", "))
+		groupBy := make([]string, 0, len(aq.Dimensions))
+		for _, dim := range aq.Dimensions {
+			groupBy = append(groupBy, sanitizeIdentifierExpression(dim))
+		}
+		query += fmt.Sprintf(" GROUP BY %s", strings.Join(groupBy, ", "))
 	}
 
 	if aq.OrderBy != "" {
@@ -326,9 +343,11 @@ type QueryTemplate struct {
 // Render renders the template with parameters.
 func (qt *QueryTemplate) Render() string {
 	result := qt.Template
-	for key, value := range qt.Parameters {
+	keys := sortedKeys(qt.Parameters)
+	for _, key := range keys {
+		value := qt.Parameters[key]
 		placeholder := fmt.Sprintf("{%s}", key)
-		result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("%v", value))
+		result = strings.ReplaceAll(result, placeholder, formatTemplateValue(value))
 	}
 	return result
 }
@@ -364,4 +383,143 @@ var CommonDashboardQueries = map[string]string{
 		GROUP BY DATE_TRUNC('hour', created_at)
 		ORDER BY time_bucket DESC
 	`,
+}
+
+func resolveExportBaseQuery(query *ExportQuery, dashboardQueries map[string]*DashboardQuery) (string, error) {
+	if query == nil {
+		return "", errors.New("export query is required")
+	}
+	if query.DashboardID == "" {
+		return "", errors.New("dashboard_id is required")
+	}
+
+	var baseSQL string
+	if dashboardQueries != nil {
+		if dashboardQuery, ok := dashboardQueries[query.DashboardID]; ok && dashboardQuery != nil {
+			baseSQL = dashboardQuery.SQL
+		}
+	}
+	if baseSQL == "" {
+		if common, ok := CommonDashboardQueries[query.DashboardID]; ok {
+			baseSQL = (&QueryTemplate{
+				Template: common,
+				Parameters: map[string]interface{}{
+					"days":  7,
+					"hours": 24,
+					"limit": 1000,
+				},
+			}).Render()
+		}
+	}
+	if strings.TrimSpace(baseSQL) == "" {
+		return "", fmt.Errorf("dashboard query %q not found", query.DashboardID)
+	}
+
+	sql := strings.TrimSpace(baseSQL)
+	if query.TimeRange != "" {
+		sql = applyTimeRangeFilter(sql, query.TimeRange)
+	}
+	if len(query.Filters) > 0 {
+		sql = applyFilterExpressions(sql, query.Filters)
+	}
+
+	return sql, nil
+}
+
+func applyTimeRangeFilter(sql, timeRange string) string {
+	column, interval := parseTimeRange(timeRange)
+	if interval == "" {
+		return sql
+	}
+
+	return wrapWithWhere(sql, fmt.Sprintf("%s >= NOW() - INTERVAL '%s'", column, escapeSQL(interval)))
+}
+
+func parseTimeRange(timeRange string) (string, string) {
+	trimmed := strings.TrimSpace(strings.ToLower(timeRange))
+	if trimmed == "" {
+		return "", ""
+	}
+
+	switch trimmed {
+	case "1h", "hour", "1 hour":
+		return "created_at", "1 hour"
+	case "24h", "1d", "day", "1 day":
+		return "created_at", "1 day"
+	case "7d", "7 days", "week":
+		return "created_at", "7 days"
+	case "30d", "30 days", "month":
+		return "created_at", "30 days"
+	default:
+		return "created_at", trimmed
+	}
+}
+
+func applyFilterExpressions(sql string, filters map[string]interface{}) string {
+	keys := sortedKeys(filters)
+	if len(keys) == 0 {
+		return sql
+	}
+
+	clauses := make([]string, 0, len(keys))
+	for _, key := range keys {
+		clauses = append(clauses, fmt.Sprintf("%s = %s", sanitizeIdentifierExpression(key), formatSQLValue(filters[key])))
+	}
+
+	return wrapWithWhere(sql, strings.Join(clauses, " AND "))
+}
+
+func wrapWithWhere(sql, clause string) string {
+	base := strings.TrimSpace(sql)
+	lowerBase := strings.ToLower(base)
+	if strings.Contains(lowerBase, " where ") {
+		return fmt.Sprintf("SELECT * FROM (%s) export_source WHERE %s", base, clause)
+	}
+	return fmt.Sprintf("SELECT * FROM (%s) export_source WHERE %s", base, clause)
+}
+
+func formatSQLValue(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return fmt.Sprintf("'%s'", escapeSQL(typed))
+	case int, int32, int64, float32, float64:
+		return fmt.Sprintf("%v", typed)
+	case bool:
+		if typed {
+			return "TRUE"
+		}
+		return "FALSE"
+	default:
+		return fmt.Sprintf("'%s'", escapeSQL(fmt.Sprintf("%v", typed)))
+	}
+}
+
+func formatTemplateValue(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return escapeSQL(typed)
+	default:
+		return fmt.Sprintf("%v", typed)
+	}
+}
+
+func sortedKeys(values map[string]interface{}) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sanitizeIdentifierExpression(value string) string {
+	replacer := strings.NewReplacer(
+		";", "",
+		"'", "",
+		"\"", "",
+		"--", "",
+		"/*", "",
+		"*/", "",
+	)
+	return replacer.Replace(strings.TrimSpace(value))
 }
