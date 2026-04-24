@@ -182,6 +182,29 @@ security:
 analytics:
   enabled: true
   
+  security:
+    enabled: true
+    rbac:
+      enabled: true
+      default_role: user
+    encryption:
+      enabled: true
+      algorithm: aes256
+      key_rotation_days: 90
+    rate_limiting:
+      enabled: true
+      requests_per_minute: 1000
+      endpoints:
+        export: 60
+        query: 500
+    audit:
+      enabled: true
+      retention_days: 365
+    query_validation:
+      max_complexity: 1000
+      max_recursion_depth: 10
+      max_fields: 100
+  
   duckdb:
     # Path to the DuckDB database file (use ":memory:" for in-memory)
     path: analytics.duckdb

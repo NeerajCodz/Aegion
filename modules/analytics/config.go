@@ -20,6 +20,9 @@ type Config struct {
 	// Enabled determines if the analytics module is active
 	Enabled bool `yaml:"enabled"`
 
+	// Security configuration
+	Security SecurityConfig `yaml:"security"`
+
 	// DuckDB configuration
 	DuckDB DuckDBConfig `yaml:"duckdb"`
 
@@ -64,6 +67,73 @@ type RestAPIConfig struct {
 
 	// DefaultPageSize is the default result page size
 	DefaultPageSize int `yaml:"default_page_size"`
+
+	// CORS configuration
+	CORS CORSConfig `yaml:"cors"`
+}
+
+// CORSConfig holds CORS configuration
+type CORSConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	AllowedOrigins  []string `yaml:"allowed_origins"`
+	AllowedMethods  []string `yaml:"allowed_methods"`
+	AllowedHeaders  []string `yaml:"allowed_headers"`
+	AllowCredentials bool    `yaml:"allow_credentials"`
+	MaxAge          int      `yaml:"max_age"`
+}
+
+// SecurityConfig holds security-related configuration
+type SecurityConfig struct {
+	// Enabled determines if security features are active
+	Enabled bool `yaml:"enabled"`
+
+	// RBAC configuration
+	RBAC RBACConfig `yaml:"rbac"`
+
+	// Encryption configuration
+	Encryption EncryptionConfig `yaml:"encryption"`
+
+	// Rate limiting configuration
+	RateLimiting RateLimitingConfig `yaml:"rate_limiting"`
+
+	// Audit logging configuration
+	Audit AuditConfig `yaml:"audit"`
+
+	// Query validation configuration
+	QueryValidation QueryValidationConfig `yaml:"query_validation"`
+}
+
+// RBACConfig holds role-based access control configuration
+type RBACConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	DefaultRole string `yaml:"default_role"`
+}
+
+// EncryptionConfig holds encryption configuration
+type EncryptionConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	Algorithm       string `yaml:"algorithm"`
+	KeyRotationDays int    `yaml:"key_rotation_days"`
+}
+
+// RateLimitingConfig holds rate limiting configuration
+type RateLimitingConfig struct {
+	Enabled            bool          `yaml:"enabled"`
+	RequestsPerMinute  int           `yaml:"requests_per_minute"`
+	Endpoints          map[string]int `yaml:"endpoints"`
+}
+
+// AuditConfig holds audit logging configuration
+type AuditConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	RetentionDays int  `yaml:"retention_days"`
+}
+
+// QueryValidationConfig holds query validation configuration
+type QueryValidationConfig struct {
+	MaxComplexity     int `yaml:"max_complexity"`
+	MaxRecursionDepth int `yaml:"max_recursion_depth"`
+	MaxFields         int `yaml:"max_fields"`
 }
 
 // DuckDBConfig holds DuckDB-specific settings.
@@ -389,6 +459,34 @@ func (c *Config) Validate() error {
 func DefaultConfig() *Config {
 	return &Config{
 		Enabled: true,
+		Security: SecurityConfig{
+			Enabled: true,
+			RBAC: RBACConfig{
+				Enabled:     true,
+				DefaultRole: "user",
+			},
+			Encryption: EncryptionConfig{
+				Enabled:          true,
+				Algorithm:        "aes256",
+				KeyRotationDays:  90,
+			},
+			RateLimiting: RateLimitingConfig{
+				Enabled:            true,
+				RequestsPerMinute:  1000,
+				Endpoints: map[string]int{
+					"export": 60,
+				},
+			},
+			Audit: AuditConfig{
+				Enabled:       true,
+				RetentionDays: 365,
+			},
+			QueryValidation: QueryValidationConfig{
+				MaxComplexity:     1000,
+				MaxRecursionDepth: 10,
+				MaxFields:         100,
+			},
+		},
 		DuckDB: DuckDBConfig{
 			Path:                   "analytics.duckdb",
 			MaxMemory:              4096,
@@ -437,6 +535,14 @@ func DefaultConfig() *Config {
 			RateLimitPerMinute:  100,
 			MaxPageSize:         1000,
 			DefaultPageSize:     50,
+			CORS: CORSConfig{
+				Enabled:         true,
+				AllowedOrigins:  []string{"http://localhost:3000"},
+				AllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+				AllowedHeaders:  []string{"Content-Type", "Authorization"},
+				AllowCredentials: true,
+				MaxAge:          3600,
+			},
 		},
 		GraphQL: GraphQLAPIConfig{
 			Enabled:             true,

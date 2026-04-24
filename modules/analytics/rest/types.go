@@ -140,3 +140,30 @@ type ExportFormat struct {
 	Extension   string   `json:"extension"`
 	Description string   `json:"description,omitempty"`
 }
+
+// AuditLogEntry represents an audit log entry
+type AuditLogEntry struct {
+	ID           string                 `json:"id"`
+	Timestamp    string                 `json:"timestamp"`
+	UserID       string                 `json:"user_id"`
+	EventType    string                 `json:"event_type"`
+	Action       string                 `json:"action"`
+	ResourceType string                 `json:"resource_type,omitempty"`
+	ResourceID   string                 `json:"resource_id,omitempty"`
+	Status       string                 `json:"status"`
+	ErrorMsg     string                 `json:"error_message,omitempty"`
+	Details      map[string]interface{} `json:"details,omitempty"`
+	IPAddress    string                 `json:"ip_address,omitempty"`
+}
+
+// UserRole represents a user's role assignment
+type UserRole struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// PermissionRequest represents a permission grant/revoke request
+type PermissionRequest struct {
+	UserID     string `json:"user_id"`
+	Permission string `json:"permission"`
+}
