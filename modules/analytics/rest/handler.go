@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	analytics "github.com/aegion/aegion/modules/analytics"
+	"github.com/aegion/aegion/modules/analytics/webhooks"
 	"github.com/rs/zerolog"
 )
 
@@ -19,6 +21,7 @@ type Handler struct {
 	exports ExportBuilder
 	cache   ResultCache
 	validator *Validator
+	webhookManager WebhookManager
 }
 
 // Config holds REST API configuration
@@ -39,6 +42,20 @@ type HandlerDeps struct {
 	Exports ExportBuilder
 	Cache   ResultCache
 	Validator *Validator
+	WebhookManager WebhookManager
+}
+
+// WebhookManager provides webhook operations used by REST handlers.
+type WebhookManager interface {
+	RegisterWebhook(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	UpdateWebhook(ctx context.Context, userID, webhookID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	DeleteWebhook(ctx context.Context, userID, webhookID string) error
+	ListWebhooks(ctx context.Context, userID string) ([]*analytics.Webhook, error)
+	GetWebhook(ctx context.Context, webhookID string) (*analytics.Webhook, error)
+	TestWebhook(ctx context.Context, webhookID string) (string, error)
+	GetDeliveryHistory(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error)
+	GetDelivery(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error)
+	ReplayEvent(ctx context.Context, deliveryID string) error
 }
 
 // QueryBuilder interface for building queries
@@ -75,6 +92,7 @@ func NewHandler(deps HandlerDeps) *Handler {
 		exports:   deps.Exports,
 		cache:     deps.Cache,
 		validator: v,
+		webhookManager: deps.WebhookManager,
 	}
 }
 

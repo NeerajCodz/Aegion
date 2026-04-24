@@ -356,6 +356,11 @@ func (m *Manager) GetDeliveryHistory(ctx context.Context, webhookID string, limi
 	return m.store.ListDeliveries(ctx, webhookID, limit)
 }
 
+// GetDelivery retrieves a delivery record by ID.
+func (m *Manager) GetDelivery(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error) {
+	return m.store.GetDelivery(ctx, deliveryID)
+}
+
 // ReplayEvent replays an event to a webhook.
 func (m *Manager) ReplayEvent(ctx context.Context, deliveryID string) error {
 	delivery, err := m.store.GetDelivery(ctx, deliveryID)

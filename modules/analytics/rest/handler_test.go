@@ -3,11 +3,15 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	analytics "github.com/aegion/aegion/modules/analytics"
+	"github.com/aegion/aegion/modules/analytics/webhooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/rs/zerolog"
@@ -48,6 +52,65 @@ func newTestHandler(db Database) *Handler {
 		Queries: NewQueryBuilder(db),
 		Exports: NewExportBuilder(db),
 		Cache:   NewCache(),
+	})
+}
+
+type mockWebhookManager struct {
+	registerFn           func(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	updateFn             func(ctx context.Context, userID, webhookID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	deleteFn             func(ctx context.Context, userID, webhookID string) error
+	listFn               func(ctx context.Context, userID string) ([]*analytics.Webhook, error)
+	getFn                func(ctx context.Context, webhookID string) (*analytics.Webhook, error)
+	testFn               func(ctx context.Context, webhookID string) (string, error)
+	getHistoryFn         func(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error)
+	getDeliveryFn        func(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error)
+	replayFn             func(ctx context.Context, deliveryID string) error
+}
+
+func (m *mockWebhookManager) RegisterWebhook(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error) {
+	return m.registerFn(ctx, userID, req)
+}
+
+func (m *mockWebhookManager) UpdateWebhook(ctx context.Context, userID, webhookID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error) {
+	return m.updateFn(ctx, userID, webhookID, req)
+}
+
+func (m *mockWebhookManager) DeleteWebhook(ctx context.Context, userID, webhookID string) error {
+	return m.deleteFn(ctx, userID, webhookID)
+}
+
+func (m *mockWebhookManager) ListWebhooks(ctx context.Context, userID string) ([]*analytics.Webhook, error) {
+	return m.listFn(ctx, userID)
+}
+
+func (m *mockWebhookManager) GetWebhook(ctx context.Context, webhookID string) (*analytics.Webhook, error) {
+	return m.getFn(ctx, webhookID)
+}
+
+func (m *mockWebhookManager) TestWebhook(ctx context.Context, webhookID string) (string, error) {
+	return m.testFn(ctx, webhookID)
+}
+
+func (m *mockWebhookManager) GetDeliveryHistory(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error) {
+	return m.getHistoryFn(ctx, webhookID, limit)
+}
+
+func (m *mockWebhookManager) GetDelivery(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error) {
+	return m.getDeliveryFn(ctx, deliveryID)
+}
+
+func (m *mockWebhookManager) ReplayEvent(ctx context.Context, deliveryID string) error {
+	return m.replayFn(ctx, deliveryID)
+}
+
+func newWebhookTestHandler(manager WebhookManager) *Handler {
+	return NewHandler(HandlerDeps{
+		Logger:         zerolog.Nop(),
+		Config:         Config{DefaultPageSize: 100, MaxPageSize: 10000, QueryTimeoutSeconds: 300},
+		Queries:        NewQueryBuilder(&MockDatabase{}),
+		Exports:        NewExportBuilder(&MockDatabase{}),
+		Cache:          NewCache(),
+		WebhookManager: manager,
 	})
 }
 
@@ -464,4 +527,166 @@ func TestHealthCheck_Success(t *testing.T) {
 func TestHealthCheck_NilHandler(t *testing.T) {
 	err := HealthCheck(context.Background(), nil)
 	assert.Error(t, err)
+}
+
+func TestRegisterWebhook_Success(t *testing.T) {
+	manager := &mockWebhookManager{
+		registerFn: func(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error) {
+			require.Equal(t, "user_1", userID)
+			require.Equal(t, "https://example.test/hook", req.URL)
+			return &analytics.Webhook{
+				ID:         "wh_1",
+				UserID:     userID,
+				URL:        req.URL,
+				EventTypes: req.EventFilter.EventTypes,
+				Active:     true,
+				CreatedAt:  time.Now(),
+				UpdatedAt:  time.Now(),
+			}, nil
+		},
+	}
+	handler := newWebhookTestHandler(manager)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks", strings.NewReader(`{"url":"https://example.test/hook","event_filter":{"event_types":["auth.login"]}}`))
+	req = req.WithContext(withUserID(req.Context(), "user_1"))
+	w := httptest.NewRecorder()
+
+	handler.RegisterWebhook(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+	assert.Contains(t, w.Body.String(), `"id":"wh_1"`)
+}
+
+func TestListWebhooks_Success(t *testing.T) {
+	manager := &mockWebhookManager{
+		listFn: func(ctx context.Context, userID string) ([]*analytics.Webhook, error) {
+			require.Equal(t, "user_1", userID)
+			return []*analytics.Webhook{
+				{ID: "wh_1", UserID: userID, URL: "https://example.test/1", EventTypes: []string{"auth.login"}, Active: true, CreatedAt: time.Now(), UpdatedAt: time.Now()},
+			}, nil
+		},
+	}
+	handler := newWebhookTestHandler(manager)
+
+	req := httptest.NewRequest(http.MethodGet, "/webhooks", nil)
+	req = req.WithContext(withUserID(req.Context(), "user_1"))
+	w := httptest.NewRecorder()
+
+	handler.ListWebhooks(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"total":1`)
+}
+
+func TestGetWebhook_ForbiddenForOtherOwner(t *testing.T) {
+	manager := &mockWebhookManager{
+		getFn: func(ctx context.Context, webhookID string) (*analytics.Webhook, error) {
+			return &analytics.Webhook{ID: webhookID, UserID: "other_user", URL: "https://example.test", Active: true, CreatedAt: time.Now(), UpdatedAt: time.Now()}, nil
+		},
+	}
+	handler := newWebhookTestHandler(manager)
+
+	req := httptest.NewRequest(http.MethodGet, "/webhooks/wh_1", nil)
+	req.SetPathValue("id", "wh_1")
+	req = req.WithContext(withUserID(req.Context(), "user_1"))
+	w := httptest.NewRecorder()
+
+	handler.GetWebhook(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestTestWebhook_Success(t *testing.T) {
+	manager := &mockWebhookManager{
+		getFn: func(ctx context.Context, webhookID string) (*analytics.Webhook, error) {
+			return &analytics.Webhook{ID: webhookID, UserID: "user_1", URL: "https://example.test", Active: true, CreatedAt: time.Now(), UpdatedAt: time.Now()}, nil
+		},
+		testFn: func(ctx context.Context, webhookID string) (string, error) {
+			return "delivery_1", nil
+		},
+	}
+	handler := newWebhookTestHandler(manager)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/wh_1/test", nil)
+	req.SetPathValue("id", "wh_1")
+	req = req.WithContext(withUserID(req.Context(), "user_1"))
+	w := httptest.NewRecorder()
+
+	handler.TestWebhook(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"delivery_id":"delivery_1"`)
+}
+
+func TestReplayDelivery_Success(t *testing.T) {
+	manager := &mockWebhookManager{
+		getDeliveryFn: func(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error) {
+			return &analytics.WebhookDelivery{ID: deliveryID, WebhookID: "wh_1"}, nil
+		},
+		getFn: func(ctx context.Context, webhookID string) (*analytics.Webhook, error) {
+			return &analytics.Webhook{ID: webhookID, UserID: "user_1", URL: "https://example.test", Active: true, CreatedAt: time.Now(), UpdatedAt: time.Now()}, nil
+		},
+		replayFn: func(ctx context.Context, deliveryID string) error {
+			require.Equal(t, "delivery_1", deliveryID)
+			return nil
+		},
+	}
+	handler := newWebhookTestHandler(manager)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/deliveries/delivery_1/replay", nil)
+	req.SetPathValue("id", "delivery_1")
+	req = req.WithContext(withUserID(req.Context(), "user_1"))
+	w := httptest.NewRecorder()
+
+	handler.ReplayDelivery(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code)
+	assert.Contains(t, w.Body.String(), `"status":"replay_queued"`)
+}
+
+func TestWriteWebhookError_MapsNotFound(t *testing.T) {
+	w := httptest.NewRecorder()
+	handler := newWebhookTestHandler(&mockWebhookManager{})
+
+	writeWebhookError(w, handler, webhooks.ErrWebhookNotFound)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestRegisterWebhook_RequiresManager(t *testing.T) {
+	handler := newWebhookTestHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks", strings.NewReader(`{}`))
+	req = req.WithContext(withUserID(req.Context(), "user_1"))
+	w := httptest.NewRecorder()
+
+	handler.RegisterWebhook(w, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestReplayDelivery_MapsMissingDelivery(t *testing.T) {
+	manager := &mockWebhookManager{
+		getDeliveryFn: func(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error) {
+			return nil, webhooks.ErrDeliveryNotFound
+		},
+	}
+	handler := newWebhookTestHandler(manager)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/deliveries/missing/replay", nil)
+	req.SetPathValue("id", "missing")
+	req = req.WithContext(withUserID(req.Context(), "user_1"))
+	w := httptest.NewRecorder()
+
+	handler.ReplayDelivery(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestWriteWebhookError_Default(t *testing.T) {
+	w := httptest.NewRecorder()
+	handler := newWebhookTestHandler(&mockWebhookManager{})
+
+	writeWebhookError(w, handler, errors.New("boom"))
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
