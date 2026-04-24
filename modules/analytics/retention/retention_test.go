@@ -176,12 +176,10 @@ func TestCategorySpecificPolicies(t *testing.T) {
 
 // TestTieringEngine tests tier transitions.
 func TestTieringEngine(t *testing.T) {
-	t.Skip("sqlite3 driver not available in test environment")
-	
 	// Create in-memory database
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
-		t.Fatalf("failed to create test database: %v", err)
+		t.Skipf("sqlite3 driver not available in test environment: %v", err)
 	}
 	defer db.Close()
 
@@ -219,12 +217,10 @@ func TestTieringEngine(t *testing.T) {
 
 // TestCleanupManager tests cleanup operations.
 func TestCleanupManager(t *testing.T) {
-	t.Skip("sqlite3 driver not available in test environment")
-	
 	// Create in-memory database
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
-		t.Fatalf("failed to create test database: %v", err)
+		t.Skipf("sqlite3 driver not available in test environment: %v", err)
 	}
 	defer db.Close()
 
