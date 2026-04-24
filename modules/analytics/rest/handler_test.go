@@ -20,12 +20,16 @@ import (
 // MockDatabase implements Database interface for testing
 type MockDatabase struct {
 	queryResults map[string][]map[string]interface{}
+	queryFn      func(ctx context.Context, sql string) ([]map[string]interface{}, error)
 	queryErr     error
 	countResult  int
 	countErr     error
 }
 
 func (m *MockDatabase) Query(ctx context.Context, sql string) ([]map[string]interface{}, error) {
+	if m.queryFn != nil {
+		return m.queryFn(ctx, sql)
+	}
 	if m.queryErr != nil {
 		return nil, m.queryErr
 	}
@@ -527,6 +531,91 @@ func TestHealthCheck_Success(t *testing.T) {
 func TestHealthCheck_NilHandler(t *testing.T) {
 	err := HealthCheck(context.Background(), nil)
 	assert.Error(t, err)
+}
+
+func TestHandlerCreateDashboard_PersistsAnalyticsDashboardsRow(t *testing.T) {
+	db := &MockDatabase{
+		queryFn: func(ctx context.Context, sql string) ([]map[string]interface{}, error) {
+			assert.Contains(t, sql, "INSERT INTO analytics_dashboards")
+			assert.Contains(t, sql, `"layout":"grid"`)
+			assert.Contains(t, sql, "'user1'")
+			return []map[string]interface{}{
+				{
+					"id":          "dash-1",
+					"name":        "Ops Dashboard",
+					"description": "Operations",
+					"config":      `{"layout":"grid"}`,
+					"owner_id":    "user1",
+					"public":      true,
+					"pinned":      false,
+				},
+			}, nil
+		},
+	}
+	h := newTestHandler(db)
+
+	req := httptest.NewRequest(http.MethodPost, "/dashboards", strings.NewReader(`{"name":"Ops Dashboard","description":"Operations","config":{"layout":"grid"},"public":true}`))
+	req = req.WithContext(withUserID(req.Context(), "user1"))
+	w := httptest.NewRecorder()
+
+	h.CreateDashboard(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+func TestHandlerUpdateDashboard_UsesAnalyticsDashboardsTable(t *testing.T) {
+	call := 0
+	db := &MockDatabase{
+		queryFn: func(ctx context.Context, sql string) ([]map[string]interface{}, error) {
+			call++
+			if call == 1 {
+				assert.Contains(t, sql, "SELECT owner_id FROM analytics_dashboards")
+				return []map[string]interface{}{{"owner_id": "user1"}}, nil
+			}
+			assert.Contains(t, sql, "UPDATE analytics_dashboards")
+			assert.Contains(t, sql, `"layout":"stacked"`)
+			return []map[string]interface{}{
+				{"id": "dash-1", "name": "Updated Dashboard", "owner_id": "user1", "public": false},
+			}, nil
+		},
+	}
+	h := newTestHandler(db)
+
+	req := httptest.NewRequest(http.MethodPut, "/dashboards/dash-1", strings.NewReader(`{"name":"Updated Dashboard","description":"","config":{"layout":"stacked"},"public":false}`))
+	req.SetPathValue("id", "dash-1")
+	req = req.WithContext(withUserID(req.Context(), "user1"))
+	w := httptest.NewRecorder()
+
+	h.UpdateDashboard(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 2, call)
+}
+
+func TestHandlerDeleteDashboard_DeletesFromAnalyticsDashboards(t *testing.T) {
+	call := 0
+	db := &MockDatabase{
+		queryFn: func(ctx context.Context, sql string) ([]map[string]interface{}, error) {
+			call++
+			if call == 1 {
+				assert.Contains(t, sql, "SELECT owner_id FROM analytics_dashboards")
+				return []map[string]interface{}{{"owner_id": "user1"}}, nil
+			}
+			assert.Contains(t, sql, "DELETE FROM analytics_dashboards")
+			return []map[string]interface{}{{"id": "dash-1"}}, nil
+		},
+	}
+	h := newTestHandler(db)
+
+	req := httptest.NewRequest(http.MethodDelete, "/dashboards/dash-1", nil)
+	req.SetPathValue("id", "dash-1")
+	req = req.WithContext(withUserID(req.Context(), "user1"))
+	w := httptest.NewRecorder()
+
+	h.DeleteDashboard(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, 2, call)
 }
 
 func TestRegisterWebhook_Success(t *testing.T) {
