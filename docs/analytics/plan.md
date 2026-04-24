@@ -54,6 +54,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] REST analytics package exists
 - [x] REST webhook handlers are wired to the webhook manager when the manager dependency is configured
 - [x] REST dashboard CRUD now reads and writes the real `analytics_dashboards` table instead of placeholder responses
+- [x] REST saved-query persistence now reads and writes the real `analytics_queries` table instead of placeholder responses
 - [x] GraphQL analytics package exists
 - [x] GraphQL auth middleware now rejects protected unauthenticated requests and populates real user context from bearer/session tokens
 - [x] GraphQL resolvers now enforce analytics RBAC permissions for events, dashboards, queries, reports, webhooks, and ad-hoc query execution
