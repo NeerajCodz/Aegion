@@ -34,11 +34,39 @@ func TestAdditionalAggregateQueryIncludesFiltersAndGrouping(t *testing.T) {
 }
 
 func TestAdditionalExportQueryHelpers(t *testing.T) {
-	csvSQL, err := ExportToCSV(&ExportQuery{DashboardID: "dash-1"}, nil)
-	require.NoError(t, err)
-	assert.Contains(t, csvSQL, "dash-1")
+	dashboardQueries := map[string]*DashboardQuery{
+		"dash-1": {
+			ID:   "dash-1",
+			SQL:  "SELECT event_type, COUNT(*) AS total FROM analytics_events",
+			Name: "events",
+		},
+	}
 
-	jsonSQL, err := ExportToJSON(&ExportQuery{DashboardID: "dash-1"}, nil)
+	csvSQL, err := ExportToCSV(&ExportQuery{
+		DashboardID: "dash-1",
+		TimeRange:   "24h",
+		Filters: map[string]interface{}{
+			"event_type": "auth.login",
+		},
+	}, dashboardQueries)
 	require.NoError(t, err)
-	assert.Contains(t, jsonSQL, "row_to_json")
+	assert.Contains(t, csvSQL, "SELECT * FROM (")
+	assert.Contains(t, csvSQL, "event_type = 'auth.login'")
+	assert.Contains(t, csvSQL, "created_at >= NOW() - INTERVAL '1 day'")
+
+	jsonSQL, err := ExportToJSON(&ExportQuery{DashboardID: "dash-1"}, dashboardQueries)
+	require.NoError(t, err)
+	assert.Contains(t, jsonSQL, "json_agg")
+}
+
+func TestAdditionalExportQueryHelpersFallbackToCommonTemplate(t *testing.T) {
+	sql, err := ExportToCSV(&ExportQuery{DashboardID: "top_events"}, nil)
+	require.NoError(t, err)
+	assert.Contains(t, sql, "FROM analytics_events")
+	assert.Contains(t, sql, "LIMIT 1000")
+}
+
+func TestAdditionalExportQueryHelpersRejectUnknownDashboard(t *testing.T) {
+	_, err := ExportToJSON(&ExportQuery{DashboardID: "missing-dashboard"}, nil)
+	require.Error(t, err)
 }

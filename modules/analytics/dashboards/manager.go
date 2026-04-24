@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +20,7 @@ type Manager struct {
 	cache    map[string]*QueryResult
 	cacheMu  sync.RWMutex
 	cacheTTL map[string]time.Time
+	cacheAt  map[string]time.Time
 	logger   zerolog.Logger
 	config   DashboardConfig
 }
@@ -28,6 +31,7 @@ func NewManager(db *sql.DB, logger zerolog.Logger, config DashboardConfig) *Mana
 		db:       db,
 		cache:    make(map[string]*QueryResult),
 		cacheTTL: make(map[string]time.Time),
+		cacheAt:  make(map[string]time.Time),
 		logger:   logger,
 		config:   config,
 	}
@@ -46,19 +50,12 @@ func (m *Manager) CreateDashboard(ctx context.Context, dashboard *Dashboard) (*D
 	dashboard.UpdatedAt = time.Now()
 
 	query := `
-		INSERT INTO analytics_dashboards (id, name, description, config, owner_id, public, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, name, description, config, owner_id, public, created_at, updated_at
+		INSERT INTO analytics_dashboards (id, name, description, config, owner_id, public, pinned, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, name, description, config, owner_id, public, pinned, created_at, updated_at
 	`
 
-	configJSON, err := marshalJSON(map[string]interface{}{
-		"category":          dashboard.Category,
-		"is_default":        dashboard.IsDefault,
-		"layout":            dashboard.Layout,
-		"refresh_interval":  dashboard.RefreshInterval,
-		"components":        dashboard.Components,
-		"config":            dashboard.Config,
-	})
+	configJSON, err := marshalJSON(buildDashboardConfigPayload(dashboard))
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -70,6 +67,7 @@ func (m *Manager) CreateDashboard(ctx context.Context, dashboard *Dashboard) (*D
 		configJSON,
 		dashboard.OwnerID,
 		dashboard.Public,
+		dashboard.Pinned,
 		dashboard.CreatedAt,
 		dashboard.UpdatedAt,
 	).Scan(
@@ -79,6 +77,7 @@ func (m *Manager) CreateDashboard(ctx context.Context, dashboard *Dashboard) (*D
 		&configJSON,
 		&dashboard.OwnerID,
 		&dashboard.Public,
+		&dashboard.Pinned,
 		&dashboard.CreatedAt,
 		&dashboard.UpdatedAt,
 	)
@@ -96,7 +95,7 @@ func (m *Manager) GetDashboard(ctx context.Context, id string) (*Dashboard, erro
 	dashboard := &Dashboard{}
 
 	query := `
-		SELECT id, name, description, config, owner_id, public, created_at, updated_at
+		SELECT id, name, description, config, owner_id, public, pinned, created_at, updated_at
 		FROM analytics_dashboards
 		WHERE id = $1
 	`
@@ -109,6 +108,7 @@ func (m *Manager) GetDashboard(ctx context.Context, id string) (*Dashboard, erro
 		&configJSON,
 		&dashboard.OwnerID,
 		&dashboard.Public,
+		&dashboard.Pinned,
 		&dashboard.CreatedAt,
 		&dashboard.UpdatedAt,
 	)
@@ -120,20 +120,10 @@ func (m *Manager) GetDashboard(ctx context.Context, id string) (*Dashboard, erro
 	}
 
 	config, err := unmarshalJSON(configJSON)
-	if err == nil {
-		dashboard.Category, _ = config["category"].(string)
-		dashboard.IsDefault, _ = config["is_default"].(bool)
-		dashboard.Layout, _ = config["layout"].(string)
-		if v, ok := config["refresh_interval"].(float64); ok {
-			dashboard.RefreshInterval = int(v)
-		}
-		if components, ok := config["components"].([]interface{}); ok {
-			dashboard.Components = parseComponents(components)
-		}
-		if cfg, ok := config["config"].(map[string]interface{}); ok {
-			dashboard.Config = cfg
-		}
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse dashboard config: %w", err)
 	}
+	applyDashboardConfig(dashboard, config)
 
 	return dashboard, nil
 }
@@ -161,19 +151,15 @@ func (m *Manager) UpdateDashboard(ctx context.Context, id string, updates map[st
 
 	dashboard.UpdatedAt = time.Now()
 
-	configJSON, _ := marshalJSON(map[string]interface{}{
-		"category":          dashboard.Category,
-		"is_default":        dashboard.IsDefault,
-		"layout":            dashboard.Layout,
-		"refresh_interval":  dashboard.RefreshInterval,
-		"components":        dashboard.Components,
-		"config":            dashboard.Config,
-	})
+	configJSON, err := marshalJSON(buildDashboardConfigPayload(dashboard))
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal dashboard config: %w", err)
+	}
 
 	query := `
 		UPDATE analytics_dashboards
-		SET name = $1, description = $2, config = $3, public = $4, updated_at = $5
-		WHERE id = $6
+		SET name = $1, description = $2, config = $3, public = $4, pinned = $5, updated_at = $6
+		WHERE id = $7
 	`
 
 	_, err = m.db.ExecContext(ctx, query,
@@ -181,6 +167,7 @@ func (m *Manager) UpdateDashboard(ctx context.Context, id string, updates map[st
 		dashboard.Description,
 		configJSON,
 		dashboard.Public,
+		dashboard.Pinned,
 		dashboard.UpdatedAt,
 		id,
 	)
@@ -217,13 +204,15 @@ func (m *Manager) DeleteDashboard(ctx context.Context, id string) error {
 func (m *Manager) ListDashboards(ctx context.Context, ownerID *string, includeDefault bool) ([]*Dashboard, error) {
 	var dashboards []*Dashboard
 
-	query := "SELECT id, name, description, config, owner_id, public, created_at, updated_at FROM analytics_dashboards WHERE 1=1"
+	query := "SELECT id, name, description, config, owner_id, public, pinned, created_at, updated_at FROM analytics_dashboards WHERE 1=1"
+	args := []interface{}{}
 
 	if ownerID != nil {
-		query += " AND owner_id = '" + *ownerID + "' OR owner_id IS NULL"
+		query += fmt.Sprintf(" AND (owner_id = $%d OR owner_id IS NULL)", len(args)+1)
+		args = append(args, *ownerID)
 	}
 
-	rows, err := m.db.QueryContext(ctx, query)
+	rows, err := m.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query dashboards: %w", err)
 	}
@@ -240,6 +229,7 @@ func (m *Manager) ListDashboards(ctx context.Context, ownerID *string, includeDe
 			&configJSON,
 			&dashboard.OwnerID,
 			&dashboard.Public,
+			&dashboard.Pinned,
 			&dashboard.CreatedAt,
 			&dashboard.UpdatedAt,
 		)
@@ -248,13 +238,12 @@ func (m *Manager) ListDashboards(ctx context.Context, ownerID *string, includeDe
 			continue
 		}
 
-		config, _ := unmarshalJSON(configJSON)
-		dashboard.Category, _ = config["category"].(string)
-		dashboard.IsDefault, _ = config["is_default"].(bool)
-		dashboard.Layout, _ = config["layout"].(string)
-		if v, ok := config["refresh_interval"].(float64); ok {
-			dashboard.RefreshInterval = int(v)
+		config, err := unmarshalJSON(configJSON)
+		if err != nil {
+			m.logger.Error().Err(err).Str("dashboard_id", dashboard.ID).Msg("failed to parse dashboard config")
+			continue
 		}
+		applyDashboardConfig(dashboard, config)
 
 		if includeDefault || !dashboard.IsDefault {
 			dashboards = append(dashboards, dashboard)
@@ -272,8 +261,9 @@ func (m *Manager) ExecuteQuery(ctx context.Context, queryID string, query *Dashb
 	m.cacheMu.RLock()
 	if cached, ok := m.cache[queryID]; ok {
 		if ttl, exists := m.cacheTTL[queryID]; exists && time.Now().Before(ttl) {
+			cachedAt := m.cacheAt[queryID]
 			m.cacheMu.RUnlock()
-			return cached, nil
+			return cloneQueryResult(cached, true, &cachedAt), nil
 		}
 	}
 	m.cacheMu.RUnlock()
@@ -326,8 +316,10 @@ func (m *Manager) ExecuteQuery(ctx context.Context, queryID string, query *Dashb
 	// Cache result
 	if query.CacheTTL > 0 {
 		m.cacheMu.Lock()
-		m.cache[queryID] = result
+		cachedAt := time.Now()
+		m.cache[queryID] = cloneQueryResult(result, false, &cachedAt)
 		m.cacheTTL[queryID] = time.Now().Add(time.Duration(query.CacheTTL) * time.Second)
+		m.cacheAt[queryID] = cachedAt
 		m.cacheMu.Unlock()
 	}
 
@@ -457,6 +449,7 @@ func (m *Manager) ClearCache() {
 
 	m.cache = make(map[string]*QueryResult)
 	m.cacheTTL = make(map[string]time.Time)
+	m.cacheAt = make(map[string]time.Time)
 	m.logger.Info().Msg("dashboard cache cleared")
 }
 
@@ -475,13 +468,26 @@ func generateToken(length int) string {
 }
 
 func marshalJSON(v interface{}) (string, error) {
-	// Simple JSON marshaling - in real implementation use encoding/json
-	return fmt.Sprintf("%v", v), nil
+	body, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }
 
 func unmarshalJSON(s string) (map[string]interface{}, error) {
-	// Simple JSON unmarshaling - in real implementation use encoding/json
-	return make(map[string]interface{}), nil
+	if strings.TrimSpace(s) == "" {
+		return map[string]interface{}{}, nil
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(s), &result); err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return map[string]interface{}{}, nil
+	}
+	return result, nil
 }
 
 func parseComponents(data []interface{}) []Component {
@@ -489,14 +495,123 @@ func parseComponents(data []interface{}) []Component {
 	for _, item := range data {
 		if m, ok := item.(map[string]interface{}); ok {
 			c := Component{
-				ID:        fmt.Sprintf("%v", m["id"]),
-				Type:      fmt.Sprintf("%v", m["type"]),
-				Title:     fmt.Sprintf("%v", m["title"]),
-				QueryID:   fmt.Sprintf("%v", m["query_id"]),
-				TimeRange: fmt.Sprintf("%v", m["time_range"]),
+				ID:         stringValue(m["id"]),
+				Type:       stringValue(m["type"]),
+				Title:      stringValue(m["title"]),
+				Description: stringValue(m["description"]),
+				QueryID:    stringValue(m["query_id"]),
+				TimeRange:  stringValue(m["time_range"]),
+				GridCol:    intValue(m["grid_col"]),
+				GridRow:    intValue(m["grid_row"]),
+				GridWidth:  intValue(m["grid_width"]),
+				GridHeight: intValue(m["grid_height"]),
+				Config:     mapValue(m["config"]),
+			}
+			if metrics, ok := m["metrics"].([]interface{}); ok {
+				c.Metrics = stringSlice(metrics)
 			}
 			components = append(components, c)
 		}
 	}
 	return components
+}
+
+func buildDashboardConfigPayload(dashboard *Dashboard) map[string]interface{} {
+	return map[string]interface{}{
+		"category":         dashboard.Category,
+		"is_default":       dashboard.IsDefault,
+		"layout":           dashboard.Layout,
+		"refresh_interval": dashboard.RefreshInterval,
+		"components":       dashboard.Components,
+		"config":           dashboard.Config,
+	}
+}
+
+func applyDashboardConfig(dashboard *Dashboard, config map[string]interface{}) {
+	dashboard.Category = stringValue(config["category"])
+	dashboard.IsDefault = boolValue(config["is_default"])
+	dashboard.Layout = stringValue(config["layout"])
+	if refreshInterval := intValue(config["refresh_interval"]); refreshInterval > 0 {
+		dashboard.RefreshInterval = refreshInterval
+	}
+	if components, ok := config["components"].([]interface{}); ok {
+		dashboard.Components = parseComponents(components)
+	}
+	if cfg, ok := config["config"].(map[string]interface{}); ok {
+		dashboard.Config = cfg
+	}
+}
+
+func cloneQueryResult(result *QueryResult, fromCache bool, cachedAt *time.Time) *QueryResult {
+	if result == nil {
+		return nil
+	}
+
+	cloned := &QueryResult{
+		QueryID:       result.QueryID,
+		Columns:       append([]string(nil), result.Columns...),
+		RowCount:      result.RowCount,
+		ExecutionTime: result.ExecutionTime,
+		FromCache:     fromCache,
+	}
+	if cachedAt != nil {
+		cloned.CachedAt = cachedAt
+	}
+	if len(result.Data) > 0 {
+		cloned.Data = make([]map[string]interface{}, 0, len(result.Data))
+		for _, row := range result.Data {
+			clonedRow := make(map[string]interface{}, len(row))
+			for key, value := range row {
+				clonedRow[key] = value
+			}
+			cloned.Data = append(cloned.Data, clonedRow)
+		}
+	}
+
+	return cloned
+}
+
+func stringValue(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", value)
+}
+
+func intValue(value interface{}) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func boolValue(value interface{}) bool {
+	typed, ok := value.(bool)
+	return ok && typed
+}
+
+func mapValue(value interface{}) map[string]interface{} {
+	typed, ok := value.(map[string]interface{})
+	if !ok || typed == nil {
+		return map[string]interface{}{}
+	}
+	return typed
+}
+
+func stringSlice(values []interface{}) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, stringValue(value))
+	}
+	return result
 }
