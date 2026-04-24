@@ -101,7 +101,16 @@ func (h *Handler) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Context().Value("user_id")
+	if err := h.validator.ValidateDashboardRequest(req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_DASHBOARD", "invalid dashboard request", err.Error())
+		return
+	}
+
+	userID, ok := userIDFromContext(r.Context())
+	if !ok || userID == "" {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
 
 	// Verify ownership
 	checkSQL := fmt.Sprintf(`SELECT owner_id FROM dashboards WHERE id = '%s'`, sanitizeID(id))
@@ -111,7 +120,7 @@ func (h *Handler) UpdateDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if rows[0]["owner_id"] != userID {
+	if fmt.Sprintf("%v", rows[0]["owner_id"]) != userID {
 		h.writeError(w, http.StatusForbidden, "FORBIDDEN", "cannot update dashboard owned by another user", "")
 		return
 	}
@@ -141,7 +150,11 @@ func (h *Handler) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Context().Value("user_id")
+	userID, ok := userIDFromContext(r.Context())
+	if !ok || userID == "" {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
 
 	// Verify ownership
 	checkSQL := fmt.Sprintf(`SELECT owner_id FROM dashboards WHERE id = '%s'`, sanitizeID(id))
@@ -151,7 +164,7 @@ func (h *Handler) DeleteDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if rows[0]["owner_id"] != userID {
+	if fmt.Sprintf("%v", rows[0]["owner_id"]) != userID {
 		h.writeError(w, http.StatusForbidden, "FORBIDDEN", "cannot delete dashboard owned by another user", "")
 		return
 	}
@@ -164,9 +177,15 @@ func (h *Handler) ListQueries(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	userID := r.Context().Value("user_id")
+	userID, ok := userIDFromContext(r.Context())
+	if !ok || userID == "" {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
 
-	sql := fmt.Sprintf(`SELECT * FROM queries WHERE owner_id = '%s' ORDER BY updated_at DESC LIMIT 100`, sanitizeID(fmt.Sprintf("%v", userID)))
+	start := time.Now()
+
+	sql := fmt.Sprintf(`SELECT * FROM queries WHERE owner_id = '%s' ORDER BY updated_at DESC LIMIT 100`, sanitizeID(userID))
 
 	rows, err := h.queries.ExecuteQuery(ctx, sql)
 	if err != nil {
@@ -174,12 +193,12 @@ func (h *Handler) ListQueries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeResponse(w, http.StatusOK, rows, nil, int64(time.Since(time.Now()).Milliseconds()), false)
+	h.writeResponse(w, http.StatusOK, rows, nil, int64(time.Since(start).Milliseconds()), false)
 }
 
 // SaveQuery handles POST /queries
 func (h *Handler) SaveQuery(w http.ResponseWriter, r *http.Request) {
-	_ , cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	_, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
 	var req QuerySaveRequest
@@ -188,17 +207,16 @@ func (h *Handler) SaveQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" {
-		h.writeError(w, http.StatusBadRequest, "MISSING_FIELD", "name is required", "")
+	if err := h.validator.ValidateQuerySaveRequest(req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_QUERY", "invalid query save request", err.Error())
 		return
 	}
 
-	if req.SQL == "" {
-		h.writeError(w, http.StatusBadRequest, "MISSING_FIELD", "sql is required", "")
+	userID, ok := userIDFromContext(r.Context())
+	if !ok || userID == "" {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
 		return
 	}
-
-	userID := r.Context().Value("user_id")
 
 	query := map[string]interface{}{
 		"id":          fmt.Sprintf("query_%d", time.Now().Unix()),
@@ -226,11 +244,15 @@ func (h *Handler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Context().Value("user_id")
+	userID, ok := userIDFromContext(r.Context())
+	if !ok || userID == "" {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
 	start := time.Now()
 
 	// Fetch saved query
-	sql := fmt.Sprintf(`SELECT sql FROM queries WHERE id = '%s' AND owner_id = '%s'`, sanitizeID(id), sanitizeID(fmt.Sprintf("%v", userID)))
+	sql := fmt.Sprintf(`SELECT sql FROM queries WHERE id = '%s' AND owner_id = '%s'`, sanitizeID(id), sanitizeID(userID))
 	rows, err := h.queries.ExecuteQuery(ctx, sql)
 	if err != nil || len(rows) == 0 {
 		h.writeError(w, http.StatusNotFound, "NOT_FOUND", "query not found", "")
@@ -238,6 +260,10 @@ func (h *Handler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	querySql := fmt.Sprintf("%v", rows[0]["sql"])
+	if err := h.validator.ValidateSQL(querySql); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_QUERY", "saved query is not allowed", err.Error())
+		return
+	}
 
 	// Execute the saved query
 	results, err := h.queries.ExecuteQuery(ctx, querySql)

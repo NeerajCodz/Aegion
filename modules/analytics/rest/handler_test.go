@@ -171,7 +171,7 @@ func TestHandlerListEvents_Success(t *testing.T) {
 	h := newTestHandler(db)
 
 	req := httptest.NewRequest("GET", "/events", nil)
-	req = req.WithContext(context.WithValue(req.Context(), "user_id", "user1"))
+	req = req.WithContext(withUserID(req.Context(), "user1"))
 	w := httptest.NewRecorder()
 
 	h.ListEvents(w, req)

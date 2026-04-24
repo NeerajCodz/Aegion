@@ -11,6 +11,19 @@ import (
 	"github.com/rs/zerolog"
 )
 
+type contextKey string
+
+const userIDContextKey contextKey = "user_id"
+
+func withUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, userIDContextKey, userID)
+}
+
+func userIDFromContext(ctx context.Context) (string, bool) {
+	userID, ok := ctx.Value(userIDContextKey).(string)
+	return userID, ok && userID != ""
+}
+
 // AuthMiddleware validates JWT bearer tokens
 func AuthMiddleware(logger zerolog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -39,7 +52,7 @@ func AuthMiddleware(logger zerolog.Logger) func(http.Handler) http.Handler {
 			}
 
 			// Add user ID to context
-			ctx := context.WithValue(r.Context(), "user_id", userID)
+			ctx := withUserID(r.Context(), userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -51,7 +64,7 @@ func RateLimitMiddleware(logger zerolog.Logger, rateLimit int) func(http.Handler
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, ok := r.Context().Value("user_id").(string)
+			userID, ok := userIDFromContext(r.Context())
 			if !ok {
 				userID = "anonymous"
 			}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -14,6 +15,11 @@ type Validator struct{}
 // NewValidator creates a new validator
 func NewValidator() *Validator {
 	return &Validator{}
+}
+
+// ValidateSQL validates a raw SQL statement according to the same rules used for saving queries.
+func (v *Validator) ValidateSQL(sql string) error {
+	return v.validateSQL(sql)
 }
 
 // ValidateQueryRequest validates a query request
@@ -46,6 +52,19 @@ func (v *Validator) ValidateQueryRequest(req QueryRequest) error {
 	for _, agg := range req.Aggregate {
 		if err := v.validateAggregateField(agg); err != nil {
 			return err
+		}
+	}
+
+	// Validate group by fields
+	for _, field := range req.GroupBy {
+		if field == "" {
+			return fmt.Errorf("group_by field cannot be empty")
+		}
+		if len(field) > 255 {
+			return fmt.Errorf("group_by field exceeds maximum of 255 characters")
+		}
+		if !regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`).MatchString(field) {
+			return fmt.Errorf("invalid group_by field name: %s", field)
 		}
 	}
 
@@ -258,10 +277,43 @@ func (v *Validator) validateAggregateField(agg AggregateField) error {
 		return fmt.Errorf("field is required for %s aggregation", agg.Function)
 	}
 
+	if agg.Function != "count" {
+		if len(agg.Field) > 255 {
+			return fmt.Errorf("aggregate field exceeds maximum of 255 characters")
+		}
+		if !regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`).MatchString(agg.Field) {
+			return fmt.Errorf("invalid aggregate field name: %s", agg.Field)
+		}
+	}
+
+	if agg.Alias != "" {
+		if len(agg.Alias) > 255 {
+			return fmt.Errorf("aggregate alias exceeds maximum of 255 characters")
+		}
+		if !regexp.MustCompile(`^[a-zA-Z0-9_]+$`).MatchString(agg.Alias) {
+			return fmt.Errorf("invalid aggregate alias: %s", agg.Alias)
+		}
+	}
+
+	if agg.Function == "percentile" && agg.Param != "" {
+		f, err := strconv.ParseFloat(agg.Param, 64)
+		if err != nil {
+			return fmt.Errorf("invalid percentile param: %s", agg.Param)
+		}
+		if f <= 0 || f >= 1 {
+			return fmt.Errorf("percentile param must be between 0 and 1 (exclusive)")
+		}
+	}
+
 	return nil
 }
 
 func (v *Validator) validateSQL(sql string) error {
+	// Disallow multiple statements and comment-based injection.
+	if strings.Contains(sql, ";") || strings.Contains(sql, "--") || strings.Contains(sql, "/*") {
+		return fmt.Errorf("only single-statement SELECT queries are allowed")
+	}
+
 	// Check for dangerous operations
 	dangerousPatterns := []string{
 		"DROP",
