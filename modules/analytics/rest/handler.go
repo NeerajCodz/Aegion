@@ -371,23 +371,6 @@ func (h *Handler) CreateDashboard(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(dashboard)
 }
 
-// Health handles GET /health
-func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
-	checks := map[string]bool{
-		"api": true,
-	}
-
-	response := HealthResponse{
-		Status: "healthy",
-		Ready:  true,
-		DuckDB: true,
-		Checks: checks,
-		Time:   time.Now(),
-	}
-
-	h.writeResponse(w, http.StatusOK, response, nil, 0, false)
-}
-
 // Stats handles GET /stats
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 	response := StatsResponse{
