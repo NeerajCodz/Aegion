@@ -37,8 +37,18 @@ export function operatorHasPermission(operator: Operator | null | undefined, req
       'security:read',
       'security:create',
       'security:delete',
+      'analytics:read',
+      'analytics:manage',
     ],
-    operator: ['identities:read', 'identities:update', 'sessions:read', 'sessions:delete', 'audit:read', 'security:read'],
+    operator: [
+      'identities:read',
+      'identities:update',
+      'sessions:read',
+      'sessions:delete',
+      'audit:read',
+      'security:read',
+      'analytics:read',
+    ],
     viewer: [
       'identities:read',
       'sessions:read',
@@ -47,6 +57,7 @@ export function operatorHasPermission(operator: Operator | null | undefined, req
       'oauth2:clients:read',
       'oauth2:tokens:read',
       'security:read',
+      'analytics:read',
     ],
   };
   const rolePermissions = fallbackByRole[operator.role.toLowerCase()] ?? [];
