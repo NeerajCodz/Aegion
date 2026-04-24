@@ -1,0 +1,85 @@
+server:
+  port: 8082
+  grpc_port: 50051
+  metrics_port: 9090
+  timeout_seconds: 30
+  request_timeout_seconds: 5
+
+database:
+  driver: duckdb
+  file: ./data/analytics.db
+  max_connections: 20
+  connection_timeout_seconds: 5
+
+postgres:
+  url: ${DATABASE_URL}
+  max_connections: 10
+  connection_timeout_seconds: 5
+
+cache:
+  enabled: true
+  type: memory
+  ttl_minutes: 5
+  max_size: 1000
+
+query:
+  timeout_seconds: 30
+  max_page_size: 1000
+  default_page_size: 50
+  max_offset: 1000000
+
+sync:
+  enabled: true
+  interval_seconds: 60
+  batch_size: 1000
+  retry_attempts: 3
+  retry_backoff_seconds: 5
+
+export:
+  formats:
+    - csv
+    - json
+    - parquet
+  max_records: 1000000
+  compression: gzip
+
+retention:
+  enabled: true
+  default_days: 90
+  policies:
+    - category: user_auth
+      retention_days: 30
+    - category: api_access
+      retention_days: 90
+    - category: audit
+      retention_days: 365
+
+logging:
+  level: info
+  format: json
+  output: stdout
+  disable_caller: false
+
+security:
+  rbac_enabled: true
+  encryption_enabled: true
+  audit_enabled: true
+  rate_limit: 100
+  rate_limit_window_seconds: 60
+
+metrics:
+  enabled: true
+  port: 9090
+  path: /metrics
+  collect_interval_seconds: 30
+
+webhooks:
+  enabled: true
+  timeout_seconds: 30
+  retry_attempts: 3
+  max_payload_bytes: 1048576
+
+performance:
+  query_cache_size: 100
+  result_cache_size: 1000
+  connection_pool_size: 20
