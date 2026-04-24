@@ -86,6 +86,18 @@ func (m *Manager) Initialize(ctx context.Context) error {
 
 // createTables creates the necessary database tables.
 func (m *Manager) createTables(ctx context.Context) error {
+	// Event categories table (referenced by analytics_events FK).
+	categoriesQuery := `
+		CREATE TABLE IF NOT EXISTS event_categories (
+			name TEXT PRIMARY KEY,
+			description TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`
+	if _, err := m.db.ExecContext(ctx, categoriesQuery); err != nil {
+		return fmt.Errorf("failed to create event_categories table: %w", err)
+	}
+
 	// Analytics events table (extended for retention)
 	eventsQuery := `
 		CREATE TABLE IF NOT EXISTS analytics_events (
