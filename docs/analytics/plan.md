@@ -46,6 +46,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] Local storage backend exists
 - [x] S3 storage backend exists
 - [x] Storage type modeling exists for `local`, `s3`, `iceberg`, and `k8s`
+- [x] Iceberg storage now supports local warehouse-backed read, write, list, delete, and health operations
 - [x] Retention policy, tiering, cleanup, and archival code exist
 - [x] Retention tests exist, including sqlite-backed execution coverage
 
@@ -69,7 +70,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 
 ### Backend gaps confirmed in code
 - [ ] GraphQL RBAC is fully enforced for analytics operations
-- [ ] Iceberg storage is production-ready
+- [ ] Iceberg storage external catalog integration is production-ready across deployed catalog backends
 - [ ] Dashboard/query persistence paths are fully implemented without placeholder logic
 
 ### Config and contract alignment
@@ -125,11 +126,12 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - `npm run build` in `modules/admin/spa`
 
 ### Tranche C - Remaining backend gaps
-- [ ] Finish REST webhook CRUD/test/history/replay wiring
-- [ ] Replace GraphQL placeholder auth/token parsing with real Aegion auth integration
+- [x] Finish REST webhook CRUD/test/history/replay wiring
+- [x] Replace GraphQL placeholder auth/token parsing with real Aegion auth integration
 - [ ] Enforce analytics RBAC consistently in GraphQL
-- [ ] Complete gRPC saved-query execution
-- [ ] Replace Iceberg stub behavior with a real implementation, or explicitly narrow support until implemented
+- [x] Complete gRPC saved-query execution
+- [x] Replace Iceberg stub behavior with a real local implementation and focused tests
+- [ ] Deepen Iceberg external catalog integration and production verification
 - [ ] Finish remaining dashboard/query placeholder plumbing
 
 **Focused verification**
@@ -166,7 +168,8 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] GraphQL rejects bad auth and sets a real identity context
 - [ ] GraphQL authorization is no longer placeholder-only
 - [x] gRPC query execution returns real results instead of `Unimplemented`
-- [ ] Iceberg support is functional with meaningful tests, or explicitly documented as deferred
+- [x] Iceberg support is functional locally with meaningful tests
+- [ ] Iceberg support is fully production-ready for external catalog deployments
 
 ### Configuration and UI
 - [ ] Analytics config in `aegion.yaml`, runtime validation, and Admin SPA forms all agree on the same contract
