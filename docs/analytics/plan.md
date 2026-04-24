@@ -1,734 +1,194 @@
-# DuckDB Analytics Migration Plan - Aegion (Beta Branch)
-
-## Overview
-Migrate Aegion's analytics layer to DuckDB while maintaining PostgreSQL for core operations. Build a complete, production-ready analytics system with flexible configuration, multiple storage backends, multiple API layers (REST/GraphQL/gRPC), configurable data retention, real-time dashboards with webhooks, and comprehensive test coverage.
-
-**Branch:** beta  
-**Scope:** Full end-to-end implementation  
-**Cadence:** Commit and push after every major change to origin/beta  
-**Commit Strategy:** Semantic messages (fix:, feat:, docs:, chore:, refactor:, security:)
-
----
-
-## Current Status (as of 2026-04-24)
-
-This plan now tracks the *actual* `beta` branch state (not just intentions).
-
-- **Last verified head:** `3cfc31e`
-- **Verified working slices (tests passing):**
-  - `modules/analytics/{dashboards,rest,graphql,grpc,integration,e2e,store,retention,sync,webhooks}`
-  - `internal/proto/analytics` exists (gRPC contract alignment for `modules/analytics/grpc`)
-  - `modules/admin/spa` builds (`npm run build`)
-- **Recent milestones completed (beta):**
-  - gRPC/proto alignment: `57c426d`
-  - Test hygiene / explicit skips: `2ed9522`
-  - REST validation + query hardening: `c8a8432`
-  - CI module matrix includes analytics: `6d84682`
-  - REST validator micro-perf cleanup: `7715408`
-  - Retention SQL portability + FK schema fix: `33797b1`
-  - Retention sqlite-backed unit tests (no longer skipped) + archival correctness fixes: `5d01903`
-  - Webhooks store unit coverage expansion: `3cfc31e`
-- **Remaining roadmap focus (not blockers):**
-  - Reduce remaining placeholder logic (REST dashboard/query persistence, GraphQL auth)
-  - Improve performance and simplify implementations once correctness/CI is stable
-- **QA / regression:** see `docs/analytics/qa.md`
-- **Verification commands:**
-  - `go test ./modules/analytics/grpc ./modules/analytics/dashboards ./modules/analytics/rest ./modules/analytics/graphql ./modules/analytics/integration ./modules/analytics/e2e ./modules/analytics/store ./modules/analytics/retention ./modules/analytics/sync ./modules/analytics/webhooks`
-  - `npm run build` (in `modules/admin/spa`)
-  - `go test ./modules/analytics/grpc`
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Aegion Analytics Layer                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌─────────────┐      ┌──────────────┐      ┌──────────────┐   │
-│  │  REST API   │      │ GraphQL API  │      │  gRPC API    │   │
-│  └──────┬──────┘      └──────┬───────┘      └──────┬───────┘   │
-│         │                    │                      │            │
-│         └────────────────────┼──────────────────────┘            │
-│                              │                                   │
-│                      ┌───────▼────────┐                          │
-│                      │ Analytics Core │                          │
-│                      │  (Query Engine)│                          │
-│                      └───────┬────────┘                          │
-│                              │                                   │
-│         ┌────────────────────┼────────────────────┐              │
-│         │                    │                    │              │
-│    ┌────▼─────┐    ┌────────▼────────┐  ┌───────▼──────┐       │
-│    │  DuckDB  │    │ Data Sync Layer │  │ Webhook Mgr  │       │
-│    │(Hot/Warm)│    │(Real/Batch/Async)  │ (Pub/Sub)    │       │
-│    └────┬─────┘    └────────┬────────┘  └───────┬──────┘       │
-│         │                   │                    │              │
-│    ┌────▼──────────────────▼──────────┬─────────▼──────┐       │
-│    │         Storage Backends         │  Event Stream  │       │
-│    │ • Local FS                       │  (KafkaRPC)    │       │
-│    │ • S3 + Apache Iceberg            │                │       │
-│    │ • Cold storage (Archive)         │                │       │
-│    │ • K8s persistent volumes         │                │       │
-│    └────────────────────────────────┬─┴────────────────┘       │
-│                                      │                          │
-│                           ┌──────────▼──────┐                   │
-│                           │ PostgreSQL      │                   │
-│                           │ (Source events) │                   │
-│                           └─────────────────┘                   │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Data Flow & Sync Strategies
-
-### 1. Real-time Sync (via CDC/Triggers)
-- PostgreSQL triggers publish events to DuckDB
-- Immediate consistency for critical events
-- Configuration option: `analytics.sync.real_time.enabled`
-
-### 2. Batch Sync (Scheduled)
-- Scheduled jobs (hourly/daily/weekly/custom)
-- Bulk insert from Postgres to DuckDB
-- Configuration option: `analytics.sync.batch.interval`
-
-### 3. Asynchronous Queue (Message Broker)
-- Events published to Kafka/RabbitMQ-like stream
-- Workers consume and write to DuckDB
-- Configuration option: `analytics.sync.async.broker`
-
-### 4. Hybrid Mode
-- Real-time for high-priority events
-- Batch/async for non-critical data
-- Automatic fallback on failure
-
----
-
-## Data Retention & Storage Tiers
-
-### Hot Storage
-- Recent data (configurable, default: last 7 days)
-- Local DuckDB for fast queries
-- Full query performance
-
-### Warm Storage
-- Medium-term data (default: 7-90 days)
-- Compressed storage (S3 or local)
-- Slightly slower queries
-
-### Cold Storage
-- Archive data (default: >90 days)
-- Apache Iceberg + S3 or local
-- Infrequent access
-
-### Configuration
-```yaml
-analytics:
-  retention:
-    hot:
-      enabled: true
-      ttl_days: 7
-      storage: local
-    warm:
-      enabled: true
-      ttl_days: 90
-      storage: s3
-      compression: snappy
-    cold:
-      enabled: true
-      storage: s3_iceberg
-      archive_format: parquet
-  # Per-category overrides
-  categories:
-    audit_events:
-      hot: 30
-      warm: 180
-      cold: 730
-    user_activity:
-      hot: 14
-      warm: 90
-      cold: 365
-```
-
----
-
-## Event Categories to Track
-
-All events stored in DuckDB with categorization:
-
-1. **Authentication Events**
-   - Login attempts (success/failure)
-   - Logout events
-   - Token generation/refresh/revocation
-   - MFA/passkey events
-
-2. **User Activity**
-   - User creation/update/deletion
-   - Profile changes
-   - Permission/role changes
-
-3. **Session Metrics**
-   - Session creation/termination
-   - Session duration
-   - Concurrent sessions
-   - Device/location tracking
-
-4. **OAuth2 Events**
-   - Authorization code flow
-   - Token endpoint access
-   - Consent events
-   - Client access logs
-
-5. **Audit Events**
-   - Admin actions
-   - Policy changes
-   - Configuration updates
-   - Security events
-
-6. **System Events**
-   - Service startup/shutdown
-   - Health checks
-   - Error/warning logs
-   - Performance metrics
-
----
-
-## API Endpoints
-
-### REST API (`/api/v1/analytics/`)
-- `GET /events` - Query events with filters
-- `GET /dashboards` - List configured dashboards
-- `GET /dashboards/:id` - Get dashboard data
-- `POST /dashboards` - Create custom dashboard
-- `GET /reports/:id` - Generate/fetch reports
-- `GET /export/:format` - Export analytics (CSV/JSON/Parquet)
-
-### GraphQL API (`/graphql`)
-- Query operations for flexible event/metric retrieval
-- Subscription support for real-time updates
-- Mutations for dashboard/report management
-
-### gRPC API (internal service communication)
-- `AnalyticsService.QueryEvents`
-- `AnalyticsService.GetDashboard`
-- `AnalyticsService.StreamEvents` (bidirectional streaming)
-- `AnalyticsService.ExportData`
-
----
-
-## Pre-built Dashboards
-
-1. **Authentication Dashboard**
-   - Login success/failure rates
-   - Peak login times
-   - Failed auth attempts by reason
-   - MFA adoption
-
-2. **User Activity Dashboard**
-   - New user signups
-   - Active users (DAU/MAU)
-   - User lifecycle phases
-
-3. **Session Analytics**
-   - Current active sessions
-   - Session duration trends
-   - Concurrent user peaks
-
-4. **Security Dashboard**
-   - Suspicious activities
-   - Rate limit violations
-   - Policy violation attempts
-   - Geographic anomalies
-
-5. **System Health**
-   - API latency
-   - Error rates
-   - Database performance
-   - Resource usage
-
----
-
-## Webhook System
-
-Real-time event notifications:
-- Webhook registration API
-- Event filtering (by type, category, source)
-- Retry mechanism with exponential backoff
-- Payload signing (HMAC-SHA256)
-- Event history and replay
-
-Example webhook trigger:
-```
-POST /webhooks/analytics/auth-spike
-{
-  "timestamp": "2026-04-23T18:47:49Z",
-  "event_type": "authentication.failed_spike",
-  "threshold": 10,
-  "current_rate": 45,
-  "duration_seconds": 300
-}
-```
-
----
-
-## Configuration Schema (aegion.yaml)
-
-```yaml
-modules:
-  analytics:
-    enabled: true
-    
-    # Storage configuration
-    storage:
-      primary:
-        type: duckdb  # Required
-        path: /data/analytics.duckdb
-        memory_limit_mb: 8192
-      
-      backends:
-        local:
-          enabled: true
-          path: /data/analytics_storage
-        s3:
-          enabled: false
-          bucket: my-analytics
-          region: us-east-1
-          prefix: analytics/
-        iceberg:
-          enabled: false
-          catalog_type: s3
-          warehouse_path: s3://my-analytics/iceberg
-    
-    # Data sync strategies
-    sync:
-      real_time:
-        enabled: true
-        batch_size: 100
-        flush_interval_ms: 5000
-      batch:
-        enabled: true
-        interval: "1h"
-        start_time: "02:00"
-      async:
-        enabled: false
-        broker: kafka
-        topic: analytics-events
-        partitions: 3
-    
-    # Retention policies
-    retention:
-      default_policy: tiered
-      hot:
-        ttl_days: 7
-        enabled: true
-      warm:
-        ttl_days: 90
-        enabled: true
-        compression: snappy
-      cold:
-        ttl_days: 730
-        enabled: true
-        archive_type: iceberg
-      
-      # Category-specific overrides
-      categories:
-        audit_events:
-          hot_days: 30
-          warm_days: 180
-          cold_days: 730
-        authentication:
-          hot_days: 14
-          warm_days: 60
-          cold_days: 365
-    
-    # API configuration
-    api:
-      rest:
-        enabled: true
-        base_path: /api/v1/analytics
-        rate_limit: 1000  # per minute
-      graphql:
-        enabled: true
-        endpoint: /graphql
-        introspection: true
-        playground: true
-      grpc:
-        enabled: true
-        port: 50051
-    
-    # Dashboard settings
-    dashboards:
-      auto_refresh_interval_seconds: 30
-      max_custom_dashboards: 50
-      default_time_range_days: 7
-    
-    # Webhooks
-    webhooks:
-      enabled: true
-      max_retry: 5
-      retry_backoff_seconds: 60
-      timeout_seconds: 30
-      signature_algorithm: hmac256
-    
-    # Performance
-    performance:
-      query_timeout_seconds: 300
-      max_concurrent_queries: 50
-      enable_query_cache: true
-      cache_ttl_minutes: 15
-```
-
----
-
-## Implementation Phases
-
-### Phase 1: Foundation (Data Layer & Storage)
-- [x] DuckDB integration module (basic; env-dependent extensions may skip some tests)
-- [x] Storage backend abstraction (local, S3, Iceberg, K8s)
-- [x] Database schema for analytics (module migrations present under `modules/analytics/migrations/`)
-- [ ] Migration system updates (core migrations not yet extended for analytics)
-- [ ] Initial configuration in aegion.yaml (spec exists; verify runtime wiring)
-- **Commit pattern:** `feat: duckdb analytics foundation`
-
-### Phase 2: Data Sync Layer
-- [x] Real-time sync engine (implementation present; CDC/trigger details depend on deployment wiring)
-- [x] Batch sync scheduler
-- [x] Async queue integration (in-memory broker implemented; external brokers require env)
-- [x] Event publishing system
-- [x] Sync health monitoring
-- **Commit pattern:** `feat: analytics data sync`
-
-### Phase 3: REST API
-- [x] Query builder/parser
-- [x] Event filtering & aggregation (baseline)
-- [x] Export functionality (CSV, JSON, Parquet) (baseline)
-- [ ] Rate limiting & auth (needs hardening + real auth middleware integration)
-- [x] Pagination & sorting
-- **Commit pattern:** `feat: analytics rest api`
-
-### Phase 4: GraphQL API
-- [x] Schema definition
-- [x] Query resolvers
-- [x] Subscription support (basic channels; production readiness requires review)
-- [x] Playground setup (config present)
-- [ ] Authentication/authorization (needs hardening + real auth context enforcement)
-- **Commit pattern:** `feat: analytics graphql api`
-
-### Phase 5: gRPC API
-- [x] Proto definitions (`internal/proto/analytics`)
-- [x] Service implementation (QueryEvents/GetDashboard/ExportData)
-- [x] Streaming support (StreamEvents)
-- [x] Interceptors for auth/logging (baseline)
-- [x] Unit tests (service + interceptors)
-- **Commit pattern:** `fix: align analytics grpc with internal proto contract`
-
-### Phase 6: Retention & Storage Management
-- [x] Hot/warm/cold tier management (baseline)
-- [x] Automatic archival jobs (scheduler present; env-dependent execution)
-- [x] Retention policy enforcement (baseline)
-- [x] Apache Iceberg integration (stub backend present; production integration pending)
-- [x] S3 backend implementation (requires env)
-- **Commit pattern:** `feat: analytics retention & archival`
-
-### Phase 7: Webhook System
-- [x] Webhook registration/management (baseline)
-- [x] Event filtering
-- [x] Signature generation
-- [x] Retry mechanism
-- [ ] Event history (delivery history persistence depends on store wiring)
-- **Commit pattern:** `feat: analytics webhooks`
-
-### Phase 8: Pre-built Dashboards
-- [x] Dashboard data models
-- [x] Auth dashboard queries (baseline set)
-- [x] Activity dashboard queries (baseline set)
-- [x] Security dashboard queries (baseline set)
-- [x] System health dashboard queries (baseline set)
-- [x] Dashboard API endpoints (REST + GraphQL baseline)
-- **Commit pattern:** `feat: analytics dashboards`
-
-### Phase 9: Admin SPA Integration
-- [x] Analytics configuration UI (baseline screens)
-- [x] Dashboard builder
-- [ ] Sync strategy selector (screen exists; verify backend wiring + validation UX)
-- [x] Retention policy UI
-- [x] Event viewer
-- [ ] Webhook manager (screen exists; verify backend wiring + delivery history UI)
-- **Commit pattern:** `feat: admin spa analytics module`
-
-### Phase 10: Testing Suite
-- [x] Unit tests (core slices covered; see `modules/analytics/*/*_test.go`)
-- [ ] Integration tests (Postgres ↔ DuckDB) (skipped until env is provided)
-- [ ] E2E tests (API workflows) (skipped until env is provided)
-- [ ] Performance benchmarks (not yet)
-- [ ] Security tests (auth, injection, etc.) (not yet)
-- [ ] Load tests (not yet)
-- **Commit pattern:** `test: analytics full coverage`
-
-### Phase 11: Documentation
-- [ ] OpenAPI schema
-- [ ] GraphQL schema documentation
-- [ ] Configuration guide (docs/analytics/config.md)
-- [ ] API usage guide (docs/analytics/api.md)
-- [ ] Architecture guide (docs/analytics/architecture.md)
-- [ ] Setup guide (docs/analytics/setup.md)
-- [ ] Implementation plan with tickboxes (docs/analytics/plan.md)
-- **Commit pattern:** `docs: analytics documentation`
-
-### Phase 12: Security & Production Hardening
-- [ ] RBAC for analytics APIs
-- [ ] Data encryption at rest/in-transit
-- [ ] Audit logging for analytics queries
-- [ ] Rate limiting per user/tenant
-- [ ] Query validation & sanitization
-- [ ] Secrets management
-- **Commit pattern:** `security: analytics hardening`
-
-### Phase 13: CI/CD & Deployment
-- [ ] GitHub Actions workflow updates
-- [ ] Migration testing in CI
-- [ ] Docker image updates
-- [ ] Kubernetes manifests
-- [ ] Health check endpoints
-- **Commit pattern:** `chore: analytics ci/cd setup`
-
-### Phase 14: Performance Optimization
-- [ ] Query optimization
-- [ ] Index creation
-- [ ] Caching strategies
-- [ ] Memory management
-- [ ] Benchmarking & profiling
-- **Commit pattern:** `perf: analytics optimization`
-
-### Phase 15: Bug Fixes & Cleanup
-- [ ] Known issue resolution
-- [ ] Edge case handling
-- [ ] Code cleanup
-- [ ] Technical debt resolution
-- **Commit pattern:** `fix: analytics issues`
-
----
-
-## Database Schema for Analytics
-
-### Core Tables (DuckDB)
-
-```sql
--- Events table (immutable)
-CREATE TABLE analytics_events (
-    id UUID PRIMARY KEY,
-    event_type VARCHAR NOT NULL,
-    category VARCHAR NOT NULL,
-    source_system VARCHAR,
-    timestamp TIMESTAMP NOT NULL,
-    data JSON,
-    storage_tier VARCHAR DEFAULT 'hot',  -- hot, warm, cold
-    created_at TIMESTAMP DEFAULT now(),
-    archived_at TIMESTAMP NULL
-) PARTITION BY (MONTH, category);
-
--- Metrics aggregates
-CREATE TABLE analytics_metrics (
-    id UUID PRIMARY KEY,
-    metric_name VARCHAR NOT NULL,
-    category VARCHAR NOT NULL,
-    time_bucket TIMESTAMP NOT NULL,
-    value DOUBLE NOT NULL,
-    dimensions JSON,
-    created_at TIMESTAMP DEFAULT now()
-) PARTITION BY (MONTH);
-
--- Dashboard definitions
-CREATE TABLE analytics_dashboards (
-    id UUID PRIMARY KEY,
-    name VARCHAR NOT NULL,
-    category VARCHAR,
-    definition JSON NOT NULL,
-    is_default BOOLEAN DEFAULT false,
-    created_by UUID,
-    created_at TIMESTAMP DEFAULT now(),
-    updated_at TIMESTAMP DEFAULT now()
-);
-
--- Custom queries
-CREATE TABLE analytics_queries (
-    id UUID PRIMARY KEY,
-    name VARCHAR NOT NULL,
-    sql_query TEXT NOT NULL,
-    description TEXT,
-    created_by UUID,
-    is_public BOOLEAN DEFAULT false,
-    created_at TIMESTAMP DEFAULT now()
-);
-
--- Webhooks
-CREATE TABLE analytics_webhooks (
-    id UUID PRIMARY KEY,
-    url VARCHAR NOT NULL,
-    events JSON NOT NULL,  -- array of event types
-    secret VARCHAR NOT NULL,
-    is_active BOOLEAN DEFAULT true,
-    created_by UUID,
-    created_at TIMESTAMP DEFAULT now()
-);
-```
-
----
-
-## Migration Strategy
-
-### On Beta Branch:
-1. **Delete existing analytics tables** (fresh start - no data yet)
-2. **Update migration files** (overwrite, don't create new drop migrations)
-3. **Add DuckDB migrations** in `core/migrations/0009_analytics_schema.up.sql`
-4. **Test locally** before pushing
-
-### Migration File Structure:
-```
-core/migrations/
-├── 0009_analytics_schema.up.sql       (Create DuckDB schema)
-├── 0009_analytics_schema.down.sql     (Drop DuckDB schema)
-modules/analytics/
-├── migrations/0001_analytics_base.up.sql
-├── migrations/0001_analytics_base.down.sql
-└── ...
-```
-
----
-
-## Commit Strategy
-
-Every major feature/component → commit and push:
-
-```bash
-# After Phase 1
-git add .
-git commit -m "feat: add duckdb analytics foundation with storage backends"
-git push origin beta
-
-# After Phase 2
-git add .
-git commit -m "feat: implement data sync layer (real-time, batch, async)"
-git push origin beta
-
-# Bug fixes during development
-git add .
-git commit -m "fix: analytics sync race condition"
-git push origin beta
-
-# Documentation updates
-git add .
-git commit -m "docs: add analytics configuration guide"
-git push origin beta
-
-# Refactoring
-git add .
-git commit -m "refactor: consolidate analytics query logic"
-git push origin beta
-
-# Security updates
-git add .
-git commit -m "security: add RBAC for analytics apis"
-git push origin beta
-```
-
----
-
-## Testing Strategy
-
-### Unit Tests
-- [ ] DuckDB connection management
-- [ ] Query builders
-- [ ] Data formatting/validation
-- [ ] Retention policy calculations
-- [ ] Event categorization
-
-### Integration Tests
-- [ ] Postgres → DuckDB sync
-- [ ] Real-time event publishing
-- [ ] Batch job execution
-- [ ] Webhook delivery
-- [ ] Dashboard data fetching
-
-### E2E Tests
-- [ ] REST API workflows (query → export)
-- [ ] GraphQL subscription lifecycle
-- [ ] Dashboard creation → data population
-- [ ] Multi-tier retention workflow
-- [ ] Failure & recovery scenarios
-
-### Performance Tests
-- [ ] 1M event ingestion
-- [ ] Query latency under load
-- [ ] Concurrent API requests
-- [ ] Memory usage profiling
-- [ ] Storage tier transitions
-
-### Security Tests
-- [ ] SQL injection prevention
-- [ ] Unauthorized API access
-- [ ] Webhook signature validation
-- [ ] Rate limiting enforcement
-- [ ] Data isolation (multi-tenant scenarios)
-
----
-
-## Documentation Deliverables
-
-All in `docs/analytics/`:
-
-1. **plan.md** - Tickbox implementation plan (this file becomes the source)
-2. **architecture.md** - System design, data flows, component descriptions
-3. **config.md** - Complete configuration reference for aegion.yaml
-4. **api.md** - REST API reference and examples
-5. **graphql-schema.md** - GraphQL schema with examples
-6. **setup.md** - Installation and local development guide
-7. **openapi.yaml** - OpenAPI 3.0 specification
-8. **graphql.schema** - GraphQL schema in standard format
-
----
-
-## Success Criteria (Production Ready)
-
-- ✅ All phases 1-15 completed
-- ✅ Unit test coverage >85%
-- ✅ Integration tests all passing
-- ✅ E2E tests for core workflows passing
-- ✅ Performance benchmarks meet targets
-- ✅ Security audit passed (no critical vulnerabilities)
-- ✅ Documentation complete and reviewed
-- ✅ Zero race conditions in sync layer
-- ✅ All configurations working in aegion.yaml
-- ✅ Admin SPA fully functional
-- ✅ CI/CD pipeline green
-- ✅ Load tested to expected QPS
-
----
-
-## Risk Mitigation
-
-| Risk | Mitigation |
-|------|-----------|
-| DuckDB performance at scale | Early performance testing, query optimization, indexing strategy |
-| Data consistency Postgres ↔ DuckDB | Dual-write validation, sync verification jobs, reconciliation |
-| Storage backend failures | Multi-backend support, fallback mechanisms, health checks |
-| Webhook delivery reliability | Retry logic, DLQ, monitoring, alerting |
-| Configuration complexity | Admin SPA simplifies, sensible defaults, clear documentation |
-
----
-
-## Timeline Notes
-
-- No time estimates provided (long-running project)
-- Prioritize by phase order but remain flexible
-- Each commit should be a working, testable state
-- Push frequently to origin/beta for team visibility
-- Use semantic commits consistently
-- Document decisions and rationale in commit messages
-
----
-
-*Plan created: 2026-04-23*  
-*Status: Ready for implementation*  
-*Branch: beta*  
-*Cadence: Continuous (commit after each major change)*
+# Analytics Master Plan - Verified Beta Checklist
+
+## Purpose
+
+This file is the source-of-truth roadmap for analytics work on the `beta` branch. It is based on repository inspection and `git log`, not earlier phase summaries. A checkbox is marked `[x]` only when the code or docs exist in the current branch and are not obviously placeholder-only. Anything stubbed, skipped, partially wired, or missing stays `[ ]`.
+
+**Verified branch:** `beta`  
+**Verified head:** `daead5d`  
+**Last reviewed:** `2026-04-24`  
+**Primary verification inputs:** `modules/analytics`, `modules/admin/spa/src/components/Analytics`, `configs/aegion.yaml`, `docs/analytics`, recent `git log`
+
+## Verification rules
+
+- `[x]` means code exists, is wired enough to be considered shipped on `beta`, and is not contradicted by obvious `NOT_IMPLEMENTED`, `Unimplemented`, `TODO`, stub, or permanent skip markers.
+- `[ ]` means any of the following:
+  - not implemented,
+  - only modeled in config/types,
+  - exposed in UI but not backed by working handlers,
+  - guarded by explicit skipped test harnesses,
+  - documented but the promised file/spec does not exist.
+- For each major tranche, done means:
+  - code merged locally,
+  - focused tests run,
+  - broader analytics verification run as appropriate,
+  - docs updated,
+  - committed and pushed to `origin/beta`.
+
+## Verified shipped on `beta`
+
+### Analytics foundation
+- [x] Analytics module structure exists under `modules/analytics`
+- [x] DuckDB-backed analytics store exists
+- [x] Analytics migrations exist under `modules/analytics/migrations`
+- [x] Admin SPA analytics routes/pages exist under `modules/admin/spa/src`
+- [x] Analytics CI workflow exists
+- [x] Recent security/perf/test milestones are present in `git log`
+
+### Sync and ingestion
+- [x] Real-time sync implementation exists
+- [x] Batch sync implementation exists
+- [x] Async sync implementation exists
+- [x] Hybrid sync implementation exists
+- [x] Sync strategy tests exist
+
+### Storage and retention
+- [x] Local storage backend exists
+- [x] S3 storage backend exists
+- [x] Storage type modeling exists for `local`, `s3`, `iceberg`, and `k8s`
+- [x] Retention policy, tiering, cleanup, and archival code exist
+- [x] Retention tests exist, including sqlite-backed execution coverage
+
+### API and UI surface
+- [x] REST analytics package exists
+- [x] REST webhook handlers are wired to the webhook manager when the manager dependency is configured
+- [x] GraphQL analytics package exists
+- [x] gRPC analytics package exists with generated/internal proto
+- [x] Dashboard, event, report, health, and config screens exist in the Admin SPA
+- [x] SPA client methods exist for storage, sync, retention, dashboards, reports, events, and webhooks
+
+### Current docs
+- [x] `docs/analytics/plan.md` exists as the execution tracker
+- [x] `docs/analytics/qa.md` exists as the regression companion
+- [x] `docs/analytics/quickstart.md` exists
+- [x] `docs/analytics/README.md` exists
+
+## Partial or incomplete on `beta`
+
+### Backend gaps confirmed in code
+- [ ] GraphQL authentication validates real Aegion identity/session/token state
+- [ ] GraphQL RBAC is fully enforced for analytics operations
+- [ ] gRPC saved-query execution is implemented end-to-end
+- [ ] Iceberg storage is production-ready
+- [ ] Dashboard/query persistence paths are fully implemented without placeholder logic
+
+### Config and contract alignment
+- [ ] `configs/aegion.yaml` matches the richer runtime analytics config model in `modules/analytics/config.go`
+- [ ] `configs/aegion.yaml` exposes per-strategy sync settings with the same shape used by runtime validation
+- [ ] `configs/aegion.yaml` exposes storage and retention flexibility at the same fidelity as runtime config
+- [ ] Admin SPA config forms match the backend contract actually enforced by the runtime
+- [ ] Config docs clearly distinguish implemented vs modeled-only options
+
+### Test and verification gaps
+- [ ] Integration tests run by default in CI with a real Postgres/DuckDB harness
+- [ ] E2E analytics workflows run by default in CI with a real harness
+- [ ] Performance benchmarks are part of normal regression verification
+- [ ] Security-specific analytics tests are part of normal regression verification
+- [ ] Link validation exists for `docs/analytics`
+
+### Documentation gaps
+- [ ] `docs/analytics/openapi.yaml` exists
+- [ ] `docs/analytics/graphql-schema.md` exists
+- [ ] `docs/analytics/config.md` exists
+- [ ] `docs/analytics/api.md` exists
+- [ ] `docs/analytics/architecture.md` exists
+- [ ] `docs/analytics/setup.md` exists
+- [ ] `docs/analytics/integration.md` exists
+- [ ] `docs/analytics/admin-spa.md` exists
+- [ ] `docs/analytics/performance.md` exists
+- [ ] `docs/analytics/webhooks.md` exists
+- [ ] `docs/analytics/security.md` exists
+- [ ] `docs/analytics/troubleshooting.md` exists
+- [ ] `docs/analytics/faq.md` exists
+
+## Execution tranches
+
+### Tranche A - Docs truth reset
+- [x] Rewrite this plan to reflect the actual `beta` branch state
+- [x] Separate shipped vs partial vs missing work
+- [x] Stop claiming missing docs/specs already exist
+- [ ] Add automated doc-link verification to the project toolchain
+
+**Done criteria**
+- Plan checked against current head
+- README/quickstart links only point to files that exist, or clearly call out pending docs
+- Commit/push completed
+
+### Tranche B - Config and contract alignment
+- [ ] Align `configs/aegion.yaml` with `modules/analytics/config.go`
+- [ ] Align Admin SPA analytics config payloads with backend/runtime contracts
+- [ ] Add or extend validation coverage for the aligned config shape
+- [ ] Update docs and examples after contract alignment lands
+
+**Focused verification**
+- `go test ./modules/analytics/...`
+- `npm run build` in `modules/admin/spa`
+
+### Tranche C - Remaining backend gaps
+- [ ] Finish REST webhook CRUD/test/history/replay wiring
+- [ ] Replace GraphQL placeholder auth/token parsing with real Aegion auth integration
+- [ ] Enforce analytics RBAC consistently in GraphQL
+- [ ] Complete gRPC saved-query execution
+- [ ] Replace Iceberg stub behavior with a real implementation, or explicitly narrow support until implemented
+- [ ] Finish remaining dashboard/query placeholder plumbing
+
+**Focused verification**
+- `go test ./modules/analytics/rest`
+- `go test ./modules/analytics/graphql`
+- `go test ./modules/analytics/grpc`
+- `go test ./modules/analytics/webhooks`
+- `go test ./modules/analytics/store`
+
+### Tranche D - Frontend and docs completion
+- [ ] Remove or disable SPA controls that call placeholder endpoints
+- [ ] Reconcile SPA analytics flows with real backend behavior
+- [ ] Add missing docs only after the corresponding slice is real
+- [ ] Keep `docs/analytics/qa.md` synchronized with the real verification path
+
+**Focused verification**
+- `npm run build` in `modules/admin/spa`
+- Manual smoke checks from `docs/analytics/qa.md`
+
+### Tranche E - Full verification and release discipline
+- [ ] Run focused tests for each change set before broader sweeps
+- [ ] Run broader analytics module verification after each major tranche
+- [ ] Update this plan and `docs/analytics/qa.md` in the same change set
+- [ ] Commit and push every major tranche to `origin/beta`
+
+**Broader verification target**
+- `go test -count=1 ./modules/analytics/grpc ./modules/analytics/dashboards ./modules/analytics/rest ./modules/analytics/graphql ./modules/analytics/integration ./modules/analytics/e2e ./modules/analytics/store ./modules/analytics/retention ./modules/analytics/sync ./modules/analytics/webhooks`
+- `npm run build` in `modules/admin/spa`
+
+## Concrete acceptance gates
+
+### Backend
+- [x] Webhook REST endpoints stop returning `NOT_IMPLEMENTED`
+- [ ] GraphQL rejects bad auth and sets a real identity context
+- [ ] GraphQL authorization is no longer placeholder-only
+- [ ] gRPC query execution returns real results instead of `Unimplemented`
+- [ ] Iceberg support is functional with meaningful tests, or explicitly documented as deferred
+
+### Configuration and UI
+- [ ] Analytics config in `aegion.yaml`, runtime validation, and Admin SPA forms all agree on the same contract
+- [ ] The SPA does not present successful UX for endpoints that are still placeholder-only
+
+### Tests
+- [ ] Integration/E2E coverage no longer depends on permanent skip paths once harness/config is supplied
+- [ ] Performance and security verification are represented by runnable analytics-specific suites or documented deferred tasks
+
+### Docs
+- [ ] Every link in `docs/analytics` resolves to an existing file
+- [ ] This plan matches the repo state at the commit where it is updated
+
+## Commit workflow for every major tranche
+
+- [ ] `git add .`
+- [ ] semantic commit message (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `security:`, `perf:`, `test:`)
+- [ ] `git push origin beta`
+- [ ] update this plan only after the code/test/doc state matches the checkbox changes
+
+## Defaults and constraints
+
+- Beta-only rule: there is no production analytics data to preserve, so analytics-specific schema/data may be reset when that is the safer path.
+- “All options supported” means user-selectable and config-driven over time, but this plan distinguishes between implemented, partial, and planned work.
+- Do not mark placeholder-backed features complete just because types, routes, or UI controls exist.

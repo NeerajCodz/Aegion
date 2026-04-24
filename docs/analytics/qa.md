@@ -2,6 +2,9 @@
 
 This document is the practical test/runbook companion to `docs/analytics/plan.md`.
 
+**Verified head:** `daead5d`  
+**Last reviewed:** `2026-04-24`
+
 ## Automated Regression
 
 Backend (analytics module matrix):
@@ -42,65 +45,58 @@ go test -count=1 -covermode=atomic -coverprofile=coverage_analytics ./modules/an
 go tool cover -func=coverage_analytics | Select-Object -Last 1
 ```
 
-Note: for day-to-day work we target “feature coverage” (tests exist for each plan feature) first, then drive statement coverage upward iteratively.
+Note: day-to-day work should prioritize feature coverage for the tranche being changed, then widen toward full-module coverage.
 
 ## Feature Coverage Map (Current)
 
-This is a living mapping from major plan features to concrete tests. Add to it whenever a feature is implemented or a test is added.
-
 - Config validation: `modules/analytics/config_test.go`
-- Sync strategies (real-time/batch/async + helpers): `modules/analytics/sync/*_test.go`
-- Retention (policy/tiering/cleanup/archival + sqlite-backed execution): `modules/analytics/retention/*_test.go`
-- Webhooks (matching/signing/retry/queue/store/worker): `modules/analytics/webhooks/*_test.go`
-- REST API (query parsing/validation/handlers): `modules/analytics/rest/*_test.go`
-- GraphQL (schema/resolvers/subscriptions): `modules/analytics/graphql/*_test.go`
-- gRPC (service + interceptors): `modules/analytics/grpc/*_test.go`
-- Dashboards (query catalog + handlers): `modules/analytics/dashboards/*_test.go`
+- Sync strategies (real-time, batch, async, hybrid): `modules/analytics/sync/*_test.go`
+- Retention (policy, tiering, cleanup, archival, sqlite-backed execution): `modules/analytics/retention/*_test.go`
+- Webhooks (matching, signing, retry, queue, store, worker): `modules/analytics/webhooks/*_test.go`
+- REST API (query parsing, validation, handlers): `modules/analytics/rest/*_test.go`
+- GraphQL (schema, resolvers, subscriptions): `modules/analytics/graphql/*_test.go`
+- gRPC (service and interceptors): `modules/analytics/grpc/*_test.go`
+- Dashboards (query catalog and handlers): `modules/analytics/dashboards/*_test.go`
 
-## Manual Smoke Checklist (95%+ Feature Coverage Target)
-
-These are the human “does it work end-to-end?” checks that complement unit tests.
+## Manual Smoke Checklist
 
 Backend:
 
-1. Start Aegion with analytics enabled in `docs/aegion.yaml` (or your env’s `aegion.yaml`).
-2. Verify each API surface responds when enabled and rejects when disabled:
+1. Start Aegion with analytics enabled in `configs/aegion.yaml` or your active environment config.
+2. Verify each enabled API surface responds:
    - REST: `GET /api/v1/analytics/events`
-   - GraphQL: `POST /graphql` basic query
-   - gRPC: `QueryEvents` round-trip (via grpcurl or internal client)
-3. Verify sync strategy toggles:
-   - real-time enabled: new events appear without manual batch trigger
-   - batch enabled: scheduled job runs (or trigger endpoint/command if present)
-   - async enabled: enqueue path works and workers drain the queue
-4. Verify retention tiering:
-   - hot -> warm transitions happen for stale data
-   - warm -> cold transitions happen for older data
-   - archival writes an external artifact (backend-dependent)
-5. Verify webhooks:
-   - create webhook with filters
-   - emit an event that matches
-   - delivery is attempted, retries happen on 5xx, DLQ on terminal failure
+   - GraphQL: `POST /graphql` with a basic query
+   - gRPC: analytics service round-trip with your internal client or `grpcurl`
+3. Verify sync strategy toggles for the environment you are testing:
+   - real-time path
+   - batch path
+   - async path
+   - hybrid behavior/fallback
+4. Verify retention behavior:
+   - hot to warm transitions
+   - warm to cold transitions
+   - archival artifact creation for the configured backend
+5. Verify webhook behavior as implemented:
+   - create/update/delete when the REST manager wiring exists
+   - event matching and delivery attempts
+   - retry behavior on 5xx responses
 
 Admin SPA:
 
-1. Build passes (`npm run build`).
-2. Open analytics settings UI:
-   - enable/disable analytics module
-   - choose storage backend (local/S3/Iceberg/K8s)
-   - choose sync strategies (real-time, batch, async, hybrid)
-   - configure retention tiers + per-category overrides
-3. Dashboards:
-   - open pre-built dashboards
-   - create a custom dashboard (builder)
-   - verify “refresh” / auto-refresh behavior
-4. Webhooks:
-   - create webhook
-   - update webhook
-   - delete/disable webhook
-   - verify delivery history UI when wired
+1. Build passes with `npm run build`.
+2. Open analytics settings pages for storage, sync, retention, and webhooks.
+3. Open overview, dashboards, events, reports, and health pages.
+4. Confirm the UI behavior matches the backend functionality that is actually wired on the branch.
 
-## Known Gaps (Planned)
+## Known Gaps (Verified)
 
-- Integration/E2E tests requiring Postgres + DuckDB runtime (currently explicit skips).
-- Benchmarks/load/security-specific tests (planned in plan Phases 10/12/14).
+- Integration/E2E tests requiring Postgres plus DuckDB runtime remain explicit skips until the harness/config is supplied.
+- GraphQL auth and parts of the authorization path still contain placeholder logic.
+- gRPC saved-query execution still contains an `Unimplemented` path.
+- Iceberg support is modeled in config/code but still includes stub behavior.
+- Several deep-dive docs promised in earlier docs are not present yet; `docs/analytics/README.md` now treats them as pending.
 
+## Docs Acceptance
+
+- `docs/analytics/plan.md` checkbox state must match the repo state at the commit where it is updated.
+- `docs/analytics` links should point only to files that actually exist on the branch.

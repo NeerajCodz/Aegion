@@ -15,6 +15,7 @@ type InitParams struct {
 	Logger  zerolog.Logger
 	DB      Database
 	Validator *Validator
+	WebhookManager WebhookManager
 }
 
 // Initialize sets up the REST API module
@@ -66,6 +67,7 @@ func Initialize(params InitParams) (*Handler, error) {
 		Exports: exportBuilder,
 		Cache:   cache,
 		Validator: params.Validator,
+		WebhookManager: params.WebhookManager,
 	})
 
 	params.Logger.Info().
