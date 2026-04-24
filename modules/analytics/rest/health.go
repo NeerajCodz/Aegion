@@ -87,7 +87,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	// Get cache metrics if available
 	cacheMetrics := make(map[string]interface{})
 	if h.cache != nil {
-		if m, err := h.cache.Get(ctx, "metrics:cache"); err == nil && m != nil {
+		if m, found, err := h.cache.Get(ctx, "metrics:cache"); err == nil && found && m != nil {
 			if metrics, ok := m.(map[string]interface{}); ok {
 				cacheMetrics = metrics
 			}
@@ -206,7 +206,7 @@ func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 	var cachedQueries int64
 
 	if h.cache != nil {
-		if m, err := h.cache.Get(ctx, "metrics:cache"); err == nil && m != nil {
+		if m, found, err := h.cache.Get(ctx, "metrics:cache"); err == nil && found && m != nil {
 			if metrics, ok := m.(map[string]interface{}); ok {
 				hitRate = extractFloat(metrics, "hit_rate", 0.0)
 				queryLatencyP95 = int64(extractFloat(metrics, "query_latency_p95_ms", 0.0))

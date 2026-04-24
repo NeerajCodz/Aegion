@@ -155,6 +155,31 @@ type DuckDBConfig struct {
 
 	// InitializeOnStartup determines if schema should be created on startup
 	InitializeOnStartup bool `yaml:"initialize_on_startup"`
+
+	// Performance optimization settings
+	Performance PerformanceConfig `yaml:"performance"`
+}
+
+// PerformanceConfig holds performance tuning settings
+type PerformanceConfig struct {
+	// Query execution settings
+	QueryTimeoutSeconds    int `yaml:"query_timeout_seconds"`
+	MaxConcurrentQueries   int `yaml:"max_concurrent_queries"`
+	ExplainThresholdMs     int `yaml:"explain_threshold_ms"`
+
+	// Caching settings
+	CachingEnabled bool `yaml:"caching_enabled"`
+	CacheTTLMinutes int `yaml:"cache_ttl_minutes"`
+	CacheMaxSizeMB int `yaml:"cache_max_size_mb"`
+
+	// Memory and threading
+	GCIntervalMs int `yaml:"gc_interval_ms"`
+
+	// Batch operation settings
+	SyncBatchSize       int `yaml:"sync_batch_size"`
+	SyncFlushIntervalMs int `yaml:"sync_flush_interval_ms"`
+	ExportBatchSize     int `yaml:"export_batch_size"`
+	WebhookBatchSize    int `yaml:"webhook_batch_size"`
 }
 
 // StorageConfig holds storage backend configuration.
