@@ -22,6 +22,9 @@ func Router(h *Handler, logger zerolog.Logger) chi.Router {
 
 	// Health endpoints (no auth required)
 	r.Get("/health", h.Health)
+	r.Get("/ready", h.Ready)
+	r.Get("/live", h.Live)
+	r.Get("/metrics", h.Metrics)
 	r.Get("/stats", h.Stats)
 	r.Get("/export-formats", h.ExportFormats)
 
