@@ -466,13 +466,13 @@ func (r *Resolver) CreateWebhook(ctx context.Context, input *CreateWebhookInput)
 	}
 
 	webhook := &analytics.Webhook{
-		ID:        generateID(),
-		URL:       input.URL,
-		EventType: input.EventType,
-		Secret:    generateID(), // Generate random secret
-		Active:    active,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:         generateID(),
+		URL:        input.URL,
+		EventTypes: []string{input.EventType},
+		Secret:     generateID(), // Generate random secret
+		Active:     active,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
 	created, err := r.store.CreateWebhook(ctx, webhook)
@@ -638,10 +638,15 @@ func healthToNode(h *analytics.HealthStatus) *HealthStatusNode {
 }
 
 func webhookToNode(w *analytics.Webhook) *WebhookNode {
+	eventType := ""
+	if len(w.EventTypes) > 0 {
+		eventType = w.EventTypes[0]
+	}
+
 	return &WebhookNode{
 		ID:        w.ID,
 		URL:       w.URL,
-		EventType: w.EventType,
+		EventType: eventType,
 		Active:    w.Active,
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
