@@ -6,11 +6,29 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // MockStorageBackend is a mock storage backend for testing.
 type MockStorageBackend struct {
 	data map[string][]byte
+}
+
+func openTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", "file:retention_test?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("failed to open sqlite test db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	// Keep behavior consistent and surface FK mistakes early.
+	_, _ = db.Exec("PRAGMA foreign_keys = ON;")
+
+	return db
 }
 
 func NewMockStorageBackend() *MockStorageBackend {
@@ -177,10 +195,7 @@ func TestCategorySpecificPolicies(t *testing.T) {
 // TestTieringEngine tests tier transitions.
 func TestTieringEngine(t *testing.T) {
 	// Create in-memory database
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Skipf("sqlite3 driver not available in test environment: %v", err)
-	}
+	db := openTestDB(t)
 	defer db.Close()
 
 	// Create test table
@@ -198,30 +213,63 @@ func TestTieringEngine(t *testing.T) {
 		t.Fatalf("failed to create test table: %v", err)
 	}
 
-	policy := DefaultRetentionPolicy()
+	policy := &RetentionPolicy{
+		Hot:  TierConfig{TTLDays: 1, Enabled: true},
+		Warm: TierConfig{TTLDays: 2, Enabled: true},
+		Cold: TierConfig{TTLDays: 3, Enabled: true},
+	}
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("policy validation failed: %v", err)
+	}
 	auditLog := &NoopAuditLog{}
 
 	engine := NewTieringEngine(db, policy, auditLog)
 	ctx := context.Background()
 
-	// Test data distribution query
+	// Insert data: one hot stale (should move to warm), one hot fresh (stays hot),
+	// and one warm stale (should move to cold).
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO analytics_events (id, category, tier, created_at)
+		VALUES
+			('hot_old', 'test', 'hot', datetime('now', '-2 days')),
+			('hot_new', 'test', 'hot', datetime('now')),
+			('warm_old', 'test', 'warm', datetime('now', '-3 days'))
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert seed events: %v", err)
+	}
+
+	transition, err := engine.TransitionStaleData(ctx, "test")
+	if err != nil {
+		t.Fatalf("TransitionStaleData failed: %v", err)
+	}
+	if transition.Status != "completed" {
+		t.Fatalf("expected completed transition, got %q (error=%q)", transition.Status, transition.Error)
+	}
+
 	distribution, err := engine.GetDataDistribution(ctx, "test")
 	if err != nil {
 		t.Fatalf("GetDataDistribution failed: %v", err)
 	}
 
-	if distribution[TierHot] != 0 {
-		t.Errorf("expected 0 hot records, got %d", distribution[TierHot])
+	if distribution[TierHot] != 1 || distribution[TierWarm] != 1 || distribution[TierCold] != 1 {
+		t.Fatalf("unexpected tier distribution: hot=%d warm=%d cold=%d", distribution[TierHot], distribution[TierWarm], distribution[TierCold])
+	}
+
+	// Ensure tier_updated_at was set for moved rows.
+	var updatedHotOld sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT tier_updated_at FROM analytics_events WHERE id = 'hot_old'`).Scan(&updatedHotOld); err != nil {
+		t.Fatalf("failed to query tier_updated_at: %v", err)
+	}
+	if !updatedHotOld.Valid {
+		t.Fatalf("expected tier_updated_at to be set for hot_old")
 	}
 }
 
 // TestCleanupManager tests cleanup operations.
 func TestCleanupManager(t *testing.T) {
 	// Create in-memory database
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Skipf("sqlite3 driver not available in test environment: %v", err)
-	}
+	db := openTestDB(t)
 	defer db.Close()
 
 	// Create test table
@@ -230,6 +278,7 @@ func TestCleanupManager(t *testing.T) {
 			id TEXT PRIMARY KEY,
 			category TEXT,
 			tier TEXT,
+			data TEXT,
 			created_at TIMESTAMP,
 			archived_at TIMESTAMP,
 			archive_path TEXT,
@@ -240,13 +289,53 @@ func TestCleanupManager(t *testing.T) {
 		t.Fatalf("failed to create test table: %v", err)
 	}
 
-	policy := DefaultRetentionPolicy()
+	policy := &RetentionPolicy{
+		Hot:  TierConfig{TTLDays: 1, Enabled: true},
+		Warm: TierConfig{TTLDays: 2, Enabled: true},
+		Cold: TierConfig{TTLDays: 3, Enabled: true},
+	}
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("policy validation failed: %v", err)
+	}
 	auditLog := &NoopAuditLog{}
 
 	manager := NewCleanupManager(db, policy, auditLog)
 	ctx := context.Background()
 
-	// Test cleanup stats
+	// Seed: 1 expired cold record and 1 soft-deleted record eligible for cleanup.
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO analytics_events (id, category, tier, created_at, deleted_at)
+		VALUES
+			('expired_cold', 'test', 'cold', datetime('now', '-10 days'), NULL),
+			('soft_deleted', 'test', 'hot', datetime('now', '-1 days'), datetime('now', '-10 days'))
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert seed events: %v", err)
+	}
+
+	job, err := manager.CleanupExpiredData(ctx, "test")
+	if err != nil {
+		t.Fatalf("CleanupExpiredData failed: %v", err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("expected completed expired cleanup, got %q (error=%q)", job.Status, job.Error)
+	}
+	if job.RowsDeleted != 1 {
+		t.Fatalf("expected 1 expired row deleted, got %d", job.RowsDeleted)
+	}
+
+	job, err = manager.CleanupSoftDeletedData(ctx, "test", 5)
+	if err != nil {
+		t.Fatalf("CleanupSoftDeletedData failed: %v", err)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("expected completed soft cleanup, got %q (error=%q)", job.Status, job.Error)
+	}
+	if job.RowsDeleted != 1 {
+		t.Fatalf("expected 1 soft-deleted row deleted, got %d", job.RowsDeleted)
+	}
+
+	// Test cleanup stats (now empty)
 	stats, err := manager.GetCleanupStats(ctx, "test")
 	if err != nil {
 		t.Fatalf("GetCleanupStats failed: %v", err)
@@ -259,13 +348,8 @@ func TestCleanupManager(t *testing.T) {
 
 // TestAuditLog tests audit logging.
 func TestDatabaseAuditLog(t *testing.T) {
-	t.Skip("sqlite3 driver not available in test environment")
-	
 	// Create in-memory database
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
+	db := openTestDB(t)
 	defer db.Close()
 
 	auditLog := NewDatabaseAuditLog(db)
@@ -336,13 +420,8 @@ func TestJobScheduler(t *testing.T) {
 
 // TestManager tests the main retention manager.
 func TestManager(t *testing.T) {
-	t.Skip("sqlite3 driver not available in test environment")
-	
 	// Create in-memory database
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to create test database: %v", err)
-	}
+	db := openTestDB(t)
 	defer db.Close()
 
 	policy := DefaultRetentionPolicy()

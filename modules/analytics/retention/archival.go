@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -170,7 +171,23 @@ func (ae *ArchivalExecutor) identifyRowsForArchival(ctx context.Context, categor
 
 		rowMap := make(map[string]interface{})
 		for i, col := range cols {
-			rowMap[col] = values[i]
+			v := values[i]
+
+			// Defensively copy byte slices: some drivers reuse scan buffers across rows.
+			if b, ok := v.([]byte); ok {
+				cp := make([]byte, len(b))
+				copy(cp, b)
+				v = cp
+			}
+
+			// Normalize `id` to string early so archival/tiering is robust across drivers.
+			if strings.EqualFold(col, "id") {
+				if s, ok := toString(v); ok {
+					v = s
+				}
+			}
+
+			rowMap[col] = v
 		}
 
 		results = append(results, rowMap)
@@ -209,7 +226,7 @@ func (ae *ArchivalExecutor) processBatch(ctx context.Context, job *ArchivalJob, 
 	// Mark rows as having been written to target tier
 	ids := make([]string, 0, len(batch))
 	for _, row := range batch {
-		if id, ok := row["id"].(string); ok {
+		if id, ok := getRowID(row); ok {
 			ids = append(ids, id)
 		}
 	}
@@ -250,7 +267,7 @@ func (ae *ArchivalExecutor) verifyAndDelete(ctx context.Context, job *ArchivalJo
 	// Query to verify all rows have been archived
 	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
-		if id, ok := row["id"].(string); ok {
+		if id, ok := getRowID(row); ok {
 			ids = append(ids, id)
 		}
 	}
@@ -266,10 +283,10 @@ func (ae *ArchivalExecutor) verifyAndDelete(ctx context.Context, job *ArchivalJo
 	`, ae.placeholders(len(ids)))
 
 	args := make([]interface{}, 0, len(ids)+1)
-	args = append(args, job.TargetTier)
 	for _, id := range ids {
 		args = append(args, id)
 	}
+	args = append(args, job.TargetTier)
 
 	var count int
 	if err := ae.db.QueryRowContext(ctx, verifyQuery, args...).Scan(&count); err != nil {
@@ -280,24 +297,42 @@ func (ae *ArchivalExecutor) verifyAndDelete(ctx context.Context, job *ArchivalJo
 		return fmt.Errorf("verification failed: only %d/%d rows archived", count, len(ids))
 	}
 
-	// Delete from source tier (mark as deleted with soft delete)
-	deleteQuery := fmt.Sprintf(`
-		UPDATE analytics_events 
-		SET deleted_at = CURRENT_TIMESTAMP
-		WHERE id IN (%s) AND tier = ?
-	`, ae.placeholders(len(ids)))
-
-	args = make([]interface{}, 0, len(ids)+1)
-	args = append(args, job.SourceTier)
-	for _, id := range ids {
-		args = append(args, id)
-	}
-
-	if _, err := ae.db.ExecContext(ctx, deleteQuery, args...); err != nil {
-		return fmt.Errorf("failed to delete from source tier: %w", err)
-	}
-
+	// Note: in the current implementation, tiers are represented as metadata on a single
+	// `analytics_events` table (not separate physical tier tables). Moving the row to the
+	// target tier is sufficient; we intentionally do not set `deleted_at` here.
 	return nil
+}
+
+func toString(v interface{}) (string, bool) {
+	switch x := v.(type) {
+	case string:
+		return x, true
+	case []byte:
+		return string(x), true
+	case fmt.Stringer:
+		return x.String(), true
+	default:
+		return "", false
+	}
+}
+
+func getRowID(row map[string]interface{}) (string, bool) {
+	if row == nil {
+		return "", false
+	}
+
+	if v, ok := row["id"]; ok {
+		return toString(v)
+	}
+
+	// Some drivers normalize/transform column names; be permissive.
+	for k, v := range row {
+		if strings.EqualFold(k, "id") {
+			return toString(v)
+		}
+	}
+
+	return "", false
 }
 
 // placeholders generates comma-separated ? placeholders for SQL queries.
