@@ -14,16 +14,23 @@ Migrate Aegion's analytics layer to DuckDB while maintaining PostgreSQL for core
 
 This plan now tracks the *actual* `beta` branch state (not just intentions).
 
-- **Last verified head:** `a36da7f`
+- **Last verified head:** `6d84682`
 - **Verified working slices (tests passing):**
-  - `modules/analytics/{dashboards,rest,graphql,integration,e2e,store,retention,sync,webhooks}`
+  - `modules/analytics/{dashboards,rest,graphql,grpc,integration,e2e,store,retention,sync,webhooks}`
+  - `internal/proto/analytics` exists (gRPC contract alignment for `modules/analytics/grpc`)
   - `modules/admin/spa` builds (`npm run build`)
-- **Next known blocker (in progress):**
-  - `modules/analytics/grpc` is blocked by missing/unaligned proto package (`internal/proto/analytics`) and placeholder tests.
+- **Recent milestones completed (beta):**
+  - gRPC/proto alignment: `57c426d`
+  - Test hygiene / explicit skips: `2ed9522`
+  - REST validation + query hardening: `c8a8432`
+  - CI module matrix includes analytics: `6d84682`
+- **Remaining roadmap focus (not blockers):**
+  - Reduce remaining placeholder logic (REST dashboard/query persistence, GraphQL auth)
+  - Improve performance and simplify implementations once correctness/CI is stable
 - **Verification commands:**
-  - `go test ./modules/analytics/dashboards ./modules/analytics/rest ./modules/analytics/graphql ./modules/analytics/integration ./modules/analytics/e2e ./modules/analytics/store ./modules/analytics/retention ./modules/analytics/sync ./modules/analytics/webhooks`
+  - `go test ./modules/analytics/grpc ./modules/analytics/dashboards ./modules/analytics/rest ./modules/analytics/graphql ./modules/analytics/integration ./modules/analytics/e2e ./modules/analytics/store ./modules/analytics/retention ./modules/analytics/sync ./modules/analytics/webhooks`
   - `npm run build` (in `modules/admin/spa`)
-  - `go test ./modules/analytics/grpc` (after the gRPC milestone lands)
+  - `go test ./modules/analytics/grpc`
 
 ## Architecture Overview
 
