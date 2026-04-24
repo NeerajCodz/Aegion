@@ -269,6 +269,7 @@ jobs:
       fail-fast: false
       matrix:
         module:
+          - analytics
           - admin
           - cli
           - introspection
