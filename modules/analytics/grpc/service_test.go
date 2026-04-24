@@ -8,8 +8,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/aegion/aegion/internal/proto/analytics"
 )
@@ -256,8 +256,8 @@ func TestStreamEvents(t *testing.T) {
 	}
 
 	err := service.StreamEvents(req, stream)
-	// Should get context error since we're not actually streaming
-	assert.Error(t, err)
+	require.NoError(t, err)
+	assert.Len(t, stream.messages, 0)
 }
 
 // TestExportData tests server streaming export
@@ -290,9 +290,9 @@ type mockServerStream struct {
 	messages []interface{}
 }
 
-func (s *mockServerStream) SetHeader(metadata interface{}) error   { return nil }
-func (s *mockServerStream) SendHeader(metadata interface{}) error  { return nil }
-func (s *mockServerStream) SetTrailer(metadata interface{})        {}
+func (s *mockServerStream) SetHeader(md metadata.MD) error  { return nil }
+func (s *mockServerStream) SendHeader(md metadata.MD) error { return nil }
+func (s *mockServerStream) SetTrailer(md metadata.MD)       {}
 func (s *mockServerStream) Context() context.Context              { return s.ctx }
 func (s *mockServerStream) SendMsg(m interface{}) error {
 	s.messages = append(s.messages, m)

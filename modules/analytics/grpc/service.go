@@ -257,13 +257,10 @@ func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerSt
 	}
 
 	// In a real implementation, subscribe to live events
-	// For now, just signal streaming complete
-	s.logger.Debug().Msg("Event streaming started")
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// For now, we don't have a live subscription mechanism; end the stream once
+	// any historical events are sent.
+	s.logger.Debug().Msg("Event streaming complete (no live subscription configured)")
+	return nil
 }
 
 // ExportData implements the ExportData RPC for streaming exports.

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -17,12 +18,14 @@ import (
 func AuthInterceptor(authFunc func(context.Context) error) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		// Check for service-to-service auth headers
-		if md, ok := metadata.FromIncomingContext(ctx); ok {
-			// Check for internal auth token or service ID
-			tokens := md.Get("x-service-id")
-			if len(tokens) == 0 {
-				return nil, status.Error(codes.Unauthenticated, "missing service identity")
-			}
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Error(codes.Unauthenticated, "missing service identity")
+		}
+		// Check for internal auth token or service ID
+		tokens := md.Get("x-service-id")
+		if len(tokens) == 0 {
+			return nil, status.Error(codes.Unauthenticated, "missing service identity")
 		}
 
 		// Call auth verifier if provided
@@ -65,7 +68,6 @@ func LoggingInterceptor(logger zerolog.Logger) grpc.UnaryServerInterceptor {
 func StreamLoggingInterceptor(logger zerolog.Logger) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		start := time.Now()
-		ctx := ss.Context()
 
 		// Call handler
 		err := handler(srv, ss)
@@ -100,10 +102,10 @@ func TracingInterceptor(tracer trace.Tracer) grpc.UnaryServerInterceptor {
 
 		if err != nil {
 			span.RecordError(err)
-			span.SetAttributes(map[string]interface{}{
-				"error": true,
-				"code":  status.Code(err).String(),
-			})
+			span.SetAttributes(
+				attribute.Bool("error", true),
+				attribute.String("code", status.Code(err).String()),
+			)
 		}
 
 		return resp, err
@@ -128,10 +130,10 @@ func StreamTracingInterceptor(tracer trace.Tracer) grpc.StreamServerInterceptor 
 
 		if err != nil {
 			span.RecordError(err)
-			span.SetAttributes(map[string]interface{}{
-				"error": true,
-				"code":  status.Code(err).String(),
-			})
+			span.SetAttributes(
+				attribute.Bool("error", true),
+				attribute.String("code", status.Code(err).String()),
+			)
 		}
 
 		return err

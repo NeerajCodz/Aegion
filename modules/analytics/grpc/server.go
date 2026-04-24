@@ -42,27 +42,32 @@ type ServerConfig struct {
 
 // NewServer creates a new gRPC server for pb.
 func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
-	if cfg.Port == 0 {
-		cfg.Port = 50051
-	}
-
+	// Support cfg.Port == 0 (ephemeral port). We'll store the actual bound port from the listener.
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on port %d: %w", cfg.Port, err)
 	}
+	port := 0
+	if addr, ok := listener.Addr().(*net.TCPAddr); ok {
+		port = addr.Port
+	}
 
 	// Build gRPC server options
 	opts := []grpc.ServerOption{
-		grpc.MaxConcurrentStreams(uint32(cfg.MaxConcurrentStreams)),
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time:    time.Duration(cfg.KeepaliveTime) * time.Second,
-			Timeout: time.Duration(cfg.KeepaliveTimeout) * time.Second,
-		}),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
 		grpc.MaxHeaderListSize(16 * 1024), // 16KB default
+	}
+	if cfg.MaxConcurrentStreams > 0 {
+		opts = append(opts, grpc.MaxConcurrentStreams(uint32(cfg.MaxConcurrentStreams)))
+	}
+	if cfg.KeepaliveTime > 0 || cfg.KeepaliveTimeout > 0 {
+		opts = append(opts, grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    time.Duration(cfg.KeepaliveTime) * time.Second,
+			Timeout: time.Duration(cfg.KeepaliveTimeout) * time.Second,
+		}))
 	}
 
 	// Add interceptors
@@ -85,7 +90,7 @@ func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
 	return &Server{
 		grpcServer: grpcServer,
 		logger:     cfg.Logger,
-		port:       cfg.Port,
+		port:       port,
 		listener:   listener,
 		service:    service,
 	}, nil
