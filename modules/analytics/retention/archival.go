@@ -217,7 +217,7 @@ func (ae *ArchivalExecutor) processBatch(ctx context.Context, job *ArchivalJob, 
 	if len(ids) > 0 {
 		updateQuery := fmt.Sprintf(`
 			UPDATE analytics_events 
-			SET tier = ?, archived_at = NOW(), archive_path = ?
+			SET tier = ?, archived_at = CURRENT_TIMESTAMP, archive_path = ?
 			WHERE id IN (%s)
 		`, ae.placeholders(len(ids)))
 
@@ -283,7 +283,7 @@ func (ae *ArchivalExecutor) verifyAndDelete(ctx context.Context, job *ArchivalJo
 	// Delete from source tier (mark as deleted with soft delete)
 	deleteQuery := fmt.Sprintf(`
 		UPDATE analytics_events 
-		SET deleted_at = NOW()
+		SET deleted_at = CURRENT_TIMESTAMP
 		WHERE id IN (%s) AND tier = ?
 	`, ae.placeholders(len(ids)))
 

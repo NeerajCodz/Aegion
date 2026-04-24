@@ -109,7 +109,7 @@ func (te *TieringEngine) transitionTier(ctx context.Context, transition *TierTra
 	// Update tier for matching rows
 	updateQuery := `
 		UPDATE analytics_events 
-		SET tier = ?, tier_updated_at = NOW()
+		SET tier = ?, tier_updated_at = CURRENT_TIMESTAMP
 		WHERE category = ? 
 		AND tier = ?
 		AND created_at < datetime('now', '-' || ? || ' days')
