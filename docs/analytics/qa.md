@@ -92,7 +92,7 @@ Admin SPA:
 
 - Integration/E2E tests requiring Postgres plus DuckDB runtime remain explicit skips until the harness/config is supplied.
 - GraphQL middleware now enforces token presence for protected operations, but resolver/directive authorization still needs deeper RBAC hardening.
-- Iceberg support is modeled in config/code but still includes stub behavior.
+- Iceberg storage now has local warehouse-backed lifecycle coverage, but external catalog integration still needs deeper production verification.
 - Several deep-dive docs promised in earlier docs are not present yet; `docs/analytics/README.md` now treats them as pending.
 
 ## Docs Acceptance
