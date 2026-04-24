@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+var (
+	fieldNameRe = regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`)
+	aliasRe     = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+	controlCharsRe = regexp.MustCompile(`[\r\n\t\x00-\x1f]`)
+)
+
 // Validator provides request validation
 type Validator struct{}
 
@@ -63,7 +69,7 @@ func (v *Validator) ValidateQueryRequest(req QueryRequest) error {
 		if len(field) > 255 {
 			return fmt.Errorf("group_by field exceeds maximum of 255 characters")
 		}
-		if !regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`).MatchString(field) {
+		if !fieldNameRe.MatchString(field) {
 			return fmt.Errorf("invalid group_by field name: %s", field)
 		}
 	}
@@ -192,7 +198,7 @@ func (v *Validator) validateFilters(filters map[string]interface{}) error {
 		}
 
 		// Validate field name (only alphanumeric, underscore, dot)
-		if !regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`).MatchString(field) {
+		if !fieldNameRe.MatchString(field) {
 			return fmt.Errorf("invalid filter field name: %s", field)
 		}
 
@@ -242,7 +248,7 @@ func (v *Validator) validateSortField(sort SortField) error {
 	}
 
 	// Validate field name
-	if !regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`).MatchString(sort.Field) {
+	if !fieldNameRe.MatchString(sort.Field) {
 		return fmt.Errorf("invalid sort field name: %s", sort.Field)
 	}
 
@@ -281,7 +287,7 @@ func (v *Validator) validateAggregateField(agg AggregateField) error {
 		if len(agg.Field) > 255 {
 			return fmt.Errorf("aggregate field exceeds maximum of 255 characters")
 		}
-		if !regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`).MatchString(agg.Field) {
+		if !fieldNameRe.MatchString(agg.Field) {
 			return fmt.Errorf("invalid aggregate field name: %s", agg.Field)
 		}
 	}
@@ -290,7 +296,7 @@ func (v *Validator) validateAggregateField(agg AggregateField) error {
 		if len(agg.Alias) > 255 {
 			return fmt.Errorf("aggregate alias exceeds maximum of 255 characters")
 		}
-		if !regexp.MustCompile(`^[a-zA-Z0-9_]+$`).MatchString(agg.Alias) {
+		if !aliasRe.MatchString(agg.Alias) {
 			return fmt.Errorf("invalid aggregate alias: %s", agg.Alias)
 		}
 	}
@@ -333,7 +339,7 @@ func (v *Validator) validateSQL(sql string) error {
 	}
 
 	// Validate SQL syntax (basic check)
-	if !strings.Contains(strings.ToUpper(sql), "SELECT") {
+	if !strings.Contains(upperSQL, "SELECT") {
 		return fmt.Errorf("only SELECT queries are allowed")
 	}
 
@@ -346,7 +352,7 @@ func SanitizeInput(input string) string {
 	input = strings.ReplaceAll(input, "\x00", "")
 
 	// Remove line breaks and control characters
-	input = regexp.MustCompile(`[\r\n\t\x00-\x1f]`).ReplaceAllString(input, " ")
+	input = controlCharsRe.ReplaceAllString(input, " ")
 
 	return input
 }
