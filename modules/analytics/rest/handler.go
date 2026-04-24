@@ -18,6 +18,7 @@ type Handler struct {
 	queries QueryBuilder
 	exports ExportBuilder
 	cache   ResultCache
+	validator *Validator
 }
 
 // Config holds REST API configuration
@@ -37,6 +38,7 @@ type HandlerDeps struct {
 	Queries QueryBuilder
 	Exports ExportBuilder
 	Cache   ResultCache
+	Validator *Validator
 }
 
 // QueryBuilder interface for building queries
@@ -62,12 +64,17 @@ type ResultCache interface {
 
 // NewHandler creates a new REST handler
 func NewHandler(deps HandlerDeps) *Handler {
+	v := deps.Validator
+	if v == nil {
+		v = NewValidator()
+	}
 	return &Handler{
-		logger:  deps.Logger,
-		config:  deps.Config,
-		queries: deps.Queries,
-		exports: deps.Exports,
-		cache:   deps.Cache,
+		logger:    deps.Logger,
+		config:    deps.Config,
+		queries:   deps.Queries,
+		exports:   deps.Exports,
+		cache:     deps.Cache,
+		validator: v,
 	}
 }
 
@@ -94,6 +101,11 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
+
+	if err := h.validator.ValidateQueryRequest(req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_QUERY", "invalid query parameters", err.Error())
+		return
+	}
 
 	// Build SQL query
 	sql, err := h.queries.BuildQuery(ctx, req, "events")
@@ -182,8 +194,8 @@ func (h *Handler) SearchEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Query == "" {
-		h.writeError(w, http.StatusBadRequest, "MISSING_QUERY", "search query is required", "")
+	if err := h.validator.ValidateSearchRequest(req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_SEARCH", "invalid search request", err.Error())
 		return
 	}
 
@@ -224,6 +236,11 @@ func (h *Handler) ExportEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.validator.ValidateQueryRequest(req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_QUERY", "invalid query parameters", err.Error())
+		return
+	}
+
 	sql, err := h.queries.BuildQuery(ctx, req, "events")
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "QUERY_ERROR", "failed to build query", err.Error())
@@ -260,14 +277,18 @@ func (h *Handler) ListDashboards(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Get current user from context (would be set by auth middleware)
-	userID := r.Context().Value("user_id")
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
 
 	sql := fmt.Sprintf(`
 		SELECT * FROM dashboards 
 		WHERE public = true OR owner_id = '%s'
 		ORDER BY updated_at DESC
 		LIMIT 100
-	`, sanitizeID(fmt.Sprintf("%v", userID)))
+	`, sanitizeID(userID))
 
 	rows, err := h.queries.ExecuteQuery(ctx, sql)
 	if err != nil {
@@ -289,12 +310,16 @@ func (h *Handler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := r.Context().Value("user_id")
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
 	sql := fmt.Sprintf(`
 		SELECT * FROM dashboards 
 		WHERE id = '%s' AND (public = true OR owner_id = '%s')
 		LIMIT 1
-	`, sanitizeID(id), sanitizeID(fmt.Sprintf("%v", userID)))
+	`, sanitizeID(id), sanitizeID(userID))
 
 	rows, err := h.queries.ExecuteQuery(ctx, sql)
 	if err != nil {
@@ -318,12 +343,16 @@ func (h *Handler) CreateDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" {
-		h.writeError(w, http.StatusBadRequest, "MISSING_FIELD", "name is required", "")
+	if err := h.validator.ValidateDashboardRequest(req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_DASHBOARD", "invalid dashboard request", err.Error())
 		return
 	}
 
-	userID := r.Context().Value("user_id")
+	userID, ok := userIDFromContext(r.Context())
+	if !ok {
+		h.writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing user identity", "")
+		return
+	}
 
 	// In real implementation, this would INSERT and return the created dashboard
 	// For now, just return a success response

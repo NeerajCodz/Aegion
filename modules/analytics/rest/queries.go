@@ -108,24 +108,39 @@ func (qb *DefaultQueryBuilder) buildOperatorCondition(field string, operators ma
 	var conditions []string
 
 	for op, opValue := range operators {
+		formatValue := func(v interface{}, quote bool) string {
+			switch vv := v.(type) {
+			case string:
+				if quote {
+					return fmt.Sprintf("'%s'", sanitizeInput(vv))
+				}
+				return sanitizeInput(vv)
+			default:
+				if quote {
+					return fmt.Sprintf("'%v'", vv)
+				}
+				return fmt.Sprintf("%v", vv)
+			}
+		}
+
 		switch op {
 		case "$eq":
-			conditions = append(conditions, fmt.Sprintf("%s = '%v'", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s = %s", field, formatValue(opValue, true)))
 		case "$ne":
-			conditions = append(conditions, fmt.Sprintf("%s != '%v'", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s != %s", field, formatValue(opValue, true)))
 		case "$gt":
-			conditions = append(conditions, fmt.Sprintf("%s > %v", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s > %s", field, formatValue(opValue, false)))
 		case "$gte":
-			conditions = append(conditions, fmt.Sprintf("%s >= %v", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s >= %s", field, formatValue(opValue, false)))
 		case "$lt":
-			conditions = append(conditions, fmt.Sprintf("%s < %v", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s < %s", field, formatValue(opValue, false)))
 		case "$lte":
-			conditions = append(conditions, fmt.Sprintf("%s <= %v", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s <= %s", field, formatValue(opValue, false)))
 		case "$in":
 			if arr, ok := opValue.([]interface{}); ok {
 				values := make([]string, len(arr))
 				for i, v := range arr {
-					values[i] = fmt.Sprintf("'%v'", v)
+					values[i] = formatValue(v, true)
 				}
 				conditions = append(conditions, fmt.Sprintf("%s IN (%s)", field, strings.Join(values, ",")))
 			}
@@ -133,18 +148,18 @@ func (qb *DefaultQueryBuilder) buildOperatorCondition(field string, operators ma
 			if arr, ok := opValue.([]interface{}); ok {
 				values := make([]string, len(arr))
 				for i, v := range arr {
-					values[i] = fmt.Sprintf("'%v'", v)
+					values[i] = formatValue(v, true)
 				}
 				conditions = append(conditions, fmt.Sprintf("%s NOT IN (%s)", field, strings.Join(values, ",")))
 			}
 		case "$contains":
-			conditions = append(conditions, fmt.Sprintf("%s ILIKE '%%%v%%'", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s ILIKE '%%%s%%'", field, sanitizeInput(fmt.Sprintf("%v", opValue))))
 		case "$regex":
-			conditions = append(conditions, fmt.Sprintf("%s ~ '%v'", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s ~ '%s'", field, sanitizeInput(fmt.Sprintf("%v", opValue))))
 		case "$startsWith":
-			conditions = append(conditions, fmt.Sprintf("%s ILIKE '%v%%'", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s ILIKE '%s%%'", field, sanitizeInput(fmt.Sprintf("%v", opValue))))
 		case "$endsWith":
-			conditions = append(conditions, fmt.Sprintf("%s ILIKE '%%%v'", field, opValue))
+			conditions = append(conditions, fmt.Sprintf("%s ILIKE '%%%s'", field, sanitizeInput(fmt.Sprintf("%v", opValue))))
 		}
 	}
 

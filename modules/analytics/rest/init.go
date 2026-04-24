@@ -45,6 +45,10 @@ func Initialize(params InitParams) (*Handler, error) {
 		return nil, fmt.Errorf("database interface is required")
 	}
 
+	if params.Validator == nil {
+		params.Validator = NewValidator()
+	}
+
 	// Create query builder
 	queryBuilder := NewQueryBuilder(params.DB)
 
@@ -61,6 +65,7 @@ func Initialize(params InitParams) (*Handler, error) {
 		Queries: queryBuilder,
 		Exports: exportBuilder,
 		Cache:   cache,
+		Validator: params.Validator,
 	})
 
 	params.Logger.Info().
