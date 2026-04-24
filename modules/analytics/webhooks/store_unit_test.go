@@ -184,3 +184,148 @@ func TestStore_DeleteWebhook_NoRowsAffected(t *testing.T) {
 	require.ErrorIs(t, err, ErrWebhookNotFound)
 }
 
+func TestStore_CreateWebhook_MarshalsFieldsAndExecs(t *testing.T) {
+	now := time.Now().UTC()
+	var gotArgs []interface{}
+
+	db := &fakeDB{
+		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+			gotArgs = args
+			return fakeResult{affected: 1}, nil
+		},
+	}
+
+	s := NewStore(db)
+	wh := &analytics.Webhook{
+		ID:          "wh_1",
+		UserID:      "user_1",
+		URL:         "https://example.test/hook",
+		EventTypes:  []string{"evt.a", "evt.b"},
+		Categories:  []string{"cat.a"},
+		CustomFilter: map[string]interface{}{"k": "v"},
+		Secret:      "secret",
+		Active:      true,
+		FailureCount: 0,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	require.NoError(t, s.CreateWebhook(context.Background(), wh))
+	require.GreaterOrEqual(t, len(gotArgs), 11)
+
+	// spot-check key serialized args (order mirrors SQL)
+	require.Equal(t, "wh_1", gotArgs[0])
+	require.Equal(t, "user_1", gotArgs[1])
+	require.Contains(t, gotArgs[3].(string), "evt.a")
+	require.Contains(t, gotArgs[4].(string), "cat.a")
+	require.Contains(t, gotArgs[5].(string), "\"k\"")
+}
+
+func TestStore_ListWebhooks_ParsesRows(t *testing.T) {
+	now := time.Now().UTC()
+	db := &fakeDB{
+		queryFn: func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+			return &fakeRows{data: [][]interface{}{
+				// id, user_id, url, event_types, categories, custom_filter, secret, active, failure_count, created_at, updated_at
+				{"wh_1", "user_1", "https://example.test/hook", `["evt.a","evt.b"]`, `["cat.a"]`, `{"k":"v"}`, "secret", true, 2, now, now},
+			}}, nil
+		},
+	}
+
+	s := NewStore(db)
+	hooks, err := s.ListWebhooks(context.Background(), "user_1")
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+	require.Equal(t, "wh_1", hooks[0].ID)
+	require.Equal(t, []string{"evt.a", "evt.b"}, hooks[0].EventTypes)
+	require.Equal(t, []string{"cat.a"}, hooks[0].Categories)
+	require.Equal(t, map[string]interface{}{"k": "v"}, hooks[0].CustomFilter)
+	require.Equal(t, 2, hooks[0].FailureCount)
+}
+
+func TestStore_GetDelivery_NotFound(t *testing.T) {
+	db := &fakeDB{
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+			return fakeRow{scanFn: func(dest ...interface{}) error { return sql.ErrNoRows }}
+		},
+	}
+
+	s := NewStore(db)
+	got, err := s.GetDelivery(context.Background(), "missing")
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.ErrorIs(t, err, ErrDeliveryNotFound)
+}
+
+func TestStore_GetDelivery_ScansNullableTimes(t *testing.T) {
+	now := time.Now().UTC()
+	next := now.Add(5 * time.Minute)
+	done := now.Add(10 * time.Minute)
+
+	db := &fakeDB{
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+			return fakeRow{scanFn: func(dest ...interface{}) error {
+				// id, webhook_id, event_id, status, status_code, response_body, error, attempts, max_retries,
+				// next_retry_at, last_attempt_at, completed_at, created_at, updated_at
+				*(dest[0].(*string)) = "d_1"
+				*(dest[1].(*string)) = "wh_1"
+				*(dest[2].(*string)) = "evt_1"
+				*(dest[3].(*string)) = "success"
+				*(dest[4].(*int)) = 204
+				*(dest[5].(*string)) = ""
+				*(dest[6].(*string)) = ""
+				*(dest[7].(*int)) = 1
+				*(dest[8].(*int)) = 3
+				*(dest[9].(**time.Time)) = &next
+				*(dest[10].(*time.Time)) = now
+				*(dest[11].(**time.Time)) = &done
+				*(dest[12].(*time.Time)) = now
+				*(dest[13].(*time.Time)) = now
+				return nil
+			}}
+		},
+	}
+
+	s := NewStore(db)
+	got, err := s.GetDelivery(context.Background(), "d_1")
+	require.NoError(t, err)
+	require.NotNil(t, got.NextRetryAt)
+	require.NotNil(t, got.CompletedAt)
+	require.Equal(t, next, *got.NextRetryAt)
+	require.Equal(t, done, *got.CompletedAt)
+}
+
+func TestStore_UpdateDelivery_Execs(t *testing.T) {
+	var gotArgs []interface{}
+	db := &fakeDB{
+		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+			gotArgs = args
+			return fakeResult{affected: 1}, nil
+		},
+	}
+
+	s := NewStore(db)
+	now := time.Now().UTC()
+	d := &analytics.WebhookDelivery{
+		ID:            "d_1",
+		WebhookID:     "wh_1",
+		EventID:       "evt_1",
+		Status:        "retrying",
+		StatusCode:    500,
+		ResponseBody:  "oops",
+		Error:         "err",
+		Attempts:      2,
+		MaxRetries:    5,
+		NextRetryAt:   nil,
+		LastAttemptAt: now,
+		CompletedAt:   nil,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	require.NoError(t, s.UpdateDelivery(context.Background(), d))
+	require.GreaterOrEqual(t, len(gotArgs), 10)
+	require.Equal(t, "retrying", gotArgs[0])
+	require.Equal(t, 500, gotArgs[1])
+	require.Equal(t, "d_1", gotArgs[len(gotArgs)-1])
+}
