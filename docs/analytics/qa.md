@@ -91,7 +91,7 @@ Admin SPA:
 ## Known Gaps (Verified)
 
 - Integration/E2E tests requiring Postgres plus DuckDB runtime remain explicit skips until the harness/config is supplied.
-- GraphQL auth and parts of the authorization path still contain placeholder logic.
+- GraphQL middleware now enforces token presence for protected operations, but resolver/directive authorization still needs deeper RBAC hardening.
 - Iceberg support is modeled in config/code but still includes stub behavior.
 - Several deep-dive docs promised in earlier docs are not present yet; `docs/analytics/README.md` now treats them as pending.
 
