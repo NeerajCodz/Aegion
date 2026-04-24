@@ -92,7 +92,6 @@ Admin SPA:
 
 - Integration/E2E tests requiring Postgres plus DuckDB runtime remain explicit skips until the harness/config is supplied.
 - GraphQL auth and parts of the authorization path still contain placeholder logic.
-- gRPC saved-query execution still contains an `Unimplemented` path.
 - Iceberg support is modeled in config/code but still includes stub behavior.
 - Several deep-dive docs promised in earlier docs are not present yet; `docs/analytics/README.md` now treats them as pending.
 

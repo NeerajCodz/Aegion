@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
@@ -157,9 +158,32 @@ func (s *Service) ExecuteQuery(ctx context.Context, req *pb.ExecuteQueryRequest)
 		Int("page_size", int(req.PageSize)).
 		Msg("Executing query")
 
-	// In a real implementation, fetch saved query by ID and execute
-	// For now, return not implemented
-	return nil, status.Error(codes.Unimplemented, "query execution not fully implemented")
+	lookupSQL := fmt.Sprintf("SELECT sql FROM queries WHERE id = '%s' LIMIT 1", sanitizeSQLLiteral(req.QueryId))
+	queryRows, err := s.store.ExecuteQuery(ctx, lookupSQL, nil)
+	if err != nil {
+		s.logger.Error().Err(err).Str("query_id", req.QueryId).Msg("Failed to load saved query")
+		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to load saved query: %v", err))
+	}
+	if len(queryRows) == 0 {
+		return nil, status.Error(codes.NotFound, "query not found")
+	}
+
+	rawSQL := fmt.Sprintf("%v", queryRows[0]["sql"])
+	if err := validateReadOnlySQL(rawSQL); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	execSQL := applyQueryLimit(rawSQL, int(req.PageSize))
+	rows, err := s.store.ExecuteQuery(ctx, execSQL, nil)
+	if err != nil {
+		s.logger.Error().Err(err).Str("query_id", req.QueryId).Msg("Failed to execute saved query")
+		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to execute query: %v", err))
+	}
+
+	return &pb.QueryResult{
+		Id:       req.QueryId,
+		RowCount: int64(len(rows)),
+	}, nil
 }
 
 // CreateDashboard implements the CreateDashboard RPC.
@@ -261,6 +285,55 @@ func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerSt
 	// any historical events are sent.
 	s.logger.Debug().Msg("Event streaming complete (no live subscription configured)")
 	return nil
+}
+
+func sanitizeSQLLiteral(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
+}
+
+func validateReadOnlySQL(query string) error {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return fmt.Errorf("saved query SQL is empty")
+	}
+
+	upper := strings.ToUpper(trimmed)
+	if !(strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "WITH ")) {
+		return fmt.Errorf("saved query must be read-only")
+	}
+
+	disallowed := []string{
+		" INSERT ",
+		" UPDATE ",
+		" DELETE ",
+		" DROP ",
+		" ALTER ",
+		" CREATE ",
+		" TRUNCATE ",
+		" ATTACH ",
+		" DETACH ",
+	}
+	padded := " " + upper + " "
+	for _, keyword := range disallowed {
+		if strings.Contains(padded, keyword) {
+			return fmt.Errorf("saved query contains disallowed statement")
+		}
+	}
+
+	return nil
+}
+
+func applyQueryLimit(query string, pageSize int) string {
+	if pageSize <= 0 {
+		return query
+	}
+
+	upper := strings.ToUpper(query)
+	if strings.Contains(upper, " LIMIT ") {
+		return query
+	}
+
+	return fmt.Sprintf("%s LIMIT %d", strings.TrimSpace(query), pageSize)
 }
 
 // ExportData implements the ExportData RPC for streaming exports.

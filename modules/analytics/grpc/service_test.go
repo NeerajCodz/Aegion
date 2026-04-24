@@ -18,12 +18,15 @@ import (
 type MockStore struct {
 	events     []interface{}
 	dashboards map[string]map[string]interface{}
+	queryRows  map[string][]map[string]interface{}
+	queryErr   error
 }
 
 func NewMockStore() *MockStore {
 	return &MockStore{
 		events:     []interface{}{},
 		dashboards: make(map[string]map[string]interface{}),
+		queryRows:  make(map[string][]map[string]interface{}),
 	}
 }
 
@@ -43,6 +46,12 @@ func (m *MockStore) GetEvent(ctx context.Context, id string) (map[string]interfa
 }
 
 func (m *MockStore) ExecuteQuery(ctx context.Context, sql string, params []interface{}) ([]map[string]interface{}, error) {
+	if m.queryErr != nil {
+		return nil, m.queryErr
+	}
+	if rows, ok := m.queryRows[sql]; ok {
+		return rows, nil
+	}
 	return []map[string]interface{}{}, nil
 }
 
@@ -233,6 +242,66 @@ func TestUpdateDashboard(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, "Updated Dashboard", resp.Name)
+}
+
+func TestExecuteQuery(t *testing.T) {
+	logger := zerolog.New(nil)
+	store := NewMockStore()
+	syncManager := &MockSyncManager{}
+	config := Config{}
+
+	store.queryRows["SELECT sql FROM queries WHERE id = 'query-1' LIMIT 1"] = []map[string]interface{}{
+		{"sql": "SELECT id, name FROM analytics_events"},
+	}
+	store.queryRows["SELECT id, name FROM analytics_events LIMIT 25"] = []map[string]interface{}{
+		{"id": "1", "name": "event1"},
+		{"id": "2", "name": "event2"},
+	}
+
+	service := NewService(logger, store, syncManager, config)
+
+	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
+		QueryId:  "query-1",
+		PageSize: 25,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, "query-1", resp.Id)
+	assert.Equal(t, int64(2), resp.RowCount)
+}
+
+func TestExecuteQuery_NotFound(t *testing.T) {
+	logger := zerolog.New(nil)
+	store := NewMockStore()
+	syncManager := &MockSyncManager{}
+	config := Config{}
+
+	service := NewService(logger, store, syncManager, config)
+
+	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
+		QueryId: "missing-query",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+}
+
+func TestExecuteQuery_RejectsMutatingSQL(t *testing.T) {
+	logger := zerolog.New(nil)
+	store := NewMockStore()
+	syncManager := &MockSyncManager{}
+	config := Config{}
+
+	store.queryRows["SELECT sql FROM queries WHERE id = 'query-bad' LIMIT 1"] = []map[string]interface{}{
+		{"sql": "DELETE FROM analytics_events"},
+	}
+
+	service := NewService(logger, store, syncManager, config)
+
+	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
+		QueryId: "query-bad",
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
 }
 
 // TestStreamEvents tests server streaming

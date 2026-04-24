@@ -54,6 +54,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] REST webhook handlers are wired to the webhook manager when the manager dependency is configured
 - [x] GraphQL analytics package exists
 - [x] gRPC analytics package exists with generated/internal proto
+- [x] gRPC saved-query execution resolves and executes stored read-only SQL
 - [x] Dashboard, event, report, health, and config screens exist in the Admin SPA
 - [x] SPA client methods exist for storage, sync, retention, dashboards, reports, events, and webhooks
 
@@ -68,7 +69,6 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 ### Backend gaps confirmed in code
 - [ ] GraphQL authentication validates real Aegion identity/session/token state
 - [ ] GraphQL RBAC is fully enforced for analytics operations
-- [ ] gRPC saved-query execution is implemented end-to-end
 - [ ] Iceberg storage is production-ready
 - [ ] Dashboard/query persistence paths are fully implemented without placeholder logic
 
@@ -165,7 +165,7 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] Webhook REST endpoints stop returning `NOT_IMPLEMENTED`
 - [ ] GraphQL rejects bad auth and sets a real identity context
 - [ ] GraphQL authorization is no longer placeholder-only
-- [ ] gRPC query execution returns real results instead of `Unimplemented`
+- [x] gRPC query execution returns real results instead of `Unimplemented`
 - [ ] Iceberg support is functional with meaningful tests, or explicitly documented as deferred
 
 ### Configuration and UI
