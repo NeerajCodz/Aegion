@@ -14,7 +14,7 @@ Migrate Aegion's analytics layer to DuckDB while maintaining PostgreSQL for core
 
 This plan now tracks the *actual* `beta` branch state (not just intentions).
 
-- **Last verified head:** `7715408`
+- **Last verified head:** `3cfc31e`
 - **Verified working slices (tests passing):**
   - `modules/analytics/{dashboards,rest,graphql,grpc,integration,e2e,store,retention,sync,webhooks}`
   - `internal/proto/analytics` exists (gRPC contract alignment for `modules/analytics/grpc`)
@@ -25,9 +25,13 @@ This plan now tracks the *actual* `beta` branch state (not just intentions).
   - REST validation + query hardening: `c8a8432`
   - CI module matrix includes analytics: `6d84682`
   - REST validator micro-perf cleanup: `7715408`
+  - Retention SQL portability + FK schema fix: `33797b1`
+  - Retention sqlite-backed unit tests (no longer skipped) + archival correctness fixes: `5d01903`
+  - Webhooks store unit coverage expansion: `3cfc31e`
 - **Remaining roadmap focus (not blockers):**
   - Reduce remaining placeholder logic (REST dashboard/query persistence, GraphQL auth)
   - Improve performance and simplify implementations once correctness/CI is stable
+- **QA / regression:** see `docs/analytics/qa.md`
 - **Verification commands:**
   - `go test ./modules/analytics/grpc ./modules/analytics/dashboards ./modules/analytics/rest ./modules/analytics/graphql ./modules/analytics/integration ./modules/analytics/e2e ./modules/analytics/store ./modules/analytics/retention ./modules/analytics/sync ./modules/analytics/webhooks`
   - `npm run build` (in `modules/admin/spa`)
@@ -411,11 +415,12 @@ modules:
 - **Commit pattern:** `feat: analytics graphql api`
 
 ### Phase 5: gRPC API
-- [ ] Proto definitions (blocked: `internal/proto/analytics` missing/unaligned)
-- [ ] Service implementation (present, but blocked on proto alignment)
-- [ ] Streaming support (present, but blocked on proto alignment)
-- [ ] Interceptors for auth/logging (present, but needs tests + correctness review)
-- **Commit pattern:** `feat: analytics grpc api`
+- [x] Proto definitions (`internal/proto/analytics`)
+- [x] Service implementation (QueryEvents/GetDashboard/ExportData)
+- [x] Streaming support (StreamEvents)
+- [x] Interceptors for auth/logging (baseline)
+- [x] Unit tests (service + interceptors)
+- **Commit pattern:** `fix: align analytics grpc with internal proto contract`
 
 ### Phase 6: Retention & Storage Management
 - [x] Hot/warm/cold tier management (baseline)
