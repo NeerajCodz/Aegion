@@ -16,6 +16,19 @@ import { OAuth2 } from './pages/OAuth2';
 import { Security } from './pages/Security';
 import { Policy } from './pages/Policy';
 import { Login } from './pages/Login';
+import {
+  AnalyticsOverview,
+  StorageConfig,
+  SyncConfig,
+  RetentionConfig,
+  WebhookConfig,
+  DashboardList,
+  DashboardViewer,
+  DashboardBuilder,
+  EventViewer,
+  ReportList,
+  HealthStatus,
+} from './components/Analytics';
 import { operatorHasPermission } from './lib/permissions';
 import type { Operator } from './types';
 
@@ -41,6 +54,7 @@ const permissionRoutes: Array<{ path: string; permission: string }> = [
   { path: '/policy', permission: 'config:read' },
   { path: '/settings', permission: 'config:read' },
   { path: '/scim', permission: 'config:read' },
+  { path: '/analytics', permission: 'analytics:read' },
 ];
 
 function fallbackRoute(operator: Operator | null): string {
@@ -196,6 +210,94 @@ function AppRoutes() {
           element={
             <ProtectedRoute permission="config:read">
               <SCIM />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <AnalyticsOverview />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/configuration/storage"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <StorageConfig />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/configuration/sync"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <SyncConfig />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/configuration/retention"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <RetentionConfig />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/configuration/webhooks"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <WebhookConfig />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/dashboards"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <DashboardList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/dashboards/builder"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <DashboardBuilder />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/dashboards/:dashboardId"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <DashboardViewer />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/events"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <EventViewer />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/reports"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <ReportList />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="analytics/settings/health"
+          element={
+            <ProtectedRoute permission="analytics:read">
+              <HealthStatus />
             </ProtectedRoute>
           }
         />
