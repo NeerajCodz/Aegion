@@ -34,6 +34,7 @@ type WebhookHandlerDeps struct {
 func (h *Handler) RegisterWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	_ = ctx
 
 	var req RegisterWebhookRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -69,6 +70,7 @@ func (h *Handler) RegisterWebhook(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	_ = ctx
 
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -84,6 +86,7 @@ func (h *Handler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	_ = ctx
 
 	webhookID := chi.URLParam(r, "id")
 	if webhookID == "" {
@@ -104,6 +107,7 @@ func (h *Handler) GetWebhook(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	_ = ctx
 
 	webhookID := chi.URLParam(r, "id")
 	if webhookID == "" {
@@ -130,6 +134,7 @@ func (h *Handler) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	_ = ctx
 
 	webhookID := chi.URLParam(r, "id")
 	if webhookID == "" {
@@ -150,6 +155,7 @@ func (h *Handler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
+	_ = ctx
 
 	webhookID := chi.URLParam(r, "id")
 	if webhookID == "" {
@@ -170,6 +176,7 @@ func (h *Handler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	_ = ctx
 
 	webhookID := chi.URLParam(r, "id")
 	if webhookID == "" {
@@ -190,6 +197,7 @@ func (h *Handler) GetWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ReplayDelivery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
+	_ = ctx
 
 	deliveryID := chi.URLParam(r, "id")
 	if deliveryID == "" {
