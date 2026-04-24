@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/modules/analytics"
+	"github.com/aegion/aegion/modules/analytics/rbac"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 )
@@ -193,7 +194,7 @@ func TestResolverEvents(t *testing.T) {
 	resolver := NewResolver(logger, store)
 
 	// Test query
-	ctx := context.WithValue(context.Background(), "userID", "test-user")
+	ctx := withGraphQLRole("test-user", rbac.RoleUser)
 	conn, err := resolver.Events(ctx, nil, nil, nil, nil)
 
 	assert.NoError(t, err)
@@ -218,7 +219,7 @@ func TestResolverEvent(t *testing.T) {
 	store.events = append(store.events, event)
 
 	resolver := NewResolver(logger, store)
-	ctx := context.Background()
+	ctx := withGraphQLRole("test-user", rbac.RoleUser)
 
 	node, err := resolver.Event(ctx, "1")
 	assert.NoError(t, err)
@@ -232,7 +233,7 @@ func TestResolverCreateDashboard(t *testing.T) {
 	store := NewMockStore()
 	resolver := NewResolver(logger, store)
 
-	ctx := context.WithValue(context.Background(), "userID", "test-user")
+	ctx := withGraphQLRole("test-user", rbac.RoleAnalyst)
 
 	input := &CreateDashboardInput{
 		Name:   "Test Dashboard",
@@ -264,7 +265,7 @@ func TestResolverUpdateDashboard(t *testing.T) {
 	}
 	store.dashboards = append(store.dashboards, dashboard)
 
-	ctx := context.WithValue(context.Background(), "userID", "test-user")
+	ctx := withGraphQLRole("test-user", rbac.RoleAnalyst)
 
 	newName := "New Name"
 	input := &UpdateDashboardInput{
@@ -292,7 +293,7 @@ func TestResolverDeleteDashboard(t *testing.T) {
 	}
 	store.dashboards = append(store.dashboards, dashboard)
 
-	ctx := context.WithValue(context.Background(), "userID", "test-user")
+	ctx := withGraphQLRole("test-user", rbac.RoleAnalyst)
 
 	payload, err := resolver.DeleteDashboard(ctx, "1")
 	assert.NoError(t, err)
@@ -306,7 +307,7 @@ func TestResolverSaveQuery(t *testing.T) {
 	store := NewMockStore()
 	resolver := NewResolver(logger, store)
 
-	ctx := context.WithValue(context.Background(), "userID", "test-user")
+	ctx := withGraphQLRole("test-user", rbac.RoleAnalyst)
 
 	desc := "A test query"
 	input := &SaveQueryInput{
@@ -361,6 +362,41 @@ func TestResolverStats(t *testing.T) {
 	assert.GreaterOrEqual(t, stats.Uptime, 0)
 }
 
+func TestResolverDashboardForbidsPrivateDashboardForOtherUser(t *testing.T) {
+	logger := zerolog.New(nil)
+	store := NewMockStore()
+	resolver := NewResolver(logger, store)
+
+	store.dashboards = append(store.dashboards, &analytics.Dashboard{
+		ID:      "private-dash",
+		Name:    "Private",
+		Config:  map[string]interface{}{},
+		OwnerID: "owner-1",
+		Public:  false,
+	})
+
+	_, err := resolver.Dashboard(withGraphQLRole("viewer-1", rbac.RoleViewer), "private-dash")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
+}
+
+func TestResolverQueryForbidsAccessToAnotherUsersSavedQuery(t *testing.T) {
+	logger := zerolog.New(nil)
+	store := NewMockStore()
+	resolver := NewResolver(logger, store)
+
+	store.queries = append(store.queries, &analytics.Query{
+		ID:      "query-1",
+		Name:    "Owned Query",
+		SQL:     "SELECT 1",
+		OwnerID: "owner-1",
+	})
+
+	_, err := resolver.Query(withGraphQLRole("analyst-2", rbac.RoleAnalyst), "query-1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "forbidden")
+}
+
 func TestRateLimiter(t *testing.T) {
 	limiter := NewSimpleRateLimiter(3)
 
@@ -379,6 +415,13 @@ func TestRateLimiter(t *testing.T) {
 
 	// Should deny 4th request
 	assert.False(t, limiter.AllowRequest(ctx, clientID))
+}
+
+func withGraphQLRole(userID string, role rbac.Role) context.Context {
+	ctx := context.WithValue(context.Background(), "userID", userID)
+	manager := rbac.NewManager()
+	_ = manager.SetUserRole(userID, role)
+	return rbac.WithManager(ctx, manager)
 }
 
 func TestComplexityAnalyzer(t *testing.T) {

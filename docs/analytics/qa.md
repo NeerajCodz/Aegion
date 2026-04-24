@@ -91,7 +91,7 @@ Admin SPA:
 ## Known Gaps (Verified)
 
 - Integration/E2E tests requiring Postgres plus DuckDB runtime remain explicit skips until the harness/config is supplied.
-- GraphQL middleware now enforces token presence for protected operations, but resolver/directive authorization still needs deeper RBAC hardening.
+- GraphQL middleware and resolvers now enforce auth plus RBAC, but the full schema/directive flow still needs broader end-to-end smoke coverage against a live GraphQL server.
 - Iceberg storage now has local warehouse-backed lifecycle coverage, but external catalog integration still needs deeper production verification.
 - Dashboard query/export helpers now execute real composed SQL, but SPA-level smoke validation still needs to confirm the full UI flow against live backend endpoints.
 - Several deep-dive docs promised in earlier docs are not present yet; `docs/analytics/README.md` now treats them as pending.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/modules/analytics"
+	"github.com/aegion/aegion/modules/analytics/rbac"
 	"github.com/rs/zerolog"
 )
 
@@ -71,6 +72,10 @@ func NewResolver(logger zerolog.Logger, store Store) *Resolver {
 
 // Events resolves the events query with filtering and pagination.
 func (r *Resolver) Events(ctx context.Context, filter *EventFilter, first *int, after *string, sort *SortInput) (*EventConnection, error) {
+	if _, err := requireGraphQLPermission(ctx, rbac.PermViewEvents); err != nil {
+		return nil, err
+	}
+
 	limit := 100
 	if first != nil && *first > 0 {
 		if *first > 1000 {
@@ -121,6 +126,10 @@ func (r *Resolver) Events(ctx context.Context, filter *EventFilter, first *int, 
 
 // Event resolves a single event by ID.
 func (r *Resolver) Event(ctx context.Context, id string) (*EventNode, error) {
+	if _, err := requireGraphQLPermission(ctx, rbac.PermViewEvents); err != nil {
+		return nil, err
+	}
+
 	event, err := r.store.GetEvent(ctx, id)
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id).Msg("failed to get event")
@@ -134,14 +143,12 @@ func (r *Resolver) Event(ctx context.Context, id string) (*EventNode, error) {
 
 // Dashboards resolves dashboards query with optional filtering.
 func (r *Resolver) Dashboards(ctx context.Context, isDefault *bool, public *bool) ([]*DashboardNode, error) {
-	// Get current user from context (implement auth context in middleware)
-	ownerID, ok := ctx.Value("userID").(string)
-	if !ok {
-		return nil, errors.New("unauthorized: user not found in context")
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermViewDashboards)
+	if err != nil {
+		return nil, err
 	}
 
 	var dashboards []*analytics.Dashboard
-	var err error
 
 	if public != nil && *public {
 		dashboards, err = r.store.ListDashboards(ctx, nil, public)
@@ -155,14 +162,33 @@ func (r *Resolver) Dashboards(ctx context.Context, isDefault *bool, public *bool
 	}
 
 	nodes := make([]*DashboardNode, len(dashboards))
-	for i, d := range dashboards {
-		nodes[i] = dashboardToNode(d)
+	filtered := make([]*DashboardNode, 0, len(dashboards))
+	for _, d := range dashboards {
+		allowed, err := canReadDashboard(ctx, ownerID, d)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			continue
+		}
+		if isDefault != nil {
+			if configDefault, ok := d.Config["is_default"].(bool); ok && configDefault != *isDefault {
+				continue
+			}
+		}
+		filtered = append(filtered, dashboardToNode(d))
 	}
-	return nodes, nil
+	copy(nodes, filtered)
+	return filtered, nil
 }
 
 // Dashboard resolves a single dashboard by ID.
 func (r *Resolver) Dashboard(ctx context.Context, id string) (*DashboardNode, error) {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermViewDashboards)
+	if err != nil {
+		return nil, err
+	}
+
 	dashboard, err := r.store.GetDashboard(ctx, id)
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id).Msg("failed to get dashboard")
@@ -171,14 +197,21 @@ func (r *Resolver) Dashboard(ctx context.Context, id string) (*DashboardNode, er
 	if dashboard == nil {
 		return nil, errors.New("dashboard not found")
 	}
+	allowed, err := canReadDashboard(ctx, ownerID, dashboard)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, errors.New("forbidden: dashboard access denied")
+	}
 	return dashboardToNode(dashboard), nil
 }
 
 // Queries resolves saved queries.
 func (r *Resolver) Queries(ctx context.Context, limit *int, offset *int) ([]*SavedQueryNode, error) {
-	ownerID, ok := ctx.Value("userID").(string)
-	if !ok {
-		return nil, errors.New("unauthorized: user not found in context")
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermModifyQueries)
+	if err != nil {
+		return nil, err
 	}
 
 	queries, err := r.store.ListQueries(ctx, &ownerID)
@@ -196,6 +229,11 @@ func (r *Resolver) Queries(ctx context.Context, limit *int, offset *int) ([]*Sav
 
 // Query resolves a single saved query by ID.
 func (r *Resolver) Query(ctx context.Context, id string) (*SavedQueryNode, error) {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermModifyQueries)
+	if err != nil {
+		return nil, err
+	}
+
 	query, err := r.store.GetQuery(ctx, id)
 	if err != nil {
 		r.logger.Error().Err(err).Str("id", id).Msg("failed to get query")
@@ -203,6 +241,9 @@ func (r *Resolver) Query(ctx context.Context, id string) (*SavedQueryNode, error
 	}
 	if query == nil {
 		return nil, errors.New("query not found")
+	}
+	if query.OwnerID != ownerID && !isGraphQLAdmin(ctx, ownerID) {
+		return nil, errors.New("forbidden: query access denied")
 	}
 	return queryToNode(query), nil
 }
@@ -239,6 +280,10 @@ func (r *Resolver) Stats(ctx context.Context) (*SystemStatsNode, error) {
 
 // Metrics resolves the metrics query.
 func (r *Resolver) Metrics(ctx context.Context, category *string, timeRange *TimeRangeInput) ([]*MetricNode, error) {
+	if _, err := requireGraphQLPermission(ctx, rbac.PermViewDashboards); err != nil {
+		return nil, err
+	}
+
 	metrics, err := r.store.ListMetrics(ctx, category)
 	if err != nil {
 		r.logger.Error().Err(err).Msg("failed to list metrics")
@@ -256,10 +301,10 @@ func (r *Resolver) Metrics(ctx context.Context, category *string, timeRange *Tim
 
 // CreateDashboard resolves the createDashboard mutation.
 func (r *Resolver) CreateDashboard(ctx context.Context, input *CreateDashboardInput) (*CreateDashboardPayload, error) {
-	ownerID, ok := ctx.Value("userID").(string)
-	if !ok {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermManageDashboards)
+	if err != nil {
 		return &CreateDashboardPayload{
-			Errors: []*ErrorNode{{Message: "unauthorized: user not found in context"}},
+			Errors: []*ErrorNode{{Message: err.Error()}},
 		}, nil
 	}
 
@@ -299,10 +344,10 @@ func (r *Resolver) CreateDashboard(ctx context.Context, input *CreateDashboardIn
 
 // UpdateDashboard resolves the updateDashboard mutation.
 func (r *Resolver) UpdateDashboard(ctx context.Context, id string, input *UpdateDashboardInput) (*UpdateDashboardPayload, error) {
-	ownerID, ok := ctx.Value("userID").(string)
-	if !ok {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermManageDashboards)
+	if err != nil {
 		return &UpdateDashboardPayload{
-			Errors: []*ErrorNode{{Message: "unauthorized: user not found in context"}},
+			Errors: []*ErrorNode{{Message: err.Error()}},
 		}, nil
 	}
 
@@ -314,7 +359,7 @@ func (r *Resolver) UpdateDashboard(ctx context.Context, id string, input *Update
 	}
 
 	// Check authorization
-	if dashboard.OwnerID != ownerID {
+	if dashboard.OwnerID != ownerID && !isGraphQLAdmin(ctx, ownerID) {
 		return &UpdateDashboardPayload{
 			Errors: []*ErrorNode{{Message: "unauthorized: cannot update dashboard owned by another user"}},
 		}, nil
@@ -349,10 +394,10 @@ func (r *Resolver) UpdateDashboard(ctx context.Context, id string, input *Update
 
 // DeleteDashboard resolves the deleteDashboard mutation.
 func (r *Resolver) DeleteDashboard(ctx context.Context, id string) (*DeleteDashboardPayload, error) {
-	ownerID, ok := ctx.Value("userID").(string)
-	if !ok {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermManageDashboards)
+	if err != nil {
 		return &DeleteDashboardPayload{
-			Errors: []*ErrorNode{{Message: "unauthorized: user not found in context"}},
+			Errors: []*ErrorNode{{Message: err.Error()}},
 		}, nil
 	}
 
@@ -364,7 +409,7 @@ func (r *Resolver) DeleteDashboard(ctx context.Context, id string) (*DeleteDashb
 	}
 
 	// Check authorization
-	if dashboard.OwnerID != ownerID {
+	if dashboard.OwnerID != ownerID && !isGraphQLAdmin(ctx, ownerID) {
 		return &DeleteDashboardPayload{
 			Errors: []*ErrorNode{{Message: "unauthorized: cannot delete dashboard owned by another user"}},
 		}, nil
@@ -382,10 +427,10 @@ func (r *Resolver) DeleteDashboard(ctx context.Context, id string) (*DeleteDashb
 
 // SaveQuery resolves the saveQuery mutation.
 func (r *Resolver) SaveQuery(ctx context.Context, input *SaveQueryInput) (*SaveQueryPayload, error) {
-	ownerID, ok := ctx.Value("userID").(string)
-	if !ok {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermModifyQueries)
+	if err != nil {
 		return &SaveQueryPayload{
-			Errors: []*ErrorNode{{Message: "unauthorized: user not found in context"}},
+			Errors: []*ErrorNode{{Message: err.Error()}},
 		}, nil
 	}
 
@@ -419,10 +464,10 @@ func (r *Resolver) SaveQuery(ctx context.Context, input *SaveQueryInput) (*SaveQ
 
 // DeleteQuery resolves the deleteQuery mutation.
 func (r *Resolver) DeleteQuery(ctx context.Context, id string) (*DeleteQueryPayload, error) {
-	ownerID, ok := ctx.Value("userID").(string)
-	if !ok {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermModifyQueries)
+	if err != nil {
 		return &DeleteQueryPayload{
-			Errors: []*ErrorNode{{Message: "unauthorized: user not found in context"}},
+			Errors: []*ErrorNode{{Message: err.Error()}},
 		}, nil
 	}
 
@@ -434,7 +479,7 @@ func (r *Resolver) DeleteQuery(ctx context.Context, id string) (*DeleteQueryPayl
 	}
 
 	// Check authorization
-	if query.OwnerID != ownerID {
+	if query.OwnerID != ownerID && !isGraphQLAdmin(ctx, ownerID) {
 		return &DeleteQueryPayload{
 			Errors: []*ErrorNode{{Message: "unauthorized: cannot delete query owned by another user"}},
 		}, nil
@@ -452,6 +497,12 @@ func (r *Resolver) DeleteQuery(ctx context.Context, id string) (*DeleteQueryPayl
 
 // CreateReport resolves the createReport mutation (stub).
 func (r *Resolver) CreateReport(ctx context.Context, input *CreateReportInput) (*CreateReportPayload, error) {
+	if _, err := requireGraphQLPermission(ctx, rbac.PermExportData); err != nil {
+		return &CreateReportPayload{
+			Errors: []*ErrorNode{{Message: err.Error()}},
+		}, nil
+	}
+
 	reportURL := "/reports/sample-report.pdf"
 	return &CreateReportPayload{
 		ReportURL: &reportURL,
@@ -460,6 +511,13 @@ func (r *Resolver) CreateReport(ctx context.Context, input *CreateReportInput) (
 
 // CreateWebhook resolves the createWebhook mutation.
 func (r *Resolver) CreateWebhook(ctx context.Context, input *CreateWebhookInput) (*CreateWebhookPayload, error) {
+	ownerID, err := requireGraphQLPermission(ctx, rbac.PermManageWebhooks)
+	if err != nil {
+		return &CreateWebhookPayload{
+			Errors: []*ErrorNode{{Message: err.Error()}},
+		}, nil
+	}
+
 	active := true
 	if input.Active != nil {
 		active = *input.Active
@@ -482,6 +540,8 @@ func (r *Resolver) CreateWebhook(ctx context.Context, input *CreateWebhookInput)
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to create webhook: %v", err)}},
 		}, nil
 	}
+	manager := rbac.FromContext(ctx)
+	_ = manager.SetWebhookOwner(created.ID, ownerID)
 
 	return &CreateWebhookPayload{
 		Webhook: webhookToNode(created),
@@ -490,10 +550,9 @@ func (r *Resolver) CreateWebhook(ctx context.Context, input *CreateWebhookInput)
 
 // ExecuteQuery resolves the executeQuery mutation.
 func (r *Resolver) ExecuteQuery(ctx context.Context, sql string, timeout *int) (*ExecuteQueryPayload, error) {
-	// Check authorization
-	if _, ok := ctx.Value("userID").(string); !ok {
+	if _, err := requireGraphQLPermission(ctx, rbac.PermModifyQueries); err != nil {
 		return &ExecuteQueryPayload{
-			Errors: []*ErrorNode{{Message: "unauthorized: user not found in context"}},
+			Errors: []*ErrorNode{{Message: err.Error()}},
 		}, nil
 	}
 
@@ -659,4 +718,40 @@ func stringPtr(s *string) *string {
 
 func generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func requireGraphQLPermission(ctx context.Context, permission rbac.Permission) (string, error) {
+	userID, ok := ctx.Value("userID").(string)
+	if !ok || userID == "" {
+		return "", errors.New("unauthorized: user not found in context")
+	}
+
+	manager := rbac.FromContext(ctx)
+	allowed, err := manager.HasPermission(userID, permission)
+	if err != nil {
+		return "", fmt.Errorf("forbidden: failed to resolve permission %s: %w", permission, err)
+	}
+	if !allowed {
+		return "", fmt.Errorf("forbidden: missing permission %s", permission)
+	}
+
+	return userID, nil
+}
+
+func canReadDashboard(ctx context.Context, userID string, dashboard *analytics.Dashboard) (bool, error) {
+	if dashboard == nil {
+		return false, nil
+	}
+	if dashboard.Public || dashboard.OwnerID == userID {
+		return true, nil
+	}
+
+	manager := rbac.FromContext(ctx)
+	return manager.CanAccessDashboard(userID, dashboard.ID)
+}
+
+func isGraphQLAdmin(ctx context.Context, userID string) bool {
+	manager := rbac.FromContext(ctx)
+	role, err := manager.GetUserRole(userID)
+	return err == nil && role == rbac.RoleAdmin
 }
