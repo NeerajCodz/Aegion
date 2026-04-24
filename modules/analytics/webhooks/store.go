@@ -15,11 +15,29 @@ type Store struct {
 	db DB
 }
 
+// RowScanner abstracts sql.Row for testability.
+type RowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+// RowsScanner abstracts sql.Rows for testability.
+type RowsScanner interface {
+	Next() bool
+	Scan(dest ...interface{}) error
+	Close() error
+	Err() error
+}
+
+// ExecResult abstracts sql.Result for testability.
+type ExecResult interface {
+	RowsAffected() (int64, error)
+}
+
 // DB interface for database operations.
 type DB interface {
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
-	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) RowScanner
+	QueryContext(ctx context.Context, query string, args ...interface{}) (RowsScanner, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (ExecResult, error)
 }
 
 // NewStore creates a new webhook store.
