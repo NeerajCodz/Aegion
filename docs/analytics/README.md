@@ -14,6 +14,9 @@ Complete documentation for the Aegion Analytics module. All analytics features a
 |----------|---------|
 | [Quickstart](./quickstart.md) | 5-minute setup guide |
 | [API Reference](./api.md) | REST, GraphQL, gRPC API overview |
+| [Endpoint Reference](./ENDPOINT_REFERENCE.md) | All 56+ endpoints documented |
+| [Quick Reference](./ENDPOINT_QUICK_REFERENCE.md) | Endpoint table lookup |
+| [Test Scenarios](./ENDPOINT_TEST_SCENARIOS.md) | End-to-end testing with curl |
 | [Setup Guide](./setup.md) | Installation and deployment |
 | [Architecture](./architecture.md) | System design and data flow |
 | [Security](./security.md) | Authentication, authorization, encryption |
@@ -45,6 +48,11 @@ Complete documentation for the Aegion Analytics module. All analytics features a
 
 ### API & Integration
 - **[API Reference](./api.md)** - REST, GraphQL, gRPC API overview, authentication, rate limiting
+- **[Endpoint Reference](./ENDPOINT_REFERENCE.md)** - Complete REST API endpoint documentation (56+ endpoints)
+- **[Quick Reference](./ENDPOINT_QUICK_REFERENCE.md)** - All endpoints in table format for quick lookup
+- **[Response Examples](./ENDPOINT_RESPONSES.md)** - Success and error response examples for each endpoint
+- **[Test Scenarios](./ENDPOINT_TEST_SCENARIOS.md)** - 9 end-to-end testing scenarios with curl commands
+- **[Endpoint Performance](./ENDPOINT_PERFORMANCE.md)** - Response times, caching, optimization, benchmarks
 - **[OpenAPI Specification](./openapi.yaml)** - Complete REST API spec (OpenAPI 3.0)
 - **[GraphQL Schema](./graphql-schema.md)** - GraphQL types, queries, mutations, subscriptions
 - **[Webhooks](./webhooks.md)** - Real-time event notifications, configuration, signature verification
