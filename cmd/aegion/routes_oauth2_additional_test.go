@@ -111,4 +111,3 @@ func TestProxyOAuth2EndpointUpstreamFailure(t *testing.T) {
 		t.Fatalf("proxy upstream failure expected %d got %d", http.StatusBadGateway, rec.Code)
 	}
 }
-

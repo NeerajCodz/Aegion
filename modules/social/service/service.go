@@ -14,6 +14,8 @@ import (
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/social/providers/catalog"
 	"github.com/aegion/aegion/modules/social/store"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 type Service struct {
@@ -241,7 +243,7 @@ func (s *Service) buildProvider(req ProviderUpsertRequest) (store.Provider, erro
 		return store.Provider{}, ErrProviderMisconfig
 	}
 	if provider.DisplayName == "" {
-		provider.DisplayName = strings.Title(provider.Slug)
+		provider.DisplayName = cases.Title(language.Und).String(provider.Slug)
 	}
 	if provider.Protocol == "" {
 		provider.Protocol = store.ProtocolOIDC

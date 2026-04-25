@@ -203,6 +203,52 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Analytics Module
+  # OLAP Analytics with DuckDB and Iceberg support (Standalone service)
+  # ─────────────────────────────────────────────────────────────────────────
+  module-analytics:
+    image: ${AEGION_IMAGE:-aegion/module-analytics}:${AEGION_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: modules/analytics/Dockerfile
+      args:
+        VERSION: ${AEGION_VERSION:-dev}
+    environment:
+      MODULE_PORT: 8082
+      GRPC_PORT: 50051
+      METRICS_PORT: 9090
+      MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+      MODULE_LOG_FORMAT: ${AEGION_LOG_FORMAT:-json}
+      AEGION_CORE_URL: http://aegion:8080
+      AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aegion}:${POSTGRES_PASSWORD:-aegion}@postgres:5432/${POSTGRES_DB:-aegion}?sslmode=disable
+      DUCKDB_DATABASE: /var/lib/aegion/analytics/data.db
+      ANALYTICS_CACHE_ENABLED: 'true'
+      ANALYTICS_CACHE_TTL: '300'
+      ANALYTICS_QUERY_TIMEOUT: '30'
+      ANALYTICS_MAX_PAGE_SIZE: '1000'
+    volumes:
+      - analytics-data:/var/lib/aegion/analytics
+      - ./configs/analytics.yaml:/app/config/analytics.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      aegion:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - aegion_modules
+    restart: unless-stopped
+    ports:
+      - "8082:8082"      # REST API
+      - "50051:50051"    # gRPC
+      - "9090:9090"      # Prometheus metrics
+
   # Mailpit - Email Testing (Development only, override in prod)
   # ─────────────────────────────────────────────────────────────────────────
   mailpit:
@@ -242,3 +288,6 @@ volumes:
     name: aegion_redis_data
   aegion-data:
     name: aegion_core_data
+  analytics-data:
+    name: aegion_analytics_data
+

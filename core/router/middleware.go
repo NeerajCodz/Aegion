@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -19,8 +19,8 @@ import (
 type contextKey string
 
 const (
-	contextKeyRequestID   contextKey = "aegion.request_id"
-	contextKeyRequestTime contextKey = "aegion.request_time"
+	contextKeyRequestID    contextKey = "aegion.request_id"
+	contextKeyRequestTime  contextKey = "aegion.request_time"
 	coreTrustedProxyEnvVar contextKey = "AEGION_TRUSTED_PROXY_CIDRS"
 )
 

@@ -45,4 +45,3 @@ func TestAppendVaryHeaderBranches(t *testing.T) {
 		t.Fatalf("appendVaryHeader(new value) expected 2 entries, got %#v", got)
 	}
 }
-

@@ -53,15 +53,15 @@ func TestSocialServiceOAuthJWTMoreBranches(t *testing.T) {
 	}
 
 	provider := store.Provider{
-		Slug:            "google",
-		RedirectURI:     "https://app.example.com/cb",
-		ClientID:        "cid",
-		ClientSecret:    "secret",
-		AuthStyle:       store.AuthStyleClientSecretPost,
-		PKCEMethod:      store.PKCENone,
-		ClaimSource:     store.ClaimSourceUserInfo,
-		ClaimMapping:    store.ClaimMapping{Subject: "sub", Email: "email"},
-		TokenEndpoint:   "https://provider.example.com/token-empty",
+		Slug:             "google",
+		RedirectURI:      "https://app.example.com/cb",
+		ClientID:         "cid",
+		ClientSecret:     "secret",
+		AuthStyle:        store.AuthStyleClientSecretPost,
+		PKCEMethod:       store.PKCENone,
+		ClaimSource:      store.ClaimSourceUserInfo,
+		ClaimMapping:     store.ClaimMapping{Subject: "sub", Email: "email"},
+		TokenEndpoint:    "https://provider.example.com/token-empty",
 		UserInfoEndpoint: "https://provider.example.com/user",
 	}
 	if _, err := svc.exchangeCode(ctx, provider, resolvedProvider{TokenEndpoint: "https://provider.example.com/token-empty"}, store.AuthState{}, "code"); err != ErrInvalidCallback {
@@ -81,7 +81,7 @@ func TestSocialServiceOAuthJWTMoreBranches(t *testing.T) {
 		}),
 	})
 	githubProvider := store.Provider{
-		Slug:       "github",
+		Slug:        "github",
 		ClaimSource: store.ClaimSourceGitHubUser,
 		ClaimMapping: store.ClaimMapping{
 			Subject: "id",
@@ -94,4 +94,3 @@ func TestSocialServiceOAuthJWTMoreBranches(t *testing.T) {
 		t.Fatalf("profileFromGitHub(verified fallback email) profile=%#v err=%v", profile, err)
 	}
 }
-

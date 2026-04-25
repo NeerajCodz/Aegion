@@ -441,4 +441,3 @@ func TestMFAServiceAdditionalTrustedDeviceAndHelpers(t *testing.T) {
 		}
 	})
 }
-

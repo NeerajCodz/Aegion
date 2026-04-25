@@ -14,8 +14,8 @@ import (
 )
 
 type cliBehaviorService struct {
-	commands   []service.CommandDescriptor
-	listRuns   []store.CommandRun
+	commands    []service.CommandDescriptor
+	listRuns    []store.CommandRun
 	listRunsErr error
 	getRun      *store.CommandRun
 	getRunErr   error
@@ -172,4 +172,3 @@ func TestCLIHandlersAdditionalBranches(t *testing.T) {
 		}
 	})
 }
-

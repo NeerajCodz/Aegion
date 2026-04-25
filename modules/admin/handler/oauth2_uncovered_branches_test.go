@@ -503,4 +503,3 @@ func TestOAuth2ClientBuilderAdditionalBranches(t *testing.T) {
 		t.Fatalf("normalizeGenericStringSet(trim empty values) = %#v", generic)
 	}
 }
-

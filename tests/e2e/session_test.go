@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	bcrypt "github.com/aegion/aegion/internal/platform/bcryptcompat"
 )
 
 // SessionResponse represents session data
