@@ -94,9 +94,9 @@ type cliFakeRows struct {
 	err  error
 }
 
-func (r *cliFakeRows) Close() {}
-func (r *cliFakeRows) Err() error { return r.err }
-func (r *cliFakeRows) CommandTag() pgconn.CommandTag { return pgconn.NewCommandTag("SELECT 0") }
+func (r *cliFakeRows) Close()                                       {}
+func (r *cliFakeRows) Err() error                                   { return r.err }
+func (r *cliFakeRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
 func (r *cliFakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *cliFakeRows) Next() bool {
 	if r.idx >= len(r.data) {
@@ -218,4 +218,3 @@ func TestPostgresStoreCLIStubCoverage(t *testing.T) {
 		t.Fatalf("systemConfig(invalid json) = %#v", cfg)
 	}
 }
-

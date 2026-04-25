@@ -42,12 +42,12 @@ func TestVerifyCertificateChainAdditionalBranches(t *testing.T) {
 		t.Fatalf("GenerateKey(root) error = %v", err)
 	}
 	rootTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "Root CA"},
-		NotBefore:    now.Add(-time.Hour),
-		NotAfter:     now.Add(24 * time.Hour),
-		IsCA:         true,
-		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Root CA"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(24 * time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 	}
 	root := issueTestCert(t, rootTemplate, rootTemplate, &rootKey.PublicKey, rootKey)
@@ -60,4 +60,3 @@ func TestVerifyCertificateChainAdditionalBranches(t *testing.T) {
 		t.Fatalf("parseCertificatesPEM() returned unexpected certificates: %#v", certs)
 	}
 }
-

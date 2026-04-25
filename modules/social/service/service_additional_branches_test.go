@@ -167,11 +167,11 @@ func TestSocialServiceAdditionalManagementAndLoadBranches(t *testing.T) {
 		}
 
 		repo = &socialRepoStub{provider: &store.Provider{
-			Slug:       "google",
-			Enabled:    true,
-			Protocol:   store.ProtocolOIDC,
-			ClientID:   "cid",
-			RedirectURI:"https://app.example.com/cb",
+			Slug:        "google",
+			Enabled:     true,
+			Protocol:    store.ProtocolOIDC,
+			ClientID:    "cid",
+			RedirectURI: "https://app.example.com/cb",
 		}}
 		svc = New(repo)
 		if _, _, err := svc.loadProvider(ctx, "google"); !errors.Is(err, ErrProviderMisconfig) {
@@ -251,18 +251,18 @@ func TestSocialServiceAdditionalAuthBranches(t *testing.T) {
 		defer server.Close()
 
 		baseProvider := &store.Provider{
-			Slug:             "google",
-			Enabled:          true,
-			Protocol:         store.ProtocolOAuth,
+			Slug:              "google",
+			Enabled:           true,
+			Protocol:          store.ProtocolOAuth,
 			AuthorizeEndpoint: server.URL + "/authorize",
-			TokenEndpoint:    server.URL + "/token",
-			UserInfoEndpoint: server.URL + "/userinfo",
-			ClientID:         "cid",
-			ClientSecret:     "secret",
-			RedirectURI:      "https://app.example.com/cb",
-			PKCEMethod:       store.PKCES256,
-			AuthStyle:        store.AuthStyleClientSecretPost,
-			ClaimSource:      store.ClaimSourceUserInfo,
+			TokenEndpoint:     server.URL + "/token",
+			UserInfoEndpoint:  server.URL + "/userinfo",
+			ClientID:          "cid",
+			ClientSecret:      "secret",
+			RedirectURI:       "https://app.example.com/cb",
+			PKCEMethod:        store.PKCES256,
+			AuthStyle:         store.AuthStyleClientSecretPost,
+			ClaimSource:       store.ClaimSourceUserInfo,
 			ClaimMapping: store.ClaimMapping{
 				Subject:       "sub",
 				Email:         "email",
@@ -305,48 +305,48 @@ func TestSocialServiceAdditionalAuthBranches(t *testing.T) {
 
 func TestSocialServiceAdditionalMergeAndAuthURLBranches(t *testing.T) {
 	base := store.Provider{
-		Slug:              "base",
-		DisplayName:       "Base",
-		Protocol:          store.ProtocolOIDC,
-		Issuer:            "iss",
-		DiscoveryURL:      "disc",
-		AuthorizeEndpoint: "auth",
-		TokenEndpoint:     "token",
-		UserInfoEndpoint:  "userinfo",
-		JWKSURI:           "jwks",
-		Scopes:            []string{"openid"},
-		ClaimMapping:      store.ClaimMapping{Subject: "sub"},
-		ExtraAuthParams:   map[string]string{"prompt": "consent"},
-		PKCEMethod:        store.PKCES256,
-		AuthStyle:         store.AuthStyleClientSecretPost,
-		ClaimSource:       store.ClaimSourceUserInfo,
-		Enabled:           true,
-		TrustEmailVerified:true,
-		RedirectURI:       "https://app.example.com/cb",
-		ClientID:          "cid",
-		ClientSecret:      "secret",
+		Slug:               "base",
+		DisplayName:        "Base",
+		Protocol:           store.ProtocolOIDC,
+		Issuer:             "iss",
+		DiscoveryURL:       "disc",
+		AuthorizeEndpoint:  "auth",
+		TokenEndpoint:      "token",
+		UserInfoEndpoint:   "userinfo",
+		JWKSURI:            "jwks",
+		Scopes:             []string{"openid"},
+		ClaimMapping:       store.ClaimMapping{Subject: "sub"},
+		ExtraAuthParams:    map[string]string{"prompt": "consent"},
+		PKCEMethod:         store.PKCES256,
+		AuthStyle:          store.AuthStyleClientSecretPost,
+		ClaimSource:        store.ClaimSourceUserInfo,
+		Enabled:            true,
+		TrustEmailVerified: true,
+		RedirectURI:        "https://app.example.com/cb",
+		ClientID:           "cid",
+		ClientSecret:       "secret",
 	}
 	override := store.Provider{
-		Slug:              "override",
-		DisplayName:       "Override",
-		Protocol:          store.ProtocolOAuth,
-		Issuer:            "iss2",
-		DiscoveryURL:      "disc2",
-		AuthorizeEndpoint: "auth2",
-		TokenEndpoint:     "token2",
-		UserInfoEndpoint:  "userinfo2",
-		JWKSURI:           "jwks2",
-		Scopes:            []string{"email"},
-		ClaimMapping:      store.ClaimMapping{Subject: "subject", Email: "email", EmailVerified: "verified", Name: "name", Picture: "picture"},
-		ExtraAuthParams:   map[string]string{"hd": "example.com"},
-		PKCEMethod:        store.PKCEPlain,
-		AuthStyle:         store.AuthStyleClientSecretBasic,
-		ClaimSource:       store.ClaimSourceIDToken,
-		Enabled:           true,
-		TrustEmailVerified:true,
-		RedirectURI:       "https://app.example.com/cb2",
-		ClientID:          "cid2",
-		ClientSecret:      "secret2",
+		Slug:               "override",
+		DisplayName:        "Override",
+		Protocol:           store.ProtocolOAuth,
+		Issuer:             "iss2",
+		DiscoveryURL:       "disc2",
+		AuthorizeEndpoint:  "auth2",
+		TokenEndpoint:      "token2",
+		UserInfoEndpoint:   "userinfo2",
+		JWKSURI:            "jwks2",
+		Scopes:             []string{"email"},
+		ClaimMapping:       store.ClaimMapping{Subject: "subject", Email: "email", EmailVerified: "verified", Name: "name", Picture: "picture"},
+		ExtraAuthParams:    map[string]string{"hd": "example.com"},
+		PKCEMethod:         store.PKCEPlain,
+		AuthStyle:          store.AuthStyleClientSecretBasic,
+		ClaimSource:        store.ClaimSourceIDToken,
+		Enabled:            true,
+		TrustEmailVerified: true,
+		RedirectURI:        "https://app.example.com/cb2",
+		ClientID:           "cid2",
+		ClientSecret:       "secret2",
 	}
 	merged := mergePreset(base, override)
 	if merged.Slug != "override" || merged.DisplayName != "Override" || merged.Protocol != store.ProtocolOAuth ||
@@ -359,10 +359,10 @@ func TestSocialServiceAdditionalMergeAndAuthURLBranches(t *testing.T) {
 	}
 
 	value, err := authorizationURL(store.Provider{
-		ClientID:   "cid",
-		RedirectURI:"https://app.example.com/cb",
-		Protocol:   store.ProtocolOIDC,
-		PKCEMethod: store.PKCES256,
+		ClientID:    "cid",
+		RedirectURI: "https://app.example.com/cb",
+		Protocol:    store.ProtocolOIDC,
+		PKCEMethod:  store.PKCES256,
 		ExtraAuthParams: map[string]string{
 			"prompt": "login",
 			" ":      "x",
@@ -379,4 +379,3 @@ func TestSocialServiceAdditionalMergeAndAuthURLBranches(t *testing.T) {
 		t.Fatalf("authorizationURL(extra params) = %q", value)
 	}
 }
-

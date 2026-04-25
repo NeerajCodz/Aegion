@@ -53,18 +53,22 @@ type socialFakeTx struct {
 	commitFn   func(context.Context) error
 }
 
-func (t *socialFakeTx) Begin(context.Context) (pgx.Tx, error) { return nil, errors.New("not implemented") }
-func (t *socialFakeTx) Rollback(context.Context) error        { return nil }
+func (t *socialFakeTx) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("not implemented")
+}
+func (t *socialFakeTx) Rollback(context.Context) error { return nil }
 func (t *socialFakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
 	return 0, errors.New("not implemented")
 }
 func (t *socialFakeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (t *socialFakeTx) LargeObjects() pgx.LargeObjects                          { return pgx.LargeObjects{} }
+func (t *socialFakeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
 func (t *socialFakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, errors.New("not implemented")
 }
-func (t *socialFakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) { return &socialFakeRows{}, nil }
-func (t *socialFakeTx) Conn() *pgx.Conn                                          { return nil }
+func (t *socialFakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return &socialFakeRows{}, nil
+}
+func (t *socialFakeTx) Conn() *pgx.Conn { return nil }
 func (t *socialFakeTx) Commit(ctx context.Context) error {
 	if t.commitFn != nil {
 		return t.commitFn(ctx)
@@ -150,8 +154,8 @@ func (r *socialFakeRows) Scan(dest ...any) error {
 	return socialFakeRow{vals: r.data[r.idx-1]}.Scan(dest...)
 }
 func (r *socialFakeRows) Values() ([]any, error) { return nil, errors.New("not implemented") }
-func (r *socialFakeRows) RawValues() [][]byte     { return nil }
-func (r *socialFakeRows) Conn() *pgx.Conn         { return nil }
+func (r *socialFakeRows) RawValues() [][]byte    { return nil }
+func (r *socialFakeRows) Conn() *pgx.Conn        { return nil }
 
 func socialProviderRow(now time.Time, id uuid.UUID) []any {
 	return []any{
@@ -221,7 +225,9 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 	}
 
 	s.pool = &socialFakeDB{
-		queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{vals: socialProviderRow(now, uuid.New())} },
+		queryRowFn: func(context.Context, string, ...any) pgx.Row {
+			return socialFakeRow{vals: socialProviderRow(now, uuid.New())}
+		},
 	}
 	if p, err := s.GetProviderBySlug(context.Background(), "google"); err != nil || p.Slug != "google" {
 		t.Fatalf("GetProviderBySlug(success) provider=%#v err=%v", p, err)
@@ -249,8 +255,12 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 	s.pool = &socialFakeDB{
 		beginFn: func(context.Context) (pgx.Tx, error) {
 			return &socialFakeTx{
-				queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{vals: []any{committedID, now, now}} },
-				execFn:     func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errors.New("credentials failed") },
+				queryRowFn: func(context.Context, string, ...any) pgx.Row {
+					return socialFakeRow{vals: []any{committedID, now, now}}
+				},
+				execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+					return pgconn.CommandTag{}, errors.New("credentials failed")
+				},
 			}, nil
 		},
 	}
@@ -261,9 +271,13 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 	s.pool = &socialFakeDB{
 		beginFn: func(context.Context) (pgx.Tx, error) {
 			return &socialFakeTx{
-				queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{vals: []any{committedID, now, now}} },
-				execFn:     func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("INSERT 1"), nil },
-				commitFn:   func(context.Context) error { return errors.New("commit failed") },
+				queryRowFn: func(context.Context, string, ...any) pgx.Row {
+					return socialFakeRow{vals: []any{committedID, now, now}}
+				},
+				execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
+				commitFn: func(context.Context) error { return errors.New("commit failed") },
 			}, nil
 		},
 	}
@@ -274,25 +288,37 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 	s.pool = &socialFakeDB{
 		beginFn: func(context.Context) (pgx.Tx, error) {
 			return &socialFakeTx{
-				queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{vals: []any{committedID, now, now}} },
-				execFn:     func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("INSERT 1"), nil },
+				queryRowFn: func(context.Context, string, ...any) pgx.Row {
+					return socialFakeRow{vals: []any{committedID, now, now}}
+				},
+				execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+					return pgconn.NewCommandTag("INSERT 1"), nil
+				},
 			}, nil
 		},
-		queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{vals: socialProviderRow(now, committedID)} },
+		queryRowFn: func(context.Context, string, ...any) pgx.Row {
+			return socialFakeRow{vals: socialProviderRow(now, committedID)}
+		},
 	}
 	if got, err := s.UpsertProvider(context.Background(), Provider{Slug: "google", DisplayName: "Google", Protocol: ProtocolOIDC}); err != nil || got.ID != committedID {
 		t.Fatalf("UpsertProvider(success) provider=%#v err=%v", got, err)
 	}
 
-	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errors.New("delete failed") }}
+	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.CommandTag{}, errors.New("delete failed")
+	}}
 	if err := s.DeleteProvider(context.Background(), "google"); err == nil || err.Error() != "delete failed" {
 		t.Fatalf("DeleteProvider(exec error) = %v", err)
 	}
-	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 0"), nil }}
+	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}}
 	if err := s.DeleteProvider(context.Background(), "google"); !errors.Is(err, ErrProviderNotFound) {
 		t.Fatalf("DeleteProvider(not found) = %v", err)
 	}
-	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil }}
+	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("DELETE 1"), nil
+	}}
 	if err := s.DeleteProvider(context.Background(), "google"); err != nil {
 		t.Fatalf("DeleteProvider(success) = %v", err)
 	}
@@ -301,7 +327,9 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 	if err := shortKeyStore.SaveState(context.Background(), AuthState{ID: "state-1", ProviderSlug: "google", PKCEVerifier: "verifier", ExpiresAt: now.Add(time.Minute)}); err == nil {
 		t.Fatal("SaveState(encrypt error) expected error")
 	}
-	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("INSERT 1"), nil }}
+	s.pool = &socialFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("INSERT 1"), nil
+	}}
 	if err := s.SaveState(context.Background(), AuthState{ID: "state-2", ProviderSlug: "google", ExpiresAt: now.Add(time.Minute)}); err != nil {
 		t.Fatalf("SaveState(success) = %v", err)
 	}
@@ -310,12 +338,16 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 	if _, err := s.ConsumeState(context.Background(), "state-1"); err == nil || err.Error() != "begin failed" {
 		t.Fatalf("ConsumeState(begin error) = %v", err)
 	}
-	s.pool = &socialFakeDB{beginFn: func(context.Context) (pgx.Tx, error) { return &socialFakeTx{queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{err: pgx.ErrNoRows} }}, nil }}
+	s.pool = &socialFakeDB{beginFn: func(context.Context) (pgx.Tx, error) {
+		return &socialFakeTx{queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{err: pgx.ErrNoRows} }}, nil
+	}}
 	if _, err := s.ConsumeState(context.Background(), "missing"); !errors.Is(err, ErrStateNotFound) {
 		t.Fatalf("ConsumeState(not found) = %v", err)
 	}
 	s.pool = &socialFakeDB{beginFn: func(context.Context) (pgx.Tx, error) {
-		return &socialFakeTx{queryRowFn: func(context.Context, string, ...any) pgx.Row { return socialFakeRow{err: errors.New("state query failed")} }}, nil
+		return &socialFakeTx{queryRowFn: func(context.Context, string, ...any) pgx.Row {
+			return socialFakeRow{err: errors.New("state query failed")}
+		}}, nil
 	}}
 	if _, err := s.ConsumeState(context.Background(), "state-3"); err == nil || err.Error() != "state query failed" {
 		t.Fatalf("ConsumeState(query error) = %v", err)
@@ -327,7 +359,9 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 			queryRowFn: func(context.Context, string, ...any) pgx.Row {
 				return socialFakeRow{vals: []any{"state-4", "google", "/app", "nonce", "", stateFuture}}
 			},
-			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errors.New("delete state failed") },
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.CommandTag{}, errors.New("delete state failed")
+			},
 		}, nil
 	}}
 	if _, err := s.ConsumeState(context.Background(), "state-4"); err == nil || err.Error() != "delete state failed" {
@@ -339,7 +373,9 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 			queryRowFn: func(context.Context, string, ...any) pgx.Row {
 				return socialFakeRow{vals: []any{"state-5", "google", "/app", "nonce", "", stateFuture}}
 			},
-			execFn:   func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil },
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("DELETE 1"), nil
+			},
 			commitFn: func(context.Context) error { return errors.New("commit failed") },
 		}, nil
 	}}
@@ -352,7 +388,9 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 			queryRowFn: func(context.Context, string, ...any) pgx.Row {
 				return socialFakeRow{vals: []any{"state-6", "google", "/app", "nonce", "", now.Add(-time.Minute)}}
 			},
-			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil },
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("DELETE 1"), nil
+			},
 		}, nil
 	}}
 	if _, err := s.ConsumeState(context.Background(), "state-6"); !errors.Is(err, ErrStateExpired) {
@@ -364,7 +402,9 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 			queryRowFn: func(context.Context, string, ...any) pgx.Row {
 				return socialFakeRow{vals: []any{"state-7", "google", "/app", "nonce", "bad-cipher", stateFuture}}
 			},
-			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil },
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("DELETE 1"), nil
+			},
 		}, nil
 	}}
 	if _, err := s.ConsumeState(context.Background(), "state-7"); err == nil {
@@ -380,7 +420,9 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 			queryRowFn: func(context.Context, string, ...any) pgx.Row {
 				return socialFakeRow{vals: []any{"state-8", "google", "/app", "nonce", validCipher, stateFuture}}
 			},
-			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil },
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("DELETE 1"), nil
+			},
 		}, nil
 	}}
 	if st, err := s.ConsumeState(context.Background(), "state-8"); err != nil || st.PKCEVerifier != "pkce-verifier" {
@@ -699,4 +741,3 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 		t.Fatalf("ResolveIdentity(new identity success) result=%#v err=%v", result, err)
 	}
 }
-

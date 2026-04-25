@@ -100,9 +100,9 @@ func TestGetConnectionForDomain(t *testing.T) {
 
 func TestNormalizeRedirect(t *testing.T) {
 	tests := []struct {
-		name  string
-		in    string
-		want  string
+		name string
+		in   string
+		want string
 	}{
 		{name: "empty defaults to root", in: "", want: "/"},
 		{name: "relative path allowed", in: "/after-login", want: "/after-login"},

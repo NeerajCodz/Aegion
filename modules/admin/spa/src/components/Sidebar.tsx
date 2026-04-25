@@ -9,6 +9,7 @@ import {
   GitBranch,
   Scale,
   Settings,
+  ChartColumn,
   LogOut,
   X,
 } from 'lucide-react';
@@ -32,6 +33,7 @@ const navigation = [
   { name: 'Integrations', href: '/integrations', icon: Network, permission: 'config:read' },
   { name: 'Policy', href: '/policy', icon: Scale, permission: 'config:read' },
   { name: 'SCIM', href: '/scim', icon: GitBranch, permission: 'config:read' },
+  { name: 'Analytics', href: '/analytics', icon: ChartColumn, permission: 'analytics:read' },
   { name: 'Settings', href: '/settings', icon: Settings, permission: 'config:read' },
 ];
 

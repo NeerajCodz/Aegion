@@ -104,8 +104,8 @@ func (r *ssoFakeRows) Scan(dest ...any) error {
 	return ssoFakeRow{vals: r.data[r.idx-1]}.Scan(dest...)
 }
 func (r *ssoFakeRows) Values() ([]any, error) { return nil, errors.New("not implemented") }
-func (r *ssoFakeRows) RawValues() [][]byte     { return nil }
-func (r *ssoFakeRows) Conn() *pgx.Conn         { return nil }
+func (r *ssoFakeRows) RawValues() [][]byte    { return nil }
+func (r *ssoFakeRows) Conn() *pgx.Conn        { return nil }
 
 func ssoConnectionRow(now time.Time, id uuid.UUID) []any {
 	return []any{
@@ -186,15 +186,21 @@ func TestPostgresStoreSSOStubCoverage(t *testing.T) {
 		t.Fatalf("UpsertConnection(success) conn=%#v err=%v", conn, err)
 	}
 
-	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.CommandTag{}, errors.New("delete failed") }}
+	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.CommandTag{}, errors.New("delete failed")
+	}}
 	if err := s.DeleteConnection(context.Background(), "acme"); err == nil || err.Error() != "delete failed" {
 		t.Fatalf("DeleteConnection(exec error) = %v", err)
 	}
-	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 0"), nil }}
+	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}}
 	if err := s.DeleteConnection(context.Background(), "acme"); !errors.Is(err, ErrConnectionNotFound) {
 		t.Fatalf("DeleteConnection(not found) = %v", err)
 	}
-	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil }}
+	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("DELETE 1"), nil
+	}}
 	if err := s.DeleteConnection(context.Background(), "acme"); err != nil {
 		t.Fatalf("DeleteConnection(success) = %v", err)
 	}
@@ -215,4 +221,3 @@ func TestPostgresStoreSSOStubCoverage(t *testing.T) {
 		t.Fatal("scanConnection(extra json error) expected error")
 	}
 }
-

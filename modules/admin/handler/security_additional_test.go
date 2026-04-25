@@ -177,4 +177,3 @@ func TestSecurityHandlerAdditionalBranches(t *testing.T) {
 		}
 	})
 }
-

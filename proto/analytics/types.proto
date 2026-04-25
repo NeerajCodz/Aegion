@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package aegion.analytics;
+
+option go_package = "github.com/aegion/aegion/internal/proto/analytics";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+
+// Event represents an analytics event.
+message Event {
+  string id = 1;
+  string category = 2;
+  string event_type = 3;
+  google.protobuf.Struct data = 4;
+  string user_id = 5;
+  string session_id = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// Metric represents an aggregated metric.
+message Metric {
+  string id = 1;
+  string name = 2;
+  string category = 3;
+  double value = 4;
+  string unit = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// Dashboard represents a saved analytics dashboard.
+message Dashboard {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Struct config = 4;
+  string owner_id = 5;
+  bool public = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// Query represents a saved analytics query.
+message SavedQuery {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string sql = 4;
+  string owner_id = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// HealthStatus represents the health check status.
+message HealthStatus {
+  bool is_healthy = 1;
+  google.protobuf.Timestamp last_check_time = 2;
+  int64 sync_lag_seconds = 3;
+  string status = 4; // "healthy", "degraded", or "unhealthy"
+  bool duckdb = 5;
+  bool storage = 6;
+  bool migrations = 7;
+}
+
+// Empty represents an empty request/response.
+message Empty {}
+
+// Filter represents query filters.
+message Filter {
+  string field = 1;
+  string operator = 2; // "eq", "ne", "gt", "gte", "lt", "lte", "in", "like"
+  string value = 3;
+}
+
+// SortOrder represents sort order for results.
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  ASC = 1;
+  DESC = 2;
+}
+
+// ExportFormat represents export data formats.
+enum ExportFormat {
+  EXPORT_FORMAT_UNSPECIFIED = 0;
+  CSV = 1;
+  JSON = 2;
+  PARQUET = 3;
+}
+
+// DataChunk represents a chunk of binary data for streaming exports.
+message DataChunk {
+  bytes data = 1;
+  int32 sequence = 2;
+  bool is_final = 3;
+}
+
+// QueryResult represents the result of a query execution.
+message QueryResult {
+  string id = 1;
+  repeated google.protobuf.Struct rows = 2;
+  int64 row_count = 3;
+  int64 total_count = 4;
+  google.protobuf.Duration execution_time = 5;
+  string next_page_token = 6;
+}
+
+// Error details for gRPC errors.
+message ErrorDetail {
+  string code = 1;
+  string message = 2;
+  google.protobuf.Struct metadata = 3;
+}

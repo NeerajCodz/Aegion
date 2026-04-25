@@ -49,18 +49,22 @@ type passkeysFakeTx struct {
 	commitFn   func(context.Context) error
 }
 
-func (t *passkeysFakeTx) Begin(context.Context) (pgx.Tx, error) { return nil, errors.New("not implemented") }
-func (t *passkeysFakeTx) Rollback(context.Context) error        { return nil }
+func (t *passkeysFakeTx) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("not implemented")
+}
+func (t *passkeysFakeTx) Rollback(context.Context) error { return nil }
 func (t *passkeysFakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
 	return 0, errors.New("not implemented")
 }
 func (t *passkeysFakeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (t *passkeysFakeTx) LargeObjects() pgx.LargeObjects                          { return pgx.LargeObjects{} }
+func (t *passkeysFakeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
 func (t *passkeysFakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, errors.New("not implemented")
 }
-func (t *passkeysFakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) { return &passkeysFakeRows{}, nil }
-func (t *passkeysFakeTx) Conn() *pgx.Conn                                         { return nil }
+func (t *passkeysFakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return &passkeysFakeRows{}, nil
+}
+func (t *passkeysFakeTx) Conn() *pgx.Conn { return nil }
 func (t *passkeysFakeTx) Commit(ctx context.Context) error {
 	if t.commitFn != nil {
 		return t.commitFn(ctx)
@@ -131,9 +135,9 @@ type passkeysFakeRows struct {
 	err  error
 }
 
-func (r *passkeysFakeRows) Close() {}
-func (r *passkeysFakeRows) Err() error { return r.err }
-func (r *passkeysFakeRows) CommandTag() pgconn.CommandTag { return pgconn.NewCommandTag("SELECT 0") }
+func (r *passkeysFakeRows) Close()                                       {}
+func (r *passkeysFakeRows) Err() error                                   { return r.err }
+func (r *passkeysFakeRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
 func (r *passkeysFakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *passkeysFakeRows) Next() bool {
 	if r.idx >= len(r.data) {
@@ -194,7 +198,9 @@ func TestPostgresStorePasskeysStubCoverage(t *testing.T) {
 			queryRowFn: func(context.Context, string, ...any) pgx.Row {
 				return passkeysFakeRow{vals: []any{"c1", "i1", "login", now.Add(time.Hour)}}
 			},
-			execFn:   func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil },
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("DELETE 1"), nil
+			},
 			commitFn: func(context.Context) error { return errors.New("commit failed") },
 		}, nil
 	}}
@@ -207,7 +213,9 @@ func TestPostgresStorePasskeysStubCoverage(t *testing.T) {
 			queryRowFn: func(context.Context, string, ...any) pgx.Row {
 				return passkeysFakeRow{vals: []any{"c1", "i1", "login", now.Add(-time.Minute)}}
 			},
-			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("DELETE 1"), nil },
+			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+				return pgconn.NewCommandTag("DELETE 1"), nil
+			},
 		}, nil
 	}}
 	if _, err := s.ConsumeChallenge("c1"); !errors.Is(err, ErrChallengeExpired) {
@@ -219,7 +227,9 @@ func TestPostgresStorePasskeysStubCoverage(t *testing.T) {
 		t.Fatalf("GetCredential(not found) = %v", err)
 	}
 
-	s.pool = &passkeysFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) { return pgconn.NewCommandTag("UPDATE 0"), nil }}
+	s.pool = &passkeysFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}}
 	if err := s.UpdateCredentialSignCount("cred-1", 1); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("UpdateCredentialSignCount(not found) = %v", err)
 	}
@@ -243,4 +253,3 @@ func TestPostgresStorePasskeysStubCoverage(t *testing.T) {
 		t.Fatalf("ListCredentialsByIdentity(success) got=%#v", got)
 	}
 }
-

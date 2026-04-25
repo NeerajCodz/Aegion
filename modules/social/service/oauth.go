@@ -81,12 +81,12 @@ func (s *Service) resolveProvider(ctx context.Context, provider store.Provider) 
 	return resolved, nil
 }
 
-func (s *Service) fetchDiscovery(ctx context.Context, discoveryURL string) (discoveryDocument, error) {
+func (s *Service) fetchDiscovery(ctx context.Context, discoveryURL string) (doc discoveryDocument, err error) {
 	discoveryURL = strings.TrimSpace(discoveryURL)
 	s.discoveryMu.Lock()
-	if doc, ok := s.discovery[discoveryURL]; ok {
+	if cached, ok := s.discovery[discoveryURL]; ok {
 		s.discoveryMu.Unlock()
-		return doc, nil
+		return cached, nil
 	}
 	s.discoveryMu.Unlock()
 
@@ -98,16 +98,19 @@ func (s *Service) fetchDiscovery(ctx context.Context, discoveryURL string) (disc
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return discoveryDocument{}, err
+		return doc, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return discoveryDocument{}, fmt.Errorf("discovery failed with status %d", resp.StatusCode)
+		return doc, fmt.Errorf("discovery failed with status %d", resp.StatusCode)
 	}
 
-	var doc discoveryDocument
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
-		return discoveryDocument{}, err
+	if err = json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+		return doc, err
 	}
 
 	s.discoveryMu.Lock()
@@ -116,7 +119,7 @@ func (s *Service) fetchDiscovery(ctx context.Context, discoveryURL string) (disc
 	return doc, nil
 }
 
-func (s *Service) exchangeCode(ctx context.Context, provider store.Provider, resolved resolvedProvider, state store.AuthState, code string) (*tokenPayload, error) {
+func (s *Service) exchangeCode(ctx context.Context, provider store.Provider, resolved resolvedProvider, state store.AuthState, code string) (payload *tokenPayload, err error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
@@ -143,19 +146,24 @@ func (s *Service) exchangeCode(ctx context.Context, provider store.Provider, res
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("token exchange failed with status %d", resp.StatusCode)
 	}
 
-	var payload tokenPayload
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	var token tokenPayload
+	if err = json.NewDecoder(resp.Body).Decode(&token); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(payload.AccessToken) == "" && strings.TrimSpace(payload.IDToken) == "" {
+	if strings.TrimSpace(token.AccessToken) == "" && strings.TrimSpace(token.IDToken) == "" {
 		return nil, ErrInvalidCallback
 	}
-	return &payload, nil
+	payload = &token
+	return payload, nil
 }
 
 func (s *Service) fetchProfile(ctx context.Context, provider store.Provider, resolved resolvedProvider, state store.AuthState, tokenResponse *tokenPayload) (store.SocialProfile, error) {
@@ -181,7 +189,7 @@ func (s *Service) profileFromUserInfo(ctx context.Context, provider store.Provid
 	return claimsToProfile(provider, claims), nil
 }
 
-func (s *Service) profileFromGitHub(ctx context.Context, provider store.Provider, resolved resolvedProvider, accessToken string) (store.SocialProfile, error) {
+func (s *Service) profileFromGitHub(ctx context.Context, provider store.Provider, resolved resolvedProvider, accessToken string) (profile store.SocialProfile, err error) {
 	claims, err := s.fetchJSONClaims(ctx, http.MethodGet, resolved.UserInfoEndpoint, accessToken)
 	if err != nil {
 		return store.SocialProfile{}, err
@@ -195,7 +203,11 @@ func (s *Service) profileFromGitHub(ctx context.Context, provider store.Provider
 			req.Header.Set("User-Agent", "aegion-social")
 			resp, err := s.client.Do(req)
 			if err == nil {
-				defer resp.Body.Close()
+				defer func() {
+					if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+						err = closeErr
+					}
+				}()
 				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 					var payload []map[string]interface{}
 					if err := json.NewDecoder(resp.Body).Decode(&payload); err == nil {
@@ -226,7 +238,8 @@ func (s *Service) profileFromGitHub(ctx context.Context, provider store.Provider
 		}
 	}
 
-	return claimsToProfile(provider, claims), nil
+	profile = claimsToProfile(provider, claims)
+	return profile, err
 }
 
 func (s *Service) profileFromIDToken(ctx context.Context, provider store.Provider, resolved resolvedProvider, state store.AuthState, idToken string) (store.SocialProfile, error) {
@@ -246,7 +259,7 @@ func (s *Service) profileFromIDToken(ctx context.Context, provider store.Provide
 	return claimsToProfile(provider, claims), nil
 }
 
-func (s *Service) fetchJSONClaims(ctx context.Context, method, endpoint, accessToken string) (map[string]interface{}, error) {
+func (s *Service) fetchJSONClaims(ctx context.Context, method, endpoint, accessToken string) (claims map[string]interface{}, err error) {
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -261,13 +274,16 @@ func (s *Service) fetchJSONClaims(ctx context.Context, method, endpoint, accessT
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("profile fetch failed with status %d", resp.StatusCode)
 	}
 
-	var claims map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&claims); err != nil {
 		return nil, err
 	}
 	return claims, nil

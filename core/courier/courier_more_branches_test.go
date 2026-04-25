@@ -137,4 +137,3 @@ func TestTemplateLoadingAdditionalBranches(t *testing.T) {
 		t.Fatalf("renderTemplate(scan error) = %v", err)
 	}
 }
-

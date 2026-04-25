@@ -45,6 +45,18 @@ VIOLATIONS="$(
     printf '%s\n' "$IMPORTS" | grep -Ev "^github.com/aegion/aegion/modules/${MODULE}(/|$)" || true
 )"
 
+# Modules that are allowed to have cross-module imports
+# admin: manages configuration of all other modules
+# introspection: needs access to OAuth2 implementation details for schema generation
+ALLOWED_CROSS_MODULE_MODULES="admin introspection"
+
+if [[ " $ALLOWED_CROSS_MODULE_MODULES " == *" $MODULE "* ]]; then
+    echo "Module $MODULE is allowed to have cross-module imports (management/introspection plane)."
+    echo "Cross-module imports detected:"
+    printf '%s\n' "$VIOLATIONS"
+    exit 0
+fi
+
 if [[ -n "$VIOLATIONS" ]]; then
     echo "Cross-module import violations found in $MODULE_DIR:"
     printf '%s\n' "$VIOLATIONS"

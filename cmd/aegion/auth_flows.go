@@ -1037,7 +1037,7 @@ func (s *Server) moduleCallbackURL(moduleID, modulePath string, query map[string
 	return nil, errors.New("module has no http endpoint")
 }
 
-func (s *Server) fetchExternalCallback(ctx context.Context, callbackURL *url.URL, headers map[string]string, out interface{}) (int, error) {
+func (s *Server) fetchExternalCallback(ctx context.Context, callbackURL *url.URL, headers map[string]string, out interface{}) (status int, err error) {
 	requestCtx := ctx
 	cancel := func() {}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -1060,7 +1060,11 @@ func (s *Server) fetchExternalCallback(ctx context.Context, callbackURL *url.URL
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices && out != nil {
 		if !strings.Contains(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type"))), "application/json") {
