@@ -60,10 +60,11 @@ export function WebhookConfig() {
         message: `Test successful! Status: ${result.status_code}, Time: ${result.response_time_ms}ms`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error ? error.message : 'Test failed';
       setTestResult({
         success: false,
-        message: error.message || 'Test failed',
+        message: errorMessage,
       });
     },
   });
