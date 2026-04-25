@@ -88,7 +88,7 @@ func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (
 	events, totalCount, nextToken, err := s.store.QueryEvents(ctx, filters, pageSize, req.PageToken)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Failed to query events")
-		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to query events: %v", err))
+		return nil, status.Error(codes.Internal, "failed to query events")
 	}
 
 	// Convert to protobuf events
@@ -162,7 +162,7 @@ func (s *Service) ExecuteQuery(ctx context.Context, req *pb.ExecuteQueryRequest)
 	queryRows, err := s.store.ExecuteQuery(ctx, lookupSQL, nil)
 	if err != nil {
 		s.logger.Error().Err(err).Str("query_id", req.QueryId).Msg("Failed to load saved query")
-		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to load saved query: %v", err))
+		return nil, status.Error(codes.Internal, "failed to load saved query")
 	}
 	if len(queryRows) == 0 {
 		return nil, status.Error(codes.NotFound, "query not found")
@@ -177,7 +177,7 @@ func (s *Service) ExecuteQuery(ctx context.Context, req *pb.ExecuteQueryRequest)
 	rows, err := s.store.ExecuteQuery(ctx, execSQL, nil)
 	if err != nil {
 		s.logger.Error().Err(err).Str("query_id", req.QueryId).Msg("Failed to execute saved query")
-		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to execute query: %v", err))
+		return nil, status.Error(codes.Internal, "failed to execute query")
 	}
 
 	return &pb.QueryResult{
@@ -204,7 +204,7 @@ func (s *Service) CreateDashboard(ctx context.Context, req *pb.CreateDashboardRe
 	dashboardID, err := s.store.CreateDashboard(ctx, dashboardData)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Failed to create dashboard")
-		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to create dashboard: %v", err))
+		return nil, status.Error(codes.Internal, "failed to create dashboard")
 	}
 
 	dashboardData["id"] = dashboardID
@@ -228,7 +228,7 @@ func (s *Service) UpdateDashboard(ctx context.Context, req *pb.UpdateDashboardRe
 
 	if err := s.store.UpdateDashboard(ctx, req.Id, dashboardData); err != nil {
 		s.logger.Error().Err(err).Str("id", req.Id).Msg("Failed to update dashboard")
-		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to update dashboard: %v", err))
+		return nil, status.Error(codes.Internal, "failed to update dashboard")
 	}
 
 	dashboardData["id"] = req.Id
@@ -367,7 +367,7 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream grpc.ServerStream
 	data, err := s.store.ExportData(ctx, formatStr, filters, req.MaxRecords)
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Failed to export data")
-		return status.Error(codes.Internal, fmt.Sprintf("failed to export data: %v", err))
+		return status.Error(codes.Internal, "failed to export data")
 	}
 
 	// Stream data in chunks
