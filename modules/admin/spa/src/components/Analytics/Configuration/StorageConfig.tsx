@@ -165,24 +165,28 @@ export function StorageConfig() {
                       <label className="text-sm font-medium">Bucket</label>
                       <Input
                         value={formData?.s3_config?.bucket || ''}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData!,
-                            s3_config: { ...formData?.s3_config!, bucket: e.target.value },
-                          })
-                        }
+                        onChange={(e) => {
+                          if (formData && formData.s3_config) {
+                            setFormData({
+                              ...formData,
+                              s3_config: { ...formData.s3_config, bucket: e.target.value },
+                            });
+                          }
+                        }}
                       />
                     </div>
                     <div>
                       <label className="text-sm font-medium">Region</label>
                       <Input
                         value={formData?.s3_config?.region || ''}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData!,
-                            s3_config: { ...formData?.s3_config!, region: e.target.value },
-                          })
-                        }
+                        onChange={(e) => {
+                          if (formData && formData.s3_config) {
+                            setFormData({
+                              ...formData,
+                              s3_config: { ...formData.s3_config, region: e.target.value },
+                            });
+                          }
+                        }}
                       />
                     </div>
                   </>
