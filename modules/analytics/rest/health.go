@@ -119,7 +119,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(healthStatus)
+	json.NewEncoder(w).Encode(Response{Data: healthStatus})
 }
 
 // Ready handles GET /ready - Readiness probe
