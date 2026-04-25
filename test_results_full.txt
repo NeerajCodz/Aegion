@@ -1,0 +1,875 @@
+=== RUN   TestDefaultConfig_Validates
+--- PASS: TestDefaultConfig_Validates (0.00s)
+=== RUN   TestConfigValidate_DisabledIsAlwaysValid
+--- PASS: TestConfigValidate_DisabledIsAlwaysValid (0.00s)
+=== RUN   TestConfigValidate_DuckDBRequirements
+=== RUN   TestConfigValidate_DuckDBRequirements/requires_path_or_max_memory
+=== RUN   TestConfigValidate_DuckDBRequirements/connection_pool_size_must_be_positive
+=== RUN   TestConfigValidate_DuckDBRequirements/max_memory_must_be_non_negative
+=== RUN   TestConfigValidate_DuckDBRequirements/threads_must_be_positive
+=== RUN   TestConfigValidate_DuckDBRequirements/valid_with_path
+=== RUN   TestConfigValidate_DuckDBRequirements/valid_with_max_memory
+--- PASS: TestConfigValidate_DuckDBRequirements (0.00s)
+    --- PASS: TestConfigValidate_DuckDBRequirements/requires_path_or_max_memory (0.00s)
+    --- PASS: TestConfigValidate_DuckDBRequirements/connection_pool_size_must_be_positive (0.00s)
+    --- PASS: TestConfigValidate_DuckDBRequirements/max_memory_must_be_non_negative (0.00s)
+    --- PASS: TestConfigValidate_DuckDBRequirements/threads_must_be_positive (0.00s)
+    --- PASS: TestConfigValidate_DuckDBRequirements/valid_with_path (0.00s)
+    --- PASS: TestConfigValidate_DuckDBRequirements/valid_with_max_memory (0.00s)
+=== RUN   TestConfigValidate_StorageTypeRequirements
+=== RUN   TestConfigValidate_StorageTypeRequirements/invalid_storage_type
+=== RUN   TestConfigValidate_StorageTypeRequirements/local_requires_path
+=== RUN   TestConfigValidate_StorageTypeRequirements/s3_requires_bucket_and_region
+=== RUN   TestConfigValidate_StorageTypeRequirements/iceberg_requires_catalog_and_warehouse
+=== RUN   TestConfigValidate_StorageTypeRequirements/k8s_requires_pvc_and_mount
+--- PASS: TestConfigValidate_StorageTypeRequirements (0.00s)
+    --- PASS: TestConfigValidate_StorageTypeRequirements/invalid_storage_type (0.00s)
+    --- PASS: TestConfigValidate_StorageTypeRequirements/local_requires_path (0.00s)
+    --- PASS: TestConfigValidate_StorageTypeRequirements/s3_requires_bucket_and_region (0.00s)
+    --- PASS: TestConfigValidate_StorageTypeRequirements/iceberg_requires_catalog_and_warehouse (0.00s)
+    --- PASS: TestConfigValidate_StorageTypeRequirements/k8s_requires_pvc_and_mount (0.00s)
+=== RUN   TestConfigValidate_SyncStrategies
+=== RUN   TestConfigValidate_SyncStrategies/multiple_strategies_enabled
+=== RUN   TestConfigValidate_SyncStrategies/real_time_strategy
+=== RUN   TestConfigValidate_SyncStrategies/batch_strategy
+=== RUN   TestConfigValidate_SyncStrategies/async_strategy
+--- PASS: TestConfigValidate_SyncStrategies (0.00s)
+    --- PASS: TestConfigValidate_SyncStrategies/multiple_strategies_enabled (0.00s)
+    --- PASS: TestConfigValidate_SyncStrategies/real_time_strategy (0.00s)
+    --- PASS: TestConfigValidate_SyncStrategies/batch_strategy (0.00s)
+    --- PASS: TestConfigValidate_SyncStrategies/async_strategy (0.00s)
+=== RUN   TestConfigValidate_RetentionTiers
+=== RUN   TestConfigValidate_RetentionTiers/default_tiers_valid
+=== RUN   TestConfigValidate_RetentionTiers/category_overrides
+--- PASS: TestConfigValidate_RetentionTiers (0.00s)
+    --- PASS: TestConfigValidate_RetentionTiers/default_tiers_valid (0.00s)
+    --- PASS: TestConfigValidate_RetentionTiers/category_overrides (0.00s)
+=== RUN   TestConfigValidate_APIs
+=== RUN   TestConfigValidate_APIs/rest_api
+=== RUN   TestConfigValidate_APIs/graphql_api
+=== RUN   TestConfigValidate_APIs/grpc_api
+--- PASS: TestConfigValidate_APIs (0.00s)
+    --- PASS: TestConfigValidate_APIs/rest_api (0.00s)
+    --- PASS: TestConfigValidate_APIs/graphql_api (0.00s)
+    --- PASS: TestConfigValidate_APIs/grpc_api (0.00s)
+=== RUN   TestConfigValidate_WebhookSettings
+=== RUN   TestConfigValidate_WebhookSettings/webhook_config
+--- PASS: TestConfigValidate_WebhookSettings (0.00s)
+    --- PASS: TestConfigValidate_WebhookSettings/webhook_config (0.00s)
+=== RUN   TestConfigValidate_DuckDBPerformance
+=== RUN   TestConfigValidate_DuckDBPerformance/performance_settings
+--- PASS: TestConfigValidate_DuckDBPerformance (0.00s)
+    --- PASS: TestConfigValidate_DuckDBPerformance/performance_settings (0.00s)
+=== RUN   TestConfigValidate_SecuritySettings
+=== RUN   TestConfigValidate_SecuritySettings/security_config
+=== RUN   TestConfigValidate_SecuritySettings/query_validation
+--- PASS: TestConfigValidate_SecuritySettings (0.00s)
+    --- PASS: TestConfigValidate_SecuritySettings/security_config (0.00s)
+    --- PASS: TestConfigValidate_SecuritySettings/query_validation (0.00s)
+=== RUN   TestConfig_HealthCheckInterval
+=== RUN   TestConfig_HealthCheckInterval/parses_duration
+--- PASS: TestConfig_HealthCheckInterval (0.00s)
+    --- PASS: TestConfig_HealthCheckInterval/parses_duration (0.00s)
+=== RUN   TestConfig_ValidateMinimalConfig
+=== RUN   TestConfig_ValidateMinimalConfig/minimal_local_config
+--- PASS: TestConfig_ValidateMinimalConfig (0.00s)
+    --- PASS: TestConfig_ValidateMinimalConfig/minimal_local_config (0.00s)
+PASS
+coverage: 18.2% of statements
+ok  	github.com/aegion/aegion/modules/analytics	1.561s	coverage: 18.2% of statements
+=== RUN   TestPrebuiltDashboards
+--- PASS: TestPrebuiltDashboards (0.00s)
+=== RUN   TestPrebuiltQueries
+--- PASS: TestPrebuiltQueries (0.00s)
+=== RUN   TestDashboardBuilder
+--- PASS: TestDashboardBuilder (0.00s)
+=== RUN   TestComponentBuilder
+--- PASS: TestComponentBuilder (0.00s)
+=== RUN   TestPrebuiltDashboardBuilder
+--- PASS: TestPrebuiltDashboardBuilder (0.00s)
+=== RUN   TestQueryBuilder
+--- PASS: TestQueryBuilder (0.00s)
+=== RUN   TestAggregateQuery
+--- PASS: TestAggregateQuery (0.00s)
+=== RUN   TestDashboardModels
+--- PASS: TestDashboardModels (0.00s)
+=== RUN   TestManagerExecuteQueryUsesCache
+--- PASS: TestManagerExecuteQueryUsesCache (0.00s)
+=== RUN   TestListDashboardsParsesStoredConfig
+--- PASS: TestListDashboardsParsesStoredConfig (0.00s)
+=== RUN   TestAdditionalDashboardQueryBuilderEscapesStrings
+--- PASS: TestAdditionalDashboardQueryBuilderEscapesStrings (0.00s)
+=== RUN   TestAdditionalAggregateQueryIncludesFiltersAndGrouping
+--- PASS: TestAdditionalAggregateQueryIncludesFiltersAndGrouping (0.00s)
+=== RUN   TestAdditionalExportQueryHelpers
+--- PASS: TestAdditionalExportQueryHelpers (0.00s)
+=== RUN   TestAdditionalExportQueryHelpersFallbackToCommonTemplate
+--- PASS: TestAdditionalExportQueryHelpersFallbackToCommonTemplate (0.00s)
+=== RUN   TestAdditionalExportQueryHelpersRejectUnknownDashboard
+--- PASS: TestAdditionalExportQueryHelpersRejectUnknownDashboard (0.00s)
+PASS
+coverage: 57.0% of statements
+ok  	github.com/aegion/aegion/modules/analytics/dashboards	2.377s	coverage: 57.0% of statements
+=== RUN   TestUserAuthAnalyticsEndToEndContract
+    user_auth_analytics_test.go:10: set AEGION_E2E=1 and provide a full end-to-end environment with auth, analytics, and admin surfaces wired together
+--- SKIP: TestUserAuthAnalyticsEndToEndContract (0.00s)
+=== RUN   TestWorkflow_REST_IngestQueryDisplay
+    workflows_test.go:155: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestWorkflow_REST_IngestQueryDisplay (0.01s)
+=== RUN   TestWorkflow_GraphQL_IngestQueryDisplay
+    workflows_test.go:221: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestWorkflow_GraphQL_IngestQueryDisplay (0.01s)
+=== RUN   TestWorkflow_CrossAPI_ConsistencyCheck
+    workflows_test.go:263: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestWorkflow_CrossAPI_ConsistencyCheck (0.01s)
+=== RUN   TestWorkflow_AdminSPA_ConfigAndDashboard
+    workflows_test.go:317: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestWorkflow_AdminSPA_ConfigAndDashboard (0.01s)
+=== RUN   TestWorkflow_DataRetention_HotWarmCold
+    workflows_test.go:385: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestWorkflow_DataRetention_HotWarmCold (0.01s)
+=== RUN   TestWorkflow_WebhookDelivery_EndToEnd
+    workflows_test.go:480: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestWorkflow_WebhookDelivery_EndToEnd (0.00s)
+=== RUN   TestWorkflow_MultiTenantIsolation
+    workflows_test.go:559: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestWorkflow_MultiTenantIsolation (0.00s)
+PASS
+coverage: [no statements]
+ok  	github.com/aegion/aegion/modules/analytics/e2e	0.386s	coverage: [no statements]
+=== RUN   TestResolverEvents
+--- PASS: TestResolverEvents (0.00s)
+=== RUN   TestResolverEvent
+--- PASS: TestResolverEvent (0.00s)
+=== RUN   TestResolverCreateDashboard
+--- PASS: TestResolverCreateDashboard (0.00s)
+=== RUN   TestResolverUpdateDashboard
+--- PASS: TestResolverUpdateDashboard (0.00s)
+=== RUN   TestResolverDeleteDashboard
+--- PASS: TestResolverDeleteDashboard (0.00s)
+=== RUN   TestResolverSaveQuery
+--- PASS: TestResolverSaveQuery (0.00s)
+=== RUN   TestResolverHealth
+--- PASS: TestResolverHealth (0.00s)
+=== RUN   TestResolverStats
+--- PASS: TestResolverStats (0.00s)
+=== RUN   TestResolverDashboardForbidsPrivateDashboardForOtherUser
+--- PASS: TestResolverDashboardForbidsPrivateDashboardForOtherUser (0.00s)
+=== RUN   TestResolverQueryForbidsAccessToAnotherUsersSavedQuery
+--- PASS: TestResolverQueryForbidsAccessToAnotherUsersSavedQuery (0.00s)
+=== RUN   TestRateLimiter
+--- PASS: TestRateLimiter (0.00s)
+=== RUN   TestComplexityAnalyzer
+--- PASS: TestComplexityAnalyzer (0.00s)
+=== RUN   TestDirectiveRegistry
+--- PASS: TestDirectiveRegistry (0.00s)
+=== RUN   TestSimpleCache
+--- PASS: TestSimpleCache (1.10s)
+=== RUN   TestDefaultConfig
+--- PASS: TestDefaultConfig (0.00s)
+=== RUN   TestConfigValidation
+--- PASS: TestConfigValidation (0.00s)
+=== RUN   TestAuthMiddleware_RequiresAuthForProtectedField
+--- PASS: TestAuthMiddleware_RequiresAuthForProtectedField (0.00s)
+=== RUN   TestAuthMiddleware_AllowsPublicQueryWithoutAuth
+--- PASS: TestAuthMiddleware_AllowsPublicQueryWithoutAuth (0.00s)
+=== RUN   TestAuthMiddleware_SetsUserContextFromBearerToken
+--- PASS: TestAuthMiddleware_SetsUserContextFromBearerToken (0.00s)
+=== RUN   TestAuthMiddleware_SupportsSessionTokenHeader
+--- PASS: TestAuthMiddleware_SupportsSessionTokenHeader (0.00s)
+=== RUN   TestAuthMiddleware_SetsRoleFromTokenClaim
+--- PASS: TestAuthMiddleware_SetsRoleFromTokenClaim (0.00s)
+=== RUN   TestAuthDirectiveHandler_RequiresTokenWhenRequested
+--- PASS: TestAuthDirectiveHandler_RequiresTokenWhenRequested (0.00s)
+=== RUN   TestValidateGraphQLToken
+--- PASS: TestValidateGraphQLToken (0.00s)
+=== RUN   TestAdditionalResolverCreateWebhookUsesEventTypes
+--- PASS: TestAdditionalResolverCreateWebhookUsesEventTypes (0.00s)
+=== RUN   TestAdditionalResolverDashboardRequiresUserContext
+--- PASS: TestAdditionalResolverDashboardRequiresUserContext (0.00s)
+=== RUN   TestAdditionalResolverCreateWebhookRequiresPermission
+--- PASS: TestAdditionalResolverCreateWebhookRequiresPermission (0.00s)
+PASS
+coverage: 36.5% of statements
+ok  	github.com/aegion/aegion/modules/analytics/graphql	2.930s	coverage: 36.5% of statements
+=== RUN   TestAuthInterceptor_RequiresServiceID
+--- PASS: TestAuthInterceptor_RequiresServiceID (0.00s)
+=== RUN   TestAuthInterceptor_DelegatesToAuthFunc
+--- PASS: TestAuthInterceptor_DelegatesToAuthFunc (0.00s)
+=== RUN   TestLoggingInterceptor_EmitsLine
+--- PASS: TestLoggingInterceptor_EmitsLine (0.00s)
+=== RUN   TestStreamLoggingInterceptor_EmitsLine
+--- PASS: TestStreamLoggingInterceptor_EmitsLine (0.00s)
+=== RUN   TestTracingInterceptor_RecordsErrorAttributes
+--- PASS: TestTracingInterceptor_RecordsErrorAttributes (0.00s)
+=== RUN   TestStreamTracingInterceptor_WrapsContext
+--- PASS: TestStreamTracingInterceptor_WrapsContext (0.00s)
+=== RUN   TestQueryEvents
+--- PASS: TestQueryEvents (0.00s)
+=== RUN   TestQueryEventsNilRequest
+--- PASS: TestQueryEventsNilRequest (0.00s)
+=== RUN   TestGetDashboard
+--- PASS: TestGetDashboard (0.00s)
+=== RUN   TestGetHealthStatus
+--- PASS: TestGetHealthStatus (0.00s)
+=== RUN   TestCreateDashboard
+--- PASS: TestCreateDashboard (0.00s)
+=== RUN   TestUpdateDashboard
+--- PASS: TestUpdateDashboard (0.00s)
+=== RUN   TestExecuteQuery
+--- PASS: TestExecuteQuery (0.00s)
+=== RUN   TestExecuteQuery_NotFound
+--- PASS: TestExecuteQuery_NotFound (0.00s)
+=== RUN   TestExecuteQuery_RejectsMutatingSQL
+--- PASS: TestExecuteQuery_RejectsMutatingSQL (0.00s)
+=== RUN   TestStreamEvents
+--- PASS: TestStreamEvents (0.00s)
+=== RUN   TestExportData
+--- PASS: TestExportData (0.00s)
+=== RUN   TestServer
+--- PASS: TestServer (0.00s)
+PASS
+coverage: 51.9% of statements
+ok  	github.com/aegion/aegion/modules/analytics/grpc	0.526s	coverage: 51.9% of statements
+=== RUN   TestSync_RealTimeTriggersData
+    integration_test.go:90: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_RealTimeTriggersData (0.01s)
+=== RUN   TestSync_BatchProcessing
+    integration_test.go:135: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_BatchProcessing (0.00s)
+=== RUN   TestSync_AsyncQueueProcessing
+    integration_test.go:183: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_AsyncQueueProcessing (0.00s)
+=== RUN   TestSync_HybridFailover
+    integration_test.go:237: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_HybridFailover (0.00s)
+=== RUN   TestSync_DataConsistency
+    integration_test.go:291: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_DataConsistency (0.00s)
+=== RUN   TestSync_EventDeduplication
+    integration_test.go:358: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_EventDeduplication (0.00s)
+=== RUN   TestSync_LargeDatasetPerformance
+    integration_test.go:387: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_LargeDatasetPerformance (0.00s)
+=== RUN   TestSync_PartialFailureRecovery
+    integration_test.go:446: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestSync_PartialFailureRecovery (0.00s)
+=== RUN   TestPostgresToDuckDBIntegrationContract
+    postgres_to_duckdb_test.go:10: set AEGION_INTEGRATION=1 and provide a live Postgres + DuckDB integration environment
+--- SKIP: TestPostgresToDuckDBIntegrationContract (0.00s)
+PASS
+coverage: [no statements]
+ok  	github.com/aegion/aegion/modules/analytics/integration	0.261s	coverage: [no statements]
+=== RUN   TestBenchmark_QueryPerformanceBaseline
+    query_perf_test.go:24: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestBenchmark_QueryPerformanceBaseline (0.01s)
+=== RUN   TestBenchmarkSuite_QueryPerformance
+--- PASS: TestBenchmarkSuite_QueryPerformance (0.03s)
+=== RUN   TestBenchmarkSuite_AggregationPerformance
+--- PASS: TestBenchmarkSuite_AggregationPerformance (0.55s)
+=== RUN   TestBenchmarkSuite_SyncPerformance
+--- PASS: TestBenchmarkSuite_SyncPerformance (2.55s)
+=== RUN   TestBenchmarkSuite_DashboardPerformance
+--- PASS: TestBenchmarkSuite_DashboardPerformance (1.00s)
+=== RUN   TestBenchmarkSuite_ConcurrencyPerformance
+--- PASS: TestBenchmarkSuite_ConcurrencyPerformance (0.64s)
+=== RUN   TestBenchmarkSuite_FullSuite
+
+=== Performance Benchmark Suite ===
+
+=== Benchmark Results ===
+Tests Run: 10, Passed: 10, Failed: 0
+
+| Benchmark | Events | Duration (ms) | Status |
+|-----------|--------|---------------|--------|
+| Query Single Event | 1 | 1 | PASS |
+| Query 100 Events | 100 | 6 | PASS |
+| Query 1000 Events with Filter | 1000 | 27 | PASS |
+| Aggregation 1M Events | 1000000 | 50 | PASS |
+| Export 10K Events | 10000 | 500 | PASS |
+| Real-time Sync Event | 1 | 50 | PASS |
+| Batch Sync 100K Events | 100000 | 2500 | PASS |
+|   Throughput: 40000 events/sec |
+| Dashboard Load | - | 1000 | PASS |
+| Concurrent Queries (50x) | - | 554 | PASS |
+|   Throughput: 90 events/sec |
+| Memory Usage Test | 1000000 | 100 | PASS |
+
+Pass Rate: 100.0%
+    benchmarks_test.go:78: Performance verification passed: Performance acceptable: 100.0% pass rate
+--- PASS: TestBenchmarkSuite_FullSuite (4.79s)
+=== RUN   TestBenchmarkSuite_PassRate
+
+=== Performance Benchmark Suite ===
+
+=== Benchmark Results ===
+Tests Run: 10, Passed: 10, Failed: 0
+
+| Benchmark | Events | Duration (ms) | Status |
+|-----------|--------|---------------|--------|
+| Query Single Event | 1 | 1 | PASS |
+| Query 100 Events | 100 | 5 | PASS |
+| Query 1000 Events with Filter | 1000 | 25 | PASS |
+| Aggregation 1M Events | 1000000 | 50 | PASS |
+| Export 10K Events | 10000 | 500 | PASS |
+| Real-time Sync Event | 1 | 50 | PASS |
+| Batch Sync 100K Events | 100000 | 2508 | PASS |
+|   Throughput: 39872 events/sec |
+| Dashboard Load | - | 1000 | PASS |
+| Concurrent Queries (50x) | - | 537 | PASS |
+|   Throughput: 93 events/sec |
+| Memory Usage Test | 1000000 | 100 | PASS |
+
+Pass Rate: 100.0%
+--- PASS: TestBenchmarkSuite_PassRate (4.78s)
+PASS
+coverage: 92.1% of statements
+ok  	github.com/aegion/aegion/modules/analytics/performance	14.686s	coverage: 92.1% of statements
+=== RUN   TestRoleValidation
+=== RUN   TestRoleValidation/admin
+=== RUN   TestRoleValidation/analyst
+=== RUN   TestRoleValidation/viewer
+=== RUN   TestRoleValidation/user
+=== RUN   TestRoleValidation/guest
+=== RUN   TestRoleValidation/invalid
+--- PASS: TestRoleValidation (0.00s)
+    --- PASS: TestRoleValidation/admin (0.00s)
+    --- PASS: TestRoleValidation/analyst (0.00s)
+    --- PASS: TestRoleValidation/viewer (0.00s)
+    --- PASS: TestRoleValidation/user (0.00s)
+    --- PASS: TestRoleValidation/guest (0.00s)
+    --- PASS: TestRoleValidation/invalid (0.00s)
+=== RUN   TestSetAndGetUserRole
+--- PASS: TestSetAndGetUserRole (0.00s)
+=== RUN   TestSetUserRoleInvalid
+--- PASS: TestSetUserRoleInvalid (0.00s)
+=== RUN   TestHasPermission
+--- PASS: TestHasPermission (0.00s)
+=== RUN   TestGrantAndRevokePermission
+--- PASS: TestGrantAndRevokePermission (0.00s)
+=== RUN   TestDashboardOwnership
+--- PASS: TestDashboardOwnership (0.00s)
+=== RUN   TestDashboardModification
+--- PASS: TestDashboardModification (0.00s)
+=== RUN   TestWebhookOwnership
+--- PASS: TestWebhookOwnership (0.00s)
+=== RUN   TestWebhookModification
+--- PASS: TestWebhookModification (0.00s)
+=== RUN   TestDefaultRole
+--- PASS: TestDefaultRole (0.00s)
+PASS
+coverage: 85.1% of statements
+ok  	github.com/aegion/aegion/modules/analytics/rbac	1.092s	coverage: 85.1% of statements
+=== RUN   TestQueryBuilder_BuildQuery_Basic
+--- PASS: TestQueryBuilder_BuildQuery_Basic (0.00s)
+=== RUN   TestQueryBuilder_BuildQuery_WithFilters
+--- PASS: TestQueryBuilder_BuildQuery_WithFilters (0.00s)
+=== RUN   TestQueryBuilder_BuildQuery_WithOperators
+--- PASS: TestQueryBuilder_BuildQuery_WithOperators (0.00s)
+=== RUN   TestQueryBuilder_BuildQuery_WithTimeRange
+--- PASS: TestQueryBuilder_BuildQuery_WithTimeRange (0.00s)
+=== RUN   TestQueryBuilder_BuildQuery_WithSorting
+--- PASS: TestQueryBuilder_BuildQuery_WithSorting (0.00s)
+=== RUN   TestHandlerListEvents_Success
+--- PASS: TestHandlerListEvents_Success (0.00s)
+=== RUN   TestHandlerHealth_Success
+    handler_test.go:272: 
+        	Error Trace:	E:/Qypher/Projects/aegion/modules/analytics/rest/handler_test.go:272
+        	Error:      	Should be true
+        	Test:       	TestHandlerHealth_Success
+    handler_test.go:273: 
+        	Error Trace:	E:/Qypher/Projects/aegion/modules/analytics/rest/handler_test.go:273
+        	Error:      	Should NOT be empty, but was map[]
+        	Test:       	TestHandlerHealth_Success
+--- FAIL: TestHandlerHealth_Success (0.00s)
+=== RUN   TestHandlerStats_Success
+--- PASS: TestHandlerStats_Success (0.00s)
+=== RUN   TestHandlerExportFormats_Success
+--- PASS: TestHandlerExportFormats_Success (0.00s)
+=== RUN   TestValidatorQueryRequest_Valid
+--- PASS: TestValidatorQueryRequest_Valid (0.00s)
+=== RUN   TestValidatorQueryRequest_InvalidPageSize
+--- PASS: TestValidatorQueryRequest_InvalidPageSize (0.00s)
+=== RUN   TestValidatorDashboardRequest_Valid
+--- PASS: TestValidatorDashboardRequest_Valid (0.00s)
+=== RUN   TestValidatorDashboardRequest_MissingName
+--- PASS: TestValidatorDashboardRequest_MissingName (0.00s)
+=== RUN   TestValidatorQuerySaveRequest_Valid
+--- PASS: TestValidatorQuerySaveRequest_Valid (0.00s)
+=== RUN   TestValidatorQuerySaveRequest_InvalidSQL
+--- PASS: TestValidatorQuerySaveRequest_InvalidSQL (0.00s)
+=== RUN   TestCache_GetSet
+--- PASS: TestCache_GetSet (0.00s)
+=== RUN   TestCache_Expiration
+--- PASS: TestCache_Expiration (0.01s)
+=== RUN   TestCache_Delete
+--- PASS: TestCache_Delete (0.00s)
+=== RUN   TestRateLimiter_Allow
+--- PASS: TestRateLimiter_Allow (0.00s)
+=== RUN   TestSanitizeInput
+--- PASS: TestSanitizeInput (0.00s)
+=== RUN   TestExportBuilder_CSV
+--- PASS: TestExportBuilder_CSV (0.00s)
+=== RUN   TestExportBuilder_JSON
+--- PASS: TestExportBuilder_JSON (0.00s)
+=== RUN   TestInitialize_Success
+{"level":"info","base_path":"/api/v1/analytics","rate_limit":1000,"query_timeout_seconds":300,"time":"2026-04-25T17:52:13+05:30","message":"REST API module initialized"}
+--- PASS: TestInitialize_Success (0.00s)
+=== RUN   TestInitialize_MissingDatabase
+--- PASS: TestInitialize_MissingDatabase (0.00s)
+=== RUN   TestHealthCheck_Success
+--- PASS: TestHealthCheck_Success (0.00s)
+=== RUN   TestHealthCheck_NilHandler
+--- PASS: TestHealthCheck_NilHandler (0.00s)
+=== RUN   TestHandlerCreateDashboard_PersistsAnalyticsDashboardsRow
+--- PASS: TestHandlerCreateDashboard_PersistsAnalyticsDashboardsRow (0.00s)
+=== RUN   TestHandlerUpdateDashboard_UsesAnalyticsDashboardsTable
+--- PASS: TestHandlerUpdateDashboard_UsesAnalyticsDashboardsTable (0.00s)
+=== RUN   TestHandlerDeleteDashboard_DeletesFromAnalyticsDashboards
+--- PASS: TestHandlerDeleteDashboard_DeletesFromAnalyticsDashboards (0.00s)
+=== RUN   TestHandlerSaveQuery_PersistsAnalyticsQueriesRow
+--- PASS: TestHandlerSaveQuery_PersistsAnalyticsQueriesRow (0.00s)
+=== RUN   TestHandlerDeleteQuery_DeletesFromAnalyticsQueries
+--- PASS: TestHandlerDeleteQuery_DeletesFromAnalyticsQueries (0.00s)
+=== RUN   TestRegisterWebhook_Success
+--- PASS: TestRegisterWebhook_Success (0.00s)
+=== RUN   TestListWebhooks_Success
+--- PASS: TestListWebhooks_Success (0.00s)
+=== RUN   TestGetWebhook_ForbiddenForOtherOwner
+--- PASS: TestGetWebhook_ForbiddenForOtherOwner (0.00s)
+=== RUN   TestTestWebhook_Success
+--- PASS: TestTestWebhook_Success (0.00s)
+=== RUN   TestReplayDelivery_Success
+--- PASS: TestReplayDelivery_Success (0.00s)
+=== RUN   TestWriteWebhookError_MapsNotFound
+--- PASS: TestWriteWebhookError_MapsNotFound (0.00s)
+=== RUN   TestRegisterWebhook_RequiresManager
+--- PASS: TestRegisterWebhook_RequiresManager (0.00s)
+=== RUN   TestReplayDelivery_MapsMissingDelivery
+--- PASS: TestReplayDelivery_MapsMissingDelivery (0.00s)
+=== RUN   TestWriteWebhookError_Default
+--- PASS: TestWriteWebhookError_Default (0.00s)
+=== RUN   TestAdditionalQueryBuilderBuildsEventQuery
+--- PASS: TestAdditionalQueryBuilderBuildsEventQuery (0.00s)
+=== RUN   TestAdditionalHandlerSearchEventsRequiresQuery
+--- PASS: TestAdditionalHandlerSearchEventsRequiresQuery (0.00s)
+=== RUN   TestAdditionalHandlerExportEventsRejectsUnsupportedFormat
+--- PASS: TestAdditionalHandlerExportEventsRejectsUnsupportedFormat (0.00s)
+=== RUN   TestAdditionalHandlerListEventsReturnsPagination
+--- PASS: TestAdditionalHandlerListEventsReturnsPagination (0.00s)
+=== RUN   TestValidateEmail
+=== RUN   TestValidateEmail/valid_email
+=== RUN   TestValidateEmail/valid_email_with_dots
+=== RUN   TestValidateEmail/valid_email_with_plus
+=== RUN   TestValidateEmail/empty_email
+=== RUN   TestValidateEmail/invalid_email_format
+=== RUN   TestValidateEmail/invalid_email_format#01
+=== RUN   TestValidateEmail/invalid_email_format#02
+--- PASS: TestValidateEmail (0.00s)
+    --- PASS: TestValidateEmail/valid_email (0.00s)
+    --- PASS: TestValidateEmail/valid_email_with_dots (0.00s)
+    --- PASS: TestValidateEmail/valid_email_with_plus (0.00s)
+    --- PASS: TestValidateEmail/empty_email (0.00s)
+    --- PASS: TestValidateEmail/invalid_email_format (0.00s)
+    --- PASS: TestValidateEmail/invalid_email_format#01 (0.00s)
+    --- PASS: TestValidateEmail/invalid_email_format#02 (0.00s)
+=== RUN   TestValidateURL
+=== RUN   TestValidateURL/valid_HTTPS_URL
+=== RUN   TestValidateURL/valid_HTTP_URL
+=== RUN   TestValidateURL/HTTP_when_HTTPS_required
+=== RUN   TestValidateURL/dangerous_javascript_protocol
+=== RUN   TestValidateURL/dangerous_data_protocol
+=== RUN   TestValidateURL/empty_URL
+--- PASS: TestValidateURL (0.00s)
+    --- PASS: TestValidateURL/valid_HTTPS_URL (0.00s)
+    --- PASS: TestValidateURL/valid_HTTP_URL (0.00s)
+    --- PASS: TestValidateURL/HTTP_when_HTTPS_required (0.00s)
+    --- PASS: TestValidateURL/dangerous_javascript_protocol (0.00s)
+    --- PASS: TestValidateURL/dangerous_data_protocol (0.00s)
+    --- PASS: TestValidateURL/empty_URL (0.00s)
+=== RUN   TestValidateInputLength
+=== RUN   TestValidateInputLength/input_within_limit
+=== RUN   TestValidateInputLength/input_at_limit
+=== RUN   TestValidateInputLength/input_exceeds_limit
+=== RUN   TestValidateInputLength/empty_input
+--- PASS: TestValidateInputLength (0.00s)
+    --- PASS: TestValidateInputLength/input_within_limit (0.00s)
+    --- PASS: TestValidateInputLength/input_at_limit (0.00s)
+    --- PASS: TestValidateInputLength/input_exceeds_limit (0.00s)
+    --- PASS: TestValidateInputLength/empty_input (0.00s)
+=== RUN   TestValidateQueryComplexity
+=== RUN   TestValidateQueryComplexity/simple_query
+=== RUN   TestValidateQueryComplexity/too_many_fields
+=== RUN   TestValidateQueryComplexity/too_many_filters
+=== RUN   TestValidateQueryComplexity/too_many_aggregations
+=== RUN   TestValidateQueryComplexity/too_many_sort_fields
+--- PASS: TestValidateQueryComplexity (0.00s)
+    --- PASS: TestValidateQueryComplexity/simple_query (0.00s)
+    --- PASS: TestValidateQueryComplexity/too_many_fields (0.00s)
+    --- PASS: TestValidateQueryComplexity/too_many_filters (0.00s)
+    --- PASS: TestValidateQueryComplexity/too_many_aggregations (0.00s)
+    --- PASS: TestValidateQueryComplexity/too_many_sort_fields (0.00s)
+=== RUN   TestValidateSQLWithDangerousPatterns
+=== RUN   TestValidateSQLWithDangerousPatterns/valid_SELECT
+=== RUN   TestValidateSQLWithDangerousPatterns/valid_SELECT_with_aggregate
+=== RUN   TestValidateSQLWithDangerousPatterns/dangerous_DROP
+=== RUN   TestValidateSQLWithDangerousPatterns/dangerous_DELETE
+=== RUN   TestValidateSQLWithDangerousPatterns/dangerous_INSERT
+=== RUN   TestValidateSQLWithDangerousPatterns/dangerous_UPDATE
+=== RUN   TestValidateSQLWithDangerousPatterns/dangerous_ALTER
+=== RUN   TestValidateSQLWithDangerousPatterns/dangerous_TRUNCATE
+=== RUN   TestValidateSQLWithDangerousPatterns/multiple_statements
+=== RUN   TestValidateSQLWithDangerousPatterns/comment_injection
+=== RUN   TestValidateSQLWithDangerousPatterns/block_comment_injection
+--- PASS: TestValidateSQLWithDangerousPatterns (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/valid_SELECT (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/valid_SELECT_with_aggregate (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/dangerous_DROP (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/dangerous_DELETE (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/dangerous_INSERT (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/dangerous_UPDATE (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/dangerous_ALTER (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/dangerous_TRUNCATE (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/multiple_statements (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/comment_injection (0.00s)
+    --- PASS: TestValidateSQLWithDangerousPatterns/block_comment_injection (0.00s)
+=== RUN   TestSanitizeInputSecurity
+=== RUN   TestSanitizeInputSecurity/normal_input
+=== RUN   TestSanitizeInputSecurity/null_byte_removed
+=== RUN   TestSanitizeInputSecurity/newline_replaced
+=== RUN   TestSanitizeInputSecurity/carriage_return_replaced
+=== RUN   TestSanitizeInputSecurity/tab_replaced
+=== RUN   TestSanitizeInputSecurity/control_char_replaced
+--- PASS: TestSanitizeInputSecurity (0.00s)
+    --- PASS: TestSanitizeInputSecurity/normal_input (0.00s)
+    --- PASS: TestSanitizeInputSecurity/null_byte_removed (0.00s)
+    --- PASS: TestSanitizeInputSecurity/newline_replaced (0.00s)
+    --- PASS: TestSanitizeInputSecurity/carriage_return_replaced (0.00s)
+    --- PASS: TestSanitizeInputSecurity/tab_replaced (0.00s)
+    --- PASS: TestSanitizeInputSecurity/control_char_replaced (0.00s)
+=== RUN   TestSanitizeJSONSecurity
+=== RUN   TestSanitizeJSONSecurity/valid_JSON
+=== RUN   TestSanitizeJSONSecurity/invalid_JSON
+=== RUN   TestSanitizeJSONSecurity/nested_JSON
+=== RUN   TestSanitizeJSONSecurity/JSON_with_array
+--- PASS: TestSanitizeJSONSecurity (0.00s)
+    --- PASS: TestSanitizeJSONSecurity/valid_JSON (0.00s)
+    --- PASS: TestSanitizeJSONSecurity/invalid_JSON (0.00s)
+    --- PASS: TestSanitizeJSONSecurity/nested_JSON (0.00s)
+    --- PASS: TestSanitizeJSONSecurity/JSON_with_array (0.00s)
+=== RUN   TestLRUQueryCache_Set_Get
+--- PASS: TestLRUQueryCache_Set_Get (0.00s)
+=== RUN   TestLRUQueryCache_Expiration
+--- PASS: TestLRUQueryCache_Expiration (0.10s)
+=== RUN   TestLRUQueryCache_LRU_Eviction
+--- PASS: TestLRUQueryCache_LRU_Eviction (0.00s)
+=== RUN   TestLRUQueryCache_Delete
+--- PASS: TestLRUQueryCache_Delete (0.00s)
+=== RUN   TestLRUQueryCache_Clear
+--- PASS: TestLRUQueryCache_Clear (0.00s)
+=== RUN   TestLRUQueryCache_Statistics
+--- PASS: TestLRUQueryCache_Statistics (0.00s)
+=== RUN   TestLRUQueryCache_InvalidatePattern
+--- PASS: TestLRUQueryCache_InvalidatePattern (0.00s)
+=== RUN   TestLRUQueryCache_DisabledCache
+--- PASS: TestLRUQueryCache_DisabledCache (0.00s)
+=== RUN   TestLRUQueryCache_MRU_Movement
+--- PASS: TestLRUQueryCache_MRU_Movement (0.00s)
+FAIL
+coverage: 36.0% of statements
+FAIL	github.com/aegion/aegion/modules/analytics/rest	0.448s
+=== RUN   TestArchivalExecutor_ArchiveData_UpdatesRowAndWritesToBackend
+--- PASS: TestArchivalExecutor_ArchiveData_UpdatesRowAndWritesToBackend (0.00s)
+=== RUN   TestArchivalExecutor_ArchiveData_NoRowsCompletes
+--- PASS: TestArchivalExecutor_ArchiveData_NoRowsCompletes (0.00s)
+=== RUN   TestRetentionPolicyAppliesDefaults
+--- PASS: TestRetentionPolicyAppliesDefaults (0.00s)
+=== RUN   TestRetentionPolicyHonorsCategoryOverrides
+--- PASS: TestRetentionPolicyHonorsCategoryOverrides (0.00s)
+=== RUN   TestRetentionPolicyNextTierAndConfig
+--- PASS: TestRetentionPolicyNextTierAndConfig (0.00s)
+=== RUN   TestRetentionPolicyValidation
+=== RUN   TestRetentionPolicyValidation/valid_default_policy
+=== RUN   TestRetentionPolicyValidation/invalid_TTL_order
+=== RUN   TestRetentionPolicyValidation/valid_custom_policy
+--- PASS: TestRetentionPolicyValidation (0.00s)
+    --- PASS: TestRetentionPolicyValidation/valid_default_policy (0.00s)
+    --- PASS: TestRetentionPolicyValidation/invalid_TTL_order (0.00s)
+    --- PASS: TestRetentionPolicyValidation/valid_custom_policy (0.00s)
+=== RUN   TestGetTierForTimestamp
+=== RUN   TestGetTierForTimestamp/recent_data_in_hot_tier
+=== RUN   TestGetTierForTimestamp/old_data_in_warm_tier
+=== RUN   TestGetTierForTimestamp/very_old_data_in_cold_tier
+--- PASS: TestGetTierForTimestamp (0.00s)
+    --- PASS: TestGetTierForTimestamp/recent_data_in_hot_tier (0.00s)
+    --- PASS: TestGetTierForTimestamp/old_data_in_warm_tier (0.00s)
+    --- PASS: TestGetTierForTimestamp/very_old_data_in_cold_tier (0.00s)
+=== RUN   TestIsExpired
+=== RUN   TestIsExpired/recent_data_not_expired
+=== RUN   TestIsExpired/very_old_data_expired
+--- PASS: TestIsExpired (0.00s)
+    --- PASS: TestIsExpired/recent_data_not_expired (0.00s)
+    --- PASS: TestIsExpired/very_old_data_expired (0.00s)
+=== RUN   TestCategorySpecificPolicies
+--- PASS: TestCategorySpecificPolicies (0.00s)
+=== RUN   TestTieringEngine
+--- PASS: TestTieringEngine (0.00s)
+=== RUN   TestCleanupManager
+--- PASS: TestCleanupManager (0.10s)
+=== RUN   TestDatabaseAuditLog
+--- PASS: TestDatabaseAuditLog (0.00s)
+=== RUN   TestJobScheduler
+--- PASS: TestJobScheduler (0.00s)
+=== RUN   TestManager
+--- PASS: TestManager (0.00s)
+PASS
+coverage: 50.9% of statements
+ok  	github.com/aegion/aegion/modules/analytics/retention	2.295s	coverage: 50.9% of statements
+=== RUN   TestAudit_AllOperationsLogged
+    audit_test.go:128: Γ£ô All operations logged verified: 6 operations tracked
+--- PASS: TestAudit_AllOperationsLogged (0.00s)
+=== RUN   TestAudit_SensitiveDataNotInLogs
+    audit_test.go:178: Γ£ô Sensitive data redaction verified: 2 entries checked for leaks
+--- PASS: TestAudit_SensitiveDataNotInLogs (0.00s)
+=== RUN   TestAudit_LogsImmutable
+    audit_test.go:222: Γ£ô Audit immutability principles verified: direct modification demonstrated
+--- PASS: TestAudit_LogsImmutable (0.00s)
+=== RUN   TestAudit_FailedOperationsLogged
+    audit_test.go:291: Γ£ô Failed operations audit verified: 1 success, 2 failures logged
+--- PASS: TestAudit_FailedOperationsLogged (0.00s)
+=== RUN   TestAudit_UserActivityTracking
+    audit_test.go:338: Γ£ô User activity tracking verified: 5 activities tracked in sequence
+--- PASS: TestAudit_UserActivityTracking (0.00s)
+=== RUN   TestAudit_ResourceChangeTracking
+    audit_test.go:399: Γ£ô Resource change tracking verified: full audit trail for dashboard_tracking
+--- PASS: TestAudit_ResourceChangeTracking (0.00s)
+=== RUN   TestAudit_ComplianceReporting
+    audit_test.go:461: Γ£ô Compliance reporting verified: 5 events analyzed
+--- PASS: TestAudit_ComplianceReporting (0.00s)
+=== RUN   TestEncryptionManagerCreation
+--- PASS: TestEncryptionManagerCreation (0.00s)
+=== RUN   TestEncryptAndDecryptString
+--- PASS: TestEncryptAndDecryptString (0.00s)
+=== RUN   TestEncryptAndDecryptBytes
+--- PASS: TestEncryptAndDecryptBytes (0.00s)
+=== RUN   TestDecryptWithWrongAAD
+--- PASS: TestDecryptWithWrongAAD (0.00s)
+=== RUN   TestGenerateKey
+--- PASS: TestGenerateKey (0.00s)
+=== RUN   TestKeyEncoding
+--- PASS: TestKeyEncoding (0.00s)
+=== RUN   TestGenerateSecret
+--- PASS: TestGenerateSecret (0.00s)
+=== RUN   TestGenerateSecretInvalidLength
+--- PASS: TestGenerateSecretInvalidLength (0.00s)
+=== RUN   TestInjection_SQLInjectionBlocked
+    injection_test.go:85: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestInjection_SQLInjectionBlocked (0.01s)
+=== RUN   TestInjection_GraphQLInjectionBlocked
+    injection_test.go:145: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestInjection_GraphQLInjectionBlocked (0.00s)
+=== RUN   TestRateLimit_PreventsBruteForce
+    injection_test.go:242: Attempt 1: allowed (count=1)
+    injection_test.go:242: Attempt 2: allowed (count=2)
+    injection_test.go:242: Attempt 3: allowed (count=3)
+    injection_test.go:242: Attempt 4: allowed (count=4)
+    injection_test.go:242: Attempt 5: allowed (count=5)
+    injection_test.go:235: Attempt 6: BLOCKED (rate limit exceeded)
+    injection_test.go:235: Attempt 7: BLOCKED (rate limit exceeded)
+    injection_test.go:235: Attempt 8: BLOCKED (rate limit exceeded)
+    injection_test.go:235: Attempt 9: BLOCKED (rate limit exceeded)
+    injection_test.go:235: Attempt 10: BLOCKED (rate limit exceeded)
+    injection_test.go:249: Γ£ô Rate limiting verified: 10 attempts blocked after 5 threshold
+--- PASS: TestRateLimit_PreventsBruteForce (0.00s)
+=== RUN   TestInjection_NoSQLInjectionBlocked
+    injection_test.go:254: DuckDB extensions not available in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestInjection_NoSQLInjectionBlocked (0.00s)
+=== RUN   TestInjection_CommandInjectionBlocked
+    injection_test.go:335: Γ£ô Command injection prevention verified: 6 malicious inputs detected
+--- PASS: TestInjection_CommandInjectionBlocked (0.00s)
+=== RUN   TestRBAC_AdminCanAccessAll
+    rbac_test.go:70: Γ£ô Admin RBAC verified: all permissions granted
+--- PASS: TestRBAC_AdminCanAccessAll (0.00s)
+=== RUN   TestRBAC_AnalystCanQueryNotDelete
+    rbac_test.go:123: Γ£ô Analyst RBAC verified: can query but not manage
+--- PASS: TestRBAC_AnalystCanQueryNotDelete (0.00s)
+=== RUN   TestRBAC_ViewerReadOnly
+    rbac_test.go:186: Γ£ô Viewer RBAC verified: read-only access only
+--- PASS: TestRBAC_ViewerReadOnly (0.00s)
+=== RUN   TestRBAC_UnauthenticatedRejected
+    rbac_test.go:206: Γ£ô Unauthenticated access rejected: no permissions granted
+--- PASS: TestRBAC_UnauthenticatedRejected (0.00s)
+=== RUN   TestRBAC_RoleSwitching
+    rbac_test.go:247: Γ£ô Role switching verified: viewer ΓåÆ analyst ΓåÆ admin ΓåÆ viewer
+--- PASS: TestRBAC_RoleSwitching (0.00s)
+=== RUN   TestRBAC_CustomPermissions
+    rbac_test.go:280: Γ£ô Custom permissions verified: grant/revoke works
+--- PASS: TestRBAC_CustomPermissions (0.00s)
+PASS
+coverage: 84.8% of statements
+ok  	github.com/aegion/aegion/modules/analytics/security	0.306s	coverage: 84.8% of statements
+=== RUN   TestNewAuditStore
+--- PASS: TestNewAuditStore (0.00s)
+=== RUN   TestLogEvent
+--- PASS: TestLogEvent (0.00s)
+=== RUN   TestGetEvents
+--- PASS: TestGetEvents (0.00s)
+=== RUN   TestGetEventsByUser
+--- PASS: TestGetEventsByUser (0.00s)
+=== RUN   TestGetEventsByType
+--- PASS: TestGetEventsByType (0.00s)
+=== RUN   TestGetEventsByResource
+--- PASS: TestGetEventsByResource (0.00s)
+=== RUN   TestCountEvents
+--- PASS: TestCountEvents (0.00s)
+=== RUN   TestAuditEventImmutability
+--- PASS: TestAuditEventImmutability (0.00s)
+=== RUN   TestGetEventsLimit
+--- PASS: TestGetEventsLimit (0.00s)
+=== RUN   TestDuckDBLifecycleAndQueries
+    duckdb_test.go:33: duckdb runtime missing required extension in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestDuckDBLifecycleAndQueries (0.01s)
+=== RUN   TestDuckDBDefaultsAndTimeouts
+    duckdb_test.go:79: duckdb runtime missing required extension in this environment: failed to open DuckDB connection: database/sql/driver: could not open database: duckdb error: IO Error: Extension "C:\Users\gskne\.duckdb\extensions\v1.1.2\windows_amd64_mingw\file.duckdb_extension" not found.
+        
+        Candidate extensions: "inet", "sqlite", "sqlite3", "iceberg", "sqlite_scanner"
+--- SKIP: TestDuckDBDefaultsAndTimeouts (0.00s)
+=== RUN   TestIcebergStorageValidation
+--- PASS: TestIcebergStorageValidation (0.00s)
+=== RUN   TestIcebergStorageReadWriteLifecycle
+--- PASS: TestIcebergStorageReadWriteLifecycle (0.01s)
+=== RUN   TestIcebergStorageRejectsTraversal
+--- PASS: TestIcebergStorageRejectsTraversal (0.00s)
+=== RUN   TestLocalStorageReadWriteDelete
+--- PASS: TestLocalStorageReadWriteDelete (0.01s)
+=== RUN   TestLocalStorageRejectsTraversal
+--- PASS: TestLocalStorageRejectsTraversal (0.00s)
+=== RUN   TestS3StorageConstructorValidation
+--- PASS: TestS3StorageConstructorValidation (0.00s)
+=== RUN   TestMockStorageBackendCRUD
+--- PASS: TestMockStorageBackendCRUD (0.00s)
+=== RUN   TestMockStorageBackendConcurrentWrites
+--- PASS: TestMockStorageBackendConcurrentWrites (0.00s)
+=== RUN   TestMockStorageBackendErrorPaths
+--- PASS: TestMockStorageBackendErrorPaths (0.00s)
+PASS
+coverage: 31.9% of statements
+ok  	github.com/aegion/aegion/modules/analytics/store	0.312s	coverage: 31.9% of statements
+=== RUN   TestManagerRegistersUniqueStrategies
+--- PASS: TestManagerRegistersUniqueStrategies (0.00s)
+=== RUN   TestManagerPublishesAndDeduplicatesEvents
+--- PASS: TestManagerPublishesAndDeduplicatesEvents (0.00s)
+=== RUN   TestManagerAggregatesHealthAndPositions
+--- PASS: TestManagerAggregatesHealthAndPositions (0.00s)
+=== RUN   TestManagerStartsAndStopsEnabledStrategies
+--- PASS: TestManagerStartsAndStopsEnabledStrategies (0.00s)
+=== RUN   TestRealTimeSyncStrategy
+--- PASS: TestRealTimeSyncStrategy (0.00s)
+=== RUN   TestBatchSyncStrategy
+--- PASS: TestBatchSyncStrategy (0.00s)
+=== RUN   TestAsyncSyncStrategy
+--- PASS: TestAsyncSyncStrategy (0.50s)
+=== RUN   TestHybridSyncStrategy
+--- PASS: TestHybridSyncStrategy (0.00s)
+=== RUN   TestSyncManager
+--- PASS: TestSyncManager (0.00s)
+=== RUN   TestRateLimiter
+--- PASS: TestRateLimiter (0.15s)
+=== RUN   TestEventDeduplicator
+--- PASS: TestEventDeduplicator (1.10s)
+PASS
+coverage: 51.0% of statements
+ok  	github.com/aegion/aegion/modules/analytics/sync	3.515s	coverage: 51.0% of statements
+=== RUN   TestSignPayloadAddsHeadersAndSignature
+--- PASS: TestSignPayloadAddsHeadersAndSignature (0.00s)
+=== RUN   TestSignatureVerifyDetectsTampering
+--- PASS: TestSignatureVerifyDetectsTampering (0.00s)
+=== RUN   TestRetryPolicyAdditionalScenarios
+--- PASS: TestRetryPolicyAdditionalScenarios (0.00s)
+=== RUN   TestMatcherSupportsCustomFilters
+--- PASS: TestMatcherSupportsCustomFilters (0.00s)
+=== RUN   TestQueueTimeoutAndPendingTracking
+--- PASS: TestQueueTimeoutAndPendingTracking (0.01s)
+=== RUN   TestStore_GetWebhook_NotFound
+--- PASS: TestStore_GetWebhook_NotFound (0.00s)
+=== RUN   TestStore_GetWebhook_RoundTripJSONFields
+--- PASS: TestStore_GetWebhook_RoundTripJSONFields (0.00s)
+=== RUN   TestStore_ListDeliveries_DefaultLimit
+--- PASS: TestStore_ListDeliveries_DefaultLimit (0.00s)
+=== RUN   TestStore_UpdateWebhook_NoRowsAffected
+--- PASS: TestStore_UpdateWebhook_NoRowsAffected (0.00s)
+=== RUN   TestStore_DeleteWebhook_NoRowsAffected
+--- PASS: TestStore_DeleteWebhook_NoRowsAffected (0.00s)
+=== RUN   TestStore_CreateWebhook_MarshalsFieldsAndExecs
+--- PASS: TestStore_CreateWebhook_MarshalsFieldsAndExecs (0.00s)
+=== RUN   TestStore_ListWebhooks_ParsesRows
+--- PASS: TestStore_ListWebhooks_ParsesRows (0.00s)
+=== RUN   TestStore_GetDelivery_NotFound
+--- PASS: TestStore_GetDelivery_NotFound (0.00s)
+=== RUN   TestStore_GetDelivery_ScansNullableTimes
+--- PASS: TestStore_GetDelivery_ScansNullableTimes (0.00s)
+=== RUN   TestStore_UpdateDelivery_Execs
+--- PASS: TestStore_UpdateDelivery_Execs (0.00s)
+=== RUN   TestSignature
+--- PASS: TestSignature (0.00s)
+=== RUN   TestRetryPolicy
+--- PASS: TestRetryPolicy (0.00s)
+=== RUN   TestMatcher
+--- PASS: TestMatcher (0.00s)
+=== RUN   TestQueue
+--- PASS: TestQueue (0.00s)
+=== RUN   TestRateLimiter
+--- PASS: TestRateLimiter (0.00s)
+=== RUN   TestDeliveryWorker_processJob_Success
+--- PASS: TestDeliveryWorker_processJob_Success (0.00s)
+=== RUN   TestDeliveryWorker_processJob_RetryPath_Requeues
+--- PASS: TestDeliveryWorker_processJob_RetryPath_Requeues (0.00s)
+=== RUN   TestDeliveryWorker_processJob_DisabledMovesToDLQ
+--- PASS: TestDeliveryWorker_processJob_DisabledMovesToDLQ (0.00s)
+=== RUN   TestDeliveryWorker_processJob_CircuitBreakFinalFailureMovesToDLQ
+--- PASS: TestDeliveryWorker_processJob_CircuitBreakFinalFailureMovesToDLQ (0.00s)
+PASS
+coverage: 50.7% of statements
+ok  	github.com/aegion/aegion/modules/analytics/webhooks	2.887s	coverage: 50.7% of statements
+FAIL

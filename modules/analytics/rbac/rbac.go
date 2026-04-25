@@ -18,6 +18,7 @@ const (
 	RoleAnalyst Role = "analyst"
 	RoleViewer  Role = "viewer"
 	RoleUser    Role = "user"
+	RoleGuest   Role = "guest" // Unauthenticated users
 
 	// Permissions
 	PermViewEvents         Permission = "view_events"
@@ -71,6 +72,7 @@ var rolePermissionMap = map[Role][]Permission{
 		PermViewEvents,
 		PermViewDashboards,
 	},
+	RoleGuest: {}, // No permissions for unauthenticated users
 }
 
 // Manager handles role and permission management
@@ -117,7 +119,7 @@ func (m *Manager) GetUserRole(userID string) (Role, error) {
 
 	role, exists := m.userRoles[userID]
 	if !exists {
-		return RoleUser, nil // Default role
+		return RoleGuest, nil // Default role for unauthenticated users
 	}
 
 	return role, nil
@@ -140,7 +142,7 @@ func (m *Manager) HasPermission(userID string, perm Permission) (bool, error) {
 	// Check role-based permissions
 	role := m.userRoles[userID]
 	if role == "" {
-		role = RoleUser // Default role
+		role = RoleGuest // Default role for unauthenticated users
 	}
 
 	if !isValidRole(role) {
@@ -292,7 +294,7 @@ func (m *Manager) CanModifyWebhook(userID, webhookID string) (bool, error) {
 // Helper function to validate role
 func isValidRole(role Role) bool {
 	switch role {
-	case RoleAdmin, RoleAnalyst, RoleViewer, RoleUser:
+	case RoleAdmin, RoleAnalyst, RoleViewer, RoleUser, RoleGuest:
 		return true
 	default:
 		return false
