@@ -724,7 +724,6 @@ func (h *Handler) ValidateWebhookConfig(w http.ResponseWriter, r *http.Request) 
 
 // GetUserPreferences handles GET /user/preferences
 func (h *Handler) GetUserPreferences(w http.ResponseWriter, r *http.Request) {
-	userID, _ := userIDFromContext(r.Context())
 	
 	preferences := map[string]interface{}{
 		"favorite_dashboards":         []string{},
@@ -991,3 +990,4 @@ func parseIntParam(s string) (int, error) {
 	val := 0
 	fmt.Sscanf(s, "%d", &val)
 	return val, nil
+}

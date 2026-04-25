@@ -13,6 +13,7 @@ func TestRoleValidation(t *testing.T) {
 		{RoleAnalyst, true},
 		{RoleViewer, true},
 		{RoleUser, true},
+		{RoleGuest, true},
 		{Role("invalid"), false},
 	}
 
@@ -191,9 +192,9 @@ func TestWebhookModification(t *testing.T) {
 func TestDefaultRole(t *testing.T) {
 	manager := NewManager()
 
-	// User not in system should have default role
+	// User not in system should have default role (guest - no permissions)
 	role, _ := manager.GetUserRole("unknown_user")
-	if role != RoleUser {
-		t.Errorf("Unknown user should have default role %s, got %s", RoleUser, role)
+	if role != RoleGuest {
+		t.Errorf("Unknown user should have default role %s, got %s", RoleGuest, role)
 	}
 }
