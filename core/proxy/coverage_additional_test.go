@@ -89,6 +89,10 @@ func TestAuthMiddleware_AdditionalCoverageBranches(t *testing.T) {
 			ID:         uuid.New(),
 			IdentityID: uuid.New(),
 			AAL:        session.AAL1,
+			Active:     true,
+			AuthMethods: []session.SessionAuthMethod{
+				{Method: session.AuthMethodPassword},
+			},
 		}
 
 		denyCalled := false
@@ -112,7 +116,7 @@ func TestAuthMiddleware_AdditionalCoverageBranches(t *testing.T) {
 		})
 		allowReq := httptest.NewRequest(http.MethodGet, "/api/profile", nil).WithContext(session.WithSession(context.Background(), sess))
 		allowRec := httptest.NewRecorder()
-		RequireCapabilities()(allowNext).ServeHTTP(allowRec, allowReq)
+		RequireCapabilities("authenticated", "auth:password")(allowNext).ServeHTTP(allowRec, allowReq)
 		if !allowCalled || allowRec.Code != http.StatusOK {
 			t.Fatalf("expected allow path to continue, called=%v status=%d", allowCalled, allowRec.Code)
 		}

@@ -797,6 +797,32 @@ func TestCheckCapabilities(t *testing.T) {
 			requiredCaps: []string{"read:users"},
 			wantErr:      ErrInsufficientPrivileges,
 		},
+		{
+			name: "allow built-in authenticated capabilities",
+			sess: &session.Session{
+				ID:         uuid.New(),
+				IdentityID: uuid.New(),
+				Active:     true,
+				AAL:        session.AAL2,
+				AuthMethods: []session.SessionAuthMethod{
+					{Method: session.AuthMethodPassword},
+					{Method: session.AuthMethodTOTP},
+				},
+			},
+			requiredCaps: []string{"authenticated", "session:active", "aal2", "auth:password", "auth:totp"},
+			wantErr:      nil,
+		},
+		{
+			name: "allow impersonation capability",
+			sess: &session.Session{
+				ID:              uuid.New(),
+				IdentityID:      uuid.New(),
+				Active:          true,
+				IsImpersonation: true,
+			},
+			requiredCaps: []string{"session:impersonation"},
+			wantErr:      nil,
+		},
 	}
 
 	for _, tt := range tests {

@@ -196,8 +196,66 @@ test_module_isolation() {
         error "Module $module1 cannot reach $module2"
         return 1
     fi
-    
-    # TODO: Add more sophisticated isolation tests (file system, process namespace, etc.)
+
+    if ! test_pid_namespace_isolation "$module1" "$module2"; then
+        return 1
+    fi
+
+    if ! test_filesystem_isolation "$module1" "$module2"; then
+        return 1
+    fi
+
+    return 0
+}
+
+test_pid_namespace_isolation() {
+    local module1=$1
+    local module2=$2
+
+    local pid_mode_1
+    local pid_mode_2
+    pid_mode_1=$(docker inspect --format='{{.HostConfig.PidMode}}' "$module1" 2>/dev/null || true)
+    pid_mode_2=$(docker inspect --format='{{.HostConfig.PidMode}}' "$module2" 2>/dev/null || true)
+
+    if [[ "$pid_mode_1" == host || "$pid_mode_2" == host ]]; then
+        error "Host PID namespace sharing detected between $module1 and $module2"
+        return 1
+    fi
+    if [[ "$pid_mode_1" == container:* || "$pid_mode_2" == container:* ]]; then
+        error "Container PID namespace sharing detected between $module1 and $module2"
+        return 1
+    fi
+
+    success "PID namespaces for $module1 and $module2 are isolated"
+    return 0
+}
+
+test_filesystem_isolation() {
+    local module1=$1
+    local module2=$2
+
+    local mounts1
+    local mounts2
+    mounts1=$(docker inspect --format='{{range .Mounts}}{{printf "%s|%s|%t\n" .Source .Destination .RW}}{{end}}' "$module1" 2>/dev/null || true)
+    mounts2=$(docker inspect --format='{{range .Mounts}}{{printf "%s|%s|%t\n" .Source .Destination .RW}}{{end}}' "$module2" 2>/dev/null || true)
+
+    local shared=0
+    while IFS='|' read -r src1 dest1 rw1; do
+        [ -n "${src1:-}" ] || continue
+        while IFS='|' read -r src2 dest2 rw2; do
+            [ -n "${src2:-}" ] || continue
+            if [[ "$src1" == "$src2" && "$rw1" == "true" && "$rw2" == "true" ]]; then
+                error "Writable shared mount detected between $module1 ($dest1) and $module2 ($dest2): $src1"
+                shared=1
+            fi
+        done <<< "$mounts2"
+    done <<< "$mounts1"
+
+    if [ "$shared" -ne 0 ]; then
+        return 1
+    fi
+
+    success "No shared writable mounts detected between $module1 and $module2"
     return 0
 }
 

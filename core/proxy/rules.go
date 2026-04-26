@@ -275,9 +275,54 @@ func checkCapabilities(sess *session.Session, requiredCaps []string) error {
 		return nil
 	}
 
-	// Capability evaluation is not wired to a trusted permission source in this package yet.
-	// Fail closed to prevent silent authorization bypass when capabilities are configured.
-	return ErrInsufficientPrivileges
+	available := sessionCapabilities(sess)
+	for _, rawCap := range requiredCaps {
+		capability := normalizeCapability(rawCap)
+		if capability == "" {
+			continue
+		}
+		if _, ok := available[capability]; !ok {
+			return ErrInsufficientPrivileges
+		}
+	}
+
+	return nil
+}
+
+func sessionCapabilities(sess *session.Session) map[string]struct{} {
+	capabilities := map[string]struct{}{
+		"authenticated": {},
+	}
+	if sess == nil {
+		return capabilities
+	}
+
+	if sess.Active {
+		capabilities["session:active"] = struct{}{}
+	}
+	if sess.IsImpersonation {
+		capabilities["session:impersonation"] = struct{}{}
+	}
+
+	aal := normalizeCapability(string(sess.AAL))
+	if aal != "" {
+		capabilities[aal] = struct{}{}
+		capabilities["session:"+aal] = struct{}{}
+	}
+
+	for _, method := range sess.AuthMethods {
+		name := normalizeCapability(string(method.Method))
+		if name == "" {
+			continue
+		}
+		capabilities["auth:"+name] = struct{}{}
+	}
+
+	return capabilities
+}
+
+func normalizeCapability(capability string) string {
+	return strings.ToLower(strings.TrimSpace(capability))
 }
 
 // ApplyRewrite applies path rewriting based on the rule's rewrite configuration.

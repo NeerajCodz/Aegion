@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -97,6 +99,15 @@ func TestMetricsEndpoint(t *testing.T) {
 	if body == "" {
 		t.Fatal("expected metrics body")
 	}
+	if !strings.Contains(body, "aegion_router_uptime_seconds") {
+		t.Fatalf("expected uptime metric in body, got %q", body)
+	}
+	if !strings.Contains(body, "aegion_modules_total 1") {
+		t.Fatalf("expected module count metric in body, got %q", body)
+	}
+	if !strings.Contains(body, "aegion_dependency_status{component=\"database\",status=\"disabled\"} 1") {
+		t.Fatalf("expected dependency status metric in body, got %q", body)
+	}
 }
 
 func TestDatabaseHealthCheckerAndCacheHealthChecker(t *testing.T) {
@@ -146,5 +157,31 @@ func TestItoa(t *testing.T) {
 	}
 	if got := itoa(-7); got != "-7" {
 		t.Fatalf("expected -7, got %s", got)
+	}
+}
+
+func TestMetricsEndpointWithDependencyLatency(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DatabaseChecker = NewDatabaseHealthChecker(func() error {
+		time.Sleep(2 * time.Millisecond)
+		return nil
+	})
+	cfg.CacheChecker = NewCacheHealthChecker(func() error { return errors.New("cache down") })
+
+	r := New(cfg, zerolog.Nop(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "aegion_dependency_latency_milliseconds{component=\"database\"}") {
+		t.Fatalf("expected dependency latency metric in body, got %q", body)
+	}
+	if !strings.Contains(body, "aegion_dependency_status{component=\"cache\",status=\"unhealthy\"} 1") {
+		t.Fatalf("expected unhealthy cache metric in body, got %q", body)
 	}
 }

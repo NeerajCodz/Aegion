@@ -257,7 +257,6 @@ func RequireCapabilities(capabilities ...string) func(http.Handler) http.Handler
 				return
 			}
 
-			// Check capabilities (placeholder implementation)
 			if err := checkCapabilities(sess, capabilities); err != nil {
 				writeErrorResponse(w, http.StatusForbidden, "Insufficient privileges")
 				return

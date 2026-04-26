@@ -3,7 +3,10 @@ package router
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -106,30 +109,122 @@ func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
 }
 
 // handleMetrics handles the /metrics endpoint.
-// This is a placeholder for Prometheus metrics integration.
 func (r *Router) handleMetrics(w http.ResponseWriter, req *http.Request) {
-	// Placeholder for Prometheus metrics
-	// TODO: Integrate with prometheus/client_golang
+	now := time.Now().UTC()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
-	// Basic metrics placeholder
-	_, _ = w.Write([]byte("# HELP aegion_up Aegion server is up\n"))
-	_, _ = w.Write([]byte("# TYPE aegion_up gauge\n"))
-	_, _ = w.Write([]byte("aegion_up 1\n"))
+	var builder strings.Builder
+	writeMetricHelp(&builder, "aegion_up", "Aegion server is up", "gauge")
+	writeMetricSample(&builder, "aegion_up", nil, "1")
+	writeMetricHelp(&builder, "aegion_router_uptime_seconds", "Router uptime in seconds", "gauge")
+	writeMetricSample(&builder, "aegion_router_uptime_seconds", nil, formatFloat(now.Sub(r.startedAt).Seconds()))
+	writeMetricHelp(&builder, "aegion_router_request_timeout_seconds", "Configured router request timeout in seconds", "gauge")
+	writeMetricSample(&builder, "aegion_router_request_timeout_seconds", nil, formatFloat(r.config.RequestTimeout.Seconds()))
+	writeMetricHelp(&builder, "aegion_router_module_timeout_seconds", "Configured module proxy timeout in seconds", "gauge")
+	writeMetricSample(&builder, "aegion_router_module_timeout_seconds", nil, formatFloat(r.config.ModuleTimeout.Seconds()))
+	writeMetricHelp(&builder, "aegion_router_rate_limit_enabled", "Router rate limiting enabled flag", "gauge")
+	writeMetricSample(&builder, "aegion_router_rate_limit_enabled", nil, boolGauge(r.config.RateLimit.Enabled))
+	writeMetricHelp(&builder, "aegion_router_rate_limit_rps", "Configured router requests per second limit", "gauge")
+	writeMetricSample(&builder, "aegion_router_rate_limit_rps", nil, formatFloat(r.config.RateLimit.RequestsPerSecond))
+	writeMetricHelp(&builder, "aegion_router_rate_limit_burst", "Configured router burst limit", "gauge")
+	writeMetricSample(&builder, "aegion_router_rate_limit_burst", nil, itoa(r.config.RateLimit.Burst))
 
 	if r.registry != nil {
 		moduleCount := r.registry.ModuleCount()
 		healthyCount := r.registry.HealthyCount()
 
-		_, _ = w.Write([]byte("\n# HELP aegion_modules_total Total number of registered modules\n"))
-		_, _ = w.Write([]byte("# TYPE aegion_modules_total gauge\n"))
-		_, _ = w.Write([]byte("aegion_modules_total " + itoa(moduleCount) + "\n"))
-
-		_, _ = w.Write([]byte("\n# HELP aegion_modules_healthy Number of healthy modules\n"))
-		_, _ = w.Write([]byte("# TYPE aegion_modules_healthy gauge\n"))
-		_, _ = w.Write([]byte("aegion_modules_healthy " + itoa(healthyCount) + "\n"))
+		writeMetricHelp(&builder, "aegion_modules_total", "Total number of registered modules", "gauge")
+		writeMetricSample(&builder, "aegion_modules_total", nil, itoa(moduleCount))
+		writeMetricHelp(&builder, "aegion_modules_healthy", "Number of healthy modules", "gauge")
+		writeMetricSample(&builder, "aegion_modules_healthy", nil, itoa(healthyCount))
 	}
+
+	r.writeDependencyMetric(&builder, "database", r.runDependencyCheck("database", r.databaseChecker))
+	r.writeDependencyMetric(&builder, "cache", r.runDependencyCheck("cache", r.cacheChecker))
+
+	_, _ = w.Write([]byte(builder.String()))
+}
+
+func (r *Router) writeDependencyMetric(builder *strings.Builder, name string, status ComponentStatus) {
+	writeMetricHelp(builder, "aegion_dependency_status", "Dependency status by component and state", "gauge")
+	writeMetricSample(builder, "aegion_dependency_status", map[string]string{
+		"component": name,
+		"status":    status.Status,
+	}, "1")
+
+	if latencyMs := durationMillis(status.Latency); latencyMs >= 0 {
+		writeMetricHelp(builder, "aegion_dependency_latency_milliseconds", "Dependency check latency in milliseconds", "gauge")
+		writeMetricSample(builder, "aegion_dependency_latency_milliseconds", map[string]string{
+			"component": name,
+		}, formatFloat(latencyMs))
+	}
+}
+
+func writeMetricHelp(builder *strings.Builder, name, help, metricType string) {
+	builder.WriteString("# HELP ")
+	builder.WriteString(name)
+	builder.WriteByte(' ')
+	builder.WriteString(help)
+	builder.WriteByte('\n')
+	builder.WriteString("# TYPE ")
+	builder.WriteString(name)
+	builder.WriteByte(' ')
+	builder.WriteString(metricType)
+	builder.WriteByte('\n')
+}
+
+func writeMetricSample(builder *strings.Builder, name string, labels map[string]string, value string) {
+	builder.WriteString(name)
+	if len(labels) > 0 {
+		keys := make([]string, 0, len(labels))
+		for key := range labels {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		builder.WriteByte('{')
+		for index, key := range keys {
+			if index > 0 {
+				builder.WriteByte(',')
+			}
+			builder.WriteString(key)
+			builder.WriteString("=\"")
+			builder.WriteString(escapePrometheusLabel(labels[key]))
+			builder.WriteByte('"')
+		}
+		builder.WriteByte('}')
+	}
+	builder.WriteByte(' ')
+	builder.WriteString(value)
+	builder.WriteByte('\n')
+}
+
+func escapePrometheusLabel(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	return strings.ReplaceAll(value, "\"", "\\\"")
+}
+
+func boolGauge(enabled bool) string {
+	if enabled {
+		return "1"
+	}
+	return "0"
+}
+
+func formatFloat(value float64) string {
+	return fmt.Sprintf("%.6f", value)
+}
+
+func durationMillis(latency string) float64 {
+	if latency == "" {
+		return -1
+	}
+	parsed, err := time.ParseDuration(latency)
+	if err != nil {
+		return -1
+	}
+	return float64(parsed.Milliseconds())
 }
 
 // itoa converts an int to a string without importing strconv.

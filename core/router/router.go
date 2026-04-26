@@ -15,9 +15,10 @@ import (
 
 // Router wraps chi.Router with Aegion-specific functionality.
 type Router struct {
-	mux    *chi.Mux
-	config Config
-	logger zerolog.Logger
+	mux       *chi.Mux
+	config    Config
+	logger    zerolog.Logger
+	startedAt time.Time
 
 	// Dependencies
 	registry        *registry.Registry
@@ -119,6 +120,7 @@ func New(cfg Config, logger zerolog.Logger, reg *registry.Registry) *Router {
 		mux:             chi.NewRouter(),
 		config:          cfg,
 		logger:          logger.With().Str("component", "router").Logger(),
+		startedAt:       time.Now().UTC(),
 		registry:        reg,
 		policy:          cfg.PolicyChecker,
 		databaseChecker: cfg.DatabaseChecker,
