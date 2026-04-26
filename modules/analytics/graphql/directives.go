@@ -3,6 +3,8 @@ package graphql
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -249,8 +251,6 @@ func NewDirectiveParser(logger zerolog.Logger) *DirectiveParser {
 func (dp *DirectiveParser) ParseDirectives(schemaSDL string) map[string]interface{} {
 	directives := make(map[string]interface{})
 
-	// This is a simplified parser - in production, use a proper GraphQL parser
-	// For now, just extract directive definitions
 	if directives, err := extractDirectiveDefinitions(schemaSDL); err == nil {
 		return directives
 	}
@@ -259,36 +259,24 @@ func (dp *DirectiveParser) ParseDirectives(schemaSDL string) map[string]interfac
 }
 
 func extractDirectiveDefinitions(schema string) (map[string]interface{}, error) {
-	// Placeholder implementation
-	return map[string]interface{}{
-		"auth": map[string]interface{}{
-			"description": "Requires authentication",
-			"locations":   []string{"FIELD_DEFINITION"},
-			"arguments": map[string]interface{}{
-				"required": map[string]interface{}{
-					"type": "Boolean",
-				},
-			},
-		},
-		"cache": map[string]interface{}{
-			"description": "Caches field results",
-			"locations":   []string{"FIELD_DEFINITION"},
-			"arguments": map[string]interface{}{
-				"ttl": map[string]interface{}{
-					"type": "Int",
-				},
-			},
-		},
-		"deprecated": map[string]interface{}{
-			"description": "Marks a field as deprecated",
-			"locations":   []string{"FIELD_DEFINITION", "ENUM_VALUE"},
-			"arguments": map[string]interface{}{
-				"reason": map[string]interface{}{
-					"type": "String",
-				},
-			},
-		},
-	}, nil
+	directives := make(map[string]interface{})
+	matches := directiveDefinitionRegex.FindAllStringSubmatch(schema, -1)
+	for _, match := range matches {
+		name := match[1]
+		args := parseDirectiveArguments(match[3])
+		locations := parseDirectiveLocations(match[4])
+		directives[name] = map[string]interface{}{
+			"description": fmt.Sprintf("Directive %s", name),
+			"locations":   locations,
+			"arguments":   args,
+		}
+	}
+
+	if len(directives) == 0 {
+		return nil, fmt.Errorf("no directives found")
+	}
+
+	return directives, nil
 }
 
 // ==================== Directive Validator ====================
@@ -309,11 +297,74 @@ func NewDirectiveValidator(registry *DirectiveRegistry, logger zerolog.Logger) *
 
 // ValidateDirectiveUsage validates that directives are used correctly.
 func (dv *DirectiveValidator) ValidateDirectiveUsage(query string) error {
-	// Simplified validation - in production, use a proper GraphQL parser
-	// This would check:
-	// 1. Directives exist
-	// 2. Arguments match the directive definition
-	// 3. Directives are applied to valid locations
+	matches := directiveUsageRegex.FindAllStringSubmatch(query, -1)
+	for _, match := range matches {
+		name := match[1]
+		args := match[3]
+
+		if _, ok := dv.registry.GetDirective(name); !ok {
+			return fmt.Errorf("directive %q is not registered", name)
+		}
+
+		switch name {
+		case "auth":
+			if strings.TrimSpace(args) == "" {
+				continue
+			}
+			if !authDirectiveArgsRegex.MatchString(args) {
+				return fmt.Errorf("directive %q expects optional Boolean required argument", name)
+			}
+		case "cache":
+			if strings.TrimSpace(args) == "" {
+				continue
+			}
+			if !cacheDirectiveArgsRegex.MatchString(args) {
+				return fmt.Errorf("directive %q expects ttl: Int argument", name)
+			}
+		case "deprecated":
+			if strings.TrimSpace(args) == "" {
+				continue
+			}
+			if !deprecatedDirectiveArgsRegex.MatchString(args) {
+				return fmt.Errorf("directive %q expects reason: String argument", name)
+			}
+		}
+	}
 
 	return nil
+}
+
+var (
+	directiveDefinitionRegex   = regexp.MustCompile(`directive\s+@([A-Za-z_][A-Za-z0-9_]*)\s*(\(([^)]*)\))?\s+on\s+([A-Z_\s|]+)`)
+	directiveArgumentRegex     = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z!\[\]_][A-Za-z0-9!\[\]_]*)(\s*=\s*([^,)]+))?`)
+	directiveUsageRegex        = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)(\(([^)]*)\))?`)
+	authDirectiveArgsRegex     = regexp.MustCompile(`^\s*required\s*:\s*(true|false)\s*$`)
+	cacheDirectiveArgsRegex    = regexp.MustCompile(`^\s*ttl\s*:\s*\d+\s*$`)
+	deprecatedDirectiveArgsRegex = regexp.MustCompile(`^\s*reason\s*:\s*"[^"]*"\s*$`)
+)
+
+func parseDirectiveArguments(definition string) map[string]interface{} {
+	result := make(map[string]interface{})
+	for _, match := range directiveArgumentRegex.FindAllStringSubmatch(definition, -1) {
+		argName := match[1]
+		argType := match[2]
+		entry := map[string]interface{}{"type": argType}
+		if defaultValue := strings.TrimSpace(match[4]); defaultValue != "" {
+			entry["default"] = strings.Trim(defaultValue, `"`)
+		}
+		result[argName] = entry
+	}
+	return result
+}
+
+func parseDirectiveLocations(definition string) []string {
+	parts := strings.Split(definition, "|")
+	locations := make([]string, 0, len(parts))
+	for _, part := range parts {
+		location := strings.TrimSpace(part)
+		if location != "" {
+			locations = append(locations, location)
+		}
+	}
+	return locations
 }

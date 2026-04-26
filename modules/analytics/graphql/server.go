@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 )
 
@@ -339,15 +340,61 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // RegisterRoutes registers GraphQL routes on the given HTTP router.
-// This is a generic helper - actual registration depends on the router being used (chi, mux, etc.)
 func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
-	// This is a placeholder. In real implementation, this would register
-	// routes with the specific router (chi, mux, etc.)
+	if strings.TrimSpace(basePath) == "" {
+		basePath = "/graphql"
+	}
+	playgroundPath := strings.TrimRight(basePath, "/") + "/playground"
+	introspectionPath := strings.TrimRight(basePath, "/") + "/introspection"
+	healthPath := strings.TrimRight(basePath, "/") + "/health"
+
+	switch router := mux.(type) {
+	case chi.Router:
+		router.MethodFunc(http.MethodPost, basePath, s.HandleQuery)
+		router.MethodFunc(http.MethodGet, basePath, s.HandlePlayground)
+		router.MethodFunc(http.MethodGet, playgroundPath, s.HandlePlayground)
+		router.MethodFunc(http.MethodGet, introspectionPath, s.HandleIntrospection)
+		router.MethodFunc(http.MethodGet, healthPath, s.HandleHealth)
+	case *http.ServeMux:
+		router.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPost:
+				s.HandleQuery(w, r)
+			case http.MethodGet:
+				s.HandlePlayground(w, r)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+		router.HandleFunc(playgroundPath, s.HandlePlayground)
+		router.HandleFunc(introspectionPath, s.HandleIntrospection)
+		router.HandleFunc(healthPath, s.HandleHealth)
+	case interface{ HandleFunc(string, http.HandlerFunc) }:
+		router.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodPost:
+				s.HandleQuery(w, r)
+			case http.MethodGet:
+				s.HandlePlayground(w, r)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+		})
+		router.HandleFunc(playgroundPath, s.HandlePlayground)
+		router.HandleFunc(introspectionPath, s.HandleIntrospection)
+		router.HandleFunc(healthPath, s.HandleHealth)
+	default:
+		return fmt.Errorf("unsupported router type %T", mux)
+	}
+
 	s.logger.Info().
 		Str("basePath", basePath).
+		Str("playgroundPath", playgroundPath).
+		Str("introspectionPath", introspectionPath).
+		Str("healthPath", healthPath).
 		Bool("playgroundEnabled", s.enablePlayground).
 		Bool("introspectionEnabled", s.enableIntrospection).
-		Msg("GraphQL server configured")
+		Msg("GraphQL routes registered")
 	return nil
 }
 

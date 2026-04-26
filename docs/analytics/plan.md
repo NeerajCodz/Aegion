@@ -5,8 +5,8 @@
 This file is the source-of-truth roadmap for analytics work on the `beta` branch. It is based on repository inspection and `git log`, not earlier phase summaries. A checkbox is marked `[x]` only when the code or docs exist in the current branch and are not obviously placeholder-only. Anything stubbed, skipped, partially wired, or missing stays `[ ]`.
 
 **Verified branch:** `beta`  
-**Verified head:** `daead5d`  
-**Last reviewed:** `2026-04-24`  
+**Verified head:** `4bc54b0`  
+**Last reviewed:** `2026-04-26`  
 **Primary verification inputs:** `modules/analytics`, `modules/admin/spa/src/components/Analytics`, `configs/aegion.yaml`, `docs/analytics`, recent `git log`
 
 ## Verification rules
@@ -58,6 +58,8 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [x] GraphQL analytics package exists
 - [x] GraphQL auth middleware now rejects protected unauthenticated requests and populates real user context from bearer/session tokens
 - [x] GraphQL resolvers now enforce analytics RBAC permissions for events, dashboards, queries, reports, webhooks, and ad-hoc query execution
+- [x] GraphQL directive parsing and directive-usage validation are implemented for built-in analytics directives
+- [x] GraphQL route registration works with `chi.Router` and `http.ServeMux`
 - [x] gRPC analytics package exists with generated/internal proto
 - [x] gRPC saved-query execution resolves and executes stored read-only SQL
 - [x] Dashboard query exports now resolve real stored/common queries with time-range and filter composition
@@ -91,19 +93,19 @@ This file is the source-of-truth roadmap for analytics work on the `beta` branch
 - [ ] Link validation exists for `docs/analytics`
 
 ### Documentation gaps
-- [ ] `docs/analytics/openapi.yaml` exists
-- [ ] `docs/analytics/graphql-schema.md` exists
-- [ ] `docs/analytics/config.md` exists
-- [ ] `docs/analytics/api.md` exists
-- [ ] `docs/analytics/architecture.md` exists
-- [ ] `docs/analytics/setup.md` exists
-- [ ] `docs/analytics/integration.md` exists
-- [ ] `docs/analytics/admin-spa.md` exists
-- [ ] `docs/analytics/performance.md` exists
-- [ ] `docs/analytics/webhooks.md` exists
-- [ ] `docs/analytics/security.md` exists
-- [ ] `docs/analytics/troubleshooting.md` exists
-- [ ] `docs/analytics/faq.md` exists
+- [x] `docs/analytics/openapi.yaml` exists
+- [x] `docs/analytics/graphql-schema.md` exists
+- [x] `docs/analytics/config.md` exists
+- [x] `docs/analytics/api.md` exists
+- [x] `docs/analytics/architecture.md` exists
+- [x] `docs/analytics/setup.md` exists
+- [x] `docs/analytics/integration.md` exists
+- [x] `docs/analytics/admin-spa.md` exists
+- [x] `docs/analytics/performance.md` exists
+- [x] `docs/analytics/webhooks.md` exists
+- [x] `docs/analytics/security.md` exists
+- [x] `docs/analytics/troubleshooting.md` exists
+- [x] `docs/analytics/faq.md` exists
 
 ## Execution tranches
 

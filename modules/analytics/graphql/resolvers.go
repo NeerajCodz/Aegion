@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aegion/aegion/modules/analytics"
@@ -20,7 +21,7 @@ type Resolver struct {
 	eventSubs       map[string]chan *EventNode
 	metricSubs      map[string]chan *MetricNode
 	dashboardSubs   map[string]chan *DashboardNode
-	subscriptionsMu interface{} // Use sync.RWMutex in real implementation
+	subscriptionsMu sync.RWMutex
 }
 
 // Store defines the interface for data access.
@@ -585,11 +586,15 @@ func (r *Resolver) ExecuteQuery(ctx context.Context, sql string, timeout *int) (
 func (r *Resolver) OnNewEvent(ctx context.Context, filter *EventFilter) (<-chan *EventNode, error) {
 	ch := make(chan *EventNode, 10)
 	subID := generateID()
+	r.subscriptionsMu.Lock()
 	r.eventSubs[subID] = ch
+	r.subscriptionsMu.Unlock()
 
 	go func() {
 		<-ctx.Done()
+		r.subscriptionsMu.Lock()
 		delete(r.eventSubs, subID)
+		r.subscriptionsMu.Unlock()
 		close(ch)
 	}()
 
@@ -600,11 +605,15 @@ func (r *Resolver) OnNewEvent(ctx context.Context, filter *EventFilter) (<-chan 
 func (r *Resolver) OnMetricUpdate(ctx context.Context, category *string) (<-chan *MetricNode, error) {
 	ch := make(chan *MetricNode, 10)
 	subID := generateID()
+	r.subscriptionsMu.Lock()
 	r.metricSubs[subID] = ch
+	r.subscriptionsMu.Unlock()
 
 	go func() {
 		<-ctx.Done()
+		r.subscriptionsMu.Lock()
 		delete(r.metricSubs, subID)
+		r.subscriptionsMu.Unlock()
 		close(ch)
 	}()
 
@@ -615,11 +624,15 @@ func (r *Resolver) OnMetricUpdate(ctx context.Context, category *string) (<-chan
 func (r *Resolver) OnDashboardChange(ctx context.Context, dashboardID string) (<-chan *DashboardNode, error) {
 	ch := make(chan *DashboardNode, 10)
 	subID := generateID()
+	r.subscriptionsMu.Lock()
 	r.dashboardSubs[subID] = ch
+	r.subscriptionsMu.Unlock()
 
 	go func() {
 		<-ctx.Done()
+		r.subscriptionsMu.Lock()
 		delete(r.dashboardSubs, subID)
+		r.subscriptionsMu.Unlock()
 		close(ch)
 	}()
 

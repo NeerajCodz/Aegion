@@ -2,13 +2,18 @@ package graphql
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/rbac"
+	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // MockStore implements the Store interface for testing.
@@ -463,6 +468,32 @@ func TestDirectiveRegistry(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestDirectiveParserParsesSchemaDefinitions(t *testing.T) {
+	parser := NewDirectiveParser(zerolog.Nop())
+
+	directives := parser.ParseDirectives(SchemaDefinition)
+
+	auth, ok := directives["auth"].(map[string]interface{})
+	require.True(t, ok)
+	args, ok := auth["arguments"].(map[string]interface{})
+	require.True(t, ok)
+	requiredArg, ok := args["required"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Boolean", requiredArg["type"])
+	assert.Contains(t, auth["locations"], "FIELD_DEFINITION")
+}
+
+func TestDirectiveValidatorValidatesRegisteredDirectives(t *testing.T) {
+	registry := NewDirectiveRegistry(zerolog.Nop())
+	RegisterBuiltInDirectives(registry)
+	validator := NewDirectiveValidator(registry, zerolog.Nop())
+
+	require.NoError(t, validator.ValidateDirectiveUsage(`query { health @cache(ttl: 30) }`))
+	require.NoError(t, validator.ValidateDirectiveUsage(`query { health @deprecated(reason: "old") }`))
+	assert.Error(t, validator.ValidateDirectiveUsage(`query { health @unknown }`))
+	assert.Error(t, validator.ValidateDirectiveUsage(`query { health @cache(ttl: nope) }`))
+}
+
 func TestSimpleCache(t *testing.T) {
 	cache := NewSimpleCache()
 
@@ -499,6 +530,54 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, 1000, config.MaxQueryComplexity)
 	assert.Equal(t, 30, config.QueryTimeoutSeconds)
 	assert.Equal(t, 100, config.RateLimitPerMinute)
+}
+
+func TestServerRegisterRoutesServeMux(t *testing.T) {
+	logger := zerolog.Nop()
+	store := NewMockStore()
+	resolver := NewResolver(logger, store)
+	server := NewServer(logger, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, logger))
+	mux := http.NewServeMux()
+
+	require.NoError(t, server.RegisterRoutes(mux, "/graphql"))
+
+	playgroundReq := httptest.NewRequest(http.MethodGet, "/graphql/playground", nil)
+	playgroundResp := httptest.NewRecorder()
+	mux.ServeHTTP(playgroundResp, playgroundReq)
+	assert.Equal(t, http.StatusOK, playgroundResp.Code)
+
+	healthReq := httptest.NewRequest(http.MethodGet, "/graphql/health", nil)
+	healthResp := httptest.NewRecorder()
+	mux.ServeHTTP(healthResp, healthReq)
+	assert.Equal(t, http.StatusOK, healthResp.Code)
+}
+
+func TestServerRegisterRoutesChiRouter(t *testing.T) {
+	logger := zerolog.Nop()
+	store := NewMockStore()
+	resolver := NewResolver(logger, store)
+	server := NewServer(logger, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, logger))
+	router := chi.NewRouter()
+
+	require.NoError(t, server.RegisterRoutes(router, "/graphql"))
+
+	req := httptest.NewRequest(http.MethodGet, "/graphql/introspection", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	assert.Equal(t, http.StatusOK, resp.Code)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+	assert.Contains(t, payload, "data")
+}
+
+func TestServerRegisterRoutesRejectsUnsupportedRouter(t *testing.T) {
+	logger := zerolog.Nop()
+	store := NewMockStore()
+	resolver := NewResolver(logger, store)
+	server := NewServer(logger, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, logger))
+
+	assert.Error(t, server.RegisterRoutes(struct{}{}, "/graphql"))
 }
 
 func TestConfigValidation(t *testing.T) {
