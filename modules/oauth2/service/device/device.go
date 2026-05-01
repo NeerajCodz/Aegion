@@ -86,8 +86,14 @@ func (s *DeviceService) RequestDeviceAuthorization(ctx context.Context, req *Dev
 	}
 
 	// Generate device code and user code
-	deviceCode := store.GenerateDeviceCode()
-	userCode := generateUserCode()
+	deviceCode, err := store.GenerateDeviceCode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate device code: %w", err)
+	}
+	userCode, err := generateUserCode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate user code: %w", err)
+	}
 
 	// Create device code record
 	dc := &store.DeviceCode{
@@ -215,7 +221,7 @@ func (s *DeviceService) ConsumeDeviceCode(ctx context.Context, deviceCode string
 
 // generateUserCode generates an 8-character user code in format XXXX-XXXX.
 // Uses uppercase consonants only to avoid profanity and visual confusion.
-func generateUserCode() string {
+func generateUserCode() (string, error) {
 	const charset = "BCDFGHJKLMNPQRSTVWXYZ" // No vowels to avoid profanity
 	const codeLength = 8
 
@@ -223,13 +229,13 @@ func generateUserCode() string {
 	for i := 0; i < codeLength; i++ {
 		n, err := platformcrypto.RandomIntN(len(charset))
 		if err != nil {
-			panic(err)
+			return "", fmt.Errorf("failed to generate random int: %w", err)
 		}
 		code[i] = charset[n]
 	}
 
 	// Format as XXXX-XXXX
-	return fmt.Sprintf("%s-%s", string(code[:4]), string(code[4:]))
+	return fmt.Sprintf("%s-%s", string(code[:4]), string(code[4:])), nil
 }
 
 // parseScopes parses a space-separated scope string.

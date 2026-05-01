@@ -29,7 +29,7 @@ func (l *LocalStorage) Initialize(ctx context.Context) error {
 	default:
 	}
 
-	if err := os.MkdirAll(l.basePath, 0755); err != nil {
+	if err := os.MkdirAll(l.basePath, 0750); err != nil {
 		return fmt.Errorf("failed to create base path: %w", err)
 	}
 
@@ -50,7 +50,7 @@ func (l *LocalStorage) Write(ctx context.Context, namespace string, data []byte)
 
 	// Create namespace directory
 	namespacePath := filepath.Join(l.basePath, namespace)
-	if err := os.MkdirAll(namespacePath, 0755); err != nil {
+	if err := os.MkdirAll(namespacePath, 0750); err != nil {
 		return "", fmt.Errorf("failed to create namespace directory: %w", err)
 	}
 
@@ -59,7 +59,7 @@ func (l *LocalStorage) Write(ctx context.Context, namespace string, data []byte)
 	filePath := filepath.Join(namespacePath, filename)
 
 	// Write the data to file
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
 		return "", fmt.Errorf("failed to write data: %w", err)
 	}
 

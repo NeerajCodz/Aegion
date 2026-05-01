@@ -86,7 +86,7 @@ func (i *IcebergStorage) Initialize(ctx context.Context) error {
 	default:
 	}
 
-	if err := os.MkdirAll(i.rootPath, 0o755); err != nil {
+	if err := os.MkdirAll(i.rootPath, 0o750); err != nil {
 		return fmt.Errorf("failed to create iceberg warehouse: %w", err)
 	}
 
@@ -104,7 +104,7 @@ func (i *IcebergStorage) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to encode iceberg metadata: %w", err)
 	}
 
-	if err := os.WriteFile(metadataPath, body, 0o644); err != nil {
+	if err := os.WriteFile(metadataPath, body, 0o600); err != nil {
 		return fmt.Errorf("failed to write iceberg metadata: %w", err)
 	}
 
@@ -128,13 +128,13 @@ func (i *IcebergStorage) Write(ctx context.Context, namespace string, data []byt
 		return "", err
 	}
 
-	if err := os.MkdirAll(namespacePath, 0o755); err != nil {
+	if err := os.MkdirAll(namespacePath, 0o750); err != nil {
 		return "", fmt.Errorf("failed to create namespace directory: %w", err)
 	}
 
 	filename := fmt.Sprintf("data_%d.iceberg", time.Now().UnixNano())
 	filePath := filepath.Join(namespacePath, filename)
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write iceberg object: %w", err)
 	}
 
@@ -327,7 +327,7 @@ func (i *IcebergStorage) writeObjectMetadata(relPath, namespace string, size int
 		return err
 	}
 
-	if err := os.WriteFile(filePath+".meta.json", body, 0o644); err != nil {
+	if err := os.WriteFile(filePath+".meta.json", body, 0o600); err != nil {
 		return fmt.Errorf("failed to write iceberg object metadata: %w", err)
 	}
 
