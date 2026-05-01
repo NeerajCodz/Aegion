@@ -150,9 +150,15 @@ func (s *AuthorizationService) StartAuthorization(ctx context.Context, req *Auth
 		requestURL = req.RedirectURI
 	}
 
+	// Generate login challenge ID
+	challengeID, err := store.GenerateLoginChallenge()
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to generate login challenge", ErrServerError)
+	}
+
 	// Create login challenge
 	challenge := &store.LoginChallenge{
-		ID:                  store.GenerateLoginChallenge(),
+		ID:                  challengeID,
 		ClientID:            client.ID,
 		RequestURL:          requestURL,
 		RedirectURI:         req.RedirectURI,
@@ -278,8 +284,13 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 			expiresAt = &exp
 		}
 
+		consentID, err := store.GenerateClientID()
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to generate consent ID", ErrServerError)
+		}
+
 		consent := &store.ConsentSession{
-			ID:          store.GenerateClientID(), // reuse generator
+			ID:          consentID, // reuse generator
 			ClientID:    challenge.ClientID,
 			IdentityID:  challenge.IdentityID,
 			Scopes:      grantedScopes,
@@ -309,8 +320,13 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 	}
 
 	// Generate authorization code
+	authCodeValue, err := store.GenerateAuthCode()
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to generate auth code", ErrServerError)
+	}
+
 	authCode := &store.AuthCode{
-		Code:                store.GenerateAuthCode(),
+		Code:                authCodeValue,
 		ClientID:            challenge.ClientID,
 		IdentityID:          challenge.IdentityID,
 		SessionID:           challenge.SessionID,
