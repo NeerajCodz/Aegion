@@ -40,7 +40,9 @@ func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(status)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		r.logger.Error().Err(err).Msg("Failed to encode health response")
+	}
 }
 
 // handleReady handles the /ready endpoint for readiness checks.
@@ -105,7 +107,9 @@ func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(httpStatus)
-	_ = json.NewEncoder(w).Encode(status)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		r.logger.Error().Err(err).Msg("Failed to encode readiness response")
+	}
 }
 
 // handleMetrics handles the /metrics endpoint.

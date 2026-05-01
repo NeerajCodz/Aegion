@@ -475,13 +475,15 @@ func (p *ModuleProxy) handleError(w http.ResponseWriter, r *http.Request, err er
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":       status,
 			"message":    message,
 			"request_id": requestID,
 		},
-	})
+	}); err != nil {
+		// Error encoding JSON response - can't do much after WriteHeader
+	}
 }
 
 // handleProxyError handles errors during proxying.
@@ -510,13 +512,15 @@ func (p *ModuleProxy) handleProxyError(w http.ResponseWriter, r *http.Request, e
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":       status,
 			"message":    message,
 			"request_id": requestID,
 		},
-	})
+	}); err != nil {
+		p.logger.Error().Err(err).Msg("Failed to encode proxy error response")
+	}
 }
 
 func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, err error, requestID string) {
@@ -544,7 +548,7 @@ func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]interface{}{
 			"code":        status,
 			"message":     message,
@@ -553,7 +557,9 @@ func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, 
 			"model_used":  modelUsed,
 			"eval_path":   evalPath,
 		},
-	})
+	}); err != nil {
+		p.logger.Error().Err(err).Msg("Failed to encode policy error response")
+	}
 }
 
 // logResponse logs the proxied response.
