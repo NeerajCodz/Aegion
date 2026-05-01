@@ -7,17 +7,17 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog"
 )
 
 // Router sets up all REST API routes
-func Router(h *Handler, logger zerolog.Logger) chi.Router {
+func Router(h *Handler, log *logger.Logger) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middleware
-	r.Use(RequestLoggingMiddleware(logger))
-	r.Use(CORSMiddleware(logger))
+	r.Use(RequestLoggingMiddleware(log))
+	r.Use(CORSMiddleware(log))
 	r.Use(QueryTimeoutMiddleware(time.Duration(h.config.QueryTimeoutSeconds) * time.Second))
 
 	// Health endpoints (no auth required)
@@ -30,8 +30,8 @@ func Router(h *Handler, logger zerolog.Logger) chi.Router {
 
 	// Protected endpoints (require auth)
 	r.Group(func(r chi.Router) {
-		r.Use(AuthMiddleware(logger))
-		r.Use(RateLimitMiddleware(logger, h.config.RateLimit))
+		r.Use(AuthMiddleware(log))
+		r.Use(RateLimitMiddleware(log, h.config.RateLimit))
 
 		// Events endpoints
 		r.Route("/events", func(r chi.Router) {

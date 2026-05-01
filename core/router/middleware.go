@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 )
 
 // Context keys for middleware data.
@@ -82,16 +82,17 @@ func (rr *responseRecorder) Write(b []byte) (int, error) {
 }
 
 // Logger middleware provides structured request logging.
-func Logger(logger zerolog.Logger) func(http.Handler) http.Handler {
-	return LoggerWithTrustProxy(logger, false)
+func Logger(log *logger.Logger) func(http.Handler) http.Handler {
+	return LoggerWithTrustProxy(log, false)
 }
 
 // LoggerWithTrustProxy controls whether forwarded client-IP headers are trusted.
-func LoggerWithTrustProxy(logger zerolog.Logger, trustProxy bool) func(http.Handler) http.Handler {
+func LoggerWithTrustProxy(log *logger.Logger, trustProxy bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := GetRequestID(r.Context())
 			start := time.Now()
+			ctx := r.Context()
 
 			rr := newResponseRecorder(w)
 			next.ServeHTTP(rr, r)
@@ -99,34 +100,37 @@ func LoggerWithTrustProxy(logger zerolog.Logger, trustProxy bool) func(http.Hand
 			duration := time.Since(start)
 			route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
 
-			// Log level based on status code
-			var event *zerolog.Event
-			switch {
-			case rr.statusCode >= 500:
-				event = logger.Error()
-			case rr.statusCode >= 400:
-				event = logger.Warn()
-			default:
-				event = logger.Info()
+			// Build wide event attributes
+			attrs := map[string]any{
+				"http.method":       r.Method,
+				"http.route":        route,
+				"http.path":         r.URL.Path,
+				"http.remote_addr":  getClientIPWithTrust(r, trustProxy),
+				"http.status":       rr.statusCode,
+				"http.bytes":        rr.written,
+				"latency_ms":        duration.Milliseconds(),
+				"http.user_agent":   r.UserAgent(),
+				"request_id":        requestID,
+				"outcome":           "success",
 			}
 
-			event = withCorrelationFields(event, r.Context(), requestID)
-			event.
-				Str("method", r.Method).
-				Str("route", route).
-				Str("path", r.URL.Path).
-				Str("remote_addr", getClientIPWithTrust(r, trustProxy)).
-				Int("status", rr.statusCode).
-				Int64("bytes", rr.written).
-				Dur("duration", duration).
-				Str("user_agent", r.UserAgent()).
-				Msg("request completed")
+			// Log level based on status code
+			switch {
+			case rr.statusCode >= 500:
+				attrs["outcome"] = "error"
+				log.LogWideEvent(ctx, "request completed", attrs)
+			case rr.statusCode >= 400:
+				attrs["outcome"] = "warning"
+				log.LogWideEvent(ctx, "request completed", attrs)
+			default:
+				log.LogWideEvent(ctx, "request completed", attrs)
+			}
 		})
 	}
 }
 
 // Recoverer middleware recovers from panics and logs them.
-func Recoverer(logger zerolog.Logger) func(http.Handler) http.Handler {
+func Recoverer(log *logger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
@@ -134,16 +138,16 @@ func Recoverer(logger zerolog.Logger) func(http.Handler) http.Handler {
 					requestID := GetRequestID(r.Context())
 					stack := string(debug.Stack())
 					route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
+					ctx := r.Context()
 
-					event := logger.Error()
-					event = withCorrelationFields(event, r.Context(), requestID)
-					event.
-						Str("method", r.Method).
-						Str("route", route).
-						Str("path", r.URL.Path).
-						Interface("panic", rec).
-						Str("stack", stack).
-						Msg("panic recovered")
+					log.ErrorContext(ctx, "panic recovered",
+						"method", r.Method,
+						"route", route,
+						"path", r.URL.Path,
+						"panic", rec,
+						"stack", stack,
+						"request_id", requestID,
+					)
 
 					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 				}
@@ -397,23 +401,4 @@ func appendVaryHeader(header http.Header, value string) {
 		}
 	}
 	header.Add("Vary", value)
-}
-
-func withCorrelationFields(event *zerolog.Event, ctx context.Context, requestID string) *zerolog.Event {
-	if requestID == "" {
-		requestID = observability.GetRequestIDForLogger(ctx)
-	}
-	if requestID != "" {
-		event = event.Str("request_id", requestID)
-	}
-
-	traceInfo := observability.GetTraceInfoForLogger(ctx)
-	if traceInfo.TraceID != "" {
-		event = event.Str("trace_id", traceInfo.TraceID)
-	}
-	if traceInfo.SpanID != "" {
-		event = event.Str("span_id", traceInfo.SpanID)
-	}
-
-	return event
 }

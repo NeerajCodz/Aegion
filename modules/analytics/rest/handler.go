@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/webhooks"
-	"github.com/rs/zerolog"
 )
 
 // Handler handles REST API requests for analytics
 type Handler struct {
-	logger  zerolog.Logger
+	logger  *logger.Logger
 	config  Config
 	queries QueryBuilder
 	exports ExportBuilder
@@ -36,7 +36,7 @@ type Config struct {
 
 // HandlerDeps holds dependencies for the handler
 type HandlerDeps struct {
-	Logger  zerolog.Logger
+	Logger  *logger.Logger
 	Config  Config
 	Queries QueryBuilder
 	Exports ExportBuilder
@@ -151,7 +151,7 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	countSQL := fmt.Sprintf("SELECT COUNT(*) as count FROM (%s) as subq", sql)
 	total, err := h.queries.ExecuteCount(ctx, countSQL)
 	if err != nil {
-		h.logger.Warn().Err(err).Msg("failed to get count")
+		h.logger.Warn("failed to get count", "error", err)
 		total = len(rows)
 	}
 
@@ -270,19 +270,19 @@ func (h *Handler) ExportEvents(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=events.csv")
 		if err := h.exports.ExportCSV(ctx, sql, w); err != nil {
-			h.logger.Error().Err(err).Msg("csv export failed")
+			h.logger.Error("csv export failed", "error", err)
 		}
 	case "json":
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Disposition", "attachment; filename=events.json")
 		if err := h.exports.ExportJSON(ctx, sql, w); err != nil {
-			h.logger.Error().Err(err).Msg("json export failed")
+			h.logger.Error("json export failed", "error", err)
 		}
 	case "parquet":
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", "attachment; filename=events.parquet")
 		if err := h.exports.ExportParquet(ctx, sql, w); err != nil {
-			h.logger.Error().Err(err).Msg("parquet export failed")
+			h.logger.Error("parquet export failed", "error", err)
 		}
 	default:
 		h.writeError(w, http.StatusBadRequest, "INVALID_FORMAT", "unsupported format", fmt.Sprintf("format must be csv, json, or parquet, got %s", format))

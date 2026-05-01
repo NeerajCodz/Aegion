@@ -12,10 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/internal/platform/logger"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
@@ -52,13 +51,13 @@ type ModuleProxyConfig struct {
 	PolicyChecker PolicyChecker
 	RequirePolicy bool
 	PolicyModel   string
-	Logger        zerolog.Logger
+	Logger        *logger.Logger
 }
 
 // ModuleProxy forwards requests to module containers.
 type ModuleProxy struct {
 	config    ModuleProxyConfig
-	logger    zerolog.Logger
+	logger    *logger.Logger
 	transport *http.Transport
 	now       func() time.Time
 }
@@ -105,7 +104,7 @@ func NewModuleProxy(cfg ModuleProxyConfig) *ModuleProxy {
 
 	return &ModuleProxy{
 		config:    cfg,
-		logger:    cfg.Logger.With().Str("module", cfg.ModuleID).Logger(),
+		logger:    cfg.Logger.With("module", cfg.ModuleID),
 		transport: transport,
 		now: func() time.Time {
 			return time.Now().UTC()
@@ -132,11 +131,11 @@ func (p *ModuleProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if decision != nil {
-		p.logger.Debug().
-			Str("request_id", requestID).
-			Str("policy_model", decision.GetModelUsed()).
-			Strs("policy_eval_path", decision.GetEvalPath()).
-			Msg("module proxy policy allow")
+		p.logger.DebugContext(ctx, "module proxy policy allow",
+			"request_id", requestID,
+			"policy_model", decision.GetModelUsed(),
+			"policy_eval_path", decision.GetEvalPath(),
+		)
 	}
 
 	// Create reverse proxy
@@ -321,13 +320,13 @@ func (p *ModuleProxy) director(target *url.URL, originalReq *http.Request) func(
 		// Add forwarded headers
 		p.addForwardedHeaders(req, originalReq)
 
-		p.logger.Debug().
-			Str("request_id", GetRequestID(req.Context())).
-			Str("method", req.Method).
-			Str("target", req.URL.String()).
-			Bool("preserve_host", p.config.PreserveHost).
-			Bool("identity_headers_signed", len(p.config.IdentitySigningSecret) > 0).
-			Msg("proxying request to module")
+		p.logger.DebugContext(req.Context(), "proxying request to module",
+			"request_id", GetRequestID(req.Context()),
+			"method", req.Method,
+			"target", req.URL.String(),
+			"preserve_host", p.config.PreserveHost,
+			"identity_headers_signed", len(p.config.IdentitySigningSecret) > 0,
+		)
 	}
 }
 
@@ -445,12 +444,13 @@ func (p *ModuleProxy) getModuleEndpoint(ctx context.Context) (*url.URL, error) {
 
 // handleError handles proxy setup errors.
 func (p *ModuleProxy) handleError(w http.ResponseWriter, r *http.Request, err error, requestID string) {
-	p.logger.Error().
-		Str("request_id", requestID).
-		Err(err).
-		Str("method", r.Method).
-		Str("path", r.URL.Path).
-		Msg("module proxy error")
+	ctx := r.Context()
+	p.logger.ErrorContext(ctx, "module proxy error",
+		"request_id", requestID,
+		"error", err,
+		"method", r.Method,
+		"path", r.URL.Path,
+	)
 
 	status := http.StatusServiceUnavailable
 	message := "Module temporarily unavailable"
@@ -488,12 +488,13 @@ func (p *ModuleProxy) handleError(w http.ResponseWriter, r *http.Request, err er
 
 // handleProxyError handles errors during proxying.
 func (p *ModuleProxy) handleProxyError(w http.ResponseWriter, r *http.Request, err error, requestID string) {
-	p.logger.Error().
-		Str("request_id", requestID).
-		Err(err).
-		Str("method", r.Method).
-		Str("path", r.URL.Path).
-		Msg("proxy transport error")
+	ctx := r.Context()
+	p.logger.ErrorContext(ctx, "proxy transport error",
+		"request_id", requestID,
+		"error", err,
+		"method", r.Method,
+		"path", r.URL.Path,
+	)
 
 	status := http.StatusBadGateway
 	message := "Error communicating with module"
@@ -519,11 +520,12 @@ func (p *ModuleProxy) handleProxyError(w http.ResponseWriter, r *http.Request, e
 			"request_id": requestID,
 		},
 	}); err != nil {
-		p.logger.Error().Err(err).Msg("Failed to encode proxy error response")
+		p.logger.ErrorContext(ctx, "Failed to encode proxy error response", "error", err)
 	}
 }
 
 func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, err error, requestID string) {
+	ctx := r.Context()
 	status := http.StatusBadGateway
 	message := "Policy evaluation failed"
 	modelUsed := ""
@@ -537,14 +539,14 @@ func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, 
 		evalPath = denyErr.response.GetEvalPath()
 	}
 
-	p.logger.Warn().
-		Str("request_id", requestID).
-		Err(err).
-		Str("method", r.Method).
-		Str("path", r.URL.Path).
-		Str("policy_model", modelUsed).
-		Strs("policy_eval_path", evalPath).
-		Msg("module proxy policy decision")
+	p.logger.WarnContext(ctx, "module proxy policy decision",
+		"request_id", requestID,
+		"error", err,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"policy_model", modelUsed,
+		"policy_eval_path", evalPath,
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -558,7 +560,7 @@ func (p *ModuleProxy) handlePolicyError(w http.ResponseWriter, r *http.Request, 
 			"eval_path":   evalPath,
 		},
 	}); err != nil {
-		p.logger.Error().Err(err).Msg("Failed to encode policy error response")
+		p.logger.ErrorContext(ctx, "Failed to encode policy error response", "error", err)
 	}
 }
 
@@ -572,23 +574,31 @@ func (p *ModuleProxy) logResponse(resp *http.Response, requestID string, start t
 		upstreamPath = resp.Request.URL.Path
 	}
 
-	var event *zerolog.Event
-	switch {
-	case resp.StatusCode >= 500:
-		event = p.logger.Error()
-	case resp.StatusCode >= 400:
-		event = p.logger.Warn()
-	default:
-		event = p.logger.Debug()
+	ctx := context.Background()
+	if resp != nil && resp.Request != nil {
+		ctx = resp.Request.Context()
 	}
 
-	event.
-		Str("request_id", requestID).
-		Str("upstream", upstreamHost).
-		Str("upstream_path", upstreamPath).
-		Int("status", resp.StatusCode).
-		Dur("duration", duration).
-		Msg("module response")
+	// Use wide event pattern for response logging
+	attrs := map[string]any{
+		"request_id":    requestID,
+		"upstream":      upstreamHost,
+		"upstream_path": upstreamPath,
+		"http.status":   resp.StatusCode,
+		"latency_ms":    duration.Milliseconds(),
+		"outcome":       "success",
+	}
+
+	switch {
+	case resp.StatusCode >= 500:
+		attrs["outcome"] = "error"
+		p.logger.LogWideEvent(ctx, "module response", attrs)
+	case resp.StatusCode >= 400:
+		attrs["outcome"] = "warning"
+		p.logger.LogWideEvent(ctx, "module response", attrs)
+	default:
+		p.logger.LogWideEvent(ctx, "module response", attrs)
+	}
 }
 
 // Helper functions

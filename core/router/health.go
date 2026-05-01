@@ -41,7 +41,7 @@ func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(status); err != nil {
-		r.logger.Error().Err(err).Msg("Failed to encode health response")
+		r.logger.Error("Failed to encode health response", "error", err)
 	}
 }
 
@@ -108,7 +108,7 @@ func (r *Router) handleReady(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(httpStatus)
 	if err := json.NewEncoder(w).Encode(status); err != nil {
-		r.logger.Error().Err(err).Msg("Failed to encode readiness response")
+		r.logger.Error("Failed to encode readiness response", "error", err)
 	}
 }
 

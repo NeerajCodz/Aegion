@@ -3,16 +3,15 @@ package rest
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 // InitParams holds parameters for initializing the REST API module
 type InitParams struct {
 	Config  Config
-	Logger  zerolog.Logger
+	Logger  *logger.Logger
 	DB      Database
 	Validator *Validator
 	WebhookManager WebhookManager
@@ -21,8 +20,8 @@ type InitParams struct {
 // Initialize sets up the REST API module
 func Initialize(params InitParams) (*Handler, error) {
 	// Create a default logger if not provided
-	if params.Logger.GetLevel() == zerolog.Disabled {
-		params.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+	if params.Logger == nil {
+		params.Logger = logger.New(logger.Config{Level: "info", Format: "json"})
 	}
 
 	// Validate config
@@ -70,11 +69,11 @@ func Initialize(params InitParams) (*Handler, error) {
 		WebhookManager: params.WebhookManager,
 	})
 
-	params.Logger.Info().
-		Str("base_path", params.Config.BasePath).
-		Int("rate_limit", params.Config.RateLimit).
-		Int("query_timeout_seconds", params.Config.QueryTimeoutSeconds).
-		Msg("REST API module initialized")
+	params.Logger.Info("REST API module initialized",
+		"base_path", params.Config.BasePath,
+		"rate_limit", params.Config.RateLimit,
+		"query_timeout_seconds", params.Config.QueryTimeoutSeconds,
+	)
 
 	return handler, nil
 }

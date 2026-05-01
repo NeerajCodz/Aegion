@@ -54,7 +54,7 @@ func (w *CourierDispatchWorker) Start(ctx context.Context) error {
 
 // dispatch processes queued messages.
 func (w *CourierDispatchWorker) dispatch(ctx context.Context) error {
-	w.Log().Debug().Msg("processing courier queue")
+	w.Log().Debug("processing courier queue")
 
 	// Use courier's ProcessQueue if available
 	if w.courier != nil {
@@ -63,7 +63,7 @@ func (w *CourierDispatchWorker) dispatch(ctx context.Context) error {
 			return err
 		}
 		if processed > 0 {
-			w.Log().Info().Int("processed", processed).Msg("messages dispatched")
+			w.Log().Info("messages dispatched", "processed", processed)
 		}
 		return nil
 	}
@@ -99,16 +99,16 @@ func (w *CourierDispatchWorker) processDirectly(ctx context.Context) error {
 		var sendCount int
 
 		if err := rows.Scan(&id, &msgType, &recipient, &subject, &body, &sendCount); err != nil {
-			w.Log().Error().Err(err).Msg("failed to scan message row")
+			w.Log().Error("failed to scan message row", "error", err)
 			continue
 		}
 
 		// Log that we found a message (actual sending would be done by courier)
-		w.Log().Info().
-			Str("id", id).
-			Str("type", msgType).
-			Str("recipient", recipient).
-			Msg("processing message")
+		w.Log().Info("processing message",
+			"id", id,
+			"type", msgType,
+			"recipient", recipient,
+		)
 
 		// Mark as failed since we can't actually send without courier config
 		sendCount++
@@ -132,7 +132,7 @@ func (w *CourierDispatchWorker) processDirectly(ctx context.Context) error {
 	}
 
 	if processed > 0 {
-		w.Log().Info().Int("processed", processed).Msg("messages processed")
+		w.Log().Info("messages processed", "processed", processed)
 	}
 
 	return rows.Err()
@@ -153,7 +153,7 @@ func (w *CourierDispatchWorker) CleanupOldMessages(ctx context.Context, olderTha
 
 	deleted := result.RowsAffected()
 	if deleted > 0 {
-		w.Log().Info().Int64("deleted", deleted).Dur("older_than", olderThan).Msg("old messages cleaned up")
+		w.Log().Info("old messages cleaned up", "deleted", deleted, "older_than", olderThan)
 	}
 
 	return deleted, nil

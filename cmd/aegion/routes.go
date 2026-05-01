@@ -980,7 +980,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		PolicyChecker:               checker,
 		RequirePolicy:               requirePolicy,
 		PolicyModel:                 policySettings.DefaultModel,
-		Logger:                      s.log.With().Str("component", "module_proxy").Logger(),
+		Logger:                      s.log.With("component", "module_proxy"),
 	})
 
 	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContextWithTrust(r.Context(), r, proxySettings.TrustForwardedHeaders)))
@@ -989,17 +989,17 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) moduleProxyRuntimeSettings(ctx context.Context) (runtimeProxySettings, runtimePolicySettings) {
 	proxySettings, err := s.loadRuntimeProxySettings(ctx)
 	if err != nil {
-		s.log.Warn().Err(err).Msg("failed to load runtime proxy config, using bootstrap defaults")
+		s.log.Warn("failed to load runtime proxy config, using bootstrap defaults", "error", err)
 		proxySettings = defaultRuntimeProxySettings(s.cfg)
 	}
 	if err := s.ensureRuntimeProxySigning(proxySettings); err != nil {
-		s.log.Warn().Err(err).Msg("runtime proxy config missing signing secret, forcing identity header stripping")
+		s.log.Warn("runtime proxy config missing signing secret, forcing identity header stripping", "error", err)
 		proxySettings.StripInboundIdentityHeaders = true
 	}
 
 	policySettings, err := s.loadRuntimePolicySettings(ctx)
 	if err != nil {
-		s.log.Warn().Err(err).Msg("failed to load runtime policy config, using bootstrap defaults")
+		s.log.Warn("failed to load runtime policy config, using bootstrap defaults", "error", err)
 		policySettings = defaultRuntimePolicySettings(s.cfg)
 	}
 
@@ -1012,7 +1012,7 @@ func (s *Server) currentInternalTokenForProxy() string {
 	}
 	token, err := s.tokenGen.Generate("core")
 	if err != nil {
-		s.log.Warn().Err(err).Msg("failed to generate internal token for module proxy")
+		s.log.Warn("failed to generate internal token for module proxy", "error", err)
 		return ""
 	}
 	return token

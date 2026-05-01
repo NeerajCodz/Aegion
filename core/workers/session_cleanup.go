@@ -51,7 +51,7 @@ func (w *SessionCleanupWorker) Start(ctx context.Context) error {
 
 // cleanup removes expired sessions from the database.
 func (w *SessionCleanupWorker) cleanup(ctx context.Context) error {
-	w.Log().Debug().Msg("starting session cleanup")
+	w.Log().Debug("starting session cleanup")
 
 	// Build dynamic SQL based on configured durations
 	days := int(w.expiredAfter.Hours() / 24)
@@ -70,9 +70,9 @@ func (w *SessionCleanupWorker) cleanup(ctx context.Context) error {
 
 	deleted := result.RowsAffected()
 	if deleted > 0 {
-		w.Log().Info().Int64("deleted", deleted).Msg("expired sessions cleaned up")
+		w.Log().Info("expired sessions cleaned up", "deleted", deleted)
 	} else {
-		w.Log().Debug().Msg("no expired sessions to clean up")
+		w.Log().Debug("no expired sessions to clean up")
 	}
 
 	// Also clean up orphaned session auth methods
@@ -81,9 +81,9 @@ func (w *SessionCleanupWorker) cleanup(ctx context.Context) error {
 		WHERE session_id NOT IN (SELECT id FROM core_sessions)
 	`)
 	if err != nil {
-		w.Log().Warn().Err(err).Msg("failed to clean up orphaned auth methods")
+		w.Log().Warn("failed to clean up orphaned auth methods", "error", err)
 	} else if result.RowsAffected() > 0 {
-		w.Log().Info().Int64("deleted", result.RowsAffected()).Msg("orphaned auth methods cleaned up")
+		w.Log().Info("orphaned auth methods cleaned up", "deleted", result.RowsAffected())
 	}
 
 	return nil
