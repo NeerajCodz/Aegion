@@ -45,7 +45,7 @@ jobs:
           cache: true
 
       - name: Run gosec
-        uses: securego/gosec@v2.25.0
+        uses: securego/gosec@v2.26.1
         with:
           args: -no-fail -fmt sarif -out gosec-results.sarif ./...
 
@@ -57,7 +57,7 @@ jobs:
           sarif_file: gosec-results.sarif
 
       - name: Run gosec with failure on high severity
-        uses: securego/gosec@v2.25.0
+        uses: securego/gosec@v2.26.1
         with:
           args: -severity high -confidence high -exclude-generated ./...
 
