@@ -1,0 +1,50 @@
+# =============================================================================
+# proxy.yaml — Proxy Module Configuration
+#
+# Phase-3 identity-aware proxy defaults.
+# =============================================================================
+
+module:
+  name: proxy
+  version: "1.0.0"
+  description: "Identity-aware ingress with authn/authz/mutate pipeline"
+
+enabled: false
+
+upstream:
+  timeout: ${AEGION_PROXY_UPSTREAM_TIMEOUT:-30s}
+  preserve_host: ${AEGION_PROXY_PRESERVE_HOST:-true}
+  trust_forwarded_headers: ${AEGION_PROXY_TRUST_FORWARDED_HEADERS:-false}
+
+authenticators:
+  bearer_token:
+    enabled: true
+  cookie_session:
+    enabled: true
+  anonymous:
+    enabled: true
+  noop:
+    enabled: true
+
+authorizers:
+  allow:
+    enabled: true
+  deny:
+    enabled: true
+  policy_engine:
+    enabled: false
+    endpoint: ${AEGION_POLICY_GRPC_ENDPOINT:-aegion-policy:9010}
+
+mutators:
+  header:
+    enabled: true
+  noop:
+    enabled: true
+
+errors:
+  fallback: json
+
+http:
+  listen_addr: ${AEGION_PROXY_HTTP_LISTEN_ADDR:-0.0.0.0:8080}
+  health_path: /health
+  ready_path: /ready

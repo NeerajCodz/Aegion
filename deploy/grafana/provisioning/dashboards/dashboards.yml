@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: aegion-observability
+    orgId: 1
+    folder: Aegion
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

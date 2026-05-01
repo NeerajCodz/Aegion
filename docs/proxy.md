@@ -95,6 +95,65 @@ Recommended controls:
 - add canonical prefixed headers only from proxy
 - sign or verify internal hop metadata where needed
 
+### Signed identity headers for upstream trust
+
+To prevent header spoofing when upstreams are not on fully isolated networks, the proxy can cryptographically sign injected identity headers:
+
+```
+X-User-ID: id_alice_xyz789
+X-User-Email: alice@example.com
+X-User-Roles: admin,editor
+X-Aegion-Signature: t=1742912521,v1=<hmac_sha256_signature>
+```
+
+The signature is computed as:
+```
+signature = HMAC-SHA256(upstream_signing_secret, timestamp + "." + headers_canonical_string)
+```
+
+Upstream services verify the signature before trusting identity headers. This prevents:
+- Header injection attacks from compromised intermediate proxies
+- Lateral movement where an attacker on the network impersonates users
+- Trust-the-network assumptions in zero-trust architectures
+
+**Configuration per upstream:**
+```yaml
+proxy:
+  rules:
+    - path: "/api/*"
+      upstream: "https://backend.internal.example.com"
+      mutators:
+        - type: "headers"
+          config:
+            X-User-ID: "{{ .Subject.ID }}"
+            X-User-Email: "{{ .Subject.Email }}"
+          sign_headers: true
+          signing_secret: "${BACKEND_SIGNING_SECRET}"
+          signature_header: "X-Aegion-Signature"
+```
+
+Upstream verification example (Go):
+```go
+func verifyAegionHeaders(r *http.Request, secret string) error {
+    sigHeader := r.Header.Get("X-Aegion-Signature")
+    parts := parseSignature(sigHeader) // extract t= and v1=
+    
+    if time.Since(parts.Timestamp) > 5*time.Minute {
+        return errors.New("signature expired")
+    }
+    
+    canonical := canonicalizeHeaders(r.Header, []string{
+        "X-User-ID", "X-User-Email", "X-User-Roles",
+    })
+    
+    expected := hmacSHA256(secret, parts.Timestamp + "." + canonical)
+    if !hmac.Equal([]byte(expected), []byte(parts.Signature)) {
+        return errors.New("invalid signature")
+    }
+    return nil
+}
+```
+
 ---
 
 ## Performance model (Go + Rust)

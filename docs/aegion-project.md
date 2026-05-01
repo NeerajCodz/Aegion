@@ -138,10 +138,15 @@ The architecture is deliberate: broad orchestration in Go, critical inner loops 
 | Rate limits + brute-force + enumeration mitigation | `security`, `cache`, `core` | `security.md`, `config.md` |
 | CAPTCHA controls | `security` | `security.md`, `config.md` |
 | IP allowlist/blocklist + suspicious login detection | `security`, `admin` | `security.md`, `admin.md` |
+| Geographic access restrictions (geo-fencing) | `security` | `security.md`, `config.md` |
+| Rate limit bypass for trusted IPs | `security`, `core` | `security.md`, `config.md` |
+| Passwordless-only enforcement | `password`, `passkeys` | `security.md`, `config.md` |
 | Field-level encryption at rest | crypto engine | `security.md`, `architecture.md`, `config.md` |
 | Append-only audit trail + admin action trace | `core`, `admin` | `security.md`, `admin.md`, `aegion-db-schema.md` |
-| Admin session hardening + re-auth gates | `admin`, `mfa` | `admin.md`, `config.md`, `security.md` |
+| Admin session hardening + re-auth gates + CSP | `admin`, `mfa` | `admin.md`, `config.md`, `security.md` |
 | Proxy-stage authz enforcement | `proxy`, `policy` | `proxy.md`, `policy.md` |
+| Webhook signature verification (token hooks) | `oauth2` | `oauth.md`, `config.md` |
+| TLS certificate pinning (inter-module) | `core`, all modules | `inter-module-communication.md`, `config.md` |
 
 This matrix is the completeness contract: security is documented by feature, module, and spec location.
 
@@ -221,3 +226,28 @@ It defines:
 - how admin bootstrap and governance work
 - how security features are covered modularly
 - where every deep detail lives in the focused docs
+
+---
+
+## Appendix A) Docs-to-code gap matrix (current repo snapshot)
+
+This matrix maps major requirements from `modules.md`, `inter-module-communication.md`, `observability.md`, `policy.md`, `timeline.md`, `project-structure.md`, and this product spec to concrete code.
+
+| Requirement source | Major capability | Primary code evidence | Status | Notes |
+|---|---|---|---|---|
+| `modules.md`, `timeline.md` | Core/module lifecycle orchestration | `core/orchestrator/{orchestrator.go,docker.go,network.go}`, `cmd/aegion/server.go` | partial | Start/stop/restart wiring exists; full enabled-module graph composition at boot is still incomplete. |
+| `modules.md` | Pre-pull dependency/version validation contract | `core/orchestrator/config.go` | missing | Current validation is mostly per-module field checks, not the documented dependency/compatibility pipeline. |
+| `modules.md`, `project-structure.md` | Module process contract (`/health`, `/ready`, `/meta`) | `internal/platform/moduleserver/server.go`, `modules/*/cmd/server/main.go` | partial | Contract runner exists for scaffold modules; legacy modules still use mixed server patterns and no shared self-registration hook. |
+| `inter-module-communication.md` | Service registry + health monitoring | `core/registry/{registry.go,health.go,discovery.go}`, `cmd/aegion/routes.go` (`/internal/registry/*`) | partial | Registry/heartbeat/health checks are implemented, but the runtime path is HTTP-centric vs the documented gRPC registry flow. |
+| `inter-module-communication.md` | gRPC inter-module runtime with internal token metadata | `internal/proto/*_grpc.pb.go`, `modules/policy/grpc/server.go`, `modules/mfa/grpc/server.go` | missing | Proto and adapter code exist, but runtime listeners/client call paths are not started from `cmd/aegion` or scaffold module mains. |
+| `inter-module-communication.md` | Async event bus with retry/dead-letter semantics | `core/eventbus/eventbus.go`, `core/workers/event_processor.go` | partial | Durable delivery, retry, and dead-letter behavior exist; production subscriber wiring in main runtime remains limited. |
+| `inter-module-communication.md`, `timeline.md` | Shared Postgres + module migration ownership | `cmd/aegion/main.go`, `cmd/aegion/migrations/*.sql`, `modules/{password,magic_link,oauth2,policy}/migrations` | partial | Core migrates embedded schema set (core + policy); per-enabled-module migration orchestration is incomplete. |
+| `timeline.md` | Self-service flow + session APIs | `cmd/aegion/routes.go`, `core/flows/service.go`, `core/session/{session.go,context.go}` | partial | Init/get/submit + whoami/logout are live; submit currently validates CSRF then marks flow complete without method-specific auth execution. |
+| `timeline.md`, `modules.md` | Password + magic-link authentication capability | `modules/password/{service,handler,store}.go`, `modules/magic_link/{service,handler,store}.go`, `cmd/aegion/server.go` | partial | Module logic is substantial, but core runtime wiring does not yet route self-service method execution through these handlers. |
+| `timeline.md` | OAuth2/OIDC module coverage | `modules/oauth2/{cmd/server/main.go,handler/handler.go,service/*,store/*}` | partial | Auth code/refresh/client credentials/discovery/userinfo/introspection and device-code token issuance are implemented; remaining work is cross-module wiring depth and advanced claim/provider features. |
+| `policy.md`, `timeline.md` | Policy engine precedence + proxy authorization checks | `modules/policy/grpc/server.go`, `cmd/aegion/server.go`, `cmd/aegion/routes.go` (`handleModuleProxy`) | implemented | RBAC/ABAC/ReBAC default-deny evaluation and fail-safe proxy enforcement are active in the in-process checker path. |
+| `aegion-project.md`, `policy.md` | Runtime ownership for policy/proxy settings | `cmd/aegion/routes.go` (`handleAdminGetConfig`, `handleAdminUpdateConfig`, `loadRuntime*Settings`) | implemented | Bootstrap defaults plus runtime DB-backed overrides are implemented via `core_system_config`. |
+| `observability.md` | OTEL provider + correlation pipeline | `internal/platform/observability/*`, `core/router/middleware.go`, `internal/platform/logger/logger.go`, `cmd/aegion/main.go` | partial | Instrumentation primitives exist, but startup does not initialize an OTEL provider/collector pipeline. |
+| `timeline.md`, `aegion-project.md` | Enterprise SSO + SCIM | `modules/sso/{service,handler,store}.go`, `modules/admin/scim/*.go`, `modules/admin/cmd/admin/server.go` | partial | SCIM service/handlers exist but are not mounted in admin server routing; SSO module remains scaffold-level. |
+| `project-structure.md`, `aegion-project.md` | Go+Rust critical-engine posture | `rust/{crypto,jwt}`, `internal/platform/{crypto,jwt}` | partial | Rust crypto/JWT crates and bindings exist; policy/proxy Rust engines and broad runtime adoption remain incomplete. |
+| `project-structure.md` | Roadmap module depth (`mfa`, `passkeys`, `social`, `introspection`, `proxy`, `cli`) | `modules/{mfa,passkeys,social,introspection,proxy,cli}/*` | partial | `passkeys` and `social` now include concrete HTTP service flows (challenge/state lifecycle, provider/profile handling, cryptographic assertion verification, and sign-counter replay protection); full FIDO2 attestation depth and deeper runtime integration remain in progress. |

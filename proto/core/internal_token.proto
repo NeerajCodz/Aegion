@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package aegion.core.internal_token;
+
+option go_package = "github.com/aegion/aegion/internal/proto/core";
+
+// InternalTokenService manages internal authentication tokens.
+// Core uses these to authenticate module-to-module calls.
+service InternalTokenService {
+  // Validate an internal auth token
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  
+  // Get current token (for modules to retrieve on startup)
+  rpc GetCurrent(GetCurrentRequest) returns (GetCurrentResponse);
+  
+  // Subscribe to token rotation events
+  rpc SubscribeRotation(SubscribeRotationRequest) returns (stream TokenRotationEvent);
+}
+
+message ValidateRequest {
+  // Token to validate
+  string token = 1;
+  
+  // Module presenting the token
+  string module = 2;
+}
+
+message ValidateResponse {
+  // Whether the token is valid
+  bool valid = 1;
+  
+  // Error code if invalid
+  string error_code = 2;
+  
+  // Human-readable error message
+  string error_message = 3;
+  
+  // Token metadata if valid
+  TokenMetadata metadata = 4;
+}
+
+message TokenMetadata {
+  // When the token was issued
+  int64 issued_at = 1;
+  
+  // When the token expires
+  int64 expires_at = 2;
+  
+  // Token generation (for rotation tracking)
+  int32 generation = 3;
+}
+
+message GetCurrentRequest {
+  // Module requesting the token
+  string module = 1;
+  
+  // Instance ID from registration
+  string instance_id = 2;
+}
+
+message GetCurrentResponse {
+  // Current valid token
+  string token = 1;
+  
+  // Token metadata
+  TokenMetadata metadata = 2;
+}
+
+message SubscribeRotationRequest {
+  // Module subscribing to rotation events
+  string module = 1;
+  
+  // Instance ID
+  string instance_id = 2;
+}
+
+message TokenRotationEvent {
+  // New token
+  string new_token = 1;
+  
+  // When the old token expires (grace period)
+  int64 old_token_expires_at = 2;
+  
+  // Token metadata
+  TokenMetadata metadata = 3;
+}

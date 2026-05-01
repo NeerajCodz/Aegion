@@ -1,0 +1,198 @@
+# Aegion Analytics Helm Chart - Values
+# Configure analytics deployment for your environment
+
+replicaCount: 2
+
+image:
+  registry: ghcr.io
+  repository: neerajcodz/aegion/analytics
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: analytics
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8082
+  grpcPort: 50051
+  metricsPort: 9090
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: analytics.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: analytics-tls
+      hosts:
+        - analytics.example.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - analytics
+          topologyKey: kubernetes.io/hostname
+
+persistence:
+  enabled: true
+  storageClassName: standard
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+analytics:
+  server:
+    port: 8082
+    grpcPort: 50051
+    metricsPort: 9090
+    timeoutSeconds: 30
+
+  database:
+    driver: duckdb
+    maxConnections: 20
+    connectionTimeoutSeconds: 5
+
+  cache:
+    enabled: true
+    ttlMinutes: 5
+    maxSize: 1000
+
+  query:
+    timeoutSeconds: 30
+    maxPageSize: 1000
+    defaultPageSize: 50
+
+  sync:
+    enabled: true
+    intervalSeconds: 60
+    batchSize: 1000
+
+  export:
+    formats:
+      - csv
+      - json
+      - parquet
+    maxRecords: 1000000
+
+  logging:
+    level: info
+    format: json
+
+postgres:
+  enabled: true
+  host: postgres
+  port: 5432
+  database: aegion
+  username: aegion
+  passwordSecret:
+    name: postgres-secret
+    key: password
+
+livenessProbe:
+  httpGet:
+    path: /live
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 2
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: aegion
+      ports:
+        - protocol: TCP
+          port: 8082
+        - protocol: TCP
+          port: 50051
+        - protocol: TCP
+          port: 9090
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+
+extraEnv: []
+
+secrets: {}

@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package aegion.core.registry;
+
+option go_package = "github.com/aegion/aegion/internal/proto/core";
+
+// ModuleRegistry is the service that modules use to register themselves with core.
+// Core maintains the service registry and routes requests to registered modules.
+service ModuleRegistry {
+  // Register a module instance with core
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  
+  // Deregister a module instance (graceful shutdown)
+  rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+  
+  // Heartbeat to maintain registration (called every 5s by modules)
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // GetModules returns all registered module instances (admin use)
+  rpc GetModules(GetModulesRequest) returns (GetModulesResponse);
+}
+
+message RegisterRequest {
+  // Module name (e.g., "password", "mfa", "oauth2")
+  string module = 1;
+  
+  // Semantic version (e.g., "2.1.0")
+  string version = 2;
+  
+  // Internal network address (e.g., "aegion-mfa-1:9002")
+  string address = 3;
+  
+  // HTTP routes this module handles (e.g., ["/self-service/mfa/*"])
+  repeated string routes = 4;
+  
+  // Capabilities this module provides (e.g., ["totp", "webauthn"])
+  repeated string capabilities = 5;
+  
+  // Health check URL
+  string health_url = 6;
+  
+  // Ready check URL
+  string ready_url = 7;
+  
+  // gRPC services this module exposes
+  repeated string grpc_services = 8;
+  
+  // Events this module subscribes to
+  repeated string event_subscriptions = 9;
+}
+
+message RegisterResponse {
+  // Unique instance ID assigned by core
+  string instance_id = 1;
+  
+  // Success status
+  bool success = 2;
+  
+  // Error message if registration failed
+  string error = 3;
+}
+
+message DeregisterRequest {
+  // Instance ID from registration
+  string instance_id = 1;
+  
+  // Module name
+  string module = 2;
+  
+  // Reason for deregistration
+  string reason = 3;
+}
+
+message DeregisterResponse {
+  bool success = 1;
+}
+
+message HeartbeatRequest {
+  // Instance ID from registration
+  string instance_id = 1;
+  
+  // Module name
+  string module = 2;
+  
+  // Current health status
+  HealthStatus status = 3;
+  
+  // Optional metrics
+  ModuleMetrics metrics = 4;
+}
+
+message HeartbeatResponse {
+  // Whether the heartbeat was accepted
+  bool accepted = 1;
+  
+  // If false, module should re-register
+  bool should_reregister = 2;
+}
+
+message GetModulesRequest {
+  // Optional filter by module name
+  string module_filter = 1;
+  
+  // Include unhealthy instances
+  bool include_unhealthy = 2;
+}
+
+message GetModulesResponse {
+  repeated ModuleInstance modules = 1;
+}
+
+message ModuleInstance {
+  string instance_id = 1;
+  string module = 2;
+  string version = 3;
+  string address = 4;
+  repeated string routes = 5;
+  repeated string capabilities = 6;
+  HealthStatus status = 7;
+  int64 registered_at = 8;
+  int64 last_heartbeat = 9;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNKNOWN = 0;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_UNHEALTHY = 3;
+}
+
+message ModuleMetrics {
+  // Requests handled since last heartbeat
+  int64 requests_handled = 1;
+  
+  // Current active connections
+  int32 active_connections = 2;
+  
+  // Average response time in milliseconds
+  double avg_response_ms = 3;
+  
+  // Error count since last heartbeat
+  int64 error_count = 4;
+}

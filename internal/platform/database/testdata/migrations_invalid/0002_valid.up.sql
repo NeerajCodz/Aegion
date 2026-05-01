@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS t_valid (
+    id INT PRIMARY KEY
+);

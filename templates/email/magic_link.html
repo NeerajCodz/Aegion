@@ -1,0 +1,164 @@
+{{/*
+  Magic Link Login Template
+  Variables:
+    - .Name: User's name or email
+    - .Link: Magic link URL
+    - .ExpiresIn: Expiration time (e.g., "10 minutes")
+    - .IP: Request IP address (optional)
+    - .Device: Device/browser info (optional)
+    - .Year: Current year
+*/}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Sign In to Your Account</title>
+  <style>
+    body, table, td, p, a, li { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      background-color: #f4f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333333;
+    }
+
+    .email-wrapper { width: 100%; background-color: #f4f7fa; padding: 40px 0; }
+    .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); overflow: hidden; }
+    .email-header { background-color: #2563eb; padding: 32px 40px; text-align: center; }
+    .email-header h1 { margin: 0; color: #ffffff; font-size: 24px; font-weight: 600; }
+    .email-body { padding: 40px; }
+    .email-body h2 { margin: 0 0 16px 0; color: #1f2937; font-size: 20px; font-weight: 600; }
+    .email-body p { margin: 0 0 16px 0; color: #4b5563; font-size: 16px; }
+
+    .btn {
+      display: inline-block;
+      padding: 16px 40px;
+      background-color: #2563eb;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 18px;
+      font-weight: 600;
+      margin: 24px 0;
+    }
+
+    .btn:hover { background-color: #1d4ed8; }
+
+    .info-box {
+      background-color: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 6px;
+      padding: 16px;
+      margin: 24px 0;
+    }
+
+    .info-box p { margin: 0 0 8px 0; color: #1e40af; font-size: 14px; }
+    .info-box p:last-child { margin-bottom: 0; }
+
+    .security-notice {
+      background-color: #f3f4f6;
+      border-radius: 6px;
+      padding: 16px;
+      margin: 24px 0;
+    }
+
+    .security-notice p { margin: 0; color: #4b5563; font-size: 14px; }
+
+    .divider { margin: 24px 0; border-top: 1px solid #e5e7eb; }
+    .text-muted { color: #6b7280; font-size: 14px; }
+    .text-small { font-size: 13px; }
+    .email-footer { padding: 24px 40px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center; }
+    .email-footer p { margin: 0 0 8px 0; color: #6b7280; font-size: 14px; }
+    .email-footer a { color: #2563eb; text-decoration: none; }
+
+    @media only screen and (max-width: 620px) {
+      .email-container { width: 100% !important; margin: 0 !important; border-radius: 0 !important; }
+      .email-header, .email-body, .email-footer { padding: 24px !important; }
+      .btn { padding: 14px 32px; font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td align="center">
+          <div class="email-container">
+            <div class="email-header">
+              <h1>Sign In to Your Account</h1>
+            </div>
+
+            <div class="email-body">
+              <h2>Hello{{if .Name}}, {{.Name}}{{end}}!</h2>
+              <p>Click the button below to securely sign in to your account. No password needed!</p>
+
+              <div style="text-align: center;">
+                <a href="{{.Link}}" class="btn" role="button">Sign In Now</a>
+              </div>
+
+              <div class="info-box">
+                <p><strong>⏱ This link expires in {{if .ExpiresIn}}{{.ExpiresIn}}{{else}}10 minutes{{end}}</strong></p>
+                <p>🔒 This link can only be used once for your security.</p>
+              </div>
+
+              {{if or .IP .Device}}
+              <div class="security-notice">
+                <p><strong>Sign-in request details:</strong></p>
+                {{if .IP}}<p>IP Address: {{.IP}}</p>{{end}}
+                {{if .Device}}<p>Device: {{.Device}}</p>{{end}}
+              </div>
+              {{end}}
+
+              <div class="divider"></div>
+
+              <p class="text-muted">
+                <strong>Didn't request this?</strong> If you didn't try to sign in, you can safely ignore this email. Your account is secure.
+              </p>
+
+              <p class="text-muted text-small">
+                If the button doesn't work, copy and paste this link into your browser:<br>
+                <span style="word-break: break-all; color: #2563eb;">{{.Link}}</span>
+              </p>
+            </div>
+
+            <div class="email-footer">
+              <p>This is an automated security message from Aegion.</p>
+              <p>&copy; {{.Year}} Aegion. All rights reserved.</p>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Plain text version for email clients that don't support HTML -->
+  <!--
+  PLAIN TEXT VERSION:
+  
+  Sign In to Your Account
+  
+  Hello{{if .Name}}, {{.Name}}{{end}}!
+  
+  Click the link below to securely sign in to your account:
+  
+  {{.Link}}
+  
+  This link expires in {{if .ExpiresIn}}{{.ExpiresIn}}{{else}}10 minutes{{end}} and can only be used once.
+  
+  {{if .IP}}IP Address: {{.IP}}{{end}}
+  {{if .Device}}Device: {{.Device}}{{end}}
+  
+  Didn't request this? If you didn't try to sign in, you can safely ignore this email.
+  
+  © {{.Year}} Aegion. All rights reserved.
+  -->
+</body>
+</html>

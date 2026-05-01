@@ -119,6 +119,31 @@ This mirrors Discord-style permission ergonomics: flexible teams without sacrifi
 - hooks/webhooks and delivery templates
 - security posture controls
 
+#### Runtime config API contract
+
+The core admin runtime endpoints expose policy/proxy management under:
+
+- `GET /aegion/api/v1/system/config`
+- `PATCH /aegion/api/v1/system/config`
+
+Managed runtime domains currently include:
+
+- `policy`:
+  - `enabled`
+  - `default_model` (`rbac` | `abac` | `rebac`)
+  - model toggles (`rbac.enabled`, `abac.enabled`, `rebac.enabled`)
+- `proxy`:
+  - `enabled`
+  - `upstream_timeout`
+  - `preserve_host`
+  - `strip_inbound_identity_headers`
+  - `identity_signature_header`
+  - `signed_identity_headers`
+  - `identity_signing_secret` (write-only semantics in responses)
+
+Config is persisted in `core_system_config` and merged over bootstrap defaults from `aegion.yaml`.
+At read time, the API resolves effective values; at write time it validates input and upserts only the requested domains.
+
 ---
 
 ## Admin session security
@@ -131,6 +156,58 @@ Admin sessions should be stricter than user sessions:
 - re-authentication for privileged operations
 
 All admin-auth critical events must be audited.
+
+### Admin SPA security hardening
+
+The embedded React admin panel (`/aegion`) implements multiple security layers:
+
+**Content Security Policy (CSP):**
+```
+Content-Security-Policy: 
+  default-src 'self';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  img-src 'self' data: https:;
+  font-src 'self' https://fonts.gstatic.com;
+  connect-src 'self';
+  frame-ancestors 'none';
+  base-uri 'self';
+  form-action 'self'
+```
+
+**Additional security headers:**
+```
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 1; mode=block
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: geolocation=(), microphone=(), camera=()
+```
+
+**Session security:**
+- HttpOnly session cookie (not accessible to JavaScript)
+- SameSite=Lax for CSRF protection
+- Secure flag enforced in production
+- X-CSRF-Token on every mutation (double-submit cookie: `aegion_admin_csrf`)
+- Automatic logout on session expiration
+- Concurrent session limit per admin identity
+
+**API security:**
+- Same-origin requests only (no CORS on admin API)
+- Request ID tracing for audit correlation
+- Rate limiting per admin identity (stricter than user limits)
+- Capability checks on every endpoint
+- Sensitive operations require re-authentication within last 15 minutes
+
+**Frontend hardening:**
+- Subresource Integrity (SRI) hashes on all embedded assets
+- No inline event handlers (CSP-compliant React patterns)
+- Automatic XSS escaping via React's JSX
+- Sanitized rendering of user-provided data
+- No `dangerouslySetInnerHTML` usage except in explicitly sandboxed contexts
+
+**Development vs production:**
+In dev mode (`build tag: dev`), CSP is relaxed to allow Vite hot module reload. Production builds enforce strict CSP with no unsafe directives.
 
 ---
 

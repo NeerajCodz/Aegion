@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package aegion.analytics;
+
+option go_package = "github.com/aegion/aegion/internal/proto/analytics";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "proto/analytics/types.proto";
+
+// QueryEventsRequest represents a request to query analytics events.
+message QueryEventsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  repeated Filter filters = 3;
+  string sort_field = 4;
+  SortOrder sort_order = 5;
+  string category = 6;
+  string event_type = 7;
+}
+
+// QueryEventsResponse represents the response from querying events.
+message QueryEventsResponse {
+  repeated Event events = 1;
+  int64 total_count = 2;
+  string next_page_token = 3;
+}
+
+// GetDashboardRequest represents a request to get a dashboard.
+message GetDashboardRequest {
+  string id = 1;
+}
+
+// DashboardData represents dashboard data with events and metrics.
+message DashboardData {
+  Dashboard dashboard = 1;
+  repeated Event events = 2;
+  repeated Metric metrics = 3;
+}
+
+// ExecuteQueryRequest represents a request to execute a query.
+message ExecuteQueryRequest {
+  string query_id = 1;
+  repeated string parameters = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+// CreateDashboardRequest represents a request to create a dashboard.
+message CreateDashboardRequest {
+  string name = 1;
+  string description = 2;
+  google.protobuf.Struct config = 3;
+  bool public = 4;
+}
+
+// UpdateDashboardRequest represents a request to update a dashboard.
+message UpdateDashboardRequest {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  google.protobuf.Struct config = 4;
+  bool public = 5;
+}
+
+// StreamEventsRequest represents a request to stream events.
+message StreamEventsRequest {
+  repeated Filter filters = 1;
+  string category = 2;
+  string event_type = 3;
+  bool include_historical = 4; // if true, send existing events first
+  int32 buffer_size = 5; // internal buffer size hint
+}
+
+// ExportDataRequest represents a request to export data.
+message ExportDataRequest {
+  ExportFormat format = 1;
+  repeated Filter filters = 2;
+  string category = 3;
+  int64 max_records = 4;
+}
+
+// QueryBatch represents a query in a batch operation.
+message QueryBatch {
+  string request_id = 1;
+  string query_id = 2;
+  repeated string parameters = 3;
+  int32 page_size = 4;
+}
+
+// AnalyticsService provides gRPC endpoints for analytics operations.
+service AnalyticsService {
+  // Unary RPCs
+  rpc QueryEvents(QueryEventsRequest) returns (QueryEventsResponse);
+  rpc GetDashboard(GetDashboardRequest) returns (DashboardData);
+  rpc GetHealthStatus(Empty) returns (HealthStatus);
+  rpc ExecuteQuery(ExecuteQueryRequest) returns (QueryResult);
+  rpc CreateDashboard(CreateDashboardRequest) returns (Dashboard);
+  rpc UpdateDashboard(UpdateDashboardRequest) returns (Dashboard);
+
+  // Server streaming
+  rpc StreamEvents(StreamEventsRequest) returns (stream Event);
+  rpc ExportData(ExportDataRequest) returns (stream DataChunk);
+
+  // Bidirectional streaming
+  rpc BatchQuery(stream QueryBatch) returns (stream QueryResult);
+}

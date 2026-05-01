@@ -2,6 +2,9 @@
 
 Every Aegion capability is a module. Every module is a standalone Docker image. `core` pulls and orchestrates them.
 
+> **Implementation status (current repo):** module maturity is tracked in `build/release-maturity.json` and summarized in [release-maturity-matrix.md](release-maturity-matrix.md).
+> Aegion runs hybrid-first: core remains control-plane ingress while standalone modules are enabled by deployment needs and maturity gate.
+
 ---
 
 ## The fundamental model
@@ -53,7 +56,7 @@ The user never writes a compose entry for `aegion-mfa`. They never manage module
 | `aegion/aegion-social` | `social` | off | OAuth2/OIDC social login providers |
 | `aegion/aegion-sso` | `sso` | off | Enterprise SAML SSO + SCIM 2.0 provisioning |
 | `aegion/aegion-oauth2` | `oauth2` | off | OAuth2/OIDC authorization server |
-| `aegion/aegion-introspect` | `introspect` | off | RFC 7662 token introspection |
+| `aegion/aegion-introspection` | `introspection` | off | RFC 7662 token introspection |
 | `aegion/aegion-policy` | `policy` | off | RBAC + ABAC + ReBAC authorization engine |
 | `aegion/aegion-proxy` | `proxy` | off | Identity-aware ingress and policy enforcement |
 | `aegion/aegion-admin` | `admin` | on | Admin panel SPA + management APIs |
@@ -411,3 +414,9 @@ Before deployment:
 8. Configure resource limits per module container (CPU/memory) appropriate to workload
 9. Set `module_auto_restart: true` in feature flags for production
 10. Monitor the Platform → Modules view in admin after first boot
+
+Production safety gate:
+
+- When `AEGION_ENV=production` (or `AEGION_ENVIRONMENT=production`), startup rejects experimental module versions by default (`mfa`, `passkeys`, `social`, `sso`, `introspection`, `cli`, `proxy`).
+- To explicitly allow experimental modules in production, set `AEGION_ALLOW_EXPERIMENTAL_MODULES=true`.
+- Recommended production-ready module set today: `password`, `magic_link`, `oauth2`, `policy`, `admin` (plus `core`).

@@ -1,0 +1,1 @@
+-- Initial introspection module scaffold rollback (no-op).

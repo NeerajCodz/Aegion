@@ -1,0 +1,91 @@
+# =============================================================================
+# Aegion Core Dockerfile
+# Builds the main core binary with embedded Rust engines
+# =============================================================================
+
+ARG BASE_IMAGE=golang:1.25.8-bookworm
+ARG RUNTIME_IMAGE=debian:bookworm-slim
+
+# Stage 1: Build Rust libraries
+FROM ${BASE_IMAGE} AS rust-builder
+
+# Install Rust and linker dependencies in builder image
+RUN apt-get update && apt-get install -y \
+    curl \
+    pkg-config \
+    libssl-dev \
+    clang \
+    lld \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /build/rust
+
+# Copy Rust source
+COPY rust/ ./
+
+# Build all Rust crates in release mode
+RUN cargo build --release --workspace
+
+# Stage 2: Build Go binary
+FROM ${BASE_IMAGE} AS go-builder
+
+# Install C toolchain needed for CGO staticlib linking
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    clang \
+    lld \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy go modules first for caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy Rust build artifacts
+COPY --from=rust-builder /build/rust/target/release/libaegion_crypto.a /build/rust/lib/libaegion_crypto.a
+COPY --from=rust-builder /build/rust/target/release/libaegion_jwt.a /build/rust/lib/libaegion_jwt.a
+COPY --from=rust-builder /build/rust/crypto/include/crypto.h /build/rust/crypto/include/crypto.h
+COPY --from=rust-builder /build/rust/jwt/include/jwt.h /build/rust/jwt/include/jwt.h
+
+# Copy source code
+COPY . .
+
+# Build the core binary
+ARG VERSION=dev
+RUN go build -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /build/aegion ./cmd/aegion
+
+# Stage 3: Final runtime image
+FROM ${RUNTIME_IMAGE}
+
+# Install CA certificates and create non-root user
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 1000 -s /usr/sbin/nologin aegion
+
+ENV TZ=UTC
+RUN mkdir -p /app /config /data && chown -R aegion:aegion /app /config /data
+USER aegion
+
+# Copy binary
+COPY --from=go-builder /build/aegion /app/aegion
+
+# Copy default config
+COPY configs/aegion.yaml /config/aegion.yaml
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/app/aegion", "health"]
+
+# Entry point
+ENTRYPOINT ["/app/aegion"]
+CMD ["serve", "--config", "/config/aegion.yaml"]

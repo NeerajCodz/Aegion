@@ -1,0 +1,59 @@
+# VCS metadata
+.git
+.gitignore
+
+# Build and test artifacts
+*.out
+*.log
+*.pid
+cov.out
+cover
+coverage
+coverage.out
+session_coverage
+test_output.txt
+
+# Go artifacts
+*.exe
+*.test
+
+# Rust artifacts
+**/target
+**/*.rlib
+**/*.rmeta
+**/*.d
+**/*.lib
+**/*.a
+**/*.dll.lib
+
+# Node artifacts
+**/node_modules
+modules/admin/spa/dist
+modules/admin/ui/dist
+
+# IDE/editor
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and env files
+.env
+.env.*
+*.pem
+*.key
+secrets
+
+# Local/session artifacts
+aegion.exe
+files
+checkpoints
+
+# CI and docs are not needed for image builds
+.github
+docs

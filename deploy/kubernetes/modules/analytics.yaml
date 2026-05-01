@@ -1,0 +1,416 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-config
+  namespace: aegion
+data:
+  analytics.yaml: |
+    server:
+      port: 8082
+      grpc_port: 50051
+      metrics_port: 9090
+      timeout_seconds: 30
+
+    database:
+      driver: duckdb
+      file: /data/analytics.db
+      max_connections: 20
+      connection_timeout_seconds: 5
+
+    cache:
+      enabled: true
+      ttl_minutes: 5
+      max_size: 1000
+
+    query:
+      timeout_seconds: 30
+      max_page_size: 1000
+      default_page_size: 50
+
+    sync:
+      enabled: true
+      interval_seconds: 60
+      batch_size: 1000
+
+    export:
+      formats: [csv, json, parquet]
+      max_records: 1000000
+
+    logging:
+      level: info
+      format: json
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: analytics-secrets
+  namespace: aegion
+type: Opaque
+stringData:
+  internal-secret: ${AEGION_INTERNAL_SECRET}
+  database-password: ${POSTGRES_PASSWORD}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: analytics
+  namespace: aegion
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: analytics
+  namespace: aegion
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: analytics
+  namespace: aegion
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: analytics
+subjects:
+  - kind: ServiceAccount
+    name: analytics
+    namespace: aegion
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: analytics-data
+  namespace: aegion
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+  namespace: aegion
+  labels:
+    app: analytics
+spec:
+  type: ClusterIP
+  selector:
+    app: analytics
+  ports:
+    - name: rest
+      port: 8082
+      targetPort: 8082
+      protocol: TCP
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: analytics
+  namespace: aegion
+  labels:
+    app: analytics
+spec:
+  serviceName: analytics
+  replicas: 2
+  selector:
+    matchLabels:
+      app: analytics
+  template:
+    metadata:
+      labels:
+        app: analytics
+        version: v1
+    spec:
+      serviceAccountName: analytics
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - analytics
+                topologyKey: kubernetes.io/hostname
+
+      initContainers:
+        - name: init-migrations
+          image: ghcr.io/neerajcodz/aegion/analytics:latest
+          command: ["/app/analytics", "migrate", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: url
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+      containers:
+        - name: analytics
+          image: ghcr.io/neerajcodz/aegion/analytics:latest
+          imagePullPolicy: IfNotPresent
+          
+          ports:
+            - name: rest
+              containerPort: 8082
+              protocol: TCP
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          env:
+            - name: MODULE_PORT
+              value: "8082"
+            - name: GRPC_PORT
+              value: "50051"
+            - name: METRICS_PORT
+              value: "9090"
+            - name: MODULE_LOG_LEVEL
+              value: "info"
+            - name: MODULE_LOG_FORMAT
+              value: "json"
+            - name: DUCKDB_DATABASE
+              value: "/data/analytics.db"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: url
+            - name: AEGION_INTERNAL_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-secrets
+                  key: internal-secret
+
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: data
+              mountPath: /data
+
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: rest
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: rest
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"]
+
+      volumes:
+        - name: config
+          configMap:
+            name: analytics-config
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: analytics
+  namespace: aegion
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: analytics
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: analytics
+  namespace: aegion
+spec:
+  podSelector:
+    matchLabels:
+      app: analytics
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: aegion
+        - podSelector:
+            matchLabels:
+              role: ingress
+      ports:
+        - protocol: TCP
+          port: 8082
+        - protocol: TCP
+          port: 50051
+        - protocol: TCP
+          port: 9090
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: aegion
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: analytics
+  namespace: aegion
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: analytics
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: analytics
+  namespace: aegion
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - analytics.aegion.local
+      secretName: analytics-tls
+  rules:
+    - host: analytics.aegion.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: analytics
+                port:
+                  number: 8082

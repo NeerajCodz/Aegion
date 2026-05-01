@@ -1,0 +1,40 @@
+# =============================================================================
+# policy.yaml — Policy Module Configuration
+#
+# Phase-3 policy defaults for RBAC/ABAC/ReBAC behavior.
+# =============================================================================
+
+module:
+  name: policy
+  version: "1.0.0"
+  description: "Central authorization engine (RBAC/ABAC/ReBAC)"
+
+enabled: false
+
+engine:
+  default_model: ${AEGION_POLICY_DEFAULT_MODEL:-rbac}
+
+rbac:
+  enabled: ${AEGION_POLICY_RBAC_ENABLED:-true}
+  cache_ttl: 30s
+
+abac:
+  enabled: ${AEGION_POLICY_ABAC_ENABLED:-false}
+
+rebac:
+  enabled: ${AEGION_POLICY_REBAC_ENABLED:-false}
+  max_depth: 20
+  expansion_cache_ttl: 60s
+
+grpc:
+  listen_addr: ${AEGION_POLICY_GRPC_LISTEN_ADDR:-0.0.0.0:9010}
+  read_timeout: 15s
+  write_timeout: 15s
+
+http:
+  listen_addr: ${AEGION_POLICY_HTTP_LISTEN_ADDR:-0.0.0.0:8080}
+  health_path: /health
+  ready_path: /ready
+
+observability:
+  emit_eval_path: true

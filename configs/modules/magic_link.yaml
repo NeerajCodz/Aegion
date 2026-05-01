@@ -1,0 +1,268 @@
+# =============================================================================
+# magic_link.yaml — Magic Link Module Configuration
+#
+# Passwordless authentication via email/SMS magic links and codes.
+# Configures code generation, expiry, and delivery settings.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Module Metadata
+# -----------------------------------------------------------------------------
+module:
+  name: magic_link
+  version: "1.0.0"
+  description: "Passwordless authentication via magic links and codes"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Enable/Disable Module
+# ─────────────────────────────────────────────────────────────────────────────
+enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Magic Link Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+link:
+  # Token length for magic links (URL-safe base64)
+  token_length: 32
+  
+  # Character set for URL token
+  token_charset: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+  
+  # Link expiration time
+  lifespan: 15m
+  
+  # Base URL for magic links (appended with token)
+  base_url: "${AEGION_MAGIC_LINK_BASE_URL:-https://auth.example.com/verify}"
+  
+  # Single-use links (invalidate after first use)
+  single_use: true
+  
+  # Allow link to work across different devices/browsers
+  cross_device: true
+  
+  # Require same IP address for link validation
+  require_same_ip: false
+  
+  # Require same user agent for link validation
+  require_same_user_agent: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verification Code Configuration (OTP-style)
+# ─────────────────────────────────────────────────────────────────────────────
+code:
+  # Enable verification codes (alternative to links)
+  enabled: true
+  
+  # Code length (6-8 recommended for usability)
+  length: 6
+  
+  # Character set for codes
+  # Numeric only: "0123456789"
+  # Alphanumeric (no ambiguous): "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  charset: "0123456789"
+  
+  # Code expiration time
+  lifespan: 15m
+  
+  # Maximum verification attempts before code invalidation
+  max_attempts: 5
+  
+  # Case-insensitive code matching (for alphanumeric codes)
+  case_insensitive: true
+  
+  # Format code for display (e.g., "123 456" instead of "123456")
+  display_format:
+    enabled: true
+    separator: " "
+    group_size: 3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rate Limiting
+# ─────────────────────────────────────────────────────────────────────────────
+rate_limits:
+  # Requests per email address
+  per_email:
+    requests: 5
+    period: 1h
+    # Cooldown between requests to same email
+    cooldown: 60s
+  
+  # Requests per IP address
+  per_ip:
+    requests: 20
+    period: 1h
+  
+  # Global rate limit
+  global:
+    requests: 1000
+    period: 1h
+  
+  # Verification attempt limits (per code/link)
+  verification:
+    max_attempts: 5
+    lockout_duration: 15m
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Email Delivery Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+email:
+  # Enable email delivery
+  enabled: true
+  
+  # Email template ID (references templates in courier)
+  template: "magic_link"
+  
+  # Subject line
+  subject: "Your login link for ${APP_NAME:-Aegion}"
+  
+  # Include both link and code in email
+  include_code: true
+  include_link: true
+  
+  # Sender configuration (overrides global courier settings)
+  from:
+    address: "${AEGION_MAGIC_LINK_FROM:-noreply@example.com}"
+    name: "${AEGION_MAGIC_LINK_FROM_NAME:-Aegion}"
+  
+  # Reply-to address
+  reply_to: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SMS Delivery Configuration (Optional)
+# ─────────────────────────────────────────────────────────────────────────────
+sms:
+  # Enable SMS delivery
+  enabled: false
+  
+  # SMS provider: "twilio", "messagebird", "nexmo", "aws_sns"
+  provider: "twilio"
+  
+  # Provider-specific configuration
+  twilio:
+    account_sid: "${TWILIO_ACCOUNT_SID:-}"
+    auth_token: "${TWILIO_AUTH_TOKEN:-}"
+    from_number: "${TWILIO_FROM_NUMBER:-}"
+  
+  # SMS message template (use {code} placeholder)
+  message_template: "Your ${APP_NAME:-Aegion} verification code is: {code}. Valid for {expiry} minutes."
+  
+  # Only send code via SMS (links too long)
+  code_only: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Settings
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  # Bind token/code to session (requires same browser session)
+  session_binding: true
+  
+  # Include device fingerprint in token validation
+  device_fingerprint: false
+  
+  # Require email verification before account creation
+  verify_before_create: true
+  
+  # Invalidate all pending codes/links on successful authentication
+  invalidate_on_success: true
+  
+  # Token hashing (store hashed tokens, not plaintext)
+  hash_tokens: true
+  hash_algorithm: "sha256"
+  
+  # Timing-safe comparison for code verification
+  constant_time_compare: true
+  
+  # Notify user of magic link requests they didn't initiate
+  notify_suspicious:
+    enabled: true
+    # Notify if request from different country/region
+    geo_mismatch: true
+    # Notify if request from new device
+    new_device: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# User Experience
+# ─────────────────────────────────────────────────────────────────────────────
+ux:
+  # Auto-submit code when fully entered
+  auto_submit: true
+  
+  # Resend cooldown displayed to user
+  show_resend_countdown: true
+  
+  # Allow user to request code via different method (email -> SMS)
+  fallback_method: true
+  
+  # Remember device after magic link authentication
+  remember_device:
+    enabled: true
+    duration: 30d
+  
+  # Success redirect URL
+  redirect_url: "${AEGION_MAGIC_LINK_REDIRECT:-/dashboard}"
+  
+  # Custom error page URL
+  error_url: "${AEGION_MAGIC_LINK_ERROR_URL:-/auth/error}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Registration Flow
+# ─────────────────────────────────────────────────────────────────────────────
+registration:
+  # Allow registration via magic link (passwordless signup)
+  enabled: true
+  
+  # Require additional profile info after verification
+  require_profile: false
+  required_fields:
+    - display_name
+  
+  # Auto-verify email on magic link registration
+  auto_verify_email: true
+  
+  # Collect consent during registration
+  consent:
+    enabled: false
+    terms_url: "/terms"
+    privacy_url: "/privacy"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cleanup & Maintenance
+# ─────────────────────────────────────────────────────────────────────────────
+cleanup:
+  # Automatically delete expired tokens
+  enabled: true
+  
+  # How often to run cleanup
+  interval: 1h
+  
+  # Delete tokens older than (even if not expired)
+  max_age: 24h
+  
+  # Batch size for cleanup operations
+  batch_size: 1000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audit & Logging
+# ─────────────────────────────────────────────────────────────────────────────
+audit:
+  # Events to log
+  log_events:
+    - magic_link_requested
+    - magic_link_sent
+    - magic_link_clicked
+    - magic_link_verified
+    - magic_link_expired
+    - magic_link_failed
+    - code_requested
+    - code_sent
+    - code_verified
+    - code_failed
+    - rate_limit_exceeded
+  
+  # Retention period
+  retention: 30d
+  
+  # Include metadata in logs
+  include_ip: true
+  include_user_agent: true
+  include_geo: false

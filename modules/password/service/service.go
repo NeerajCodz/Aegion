@@ -1,0 +1,427 @@
+// Package service provides password authentication business logic.
+package service
+
+import (
+	"context"
+	"crypto/sha1" // #nosec G505 -- HIBP k-anonymity protocol requires SHA-1 prefix hashing.
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/google/uuid"
+
+	"github.com/aegion/aegion/modules/password/store"
+)
+
+var (
+	ErrPasswordTooShort   = errors.New("password is too short")
+	ErrPasswordTooWeak    = errors.New("password does not meet complexity requirements")
+	ErrPasswordBreached   = errors.New("password has been found in a data breach")
+	ErrPasswordReused     = errors.New("password was used recently")
+	ErrPasswordSimilar    = errors.New("password is too similar to identifier")
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrIdentityNotFound   = errors.New("identity not found")
+)
+
+// Config holds password service configuration.
+type Config struct {
+	MinLength               int
+	RequireUppercase        bool
+	RequireLowercase        bool
+	RequireNumber           bool
+	RequireSpecial          bool
+	HIBPEnabled             bool
+	HIBPTimeout             time.Duration // Timeout for HIBP API requests (default: 5s)
+	HIBPBaseURL             string        // Base URL for HIBP API (default: https://api.pwnedpasswords.com/range/)
+	HIBPIgnoreNetworkErrors bool          // Ignore network/API errors (default: true)
+	HIBPMinBreachCount      int           // Minimum breach count to reject password (default: 1)
+	HistoryCount            int
+}
+
+// Hasher interface for password hashing.
+type Hasher interface {
+	Hash(password string) (string, error)
+	Verify(password, hash string) (bool, error)
+}
+
+type credentialStore interface {
+	Create(ctx context.Context, cred *store.Credential) error
+	GetByIdentifier(ctx context.Context, identifier string) (*store.Credential, error)
+	GetByIdentityID(ctx context.Context, identityID uuid.UUID) (*store.Credential, error)
+	Update(ctx context.Context, credID uuid.UUID, newHash string) error
+	DeleteByIdentityID(ctx context.Context, identityID uuid.UUID) error
+	AddToHistory(ctx context.Context, credID uuid.UUID, hash string) error
+	GetHistory(ctx context.Context, credID uuid.UUID, limit int) ([]string, error)
+	CleanupHistory(ctx context.Context, credID uuid.UUID, keepCount int) error
+}
+
+// Service handles password authentication.
+type Service struct {
+	store  credentialStore
+	hasher Hasher
+	config Config
+}
+
+// New creates a new password service.
+func New(store credentialStore, hasher Hasher, config Config) *Service {
+	if config.MinLength == 0 {
+		config.MinLength = 8
+	}
+	if config.HistoryCount == 0 {
+		config.HistoryCount = 5
+	}
+	if config.HIBPTimeout == 0 {
+		config.HIBPTimeout = 5 * time.Second
+	}
+	if config.HIBPBaseURL == "" {
+		config.HIBPBaseURL = "https://api.pwnedpasswords.com/range/"
+	}
+	if !config.HIBPEnabled {
+		config.HIBPIgnoreNetworkErrors = true
+	}
+	if config.HIBPMinBreachCount == 0 {
+		config.HIBPMinBreachCount = 1
+	}
+
+	return &Service{
+		store:  store,
+		hasher: hasher,
+		config: config,
+	}
+}
+
+// Register creates a new password credential for an identity.
+func (s *Service) Register(ctx context.Context, identityID uuid.UUID, identifier, password string) error {
+	// Validate password
+	if err := s.ValidatePassword(ctx, password, identifier); err != nil {
+		return err
+	}
+
+	// Hash password
+	hash, err := s.hasher.Hash(password)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	// Create credential
+	cred := &store.Credential{
+		ID:         uuid.New(),
+		IdentityID: identityID,
+		Identifier: strings.ToLower(identifier),
+		Hash:       hash,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	return s.store.Create(ctx, cred)
+}
+
+// Verify verifies a password against stored credentials.
+// Returns the identity ID if successful.
+func (s *Service) Verify(ctx context.Context, identifier, password string) (uuid.UUID, error) {
+	cred, err := s.store.GetByIdentifier(ctx, strings.ToLower(identifier))
+	if err != nil {
+		if errors.Is(err, store.ErrCredentialNotFound) {
+			// Constant-time delay to prevent timing attacks
+			_, _ = s.hasher.Hash(password) // Dummy hash
+			return uuid.Nil, ErrInvalidCredentials
+		}
+		return uuid.Nil, err
+	}
+
+	valid, err := s.hasher.Verify(password, cred.Hash)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to verify password: %w", err)
+	}
+
+	if !valid {
+		return uuid.Nil, ErrInvalidCredentials
+	}
+
+	return cred.IdentityID, nil
+}
+
+// ChangePassword changes the password for an identity.
+func (s *Service) ChangePassword(ctx context.Context, identityID uuid.UUID, oldPassword, newPassword string) error {
+	cred, err := s.store.GetByIdentityID(ctx, identityID)
+	if err != nil {
+		if errors.Is(err, store.ErrCredentialNotFound) {
+			return ErrIdentityNotFound
+		}
+		return err
+	}
+
+	// Verify old password
+	valid, err := s.hasher.Verify(oldPassword, cred.Hash)
+	if err != nil || !valid {
+		return ErrInvalidCredentials
+	}
+
+	// Validate new password
+	if err := s.ValidatePassword(ctx, newPassword, cred.Identifier); err != nil {
+		return err
+	}
+
+	// Check against history
+	if err := s.checkHistory(ctx, cred.ID, newPassword); err != nil {
+		return err
+	}
+
+	// Hash new password
+	newHash, err := s.hasher.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	// Add old hash to history
+	if err := s.store.AddToHistory(ctx, cred.ID, cred.Hash); err != nil {
+		return err
+	}
+
+	// Update credential
+	if err := s.store.Update(ctx, cred.ID, newHash); err != nil {
+		return err
+	}
+
+	// Cleanup old history
+	return s.store.CleanupHistory(ctx, cred.ID, s.config.HistoryCount)
+}
+
+// ResetPassword sets a new password without requiring the old one.
+// Used for password recovery flows.
+func (s *Service) ResetPassword(ctx context.Context, identityID uuid.UUID, newPassword string) error {
+	cred, err := s.store.GetByIdentityID(ctx, identityID)
+	if err != nil {
+		if errors.Is(err, store.ErrCredentialNotFound) {
+			return ErrIdentityNotFound
+		}
+		return err
+	}
+
+	// Validate new password
+	if err := s.ValidatePassword(ctx, newPassword, cred.Identifier); err != nil {
+		return err
+	}
+
+	// Check against history
+	if err := s.checkHistory(ctx, cred.ID, newPassword); err != nil {
+		return err
+	}
+
+	// Hash new password
+	newHash, err := s.hasher.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	// Add old hash to history
+	if err := s.store.AddToHistory(ctx, cred.ID, cred.Hash); err != nil {
+		return err
+	}
+
+	// Update credential
+	return s.store.Update(ctx, cred.ID, newHash)
+}
+
+// ValidatePassword validates a password against all configured rules.
+func (s *Service) ValidatePassword(ctx context.Context, password, identifier string) error {
+	// Length check
+	if len(password) < s.config.MinLength {
+		return ErrPasswordTooShort
+	}
+
+	// Complexity checks
+	if err := s.checkComplexity(password); err != nil {
+		return err
+	}
+
+	// Similarity check
+	if err := s.checkSimilarity(password, identifier); err != nil {
+		return err
+	}
+
+	// HIBP check
+	if s.config.HIBPEnabled {
+		if err := s.checkHIBP(ctx, password); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkComplexity validates password complexity requirements.
+func (s *Service) checkComplexity(password string) error {
+	var hasUpper, hasLower, hasNumber, hasSpecial bool
+
+	for _, c := range password {
+		switch {
+		case unicode.IsUpper(c):
+			hasUpper = true
+		case unicode.IsLower(c):
+			hasLower = true
+		case unicode.IsNumber(c):
+			hasNumber = true
+		case unicode.IsPunct(c) || unicode.IsSymbol(c):
+			hasSpecial = true
+		}
+	}
+
+	if s.config.RequireUppercase && !hasUpper {
+		return ErrPasswordTooWeak
+	}
+	if s.config.RequireLowercase && !hasLower {
+		return ErrPasswordTooWeak
+	}
+	if s.config.RequireNumber && !hasNumber {
+		return ErrPasswordTooWeak
+	}
+	if s.config.RequireSpecial && !hasSpecial {
+		return ErrPasswordTooWeak
+	}
+
+	return nil
+}
+
+// checkSimilarity checks if password is too similar to identifier.
+func (s *Service) checkSimilarity(password, identifier string) error {
+	// Skip check if identifier is empty
+	if identifier == "" {
+		return nil
+	}
+
+	passwordLower := strings.ToLower(password)
+	identifierLower := strings.ToLower(identifier)
+
+	// Extract username part from email
+	if idx := strings.Index(identifierLower, "@"); idx > 0 {
+		identifierLower = identifierLower[:idx]
+	}
+
+	// Skip check if username part is too short (< 3 chars)
+	if len(identifierLower) < 3 {
+		return nil
+	}
+
+	// Check if password contains identifier or vice versa
+	if strings.Contains(passwordLower, identifierLower) ||
+		strings.Contains(identifierLower, passwordLower) {
+		return ErrPasswordSimilar
+	}
+
+	return nil
+}
+
+// checkHIBP checks password against Have I Been Pwned API using k-anonymity.
+func (s *Service) checkHIBP(ctx context.Context, password string) error {
+	// SHA-1 hash of password
+	hash := sha1.Sum([]byte(password)) // #nosec G401 -- HIBP API requires SHA-1 range query prefixes.
+	hashStr := strings.ToUpper(hex.EncodeToString(hash[:]))
+
+	prefix := hashStr[:5]
+	suffix := hashStr[5:]
+
+	// Query HIBP API
+	url := fmt.Sprintf("%s%s", s.config.HIBPBaseURL, prefix)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
+		return err
+	}
+	req.Header.Set("User-Agent", "Aegion-Identity-Server")
+
+	client := &http.Client{Timeout: s.config.HIBPTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
+		return fmt.Errorf("hibp request failed with status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		if s.config.HIBPIgnoreNetworkErrors {
+			return nil
+		}
+		return fmt.Errorf("failed to read hibp response: %w", err)
+	}
+
+	// Check if suffix is in response
+	lines := strings.Split(string(body), "\n")
+	for _, line := range lines {
+		parts := strings.Split(strings.TrimSpace(line), ":")
+		if len(parts) >= 2 && strings.EqualFold(parts[0], suffix) {
+			count, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err != nil {
+				continue
+			}
+			if count >= s.config.HIBPMinBreachCount {
+				return ErrPasswordBreached
+			}
+		}
+	}
+
+	return nil
+}
+
+// HIBPBaseURLFromHost builds a HIBP range endpoint from host.
+func HIBPBaseURLFromHost(host string) string {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return "https://api.pwnedpasswords.com/range/"
+	}
+	if strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://") {
+		u, err := url.Parse(h)
+		if err == nil {
+			u.Path = strings.TrimRight(u.Path, "/") + "/range/"
+			return u.String()
+		}
+	}
+	return "https://" + strings.Trim(h, "/") + "/range/"
+}
+
+// checkHistory checks if password matches any historical passwords.
+func (s *Service) checkHistory(ctx context.Context, credID uuid.UUID, password string) error {
+	history, err := s.store.GetHistory(ctx, credID, s.config.HistoryCount)
+	if err != nil {
+		return err
+	}
+
+	for _, hash := range history {
+		valid, err := s.hasher.Verify(password, hash)
+		if err != nil {
+			continue
+		}
+		if valid {
+			return ErrPasswordReused
+		}
+	}
+
+	return nil
+}
+
+// Delete removes password credentials for an identity.
+func (s *Service) Delete(ctx context.Context, identityID uuid.UUID) error {
+	return s.store.DeleteByIdentityID(ctx, identityID)
+}

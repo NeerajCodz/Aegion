@@ -1,0 +1,208 @@
+package router
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/aegion/aegion/internal/platform/observability"
+)
+
+func TestRequestIDMiddleware(t *testing.T) {
+	handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := GetRequestID(r.Context())
+		if requestID == "" {
+			t.Fatalf("expected request ID in context")
+		}
+		if obsRequestID := observability.GetRequestIDForLogger(r.Context()); obsRequestID != requestID {
+			t.Fatalf("expected observability request ID %q, got %q", requestID, obsRequestID)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.Header.Get("X-Request-ID") == "" {
+		t.Fatalf("expected X-Request-ID header to be set")
+	}
+}
+
+func TestSecurityHeadersProd(t *testing.T) {
+	handler := SecurityHeaders(false)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.Header.Get("Strict-Transport-Security") == "" {
+		t.Fatalf("expected HSTS header in production mode")
+	}
+	if resp.Header.Get("Content-Security-Policy") == "" {
+		t.Fatalf("expected CSP header in production mode")
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("expected nosniff header")
+	}
+}
+
+func TestSecurityHeadersDevMode(t *testing.T) {
+	handler := SecurityHeaders(true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.Header.Get("Strict-Transport-Security") != "" {
+		t.Fatalf("expected no HSTS header in dev mode")
+	}
+	if resp.Header.Get("Content-Security-Policy") != "" {
+		t.Fatalf("expected no CSP header in dev mode")
+	}
+}
+
+func TestRateLimitMiddleware(t *testing.T) {
+	handler := RateLimit(RateLimitConfig{
+		RequestsPerSecond: 1,
+		Burst:             1,
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req1.RemoteAddr = "192.0.2.1:1234"
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected first request to pass, got %d", rec1.Code)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.RemoteAddr = "192.0.2.1:1234"
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected rate limit to trigger, got %d", rec2.Code)
+	}
+}
+
+func TestCORSMiddlewarePreflight(t *testing.T) {
+	handler := CORS(CORSConfig{
+		AllowedOrigins:   []string{"https://example.com"},
+		AllowedMethods:   []string{"GET", "POST"},
+		AllowedHeaders:   []string{"Authorization"},
+		ExposedHeaders:   []string{"X-Request-ID"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/", nil)
+	req.Header.Set("Origin", "https://example.com")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected preflight to return %d, got %d", http.StatusNoContent, resp.StatusCode)
+	}
+	if resp.Header.Get("Access-Control-Allow-Origin") != "https://example.com" {
+		t.Fatalf("expected allow origin header to be set")
+	}
+	if resp.Header.Get("Access-Control-Allow-Methods") == "" {
+		t.Fatalf("expected allow methods header")
+	}
+	if resp.Header.Get("Access-Control-Allow-Headers") == "" {
+		t.Fatalf("expected allow headers header")
+	}
+}
+
+func TestGetRequestTime(t *testing.T) {
+	t.Run("no time in context", func(t *testing.T) {
+		ctx := context.Background()
+		tm := GetRequestTime(ctx)
+		if !tm.IsZero() {
+			t.Errorf("expected zero time, got %v", tm)
+		}
+	})
+
+	t.Run("time in context via RequestID middleware", func(t *testing.T) {
+		var capturedTime time.Time
+		handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedTime = GetRequestTime(r.Context())
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if capturedTime.IsZero() {
+			t.Error("expected non-zero time from context")
+		}
+	})
+}
+
+func TestTimeoutMiddleware(t *testing.T) {
+	t.Run("request completes before timeout", func(t *testing.T) {
+		handler := Timeout(5 * time.Second)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", rec.Code)
+		}
+	})
+
+	t.Run("context has timeout set", func(t *testing.T) {
+		var deadline time.Time
+		var hasDeadline bool
+		handler := Timeout(100 * time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			deadline, hasDeadline = r.Context().Deadline()
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if !hasDeadline {
+			t.Error("expected context to have deadline")
+		}
+		if deadline.IsZero() {
+			t.Error("expected non-zero deadline")
+		}
+	})
+}

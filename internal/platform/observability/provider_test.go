@@ -1,0 +1,402 @@
+package observability
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/log/global"
+	lognoop "go.opentelemetry.io/otel/log/noop"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/sdk/resource"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
+)
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+
+	assert.Equal(t, "aegion", cfg.ServiceName)
+	assert.NotEmpty(t, cfg.ServiceVersion)
+	assert.NotEmpty(t, cfg.Environment)
+	assert.NotEmpty(t, cfg.InstanceID)
+	assert.True(t, cfg.EnableTraces)
+	assert.True(t, cfg.EnableMetrics)
+	assert.True(t, cfg.EnableLogs)
+	assert.Equal(t, 1.0, cfg.TraceSamplingRatio)
+	assert.True(t, cfg.Insecure)
+}
+
+func TestProductionConfig(t *testing.T) {
+	cfg := ProductionConfig()
+
+	assert.Equal(t, "production", cfg.Environment)
+	assert.Equal(t, 0.1, cfg.TraceSamplingRatio)
+	assert.False(t, cfg.Insecure)
+}
+
+func TestConfigEnvironmentVariables(t *testing.T) {
+	// Set test environment variables
+	t.Setenv("AEGION_ENVIRONMENT", "test")
+	t.Setenv("AEGION_INSTANCE_ID", "test-instance-123")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://test:4318/v1/traces")
+
+	cfg := DefaultConfig()
+
+	assert.Equal(t, "test", cfg.Environment)
+	assert.Equal(t, "test-instance-123", cfg.InstanceID)
+	assert.Equal(t, "http://test:4318/v1/traces", cfg.TracesEndpoint)
+}
+
+func TestProvider_NewProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.EnableTraces = false // Disable for testing
+	cfg.EnableMetrics = false
+	cfg.EnableLogs = false
+
+	provider, err := NewProvider(context.Background(), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+
+	assert.Equal(t, cfg, provider.config)
+	assert.NotNil(t, provider.resource)
+
+	// Test shutdown
+	err = provider.Shutdown(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestProvider_NewProviderWithNilConfig(t *testing.T) {
+	// When nil config is passed, it should use default with all telemetry disabled for safety
+	provider, err := NewProvider(context.Background(), nil)
+
+	// Accept both success (with disabled telemetry) and error (if exporter fails)
+	// The important thing is it doesn't panic
+	if err != nil {
+		// Error is acceptable if it's an exporter initialization error
+		assert.Contains(t, err.Error(), "failed to initialize")
+		return
+	}
+
+	require.NotNil(t, provider)
+
+	// Should use default config
+	assert.NotNil(t, provider.config)
+	assert.Equal(t, "aegion", provider.config.ServiceName)
+
+	err = provider.Shutdown(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestProvider_ResourceAttributes(t *testing.T) {
+	cfg := &Config{
+		ServiceName:    "test-service",
+		ServiceVersion: "v1.2.3",
+		Environment:    "testing",
+		InstanceID:     "test-instance",
+		EnableTraces:   false,
+		EnableMetrics:  false,
+		EnableLogs:     false,
+	}
+
+	provider, err := NewProvider(context.Background(), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+
+	// Check resource attributes
+	attrs := provider.resource.Attributes()
+	hasServiceName := false
+	hasServiceVersion := false
+	hasEnvironment := false
+	hasInstanceID := false
+
+	for _, attr := range attrs {
+		switch attr.Key {
+		case "service.name":
+			hasServiceName = true
+			assert.Equal(t, "test-service", attr.Value.AsString())
+		case "service.version":
+			hasServiceVersion = true
+			assert.Equal(t, "v1.2.3", attr.Value.AsString())
+		case "deployment.environment":
+			hasEnvironment = true
+			assert.Equal(t, "testing", attr.Value.AsString())
+		case "service.instance.id":
+			hasInstanceID = true
+			assert.Equal(t, "test-instance", attr.Value.AsString())
+		}
+	}
+
+	assert.True(t, hasServiceName, "Missing service.name attribute")
+	assert.True(t, hasServiceVersion, "Missing service.version attribute")
+	assert.True(t, hasEnvironment, "Missing deployment.environment attribute")
+	assert.True(t, hasInstanceID, "Missing service.instance.id attribute")
+
+	err = provider.Shutdown(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestProvider_EnabledFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		enableTraces  bool
+		enableMetrics bool
+		enableLogs    bool
+	}{
+		{
+			name:          "all disabled",
+			enableTraces:  false,
+			enableMetrics: false,
+			enableLogs:    false,
+		},
+		{
+			name:          "traces only",
+			enableTraces:  true,
+			enableMetrics: false,
+			enableLogs:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.EnableTraces = tt.enableTraces
+			cfg.EnableMetrics = tt.enableMetrics
+			cfg.EnableLogs = tt.enableLogs
+			// Use localhost endpoints that don't require connection
+			cfg.TracesEndpoint = "http://localhost:4318/v1/traces"
+			cfg.MetricsEndpoint = "http://localhost:4318/v1/metrics"
+			cfg.LogsEndpoint = "http://localhost:4318/v1/logs"
+
+			provider, err := NewProvider(context.Background(), cfg)
+
+			// Skip if exporter fails (network not available)
+			if err != nil {
+				t.Skipf("Skipping due to exporter error: %v", err)
+				return
+			}
+
+			require.NotNil(t, provider)
+
+			assert.Equal(t, tt.enableTraces, provider.IsTracingEnabled())
+			assert.Equal(t, tt.enableMetrics, provider.IsMetricsEnabled())
+			assert.Equal(t, tt.enableLogs, provider.IsLoggingEnabled())
+
+			err = provider.Shutdown(context.Background())
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestProvider_ShutdownTimeout(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.EnableTraces = false
+	cfg.EnableMetrics = false
+	cfg.EnableLogs = false
+
+	provider, err := NewProvider(context.Background(), cfg)
+	require.NoError(t, err)
+
+	// Test shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+
+	err = provider.Shutdown(ctx)
+	// Should complete even with short timeout since no components are enabled
+	assert.NoError(t, err)
+}
+
+func TestProviderInitLoggingAndShutdownError(t *testing.T) {
+	t.Run("init logging invalid endpoint fails", func(t *testing.T) {
+		p := &Provider{
+			config: &Config{
+				ServiceName:  "aegion",
+				LogsEndpoint: "://bad-endpoint",
+				Insecure:     true,
+			},
+			resource: resource.Empty(),
+		}
+		err := p.initLogging(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create log exporter")
+	})
+
+	t.Run("new provider with logs enabled propagates init failure", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.EnableTraces = false
+		cfg.EnableMetrics = false
+		cfg.EnableLogs = true
+		cfg.LogsEndpoint = "://bad-endpoint"
+		_, err := NewProvider(context.Background(), cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to initialize logging")
+	})
+
+	t.Run("shutdown returns last error", func(t *testing.T) {
+		p := &Provider{
+			shutdownFuncs: []func(context.Context) error{
+				func(context.Context) error { return errors.New("first") },
+				func(context.Context) error { return nil },
+				func(context.Context) error { return errors.New("last") },
+			},
+		}
+		err := p.Shutdown(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, "last", err.Error())
+	})
+}
+
+func TestProviderNewProviderErrorPaths(t *testing.T) {
+	t.Run("metrics init error triggers cleanup", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.EnableTraces = false
+		cfg.EnableMetrics = true
+		cfg.EnableLogs = false
+		cfg.MetricsEndpoint = "://bad-endpoint"
+		_, err := NewProvider(context.Background(), cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to initialize metrics")
+	})
+
+	t.Run("trace init error returned", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.EnableTraces = true
+		cfg.EnableMetrics = false
+		cfg.EnableLogs = false
+		cfg.TracesEndpoint = "://bad-endpoint"
+		provider, err := NewProvider(context.Background(), cfg)
+		if err != nil {
+			assert.Contains(t, err.Error(), "failed to initialize tracing")
+			return
+		}
+		require.NotNil(t, provider)
+		assert.True(t, provider.IsTracingEnabled())
+		assert.NoError(t, provider.Shutdown(context.Background()))
+	})
+}
+
+func TestProviderInitMetricsWithHeadersBranch(t *testing.T) {
+	p := &Provider{
+		config: &Config{
+			ServiceName:          "aegion",
+			ServiceVersion:       "v1.0.0",
+			MetricsEndpoint:      "://bad-endpoint",
+			Headers:              map[string]string{"x-test": "1"},
+			MetricExportInterval: time.Second,
+			Insecure:             true,
+		},
+		resource: resource.Empty(),
+	}
+	err := p.initMetrics(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create metric exporter")
+}
+
+func TestProviderCreateResourceNeverFails(t *testing.T) {
+	p := &Provider{
+		config: &Config{
+			ServiceName:    "svc",
+			ServiceVersion: "v1",
+			Environment:    "dev",
+			InstanceID:     "inst-1",
+		},
+	}
+	res, err := p.createResource()
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	attrs := res.Attributes()
+	require.NotEmpty(t, attrs)
+	var found bool
+	for _, a := range attrs {
+		if fmt.Sprint(a.Key) == "service.name" && a.Value.AsString() == "svc" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
+}
+
+func TestProviderInitMethodsSuccessWithLocalCollector(t *testing.T) {
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(collector.Close)
+
+	// Restore globals changed by init* methods.
+	t.Cleanup(func() {
+		otel.SetTracerProvider(tracenoop.NewTracerProvider())
+		otel.SetMeterProvider(metricnoop.NewMeterProvider())
+		global.SetLoggerProvider(lognoop.NewLoggerProvider())
+	})
+
+	endpoint := strings.TrimPrefix(collector.URL, "http://")
+	p := &Provider{
+		config: &Config{
+			ServiceName:          "aegion",
+			ServiceVersion:       "v1.0.0",
+			TracesEndpoint:       endpoint,
+			MetricsEndpoint:      endpoint,
+			LogsEndpoint:         endpoint,
+			Headers:              map[string]string{"x-test": "1"},
+			TraceSamplingRatio:   1.0,
+			MetricExportInterval: time.Hour,
+			Insecure:             true,
+		},
+		resource:      resource.Empty(),
+		shutdownFuncs: make([]func(context.Context) error, 0, 3),
+	}
+
+	require.NoError(t, p.initTracing(context.Background()))
+	require.NoError(t, p.initMetrics(context.Background()))
+	require.NoError(t, p.initLogging(context.Background()))
+	assert.NotNil(t, p.Tracer)
+	assert.NotNil(t, p.Meter)
+	assert.Len(t, p.shutdownFuncs, 3)
+}
+
+func TestProviderInitTracingAndNewProviderTracingErrorPaths(t *testing.T) {
+	t.Run("init tracing returns exporter creation error", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		p := &Provider{
+			config: &Config{
+				ServiceName:        "aegion",
+				ServiceVersion:     "v1.0.0",
+				TracesEndpoint:     "localhost:4317",
+				Headers:            map[string]string{"x-test": "1"},
+				TraceSamplingRatio: 1.0,
+				Insecure:           true,
+			},
+			resource: resource.Empty(),
+		}
+		err := p.initTracing(ctx)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create")
+	})
+
+	t.Run("new provider propagates tracing initialization failure", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		cfg := DefaultConfig()
+		cfg.EnableTraces = true
+		cfg.EnableMetrics = false
+		cfg.EnableLogs = false
+		cfg.TracesEndpoint = "localhost:4317"
+		cfg.Insecure = true
+
+		_, err := NewProvider(ctx, cfg)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to initialize tracing")
+	})
+}

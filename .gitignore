@@ -1,0 +1,101 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+/aegion
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+*.out
+coverage
+cov.out
+cover
+**/coverage
+session_coverage
+test_output.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+rust/target/
+rust/*/target/
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# Rust build artifacts
+*.rlib
+*.rmeta
+*.d
+*.lib
+*.a
+*.dll.lib
+
+# Node (Admin SPA)
+node_modules/
+modules/admin/ui/dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Secrets - NEVER commit
+*.pem
+*.key
+secrets/
+
+# Build artifacts
+/build/release/
+*.tar.gz
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# Session/cache files
+*.pid
+
+# Local test/coverage artifacts
+coverage-focus
+coverage-store
+coverage-html
+coverage-profile
+coverage-raw
+coverage_out
+coverage_all
+local_cov
+oauth2_store_cov
+cover_router
+/handler
+/registry
+
+# Exclude accidental vendored Go package under SPA dependencies
+modules/admin/spa/node_modules/flatted/golang/
+
+.agents
+skills-lock.json
+github.com

@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package aegion.core.courier;
+
+option go_package = "github.com/aegion/aegion/internal/proto/core";
+
+// CourierService handles email and SMS delivery.
+// Modules call this to send notifications to users.
+service CourierService {
+  // Enqueue a message for delivery
+  rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
+  
+  // Check delivery status of a message
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  
+  // Cancel a queued message (if not yet sent)
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+}
+
+message EnqueueRequest {
+  // Message type
+  MessageType type = 1;
+  
+  // Recipient address (email or phone)
+  string recipient = 2;
+  
+  // Template ID (e.g., "verification_code", "password_reset")
+  string template_id = 3;
+  
+  // Template data for rendering
+  map<string, string> template_data = 4;
+  
+  // Idempotency key to prevent duplicate sends
+  string idempotency_key = 5;
+  
+  // Optional: send after this timestamp
+  int64 send_after = 6;
+  
+  // Optional: custom subject (email only)
+  string subject = 7;
+  
+  // Source module requesting the send
+  string source_module = 8;
+  
+  // Related identity ID (for audit)
+  string identity_id = 9;
+}
+
+message EnqueueResponse {
+  // Message ID for tracking
+  string message_id = 1;
+  
+  // Whether enqueue succeeded
+  bool success = 2;
+  
+  // Error message if failed
+  string error = 3;
+  
+  // If idempotency_key matched an existing message
+  bool deduplicated = 4;
+}
+
+message GetStatusRequest {
+  // Message ID to check
+  string message_id = 1;
+}
+
+message GetStatusResponse {
+  // Message ID
+  string message_id = 1;
+  
+  // Current status
+  DeliveryStatus status = 2;
+  
+  // Number of send attempts
+  int32 send_count = 3;
+  
+  // Last error if failed
+  string last_error = 4;
+  
+  // When the message was sent (if sent)
+  int64 sent_at = 5;
+  
+  // When the message was created
+  int64 created_at = 6;
+}
+
+message CancelRequest {
+  // Message ID to cancel
+  string message_id = 1;
+  
+  // Reason for cancellation
+  string reason = 2;
+}
+
+message CancelResponse {
+  // Whether cancellation succeeded
+  bool success = 1;
+  
+  // Error message if failed (e.g., already sent)
+  string error = 2;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_EMAIL = 1;
+  MESSAGE_TYPE_SMS = 2;
+}
+
+enum DeliveryStatus {
+  DELIVERY_STATUS_UNSPECIFIED = 0;
+  DELIVERY_STATUS_QUEUED = 1;
+  DELIVERY_STATUS_PROCESSING = 2;
+  DELIVERY_STATUS_SENT = 3;
+  DELIVERY_STATUS_FAILED = 4;
+  DELIVERY_STATUS_ABANDONED = 5;
+  DELIVERY_STATUS_CANCELLED = 6;
+}

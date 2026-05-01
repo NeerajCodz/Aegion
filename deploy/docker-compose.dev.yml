@@ -1,0 +1,184 @@
+# =============================================================================
+# Aegion Identity Platform - Development Overrides
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# =============================================================================
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL - Expose port for local tools
+  # ─────────────────────────────────────────────────────────────────────────
+  postgres:
+    ports:
+      - "5432:5432"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis - Expose port for debugging
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    ports:
+      - "6379:6379"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Aegion Core - Development configuration
+  # ─────────────────────────────────────────────────────────────────────────
+  aegion:
+    build:
+      context: ..
+      dockerfile: build/Dockerfile.core
+    ports:
+      - "8080:8080"
+      - "6060:6060"   # pprof debug port
+    environment:
+      AEGION_ENV: development
+      AEGION_ENVIRONMENT: development
+      AEGION_LOG_LEVEL: debug
+      AEGION_LOG_FORMAT: text
+      AEGION_DEBUG_PPROF: "true"
+      AEGION_DATABASE_URL: postgres://aegion:aegion@postgres:5432/aegion?sslmode=disable
+      AEGION_CACHE_URL: redis://redis:6379/0
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: otel-collector:4318
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: otel-collector:4318
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: otel-collector:4318
+      # Development secrets (DO NOT USE IN PRODUCTION)
+      AEGION_SECRETS_COOKIE: dev-cookie-secret-change-me-32chars!
+      AEGION_SECRETS_CIPHER: dev-cipher-secret-change-me-32chars!
+      AEGION_SECRETS_INTERNAL: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/aegion.yaml:/config/aegion.yaml:ro
+      - ../configs/schemas:/config/schemas:ro
+      - aegion-data:/data
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Password Module - Development
+  # ─────────────────────────────────────────────────────────────────────────
+  module-password:
+    build:
+      context: ..
+      dockerfile: modules/password/Dockerfile
+    ports:
+      - "9001:9001"
+    environment:
+      MODULE_LOG_LEVEL: debug
+      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/modules/password.yaml:/config/password.yaml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Magic Link Module - Development
+  # ─────────────────────────────────────────────────────────────────────────
+  module-magic-link:
+    build:
+      context: ..
+      dockerfile: modules/magic_link/Dockerfile
+    ports:
+      - "9002:9002"
+    environment:
+      MODULE_LOG_LEVEL: debug
+      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/modules/magic_link.yaml:/config/magic_link.yaml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Admin Module - Development
+  # ─────────────────────────────────────────────────────────────────────────
+  module-admin:
+    build:
+      context: ..
+      dockerfile: modules/admin/Dockerfile
+    ports:
+      - "9003:9003"
+    environment:
+      MODULE_LOG_LEVEL: debug
+      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
+      AEGION_ADMIN_OBSERVABILITY_ENABLED: "true"
+      AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL: http://otel-collector:13133
+      AEGION_ADMIN_OBS_PROMETHEUS_URL: http://prometheus:9090/-/healthy
+      AEGION_ADMIN_OBS_GRAFANA_URL: http://grafana:3000/api/health
+      AEGION_ADMIN_OBS_TEMPO_URL: http://tempo:3200/ready
+      AEGION_ADMIN_OBS_LOKI_URL: http://loki:3100/ready
+    volumes:
+      - ../configs/modules/admin.yaml:/config/admin.yaml:ro
+      - ../modules/admin/ui/dist:/app/ui:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # OpenTelemetry Collector
+  # ─────────────────────────────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.1
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC ingest
+      - "4318:4318"   # OTLP HTTP ingest
+      - "8888:8888"   # Collector self-metrics
+      - "8889:8889"   # Prometheus exporter for app metrics
+      - "13133:13133" # Collector health
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Prometheus
+  # ─────────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Tempo (Traces backend)
+  # ─────────────────────────────────────────────────────────────────────────
+  tempo:
+    image: grafana/tempo:2.6.1
+    command:
+      - -config.file=/etc/tempo.yaml
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Loki (Logs backend)
+  # ─────────────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.1.1
+    command:
+      - -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki.yaml:/etc/loki/local-config.yaml:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Grafana
+  # ─────────────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Mailpit - Email Testing UI
+  # ─────────────────────────────────────────────────────────────────────────
+  mailpit:
+    profiles: []  # Enable in dev (override the 'dev' profile restriction)
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
+
+volumes:
+  grafana-data:

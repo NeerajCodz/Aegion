@@ -1,0 +1,211 @@
+{{/*
+  Welcome Email Template
+  Variables:
+    - .Name: User's name
+    - .Email: User's email address
+    - .Link: Dashboard or getting started link (optional)
+    - .Features: List of key features (optional)
+    - .SupportEmail: Support contact email (optional)
+    - .Year: Current year
+*/}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Welcome to Aegion</title>
+  <style>
+    body, table, td, p, a, li { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      background-color: #f4f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333333;
+    }
+
+    .email-wrapper { width: 100%; background-color: #f4f7fa; padding: 40px 0; }
+    .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); overflow: hidden; }
+    
+    .email-header {
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      padding: 48px 40px;
+      text-align: center;
+    }
+
+    .email-header h1 { margin: 0 0 8px 0; color: #ffffff; font-size: 28px; font-weight: 700; }
+    .email-header p { margin: 0; color: rgba(255, 255, 255, 0.9); font-size: 16px; }
+
+    .email-body { padding: 40px; }
+    .email-body h2 { margin: 0 0 16px 0; color: #1f2937; font-size: 22px; font-weight: 600; }
+    .email-body p { margin: 0 0 16px 0; color: #4b5563; font-size: 16px; }
+
+    .btn {
+      display: inline-block;
+      padding: 14px 32px;
+      background-color: #2563eb;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 500;
+      margin: 16px 0;
+    }
+
+    .feature-list {
+      list-style: none;
+      padding: 0;
+      margin: 24px 0;
+    }
+
+    .feature-list li {
+      padding: 12px 0;
+      border-bottom: 1px solid #e5e7eb;
+      color: #4b5563;
+      font-size: 15px;
+    }
+
+    .feature-list li:last-child { border-bottom: none; }
+
+    .feature-list li::before {
+      content: "✓";
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      background-color: #d1fae5;
+      color: #059669;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 24px;
+      margin-right: 12px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .info-card {
+      background-color: #f9fafb;
+      border-radius: 8px;
+      padding: 24px;
+      margin: 24px 0;
+    }
+
+    .info-card h3 { margin: 0 0 12px 0; color: #1f2937; font-size: 16px; font-weight: 600; }
+    .info-card p { margin: 0; color: #6b7280; font-size: 14px; }
+    .info-card a { color: #2563eb; text-decoration: none; }
+
+    .divider { margin: 32px 0; border-top: 1px solid #e5e7eb; }
+    .text-muted { color: #6b7280; font-size: 14px; }
+    .text-center { text-align: center; }
+    .email-footer { padding: 24px 40px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center; }
+    .email-footer p { margin: 0 0 8px 0; color: #6b7280; font-size: 14px; }
+    .email-footer a { color: #2563eb; text-decoration: none; }
+
+    @media only screen and (max-width: 620px) {
+      .email-container { width: 100% !important; margin: 0 !important; border-radius: 0 !important; }
+      .email-header { padding: 32px 24px !important; }
+      .email-header h1 { font-size: 24px; }
+      .email-body, .email-footer { padding: 24px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td align="center">
+          <div class="email-container">
+            <div class="email-header">
+              <h1>Welcome to Aegion!</h1>
+              <p>Your account has been created successfully</p>
+            </div>
+
+            <div class="email-body">
+              <h2>Hello{{if .Name}}, {{.Name}}{{end}}! 👋</h2>
+              <p>Thank you for joining Aegion. We're excited to have you on board! Your account is now ready to use.</p>
+
+              {{if .Email}}
+              <p class="text-muted">Registered email: <strong>{{.Email}}</strong></p>
+              {{end}}
+
+              {{if .Link}}
+              <div class="text-center">
+                <a href="{{.Link}}" class="btn" role="button">Get Started</a>
+              </div>
+              {{end}}
+
+              {{if .Features}}
+              <div class="divider"></div>
+              <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px;">What you can do with Aegion:</h3>
+              <ul class="feature-list">
+                {{range .Features}}
+                <li>{{.}}</li>
+                {{end}}
+              </ul>
+              {{else}}
+              <div class="divider"></div>
+              <h3 style="margin: 0 0 16px 0; color: #1f2937; font-size: 18px;">What you can do with Aegion:</h3>
+              <ul class="feature-list">
+                <li>Secure authentication for your applications</li>
+                <li>Single sign-on across all your services</li>
+                <li>Multi-factor authentication for enhanced security</li>
+                <li>Manage user sessions and permissions</li>
+              </ul>
+              {{end}}
+
+              <div class="info-card">
+                <h3>Need help getting started?</h3>
+                <p>
+                  Check out our documentation or reach out to our support team at 
+                  <a href="mailto:{{if .SupportEmail}}{{.SupportEmail}}{{else}}support@aegion.io{{end}}">
+                    {{if .SupportEmail}}{{.SupportEmail}}{{else}}support@aegion.io{{end}}
+                  </a>
+                </p>
+              </div>
+
+              <p class="text-muted">
+                We're committed to keeping your data secure. If you have any questions about your account or our security practices, don't hesitate to reach out.
+              </p>
+            </div>
+
+            <div class="email-footer">
+              <p>Welcome to the Aegion community!</p>
+              <p>&copy; {{.Year}} Aegion. All rights reserved.</p>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Plain text version for email clients that don't support HTML -->
+  <!--
+  PLAIN TEXT VERSION:
+  
+  Welcome to Aegion!
+  
+  Hello{{if .Name}}, {{.Name}}{{end}}!
+  
+  Thank you for joining Aegion. We're excited to have you on board! Your account is now ready to use.
+  
+  {{if .Email}}Registered email: {{.Email}}{{end}}
+  
+  {{if .Link}}Get started: {{.Link}}{{end}}
+  
+  What you can do with Aegion:
+  - Secure authentication for your applications
+  - Single sign-on across all your services
+  - Multi-factor authentication for enhanced security
+  - Manage user sessions and permissions
+  
+  Need help? Contact us at {{if .SupportEmail}}{{.SupportEmail}}{{else}}support@aegion.io{{end}}
+  
+  © {{.Year}} Aegion. All rights reserved.
+  -->
+</body>
+</html>

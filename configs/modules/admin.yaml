@@ -1,0 +1,428 @@
+# =============================================================================
+# admin.yaml — Admin Module Configuration
+#
+# Administrative interface configuration including bootstrap settings,
+# API key management, and audit retention policies.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Module Metadata
+# -----------------------------------------------------------------------------
+module:
+  name: admin
+  version: "1.0.0"
+  description: "Administrative interface and API management module"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Enable/Disable Module
+# ─────────────────────────────────────────────────────────────────────────────
+enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin UI Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+ui:
+  # URL path for admin interface
+  path: "${AEGION_ADMIN_PATH:-/aegion}"
+  
+  # Enable admin UI (disable for API-only mode)
+  enabled: true
+  
+  # Custom branding
+  branding:
+    title: "${AEGION_ADMIN_TITLE:-Aegion Admin}"
+    logo_url: "${AEGION_ADMIN_LOGO:-}"
+    favicon_url: "${AEGION_ADMIN_FAVICON:-}"
+    primary_color: "#6366f1"
+  
+  # Pagination defaults
+  pagination:
+    default_page_size: 25
+    max_page_size: 100
+  
+  # Dashboard widgets
+  dashboard:
+    show_user_stats: true
+    show_session_stats: true
+    show_recent_activity: true
+    show_system_health: true
+    refresh_interval: 30s
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap Configuration — Initial Admin Setup
+# ─────────────────────────────────────────────────────────────────────────────
+bootstrap:
+  # Enable bootstrap (creates initial admin on first run)
+  enabled: true
+  
+  # Bootstrap admin credentials (CHANGE AFTER SETUP!)
+  operator:
+    email: "${AEGION_OPERATOR_EMAIL:-admin@localhost}"
+    password: "${AEGION_OPERATOR_PASSWORD:-}"
+    # Display name for bootstrap admin
+    display_name: "System Administrator"
+  
+  # Auto-disable bootstrap after first admin created
+  auto_disable: true
+  
+  # Require password change on first login
+  require_password_change: true
+  
+  # Send welcome email to bootstrap admin
+  send_welcome_email: false
+  
+  # Bootstrap mode: "single" (one admin) or "multi" (from list)
+  mode: single
+  
+  # For mode: "multi", list of initial admins
+  operators: []
+  # operators:
+  #   - email: admin1@example.com
+  #     password: ${ADMIN1_PASSWORD}
+  #     role: super_admin
+  #   - email: admin2@example.com
+  #     password: ${ADMIN2_PASSWORD}
+  #     role: admin
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin Session Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+session:
+  # Admin session lifespan (shorter than user sessions)
+  lifespan: 4h
+  
+  # Idle timeout
+  idle_timeout: 30m
+  
+  # Require re-authentication for sensitive operations
+  require_reauth: true
+  reauth_timeout: 5m
+  
+  # Sensitive operations requiring re-auth
+  sensitive_operations:
+    - user_delete
+    - user_role_change
+    - api_key_create
+    - api_key_delete
+    - system_config_change
+    - audit_log_export
+    - bootstrap_settings
+  
+  # Maximum concurrent admin sessions per user
+  max_concurrent: 3
+  
+  # Session cookie settings
+  cookie:
+    name: aegion_admin_session
+    same_site: strict
+    secure: true
+    http_only: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# API Key Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+api_keys:
+  # Enable API key authentication
+  enabled: true
+  
+  # Key generation settings
+  generation:
+    # Key prefix for identification (e.g., "aegion_live_", "aegion_test_")
+    prefix: "aegion_"
+    # Key length (excluding prefix)
+    length: 32
+    # Character set
+    charset: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  
+  # Key types
+  types:
+    # Live/production keys
+    live:
+      prefix: "aegion_live_"
+      rate_limit:
+        requests: 1000
+        period: 1m
+    # Test/development keys (can have different limits)
+    test:
+      prefix: "aegion_test_"
+      rate_limit:
+        requests: 100
+        period: 1m
+  
+  # Maximum keys per user/organization
+  max_per_user: 10
+  
+  # Key expiration
+  expiration:
+    enabled: false
+    default_lifespan: 365d
+    max_lifespan: 730d
+  
+  # Key rotation
+  rotation:
+    # Warn before expiration
+    warn_before_expiry: 30d
+    # Allow overlap period for key rotation
+    overlap_period: 7d
+  
+  # Hashing (store hashed keys)
+  hash_keys: true
+  hash_algorithm: "sha256"
+  
+  # Rate limiting per key
+  rate_limiting:
+    enabled: true
+    default_requests: 1000
+    default_period: 1m
+  
+  # IP allowlisting per key
+  ip_allowlist:
+    enabled: true
+    max_ips_per_key: 20
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Role-Based Access Control (RBAC)
+# ─────────────────────────────────────────────────────────────────────────────
+rbac:
+  # Built-in roles
+  roles:
+    super_admin:
+      description: "Full system access"
+      permissions: ["*"]
+    
+    admin:
+      description: "Administrative access without system config"
+      permissions:
+        - users:read
+        - users:write
+        - users:delete
+        - sessions:read
+        - sessions:write
+        - audit:read
+        - api_keys:read
+        - api_keys:write
+    
+    operator:
+      description: "Day-to-day operations"
+      permissions:
+        - users:read
+        - users:write
+        - sessions:read
+        - sessions:write
+        - audit:read
+    
+    viewer:
+      description: "Read-only access"
+      permissions:
+        - users:read
+        - sessions:read
+        - audit:read
+  
+  # Allow custom roles
+  custom_roles_enabled: true
+  
+  # Default role for new admins
+  default_role: operator
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audit Log Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+audit:
+  # Enable audit logging
+  enabled: true
+  
+  # Events to audit
+  events:
+    # User management
+    - user_created
+    - user_updated
+    - user_deleted
+    - user_suspended
+    - user_activated
+    - user_password_reset
+    - user_role_changed
+    
+    # Session management
+    - session_revoked
+    - sessions_bulk_revoked
+    
+    # Admin actions
+    - admin_login
+    - admin_logout
+    - admin_created
+    - admin_deleted
+    - admin_role_changed
+    
+    # API key management
+    - api_key_created
+    - api_key_deleted
+    - api_key_rotated
+    
+    # System changes
+    - config_changed
+    - module_enabled
+    - module_disabled
+    
+    # Exports and bulk operations
+    - users_exported
+    - audit_exported
+  
+  # Retention settings
+  retention:
+    # How long to keep audit logs
+    duration: 90d
+    
+    # Archive before deletion (to cold storage)
+    archive:
+      enabled: false
+      destination: "${AEGION_AUDIT_ARCHIVE_PATH:-}"
+      format: "json"  # json, csv
+    
+    # Cleanup schedule
+    cleanup:
+      enabled: true
+      schedule: "0 3 * * *"  # 3 AM daily (cron format)
+      batch_size: 10000
+  
+  # Log detail level
+  detail_level: full  # minimal, standard, full
+  
+  # Include in logs
+  include:
+    ip_address: true
+    user_agent: true
+    request_id: true
+    changes_diff: true  # Include before/after for updates
+    geo_location: false
+  
+  # Immutability (prevent audit log tampering)
+  immutable: true
+  
+  # Export settings
+  export:
+    enabled: true
+    formats:
+      - json
+      - csv
+    max_records: 100000
+    require_reauth: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Settings
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  # IP allowlisting for admin access
+  ip_allowlist:
+    enabled: false
+    allowed_ips: []
+    # allowed_ips:
+    #   - 10.0.0.0/8
+    #   - 192.168.1.0/24
+  
+  # Two-factor authentication
+  mfa:
+    # Require MFA for all admin accounts
+    required: true
+    # Allowed MFA methods
+    methods:
+      - totp
+      - webauthn
+    # Grace period for MFA setup
+    setup_grace_period: 24h
+  
+  # Login security
+  login:
+    max_attempts: 5
+    lockout_duration: 30m
+    progressive_lockout: true
+    
+    # CAPTCHA after failed attempts
+    captcha:
+      enabled: true
+      threshold: 3
+    
+    # Notify on suspicious login
+    notify_suspicious: true
+  
+  # Content Security Policy for admin UI
+  csp: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Notifications
+# ─────────────────────────────────────────────────────────────────────────────
+notifications:
+  # Email notifications for admin events
+  email:
+    enabled: true
+    recipients:
+      - "${AEGION_ADMIN_NOTIFY_EMAIL:-}"
+    events:
+      - admin_login_suspicious
+      - admin_locked_out
+      - api_key_created
+      - system_config_changed
+      - security_alert
+  
+  # Webhook notifications
+  webhooks:
+    enabled: false
+    endpoints: []
+    # endpoints:
+    #   - url: https://hooks.slack.com/services/xxx
+    #     events: [security_alert, admin_locked_out]
+    #     headers:
+    #       Content-Type: application/json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin API Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+api:
+  # API version prefix
+  version_prefix: /v1
+  
+  # Base path for admin API
+  base_path: "${AEGION_ADMIN_API_PATH:-/api/admin}"
+  
+  # Rate limiting for admin API
+  rate_limit:
+    enabled: true
+    requests: 100
+    period: 1m
+  
+  # Response format
+  default_format: json
+  
+  # Pagination
+  pagination:
+    default_limit: 25
+    max_limit: 100
+  
+  # Enable API documentation (Swagger/OpenAPI)
+  docs:
+    enabled: true
+    path: /docs
+    # Require authentication to view docs
+    require_auth: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Maintenance Mode
+# ─────────────────────────────────────────────────────────────────────────────
+maintenance:
+  # Enable maintenance mode toggle
+  enabled: false
+  
+  # Message shown during maintenance
+  message: "System is under maintenance. Please try again later."
+  
+  # Allow admin access during maintenance
+  allow_admin: true
+  
+  # Allowed IPs during maintenance
+  allowed_ips: []
+  
+  # Scheduled maintenance
+  schedule:
+    enabled: false
+    start: ""
+    end: ""
+    notify_before: 24h

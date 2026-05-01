@@ -1,0 +1,520 @@
+# =============================================================================
+# aegion.yaml — Development Configuration
+#
+# This configuration is optimized for local development.
+# For production, see configs/aegion.production.yaml
+# =============================================================================
+
+# Module versions (use 'latest' for development)
+module_versions:
+  password:   "latest"
+  magic_link: "latest"
+  mfa:        "latest"
+  passkeys:   "latest"
+  social:     "latest"
+  sso:        "latest"
+  oauth2:     "latest"
+  introspection: "latest"
+  admin:      "latest"
+  policy:     "latest"
+  proxy:      "latest"
+  cli:        "latest"
+
+# Module registry (use local Docker for development)
+module_registry:
+  base_url: ""
+  pull_policy: "if-not-present"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Server Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+server:
+  port: 8080
+  host: 0.0.0.0
+
+  tls:
+    enabled: false
+
+  cors:
+    enabled: true
+    allowed_origins:
+      - http://localhost:3000
+      - http://localhost:5173
+      - http://127.0.0.1:3000
+      - http://127.0.0.1:5173
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Authorization
+      - Content-Type
+      - Cookie
+      - X-Session-Token
+      - X-CSRF-Token
+    allow_credentials: true
+    max_age: 300
+
+  request_timeout: 60s
+  read_timeout: 30s
+  write_timeout: 60s
+  idle_timeout: 120s
+
+  internal_network:
+    name: aegion_modules
+    subnet: 172.20.0.0/16
+    health_check_interval: 5s
+    health_check_timeout: 2s
+    health_check_failures: 3
+    restart_on_failure: true
+    startup_timeout: 30s
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Database Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+database:
+  url: postgres://aegion:aegion@localhost:5432/aegion?sslmode=disable
+  max_open_connections: 25
+  max_idle_connections: 10
+  connection_max_lifetime: 1h
+  connection_max_idle_time: 5m
+  migrate_only: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cache Configuration (Redis)
+# ─────────────────────────────────────────────────────────────────────────────
+cache:
+  enabled: true
+  url: redis://localhost:6379/0
+  key_prefix: "aegion:"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Secrets
+# Provide these via environment variables or *_FILE mounts.
+# ─────────────────────────────────────────────────────────────────────────────
+secrets:
+  cookie:
+    - ${AEGION_SECRETS_COOKIE}
+  cipher:
+    - ${AEGION_SECRETS_CIPHER}
+  internal:
+    - ${AEGION_SECRETS_INTERNAL}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
+log:
+  level: debug
+  format: text  # text | json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap Operator
+# Created on first boot when no admin exists
+# Used only with -admin-bootstrap; placeholder password is blocked at runtime.
+# ─────────────────────────────────────────────────────────────────────────────
+operator:
+  email: admin@localhost
+  password: ${AEGION_OPERATOR_PASSWORD}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Courier (Email/SMS)
+# ─────────────────────────────────────────────────────────────────────────────
+courier:
+  smtp:
+    host: localhost
+    port: 1025
+    from_address: noreply@aegion.local
+    from_name: Aegion
+    # No auth for Mailpit
+    auth:
+      enabled: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sessions
+# ─────────────────────────────────────────────────────────────────────────────
+sessions:
+  cookie:
+    name: aegion_session
+    path: /
+    same_site: lax
+    secure: false  # Set true in production
+    http_only: true
+  lifespan: 24h
+  idle_timeout: 2h
+  remember_me_lifespan: 720h
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Identity Schemas
+# ─────────────────────────────────────────────────────────────────────────────
+identity:
+  default_schema: default
+  schemas:
+    - id: default
+      url: file:///config/schemas/default.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security Settings
+# ─────────────────────────────────────────────────────────────────────────────
+security:
+  account_enumeration_mitigation: true
+  
+  rate_limits:
+    login:
+      requests: 20
+      period: 1m
+    registration:
+      requests: 10
+      period: 1h
+    email_delivery:
+      requests: 10
+      period: 1h
+    
+  brute_force:
+    max_attempts: 10
+    lockout_duration: 15m
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Analytics Module
+# ─────────────────────────────────────────────────────────────────────────────
+analytics:
+  enabled: true
+  
+  security:
+    enabled: true
+    rbac:
+      enabled: true
+      default_role: user
+    encryption:
+      enabled: true
+      algorithm: aes256
+      key_rotation_days: 90
+    rate_limiting:
+      enabled: true
+      requests_per_minute: 1000
+      endpoints:
+        export: 60
+        query: 500
+    audit:
+      enabled: true
+      retention_days: 365
+    query_validation:
+      max_complexity: 1000
+      max_recursion_depth: 10
+      max_fields: 100
+  
+  duckdb:
+    # Path to the DuckDB database file (use ":memory:" for in-memory)
+    path: analytics.duckdb
+    # Maximum memory in MB for DuckDB to use
+    max_memory: 4096
+    # Number of threads DuckDB will use
+    threads: 4
+    # Connection pool size for concurrent queries
+    connection_pool_size: 10
+    # Health check interval for connections
+    health_check_interval: 30s
+    # Create schema on startup
+    initialize_on_startup: true
+    
+    # Performance tuning settings
+    performance:
+      # Query execution timeout in seconds
+      query_timeout_seconds: 30
+      # Maximum concurrent queries allowed
+      max_concurrent_queries: 50
+      # Explain plan threshold - use explain for queries taking longer than this (ms)
+      explain_threshold_ms: 5000
+      # Query result caching
+      caching_enabled: true
+      # Cache TTL in minutes
+      cache_ttl_minutes: 15
+      # Maximum cache size in MB
+      cache_max_size_mb: 512
+      # Garbage collection interval in milliseconds
+      gc_interval_ms: 300000
+      # Batch sync size for bulk operations
+      sync_batch_size: 1000
+      # Sync flush interval in milliseconds
+      sync_flush_interval_ms: 5000
+      # Export batch size for bulk exports
+      export_batch_size: 10000
+      # Webhook event batch size
+      webhook_batch_size: 100
+  
+  storage:
+    # Storage backend type: local, s3, iceberg, k8s
+    type: local
+    
+    # Local storage configuration
+    local_path: ./analytics_data
+    
+    # S3 storage configuration (used when type is "s3")
+    s3:
+      bucket: analytics
+      region: us-east-1
+      prefix: duckdb
+      endpoint_url: ${AEGION_ANALYTICS_S3_ENDPOINT_URL:-}
+      use_path_style: false
+      access_key_id: ${AEGION_ANALYTICS_S3_ACCESS_KEY_ID:-}
+      secret_access_key: ${AEGION_ANALYTICS_S3_SECRET_ACCESS_KEY:-}
+    
+    # Iceberg storage configuration (used when type is "iceberg")
+    iceberg:
+      catalog_type: hive
+      warehouse_path: ./iceberg_warehouse
+      catalog_name: analytics
+      nessie_uri: ${AEGION_ANALYTICS_NESSIE_URI:-}
+    
+    # Kubernetes storage configuration (used when type is "k8s")
+    k8s:
+      pvc_name: analytics-storage
+      mount_path: /data/analytics
+      storage_class: standard
+      size: 10Gi
+    
+    # Failover backends - try these in order if primary fails
+    failover_backends: []
+    # Example:
+    # failover_backends:
+    #   - type: s3
+    #     s3:
+    #       bucket: analytics-backup
+    #       region: us-west-2
+  
+  sync:
+    # Enable syncing from PostgreSQL
+    enabled: false
+    # List of active strategies: real_time, batch, async (can have multiple)
+    strategies: []
+    
+    # Real-time CDC/trigger sync configuration
+    real_time:
+      enabled: false
+      # Batch events before flushing
+      batch_size: 100
+      # Maximum time to wait before flushing batched events (ms)
+      flush_interval_ms: 5000
+      # Maximum retry attempts for failed events
+      max_retries: 3
+      # Initial backoff for retries (exponential backoff, ms)
+      retry_backoff_ms: 100
+    
+    # Batch scheduler sync configuration
+    batch:
+      enabled: false
+      # Cron-like interval (e.g., "1h", "1d", "@hourly", "@daily")
+      interval: 1h
+      # Start time for first batch (e.g., "02:00" for 2 AM UTC)
+      start_time: "02:00"
+      # Tables to include in batch sync (if empty, all tables)
+      tables: []
+      # Records per batch
+      batch_size: 1000
+      # Internal chunk size for bulk inserts
+      chunk_size: 100
+    
+    # Message queue based async sync configuration
+    async:
+      enabled: false
+      # Broker type: kafka, rabbitmq, redis, memory
+      broker: memory
+      # Topic or queue name
+      topic: analytics-events
+      # Number of partitions (for Kafka-style brokers)
+      partitions: 3
+      # Consumer group for coordinated consumption
+      consumer_group: aegion-analytics
+      # Number of concurrent worker threads
+      worker_count: 4
+      # Initial backoff for retries (exponential backoff, ms)
+      retry_backoff_ms: 1000
+      # Maximum retry attempts
+      max_retries: 5
+      # Broker-specific configuration (JSON for flexibility)
+      broker_config: {}
+
+  webhooks:
+    # Enable webhook system for real-time event notifications
+    enabled: true
+    # Maximum webhooks per user
+    max_per_user: 50
+    # Maximum retry attempts for webhook delivery
+    max_retries: 5
+    # Initial retry backoff in milliseconds (exponential backoff)
+    retry_backoff_base_ms: 1000
+    # HTTP request timeout in seconds
+    timeout_seconds: 30
+    # Delivery queue batch size
+    batch_size: 100
+    # Concurrent delivery workers
+    worker_threads: 10
+    # How long to keep delivery history in days (Dead Letter Queue retention)
+    store_delivery_history_days: 30
+  
+  retention:
+    enabled: true
+    # Default retention policy: tiered, archive, delete
+    default_policy: tiered
+    # Default TTL for hot tier (days)
+    hot_ttl_days: 7
+    # Default TTL for warm tier (days)
+    warm_ttl_days: 90
+    # Default TTL for cold tier (days)
+    cold_ttl_days: 730
+    # How often to run archival jobs (e.g., "24h", "@midnight")
+    archival_interval: 24h
+    # How often to run cleanup jobs (e.g., "168h" for weekly)
+    cleanup_interval: 168h
+    # How often to re-tier data between tiers (e.g., "6h")
+    tiering_interval: 6h
+    # Category-specific retention overrides
+    categories:
+      audit_events:
+        hot_days: 30
+        warm_days: 180
+        cold_days: 730
+      authentication:
+        hot_days: 14
+        warm_days: 60
+        cold_days: 365
+
+  rest:
+    # Enable REST API for analytics
+    enabled: true
+    # Base endpoint path
+    endpoint: /api/v1/analytics
+    # Query execution timeout in seconds
+    query_timeout_seconds: 30
+    # Rate limit in requests per minute
+    rate_limit_per_minute: 100
+    # Maximum page size for list results
+    max_page_size: 1000
+    # Default page size for list results
+    default_page_size: 50
+    # CORS configuration for REST API
+    cors:
+      enabled: true
+      allowed_origins:
+        - http://localhost:3000
+        - http://localhost:5173
+      allowed_methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      allowed_headers:
+        - Content-Type
+        - Authorization
+      allow_credentials: true
+      max_age: 3600
+
+  graphql:
+    # Enable GraphQL API for analytics
+    enabled: true
+    # GraphQL endpoint path
+    endpoint: /api/v1/graphql
+    # Enable schema introspection
+    introspection: true
+    # Enable GraphQL Playground UI
+    playground: true
+    # Maximum query depth to prevent deeply nested queries
+    max_query_depth: 10
+    # Maximum query complexity score
+    max_query_complexity: 1000
+    # Query execution timeout in seconds
+    query_timeout_seconds: 30
+    # Rate limit in requests per minute
+    rate_limit_per_minute: 100
+
+  grpc:
+    # Enable gRPC API for analytics
+    enabled: true
+    # gRPC server port
+    port: 50051
+    # Maximum concurrent streams per connection
+    max_concurrent_streams: 100
+    # Keepalive ping interval in seconds
+    keepalive_time_seconds: 20
+    # Keepalive ping timeout in seconds
+    keepalive_timeout_seconds: 10
+    # Maximum idle time for connections in seconds
+    max_connection_idle_seconds: 300
+    # Require service authentication
+    enable_auth: true
+    # Enable request/response logging
+    enable_logging: true
+    # Enable OpenTelemetry tracing
+    enable_tracing: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module Enable Flags
+# ─────────────────────────────────────────────────────────────────────────────
+password:
+  enabled: true
+  min_length: 8
+  require_uppercase: false
+  require_lowercase: false
+  require_number: false
+  require_special: false
+  hibp_enabled: true
+  hibp_host: ${AEGION_PASSWORD_HIBP_HOST:-api.pwnedpasswords.com}
+  hibp_timeout: ${AEGION_PASSWORD_HIBP_TIMEOUT:-5s}
+  hibp_ignore_network_errors: ${AEGION_PASSWORD_HIBP_IGNORE_NETWORK_ERRORS:-true}
+  hibp_min_breach_count: ${AEGION_PASSWORD_HIBP_MIN_BREACH_COUNT:-1}
+  history_count: 5
+
+magic_link:
+  enabled: true
+  code_length: 6
+  code_charset: "0123456789"
+  link_lifespan: 15m
+  code_lifespan: 15m
+  rate_limit: 5
+  rate_window: 1h
+  recovery_rate_limit: 3
+
+admin:
+  enabled: true
+  path: /aegion
+  session_lifespan: 4h
+  default_page_size: 20
+  max_page_size: 100
+  api_key_prefix: "aegion_"
+  api_key_lookup_prefix_len: 12
+  api_key_entropy_bytes: 32
+  scim:
+    enabled: true
+    base_path: ${AEGION_ADMIN_SCIM_BASE_PATH:-/scim/v2}
+    token_prefix: ${AEGION_ADMIN_SCIM_TOKEN_PREFIX:-aegion_scim_}
+    token_lookup_prefix_len: ${AEGION_ADMIN_SCIM_TOKEN_LOOKUP_PREFIX_LEN:-12}
+    token_entropy_bytes: ${AEGION_ADMIN_SCIM_TOKEN_ENTROPY_BYTES:-32}
+    default_page_size: ${AEGION_ADMIN_SCIM_DEFAULT_PAGE_SIZE:-20}
+    max_page_size: ${AEGION_ADMIN_SCIM_MAX_PAGE_SIZE:-1000}
+    token_last_used_update_timeout: ${AEGION_ADMIN_SCIM_TOKEN_LAST_USED_UPDATE_TIMEOUT:-2s}
+
+policy:
+  enabled: false
+  default_model: ${AEGION_POLICY_DEFAULT_MODEL:-rbac}
+  rbac:
+    enabled: true
+  abac:
+    enabled: false
+  rebac:
+    enabled: false
+
+proxy:
+  enabled: false
+  upstream_timeout: ${AEGION_PROXY_UPSTREAM_TIMEOUT:-30s}
+  preserve_host: ${AEGION_PROXY_PRESERVE_HOST:-true}
+  trust_forwarded_headers: ${AEGION_PROXY_TRUST_FORWARDED_HEADERS:-false}
+  strip_inbound_identity_headers: ${AEGION_PROXY_STRIP_IDENTITY_HEADERS:-true}
+  identity_signing_secret: ${AEGION_PROXY_IDENTITY_SIGNING_SECRET:-}
+  identity_signature_header: ${AEGION_PROXY_IDENTITY_SIGNATURE_HEADER:-X-Aegion-Signature}
+  signed_identity_headers:
+    - X-User-ID
+    - X-User-Session-ID
+    - X-User-AAL

@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package aegion.core.events;
+
+option go_package = "github.com/aegion/aegion/internal/proto/core";
+
+// EventBusService handles the internal event bus for async communication.
+// Modules publish and subscribe to domain events.
+service EventBusService {
+  // Publish an event to the bus
+  rpc Publish(PublishRequest) returns (PublishResponse);
+  
+  // Subscribe to events (server streaming)
+  rpc Subscribe(SubscribeRequest) returns (stream Event);
+  
+  // Acknowledge event delivery (for at-least-once semantics)
+  rpc Acknowledge(AcknowledgeRequest) returns (AcknowledgeResponse);
+}
+
+message PublishRequest {
+  // Event type (e.g., "identity.created", "session.revoked")
+  string event_type = 1;
+  
+  // Source module publishing the event
+  string source_module = 2;
+  
+  // Entity type (e.g., "identity", "session")
+  string entity_type = 3;
+  
+  // Entity ID
+  string entity_id = 4;
+  
+  // Event payload (JSON encoded)
+  bytes payload = 5;
+  
+  // Additional metadata
+  map<string, string> metadata = 6;
+}
+
+message PublishResponse {
+  // Event ID assigned by the bus
+  string event_id = 1;
+  
+  // Whether publish succeeded
+  bool success = 2;
+  
+  // Error message if failed
+  string error = 3;
+}
+
+message SubscribeRequest {
+  // Module name subscribing
+  string subscriber = 1;
+  
+  // Event types to subscribe to (empty = all)
+  repeated string event_types = 2;
+  
+  // Entity types to filter by (empty = all)
+  repeated string entity_types = 3;
+  
+  // Resume from this event ID (for reconnection)
+  string resume_from = 4;
+}
+
+message Event {
+  // Unique event ID
+  string id = 1;
+  
+  // Event type
+  string event_type = 2;
+  
+  // Source module
+  string source_module = 3;
+  
+  // Entity type
+  string entity_type = 4;
+  
+  // Entity ID
+  string entity_id = 5;
+  
+  // Identity ID (if applicable)
+  string identity_id = 6;
+  
+  // Event payload (JSON encoded)
+  bytes payload = 7;
+  
+  // Event metadata
+  map<string, string> metadata = 8;
+  
+  // When the event occurred
+  int64 occurred_at = 9;
+  
+  // Delivery attempt number
+  int32 attempt = 10;
+}
+
+message AcknowledgeRequest {
+  // Subscriber module
+  string subscriber = 1;
+  
+  // Event ID to acknowledge
+  string event_id = 2;
+  
+  // Whether processing succeeded
+  bool success = 3;
+  
+  // Error message if processing failed
+  string error = 4;
+}
+
+message AcknowledgeResponse {
+  // Whether acknowledge was recorded
+  bool success = 1;
+}
+
+// Common event types (documentation, not enforced)
+// 
+// Identity events:
+//   identity.created     - New identity created
+//   identity.updated     - Identity traits or metadata changed
+//   identity.suspended   - Identity suspended (revoke tokens/sessions)
+//   identity.deleted     - Identity deleted (cleanup all data)
+//   identity.state_changed - State transition (active/inactive/banned)
+//
+// Session events:
+//   session.created      - New session issued
+//   session.updated      - Session AAL upgraded (step-up MFA)
+//   session.revoked      - Session explicitly revoked
+//   session.expired      - Session reached TTL
+//
+// Authentication events:
+//   auth.login_success   - Successful authentication
+//   auth.login_failed    - Failed authentication attempt
+//   auth.mfa_enrolled    - MFA factor enrolled
+//   auth.mfa_verified    - MFA challenge completed
+//   auth.password_changed - Password changed
+//   auth.recovery_started - Recovery flow initiated
+//
+// Admin events:
+//   admin.action         - Any admin mutation (with before/after state)
+//
+// System events:
+//   key.rotated          - Signing or encryption key rotated
+//   config.changed       - System configuration changed

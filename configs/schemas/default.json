@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Default Identity Schema",
+  "type": "object",
+  "properties": {
+    "traits": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "title": "Email",
+          "aegion.credentials": {
+            "password": {
+              "identifier": true
+            }
+          },
+          "aegion.verification": {
+            "via": "email"
+          },
+          "aegion.recovery": {
+            "via": "email"
+          }
+        },
+        "name": {
+          "type": "object",
+          "properties": {
+            "first": {
+              "type": "string",
+              "title": "First Name",
+              "maxLength": 100
+            },
+            "last": {
+              "type": "string",
+              "title": "Last Name",
+              "maxLength": 100
+            }
+          }
+        }
+      },
+      "required": ["email"],
+      "additionalProperties": false
+    }
+  }
+}
