@@ -179,11 +179,13 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	clientID := getClientID(r)
 	if !s.rateLimiter.AllowRequest(r.Context(), clientID) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"errors": []map[string]string{
 				{"message": "rate limit exceeded"},
 			},
-		})
+		}); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to encode rate limit response")
+		}
 		return
 	}
 
@@ -191,11 +193,13 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	var req GraphQLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 			"errors": []map[string]string{
 				{"message": fmt.Sprintf("invalid request: %v", err)},
 			},
-		})
+		}); encErr != nil {
+			s.logger.Error().Err(encErr).Msg("Failed to encode error response")
+		}
 		return
 	}
 
@@ -205,36 +209,42 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// Validate query depth
 	if depth, err := s.complexityAnalyzer.ValidateDepth(req.Query, s.maxQueryDepth); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(&ExecutionResult{
+		if encErr := json.NewEncoder(w).Encode(&ExecutionResult{
 			Errors: []*GraphQLError{
 				{
 					Message: fmt.Sprintf("query depth exceeded: %d > %d", depth, s.maxQueryDepth),
 				},
 			},
-		})
+		}); encErr != nil {
+			s.logger.Error().Err(encErr).Msg("Failed to encode depth error response")
+		}
 		return
 	}
 
 	// Validate query complexity
 	if complexity, err := s.complexityAnalyzer.AnalyzeComplexity(req.Query); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(&ExecutionResult{
+		if encErr := json.NewEncoder(w).Encode(&ExecutionResult{
 			Errors: []*GraphQLError{
 				{
 					Message: fmt.Sprintf("query complexity invalid: %v", err),
 				},
 			},
-		})
+		}); encErr != nil {
+			s.logger.Error().Err(encErr).Msg("Failed to encode complexity error response")
+		}
 		return
 	} else if complexity > s.maxQueryComplexity {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(&ExecutionResult{
+		if encErr := json.NewEncoder(w).Encode(&ExecutionResult{
 			Errors: []*GraphQLError{
 				{
 					Message: fmt.Sprintf("query complexity exceeded: %d > %d", complexity, s.maxQueryComplexity),
 				},
 			},
-		})
+		}); encErr != nil {
+			s.logger.Error().Err(encErr).Msg("Failed to encode complexity error response")
+		}
 		return
 	}
 
@@ -269,7 +279,9 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 
 	// Write response
 	w.Header().Set("X-Execution-Time-Ms", fmt.Sprintf("%d", executionTimeMs))
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to encode query result")
+	}
 }
 
 // HandlePlayground handles GET requests for GraphQL Playground.
@@ -288,11 +300,13 @@ func (s *Server) HandlePlayground(w http.ResponseWriter, r *http.Request) {
 func (s *Server) HandleIntrospection(w http.ResponseWriter, r *http.Request) {
 	if !s.enableIntrospection {
 		w.WriteHeader(http.StatusForbidden)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"errors": []map[string]string{
 				{"message": "introspection disabled"},
 			},
-		})
+		}); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to encode introspection disabled response")
+		}
 		return
 	}
 
@@ -300,20 +314,24 @@ func (s *Server) HandleIntrospection(w http.ResponseWriter, r *http.Request) {
 	schema, err := s.schemaBuilder.Build(r.Context())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 			"errors": []map[string]string{
 				{"message": fmt.Sprintf("failed to build schema: %v", err)},
 			},
-		})
+		}); encErr != nil {
+			s.logger.Error().Err(encErr).Msg("Failed to encode schema error response")
+		}
 		return
 	}
 
 	// Return schema as introspection result
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": map[string]interface{}{
 			"__schema": parseSchema(schema),
 		},
-	})
+	}); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to encode introspection result")
+	}
 }
 
 // HandleHealth handles health check requests.
@@ -325,18 +343,22 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	// Check resolver health
 	if s.resolver == nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "down",
 			"ready":  false,
-		})
+		}); err != nil {
+			s.logger.Error().Err(err).Msg("Failed to encode health response")
+		}
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "up",
 		"ready":  true,
 		"time":   time.Now(),
-	})
+	}); err != nil {
+		s.logger.Error().Err(err).Msg("Failed to encode health response")
+	}
 }
 
 // RegisterRoutes registers GraphQL routes on the given HTTP router.

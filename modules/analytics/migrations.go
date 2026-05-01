@@ -66,7 +66,9 @@ func RunMigrations(ctx context.Context, db *sql.DB) error {
 
 		start := time.Now()
 		if _, err := tx.ExecContext(ctx, upSQL); err != nil {
-			tx.Rollback()
+			if rbErr := tx.Rollback(); rbErr != nil {
+				return fmt.Errorf("migration %s failed: %w; rollback error: %v", version, err, rbErr)
+			}
 			return fmt.Errorf("migration %s failed: %w", version, err)
 		}
 
@@ -75,7 +77,9 @@ func RunMigrations(ctx context.Context, db *sql.DB) error {
 			"INSERT INTO schema_migrations (version, type, execution_time) VALUES ($1, $2, $3)",
 			version, "up", duration,
 		); err != nil {
-			tx.Rollback()
+			if rbErr := tx.Rollback(); rbErr != nil {
+				return fmt.Errorf("migration %s insert failed: %w; rollback error: %v", version, err, rbErr)
+			}
 			return err
 		}
 
@@ -119,12 +123,16 @@ func RollbackMigration(ctx context.Context, db *sql.DB) error {
 	}
 
 	if _, err := tx.ExecContext(ctx, downSQL); err != nil {
-		tx.Rollback()
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("rollback %s failed: %w; rollback error: %v", version, err, rbErr)
+		}
 		return fmt.Errorf("rollback %s failed: %w", version, err)
 	}
 
 	if _, err := tx.ExecContext(ctx, "DELETE FROM schema_migrations WHERE version = $1", version); err != nil {
-		tx.Rollback()
+		if rbErr := tx.Rollback(); rbErr != nil {
+			return fmt.Errorf("delete migration record %s failed: %w; rollback error: %v", version, err, rbErr)
+		}
 		return err
 	}
 

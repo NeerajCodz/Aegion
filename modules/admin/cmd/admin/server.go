@@ -270,40 +270,49 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if pinger == nil {
 		log.Error().Msg("No database connection configured")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
 			"error":  "database not configured",
-		})
+		}); err != nil {
+			log.Error().Err(err).Msg("Failed to encode health response")
+		}
 		return
 	}
 
 	if err := pinger.Ping(ctx); err != nil {
 		log.Error().Err(err).Msg("Database health check failed")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		if encErr := json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
 			"error":  "database unavailable",
-		})
+		}); encErr != nil {
+			log.Error().Err(encErr).Msg("Failed to encode health response")
+		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":    "ready",
 		"service":   "aegion-admin",
 		"database":  "connected",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
-	})
+	}); err != nil {
+		log.Error().Err(err).Msg("Failed to encode health response")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 	s.ensureRoutingAssets()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"base_path": s.adminPath,
-	})
+	}); err != nil {
+		log.Error().Err(err).Msg("Failed to encode config response")
+	}
 }
 
 func (s *Server) handleDashboardObservability(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +320,9 @@ func (s *Server) handleDashboardObservability(w http.ResponseWriter, r *http.Req
 	response := s.buildDashboardObservabilityResponse(r.Context())
 
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Error().Err(err).Msg("Failed to encode observability response")
+	}
 }
 
 func (s *Server) buildDashboardObservabilityResponse(ctx context.Context) dashboardObservabilityResponse {
@@ -646,7 +657,9 @@ func (s *Server) handleListSCIMTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"tokens": tokens})
+	if err := json.NewEncoder(w).Encode(map[string]any{"tokens": tokens}); err != nil {
+		log.Error().Err(err).Msg("Failed to encode SCIM tokens response")
+	}
 }
 
 func (s *Server) handleCreateSCIMToken(w http.ResponseWriter, r *http.Request) {
@@ -683,10 +696,12 @@ func (s *Server) handleCreateSCIMToken(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"token":       token,
 		"plain_token": plainToken,
-	})
+	}); err != nil {
+		log.Error().Err(err).Msg("Failed to encode SCIM token creation response")
+	}
 }
 
 func (s *Server) handleDeleteSCIMToken(w http.ResponseWriter, r *http.Request) {
@@ -710,7 +725,9 @@ func (s *Server) handleListSCIMMappings(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"mappings": mappings})
+	if err := json.NewEncoder(w).Encode(map[string]any{"mappings": mappings}); err != nil {
+		log.Error().Err(err).Msg("Failed to encode SCIM mappings response")
+	}
 }
 
 func (s *Server) handleCreateSCIMMapping(w http.ResponseWriter, r *http.Request) {
@@ -735,7 +752,9 @@ func (s *Server) handleCreateSCIMMapping(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{"mapping": mapping})
+	if err := json.NewEncoder(w).Encode(map[string]any{"mapping": mapping}); err != nil {
+		log.Error().Err(err).Msg("Failed to encode SCIM mapping creation response")
+	}
 }
 
 func (s *Server) handleUpdateSCIMMapping(w http.ResponseWriter, r *http.Request) {
@@ -767,7 +786,9 @@ func (s *Server) handleUpdateSCIMMapping(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"mapping": mapping})
+	if err := json.NewEncoder(w).Encode(map[string]any{"mapping": mapping}); err != nil {
+		log.Error().Err(err).Msg("Failed to encode SCIM mapping update response")
+	}
 }
 
 func (s *Server) handleDeleteSCIMMapping(w http.ResponseWriter, r *http.Request) {

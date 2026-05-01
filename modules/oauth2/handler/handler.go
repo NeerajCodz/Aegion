@@ -449,16 +449,22 @@ func (h *OAuth2Handler) HandleIntrospect(w http.ResponseWriter, r *http.Request)
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		// Log encoding error but can't write to response after WriteHeader
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 func writeError(w http.ResponseWriter, code, description string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"error":             code,
 		"error_description": description,
-	})
+	}); err != nil {
+		// Log encoding error but can't write to response after WriteHeader
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 func writeTokenError(w http.ResponseWriter, code, description string, status int) {
