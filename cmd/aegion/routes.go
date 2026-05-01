@@ -2499,7 +2499,9 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, message string, err error) {
@@ -2510,5 +2512,7 @@ func writeError(w http.ResponseWriter, status int, message string, err error) {
 		"error": message,
 		"code":  status,
 	}
-	_ = json.NewEncoder(w).Encode(resp)
+	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
