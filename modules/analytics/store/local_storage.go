@@ -102,7 +102,7 @@ func (l *LocalStorage) Read(ctx context.Context, path string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to resolve base path: %w", err)
 	}
 
-	if !strings.HasPrefix(absPath, absBase) {
+	if !strings.HasPrefix(absPath, absBase+string(filepath.Separator)) && absPath != absBase {
 		return nil, fmt.Errorf("path escapes base directory: %w", ErrInvalidArg)
 	}
 
@@ -146,7 +146,7 @@ func (l *LocalStorage) Delete(ctx context.Context, path string) error {
 		return fmt.Errorf("failed to resolve base path: %w", err)
 	}
 
-	if !strings.HasPrefix(absPath, absBase) {
+	if !strings.HasPrefix(absPath, absBase+string(filepath.Separator)) && absPath != absBase {
 		return fmt.Errorf("path escapes base directory: %w", ErrInvalidArg)
 	}
 

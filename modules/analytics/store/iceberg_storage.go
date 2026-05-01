@@ -302,7 +302,7 @@ func (i *IcebergStorage) resolvePath(path string) (string, error) {
 		return "", fmt.Errorf("failed to resolve root path: %w", err)
 	}
 
-	if !strings.HasPrefix(absPath, absRoot) {
+	if !strings.HasPrefix(absPath, absRoot+string(filepath.Separator)) && absPath != absRoot {
 		return "", fmt.Errorf("path escapes warehouse root: %w", ErrInvalidArg)
 	}
 
