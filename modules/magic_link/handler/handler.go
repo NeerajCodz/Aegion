@@ -467,7 +467,9 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, message st
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, message, status)
+	}
 }
 
 // writeSuccess writes a success response with a message.
@@ -476,5 +478,7 @@ func (h *Handler) writeSuccess(w http.ResponseWriter, status int, message string
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
