@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	fieldNameRe = regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`)
-	aliasRe     = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
+	fieldNameRe    = regexp.MustCompile(`^[a-zA-Z0-9_\.]+$`)
+	aliasRe        = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 	controlCharsRe = regexp.MustCompile(`[\r\n\t\x00-\x1f]`)
 )
 

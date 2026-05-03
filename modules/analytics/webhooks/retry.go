@@ -8,9 +8,9 @@ import (
 
 // RetryConfig holds retry configuration.
 type RetryConfig struct {
-	MaxRetries      int // Maximum number of retries
-	BackoffBaseMs   int // Base backoff in milliseconds (1000 = 1s)
-	TimeoutSeconds  int // HTTP request timeout
+	MaxRetries              int // Maximum number of retries
+	BackoffBaseMs           int // Base backoff in milliseconds (1000 = 1s)
+	TimeoutSeconds          int // HTTP request timeout
 	CircuitBreakerThreshold int // Failures before disabling webhook
 }
 

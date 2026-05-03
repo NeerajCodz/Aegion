@@ -194,4 +194,3 @@ func _AnalyticsService_ExportData_Handler(srv interface{}, stream grpc.ServerStr
 func _AnalyticsService_BatchQuery_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(AnalyticsServiceServer).BatchQuery(stream)
 }
-

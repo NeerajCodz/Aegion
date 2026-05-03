@@ -7,14 +7,14 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/rs/zerolog"
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestManagerExecuteQueryUsesCache(t *testing.T) {
 	db := openDashboardTestDB(t)
-	manager := NewManager(db, zerolog.Nop(), DashboardConfig{})
+	manager := NewManager(db, logger.TestLogger(), DashboardConfig{})
 
 	first, err := manager.ExecuteQuery(context.Background(), "query-1", &DashboardQuery{
 		ID:       "query-1",
@@ -41,7 +41,7 @@ func TestManagerExecuteQueryUsesCache(t *testing.T) {
 
 func TestListDashboardsParsesStoredConfig(t *testing.T) {
 	db := openDashboardTestDB(t)
-	manager := NewManager(db, zerolog.Nop(), DashboardConfig{})
+	manager := NewManager(db, logger.TestLogger(), DashboardConfig{})
 
 	configJSON, err := marshalJSON(map[string]interface{}{
 		"category":         "security",
@@ -50,13 +50,13 @@ func TestListDashboardsParsesStoredConfig(t *testing.T) {
 		"refresh_interval": 45,
 		"components": []Component{
 			{
-				ID:         "component-1",
-				Type:       "table",
-				Title:      "Security Events",
+				ID:          "component-1",
+				Type:        "table",
+				Title:       "Security Events",
 				Description: "Latest auth failures",
-				QueryID:    "security_failures",
-				TimeRange:  "7d",
-				Metrics:    []string{"count"},
+				QueryID:     "security_failures",
+				TimeRange:   "7d",
+				Metrics:     []string{"count"},
 				Config: map[string]interface{}{
 					"page_size": 25,
 				},

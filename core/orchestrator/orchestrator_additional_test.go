@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -128,7 +129,7 @@ func TestOrchestratorAdditionalWrapperFallbacksAndStatusBranches(t *testing.T) {
 func TestOrchestratorAdditionalRegistryAndRestartBranches(t *testing.T) {
 	ctx := context.Background()
 	o := newSeamedOrchestrator()
-	o.registry = registry.New(registry.DefaultConfig())
+	o.registry = registry.New(registry.DefaultConfig(), slog.Default())
 	o.modules["password"] = &moduleInstance{moduleID: "password", containerID: "container-1", state: StateRunning}
 	if err := o.StopModule(ctx, "password"); err != nil {
 		t.Fatalf("StopModule(registry deregister warning path) error = %v", err)

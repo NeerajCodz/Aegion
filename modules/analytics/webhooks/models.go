@@ -6,7 +6,7 @@ import (
 
 // EventFilter defines how a webhook filters events.
 type EventFilter struct {
-	EventTypes   []string               `json:"event_types"`   // Glob patterns like "auth.*", "user.created"
+	EventTypes   []string               `json:"event_types"` // Glob patterns like "auth.*", "user.created"
 	Categories   []string               `json:"categories,omitempty"`
 	CustomFilter map[string]interface{} `json:"custom_filter,omitempty"`
 }

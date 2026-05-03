@@ -3,19 +3,18 @@ package router
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/aegion/aegion/core/registry"
 )
 
 func TestHealthEndpoint(t *testing.T) {
-	r := New(DefaultConfig(), zerolog.Nop(), nil)
+	r := New(DefaultConfig(), slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 
@@ -34,7 +33,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestReadyEndpointWithoutRegistry(t *testing.T) {
-	r := New(DefaultConfig(), zerolog.Nop(), nil)
+	r := New(DefaultConfig(), slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
 
@@ -56,7 +55,7 @@ func TestReadyEndpointWithoutRegistry(t *testing.T) {
 }
 
 func TestReadyEndpointWithUnhealthyModules(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.Default())
 	_, _ = reg.Register(registry.RegistrationRequest{
 		ID:      "mod1",
 		Name:    "module",
@@ -66,7 +65,7 @@ func TestReadyEndpointWithUnhealthyModules(t *testing.T) {
 		},
 	})
 
-	r := New(DefaultConfig(), zerolog.Nop(), reg)
+	r := New(DefaultConfig(), slog.Default(), reg)
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -76,7 +75,7 @@ func TestReadyEndpointWithUnhealthyModules(t *testing.T) {
 }
 
 func TestMetricsEndpoint(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.Default())
 	_, _ = reg.Register(registry.RegistrationRequest{
 		ID:      "mod1",
 		Name:    "module",
@@ -87,7 +86,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	})
 	_ = reg.UpdateStatus("mod1", registry.StatusHealthy)
 
-	r := New(DefaultConfig(), zerolog.Nop(), reg)
+	r := New(DefaultConfig(), slog.Default(), reg)
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -127,7 +126,7 @@ func TestReadyEndpointWithDependencyFailure(t *testing.T) {
 	cfg.DatabaseChecker = NewDatabaseHealthChecker(func() error { return errors.New("database unavailable") })
 	cfg.CacheChecker = NewCacheHealthChecker(func() error { return nil })
 
-	r := New(cfg, zerolog.Nop(), nil)
+	r := New(cfg, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
 
@@ -168,7 +167,7 @@ func TestMetricsEndpointWithDependencyLatency(t *testing.T) {
 	})
 	cfg.CacheChecker = NewCacheHealthChecker(func() error { return errors.New("cache down") })
 
-	r := New(cfg, zerolog.Nop(), nil)
+	r := New(cfg, slog.Default(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
 

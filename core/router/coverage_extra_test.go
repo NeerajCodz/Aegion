@@ -5,18 +5,18 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/aegion/aegion/core/registry"
 )
 
 func TestReadyEndpoint_DegradedAndCancelledContext(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	_, _ = reg.Register(registry.RegistrationRequest{
@@ -37,7 +37,8 @@ func TestReadyEndpoint_DegradedAndCancelledContext(t *testing.T) {
 	})
 	_ = reg.UpdateStatus("mod-healthy", registry.StatusHealthy)
 
-	r := New(DefaultConfig(), zerolog.Nop(), reg)
+	nopLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	r := New(DefaultConfig(), nopLog, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rec := httptest.NewRecorder()
@@ -80,9 +81,10 @@ func TestHealthChecker_AdditionalBranches(t *testing.T) {
 }
 
 func TestModuleProxy_TimeoutAndForwardedProtoBranches(t *testing.T) {
+	nopLog := slog.New(slog.NewTextHandler(io.Discard, nil))
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "password",
-		Logger:   zerolog.Nop(),
+		Logger:   nopLog,
 	})
 
 	original := httptest.NewRequest(http.MethodGet, "https://gateway.local/module", nil)
@@ -109,7 +111,8 @@ func TestModuleProxy_TimeoutAndForwardedProtoBranches(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP_TransportErrorPath(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	nopLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reg := registry.New(registry.DefaultConfig(), nopLog)
 	defer reg.Stop()
 
 	_, _ = reg.Register(registry.RegistrationRequest{
@@ -126,7 +129,7 @@ func TestModuleProxyServeHTTP_TransportErrorPath(t *testing.T) {
 		Registry: reg,
 		ModuleID: "password",
 		Timeout:  200 * time.Millisecond,
-		Logger:   zerolog.Nop(),
+		Logger:   nopLog,
 	})
 
 	rec := httptest.NewRecorder()

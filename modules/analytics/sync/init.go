@@ -9,10 +9,10 @@ import (
 
 // InitParams holds parameters for initializing the sync layer.
 type InitParams struct {
-	Config   *analytics.Config
-	Logger   Logger
-	DB       DB
-	DuckDB   DuckDB
+	Config *analytics.Config
+	Logger Logger
+	DB     DB
+	DuckDB DuckDB
 }
 
 // InitializeSyncManager creates and initializes all configured sync strategies.

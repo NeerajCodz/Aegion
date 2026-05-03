@@ -11,23 +11,23 @@ import (
 
 // BatchSync implements scheduled batch synchronization.
 type BatchSync struct {
-	enabled        bool
-	interval       string
-	startTime      string
-	tables         []string
-	batchSize      int
-	chunkSize      int
-	logger         Logger
-	db             DB
-	duckdb         DuckDB
-	mu             sync.RWMutex
-	ticker         *time.Ticker
-	done           chan struct{}
-	isRunning      bool
-	errorCount     int
-	lastErrorMsg   *string
-	lastSyncAt     *time.Time
-	positions      map[string]*analytics.SyncPosition
+	enabled      bool
+	interval     string
+	startTime    string
+	tables       []string
+	batchSize    int
+	chunkSize    int
+	logger       Logger
+	db           DB
+	duckdb       DuckDB
+	mu           sync.RWMutex
+	ticker       *time.Ticker
+	done         chan struct{}
+	isRunning    bool
+	errorCount   int
+	lastErrorMsg *string
+	lastSyncAt   *time.Time
+	positions    map[string]*analytics.SyncPosition
 }
 
 // NewBatchSync creates a new batch sync strategy instance.

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 var (
@@ -83,6 +84,19 @@ func Run(cfg Config) error {
 	if cfg.Module == "" {
 		return errors.New("module name is required")
 	}
+
+	// Initialize standardized logger
+	logger.New(logger.Config{
+		Level:            os.Getenv("AEGION_LOG_LEVEL"),
+		Format:           os.Getenv("AEGION_LOG_FORMAT"),
+		ServiceName:      cfg.Module,
+		ServiceNamespace: os.Getenv("AEGION_LOG_NAMESPACE"),
+		Environment:      os.Getenv("AEGION_ENV"),
+		CloudRegion:      os.Getenv("AEGION_CLOUD_REGION"),
+		Developer:        os.Getenv("DEV_NAME"),
+		Version:          cfg.Version,
+	})
+
 	if err := rustRuntimeSelfCheck(); err != nil {
 		return fmt.Errorf("[%s] rust runtime self-check failed: %w", cfg.Module, err)
 	}

@@ -11,7 +11,7 @@ func TestSignature(t *testing.T) {
 	secret := "test_secret_12345"
 
 	payload := map[string]interface{}{
-		"id":        "event-123",
+		"id":         "event-123",
 		"event_type": "auth.login",
 	}
 
@@ -43,9 +43,9 @@ func TestSignature(t *testing.T) {
 // TestRetryPolicy tests exponential backoff calculation.
 func TestRetryPolicy(t *testing.T) {
 	config := RetryConfig{
-		MaxRetries:     5,
-		BackoffBaseMs:  1000,
-		TimeoutSeconds: 30,
+		MaxRetries:              5,
+		BackoffBaseMs:           1000,
+		TimeoutSeconds:          30,
 		CircuitBreakerThreshold: 5,
 	}
 
@@ -97,12 +97,12 @@ func TestMatcher(t *testing.T) {
 	matcher := NewMatcher(config)
 
 	testCases := []struct {
-		name     string
-		filter   EventFilter
+		name      string
+		filter    EventFilter
 		eventType string
-		category string
-		data     map[string]interface{}
-		expected bool
+		category  string
+		data      map[string]interface{}
+		expected  bool
 	}{
 		{
 			name: "exact event type match",

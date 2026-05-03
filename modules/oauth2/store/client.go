@@ -45,7 +45,11 @@ type Client struct {
 // CreateClient creates a new OAuth2 client.
 func (s *Store) CreateClient(ctx context.Context, client *Client) error {
 	if client.ID == "" {
-		client.ID = GenerateClientID()
+		var err error
+		client.ID, err = GenerateClientID()
+		if err != nil {
+			return err
+		}
 	}
 	now := nowUTC()
 	client.CreatedAt = now

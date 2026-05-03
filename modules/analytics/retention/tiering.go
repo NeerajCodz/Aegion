@@ -9,15 +9,15 @@ import (
 
 // TierTransition represents a data movement operation between tiers.
 type TierTransition struct {
-	ID              string    `json:"id"`
-	Category        string    `json:"category"`
-	FromTier        TierType  `json:"from_tier"`
-	ToTier          TierType  `json:"to_tier"`
-	RowsAffected    int64     `json:"rows_affected"`
-	StartedAt       time.Time `json:"started_at"`
-	CompletedAt     time.Time `json:"completed_at,omitempty"`
-	Status          string    `json:"status"` // pending, completed, failed
-	Error           string    `json:"error,omitempty"`
+	ID           string    `json:"id"`
+	Category     string    `json:"category"`
+	FromTier     TierType  `json:"from_tier"`
+	ToTier       TierType  `json:"to_tier"`
+	RowsAffected int64     `json:"rows_affected"`
+	StartedAt    time.Time `json:"started_at"`
+	CompletedAt  time.Time `json:"completed_at,omitempty"`
+	Status       string    `json:"status"` // pending, completed, failed
+	Error        string    `json:"error,omitempty"`
 }
 
 // TieringEngine manages tier transitions for data.
@@ -200,13 +200,13 @@ func (te *TieringEngine) GetDataDistribution(ctx context.Context, category strin
 
 // GetTierMetrics returns detailed metrics for each tier.
 type TierMetrics struct {
-	Tier              TierType `json:"tier"`
-	RowCount          int64    `json:"row_count"`
-	EstimatedSizeGB   float64  `json:"estimated_size_gb"`
-	OldestRecordAge   int      `json:"oldest_record_age_days"`
-	NewestRecordAge   int      `json:"newest_record_age_days"`
-	CompressionRatio  float64  `json:"compression_ratio,omitempty"`
-	EstimatedMonthlyCost float64 `json:"estimated_monthly_cost"`
+	Tier                 TierType `json:"tier"`
+	RowCount             int64    `json:"row_count"`
+	EstimatedSizeGB      float64  `json:"estimated_size_gb"`
+	OldestRecordAge      int      `json:"oldest_record_age_days"`
+	NewestRecordAge      int      `json:"newest_record_age_days"`
+	CompressionRatio     float64  `json:"compression_ratio,omitempty"`
+	EstimatedMonthlyCost float64  `json:"estimated_monthly_cost"`
 }
 
 // GetMetricsForCategory returns metrics for all tiers in a category.

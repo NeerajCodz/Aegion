@@ -10,30 +10,30 @@ import (
 type AuditEventType string
 
 const (
-	AuditEventQuery         AuditEventType = "query"
-	AuditEventExport        AuditEventType = "export"
-	AuditEventDashboard     AuditEventType = "dashboard"
-	AuditEventWebhook       AuditEventType = "webhook"
-	AuditEventAuth          AuditEventType = "auth"
-	AuditEventConfigChange  AuditEventType = "config_change"
-	AuditEventAccessDenied  AuditEventType = "access_denied"
-	AuditEventDelete        AuditEventType = "delete"
+	AuditEventQuery        AuditEventType = "query"
+	AuditEventExport       AuditEventType = "export"
+	AuditEventDashboard    AuditEventType = "dashboard"
+	AuditEventWebhook      AuditEventType = "webhook"
+	AuditEventAuth         AuditEventType = "auth"
+	AuditEventConfigChange AuditEventType = "config_change"
+	AuditEventAccessDenied AuditEventType = "access_denied"
+	AuditEventDelete       AuditEventType = "delete"
 )
 
 // AuditEvent represents an immutable audit log entry
 type AuditEvent struct {
-	ID          string
-	Timestamp   time.Time
-	UserID      string
-	EventType   AuditEventType
-	ResourceID  string
+	ID           string
+	Timestamp    time.Time
+	UserID       string
+	EventType    AuditEventType
+	ResourceID   string
 	ResourceType string
-	Action      string
-	Status      string // success, failure
-	ErrorMsg    string
-	Details     map[string]interface{}
-	IPAddress   string
-	UserAgent   string
+	Action       string
+	Status       string // success, failure
+	ErrorMsg     string
+	Details      map[string]interface{}
+	IPAddress    string
+	UserAgent    string
 }
 
 // AuditStore stores immutable audit events

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/aegion/aegion/internal/platform/logger"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
@@ -50,7 +52,7 @@ func mustRegisterModule(t *testing.T, reg *registry.Registry, req registry.Regis
 }
 
 func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	proxy := NewModuleProxy(ModuleProxyConfig{
@@ -59,7 +61,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		InternalToken: "internal-token",
 		SessionSecret: []byte("test-session-secret"),
 		Timeout:       10 * time.Millisecond,
-		Logger:        zerolog.Nop(),
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrModuleUnavailable) {
@@ -118,7 +120,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 		TrustForwardedHeaders:       false,
 		StripInboundIdentityHeaders: true,
 		ModuleID:                    "admin",
-		Logger:                      zerolog.Nop(),
+		Logger:                      logger.New(logger.Config{Level: "error"}).Logger,
 	})
 	proxy.now = func() time.Time {
 		return time.Unix(1742912521, 0).UTC()
@@ -210,7 +212,7 @@ func TestModuleProxyAddForwardedHeadersTrustForwardedHeaders(t *testing.T) {
 		TrustForwardedHeaders:       true,
 		IdentitySigningSecret:       []byte("identity-signing-secret"),
 		StripInboundIdentityHeaders: true,
-		Logger:                      zerolog.Nop(),
+		Logger:                      logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	original := httptest.NewRequest(http.MethodGet, "http://gateway.local/module/path", nil)
@@ -239,7 +241,7 @@ func TestModuleProxyDirectorPreserveHost(t *testing.T) {
 			ModuleID:      "admin",
 			PreserveHost:  true,
 			SessionSecret: []byte("module-secret"),
-			Logger:        zerolog.Nop(),
+			Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 		})
 
 		target, _ := url.Parse("http://module.local/base")
@@ -259,7 +261,7 @@ func TestModuleProxyDirectorPreserveHost(t *testing.T) {
 			ModuleID:      "admin",
 			PreserveHost:  false,
 			SessionSecret: []byte("module-secret"),
-			Logger:        zerolog.Nop(),
+			Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 		})
 
 		target, _ := url.Parse("http://module.local/base")
@@ -278,7 +280,7 @@ func TestModuleProxyDirectorPreserveHost(t *testing.T) {
 func TestModuleProxyErrorHandlers(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "password",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	t.Run("setup error with timeout", func(t *testing.T) {
@@ -324,7 +326,7 @@ func TestModuleProxyErrorHandlers(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +355,7 @@ func TestModuleProxyServeHTTP(t *testing.T) {
 		ModuleID:      "password",
 		InternalToken: "int-token",
 		Timeout:       2 * time.Second,
-		Logger:        zerolog.Nop(),
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	rec := httptest.NewRecorder()
@@ -373,7 +375,7 @@ func TestModuleProxyServeHTTP_ModuleUnavailable(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		Registry: nil,
 		ModuleID: "missing",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	rec := httptest.NewRecorder()
@@ -386,7 +388,7 @@ func TestModuleProxyServeHTTP_ModuleUnavailable(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP_PolicyDeny(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -417,7 +419,7 @@ func TestModuleProxyServeHTTP_PolicyDeny(t *testing.T) {
 		InternalToken: "int-token",
 		Timeout:       2 * time.Second,
 		PolicyChecker: checker,
-		Logger:        zerolog.Nop(),
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	rec := httptest.NewRecorder()
@@ -440,7 +442,7 @@ func TestModuleProxyServeHTTP_PolicyDeny(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP_PolicyError(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	mustRegisterModule(t, reg, registry.RegistrationRequest{
@@ -459,7 +461,7 @@ func TestModuleProxyServeHTTP_PolicyError(t *testing.T) {
 		ModuleID:      "policy-module",
 		Timeout:       2 * time.Second,
 		PolicyChecker: checker,
-		Logger:        zerolog.Nop(),
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	rec := httptest.NewRecorder()
@@ -473,7 +475,7 @@ func TestModuleProxyServeHTTP_PolicyError(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP_PolicyRequiredWithoutChecker(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -495,7 +497,7 @@ func TestModuleProxyServeHTTP_PolicyRequiredWithoutChecker(t *testing.T) {
 		Registry:      reg,
 		ModuleID:      "policy-required",
 		RequirePolicy: true,
-		Logger:        zerolog.Nop(),
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	rec := httptest.NewRecorder()
@@ -511,7 +513,7 @@ func TestModuleProxyServeHTTP_PolicyRequiredWithoutChecker(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP_PolicyNilDecision(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -533,7 +535,7 @@ func TestModuleProxyServeHTTP_PolicyNilDecision(t *testing.T) {
 		Registry:      reg,
 		ModuleID:      "policy-nil",
 		PolicyChecker: &stubPolicyChecker{returnNil: true},
-		Logger:        zerolog.Nop(),
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	rec := httptest.NewRecorder()

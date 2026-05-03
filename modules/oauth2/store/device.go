@@ -27,10 +27,18 @@ type DeviceCode struct {
 // CreateDeviceCode creates a new device code.
 func (s *Store) CreateDeviceCode(ctx context.Context, dc *DeviceCode) error {
 	if dc.DeviceCode == "" {
-		dc.DeviceCode = GenerateDeviceCode()
+		var err error
+		dc.DeviceCode, err = GenerateDeviceCode()
+		if err != nil {
+			return err
+		}
 	}
 	if dc.UserCode == "" {
-		dc.UserCode = GenerateUserCode()
+		var err error
+		dc.UserCode, err = GenerateUserCode()
+		if err != nil {
+			return err
+		}
 	}
 	dc.CreatedAt = nowUTC()
 	if dc.Status == "" {
