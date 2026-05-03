@@ -27,7 +27,7 @@ func TestLoggerMiddlewareStandardKeys(t *testing.T) {
 	var logBuf bytes.Buffer
 	// This is tricky because logger.New sets global default.
 	// Let's just use LogWideEvent directly to test it.
-	
+
 	l := &logger.Logger{
 		Logger: slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{
 			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -43,7 +43,7 @@ func TestLoggerMiddlewareStandardKeys(t *testing.T) {
 	}
 
 	ctx := observability.WithRequestIDForLogger(context.Background(), "ctx-request-id")
-	
+
 	l.LogWideEvent(ctx, "test-event", map[string]any{
 		"foo": "bar",
 	})

@@ -10,23 +10,23 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"log/slog"
-	)
+)
 
-	// Server handles GraphQL HTTP and WebSocket requests.
-	type Server struct {
-	logger                 *slog.Logger
-	resolver               *Resolver
-	schemaBuilder          *SchemaBuilder
-	maxQueryDepth          int
-	maxQueryComplexity     int
-	queryTimeoutSeconds    int
-	rateLimitPerMinute     int
-	enableIntrospection    bool
-	enablePlayground       bool
-	queryExecutor          QueryExecutor
-	requestLogger          RequestLogger
-	complexityAnalyzer     ComplexityAnalyzer
-	rateLimiter            RateLimiter
+// Server handles GraphQL HTTP and WebSocket requests.
+type Server struct {
+	logger              *slog.Logger
+	resolver            *Resolver
+	schemaBuilder       *SchemaBuilder
+	maxQueryDepth       int
+	maxQueryComplexity  int
+	queryTimeoutSeconds int
+	rateLimitPerMinute  int
+	enableIntrospection bool
+	enablePlayground    bool
+	queryExecutor       QueryExecutor
+	requestLogger       RequestLogger
+	complexityAnalyzer  ComplexityAnalyzer
+	rateLimiter         RateLimiter
 }
 
 // QueryExecutor executes parsed GraphQL queries.
@@ -54,8 +54,8 @@ type RateLimiter interface {
 
 // ExecutionResult represents the result of executing a GraphQL query.
 type ExecutionResult struct {
-	Data       interface{}   `json:"data,omitempty"`
-	Errors     []*GraphQLError `json:"errors,omitempty"`
+	Data       interface{}            `json:"data,omitempty"`
+	Errors     []*GraphQLError        `json:"errors,omitempty"`
 	Extensions map[string]interface{} `json:"extensions,omitempty"`
 }
 
@@ -369,7 +369,9 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 		router.HandleFunc(playgroundPath, s.HandlePlayground)
 		router.HandleFunc(introspectionPath, s.HandleIntrospection)
 		router.HandleFunc(healthPath, s.HandleHealth)
-	case interface{ HandleFunc(string, http.HandlerFunc) }:
+	case interface {
+		HandleFunc(string, http.HandlerFunc)
+	}:
 		router.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodPost:

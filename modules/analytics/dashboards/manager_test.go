@@ -50,13 +50,13 @@ func TestListDashboardsParsesStoredConfig(t *testing.T) {
 		"refresh_interval": 45,
 		"components": []Component{
 			{
-				ID:         "component-1",
-				Type:       "table",
-				Title:      "Security Events",
+				ID:          "component-1",
+				Type:        "table",
+				Title:       "Security Events",
 				Description: "Latest auth failures",
-				QueryID:    "security_failures",
-				TimeRange:  "7d",
-				Metrics:    []string{"count"},
+				QueryID:     "security_failures",
+				TimeRange:   "7d",
+				Metrics:     []string{"count"},
 				Config: map[string]interface{}{
 					"page_size": 25,
 				},

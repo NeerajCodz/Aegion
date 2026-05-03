@@ -203,12 +203,12 @@ func TestCapturePanic(t *testing.T) {
 		if r := recover(); r == nil {
 			t.Error("expected panic to be re-propagated")
 		}
-		
+
 		var data map[string]any
 		if err := json.Unmarshal(buf.Bytes(), &data); err != nil {
 			t.Fatalf("failed to unmarshal log: %v", err)
 		}
-		
+
 		if !strings.Contains(data["msg"].(string), "panic recovered") {
 			t.Errorf("expected msg to contain 'panic recovered', got %v", data["msg"])
 		}

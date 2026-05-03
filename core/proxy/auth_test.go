@@ -535,4 +535,3 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 		}
 	})
 }
-

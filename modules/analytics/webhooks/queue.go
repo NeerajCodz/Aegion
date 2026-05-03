@@ -22,11 +22,11 @@ type DeliveryJob struct {
 
 // Queue manages a queue of webhook delivery jobs.
 type Queue struct {
-	jobs     chan *DeliveryJob
-	maxSize  int
-	mu       sync.RWMutex
-	closed   bool
-	pending  map[string]*DeliveryJob
+	jobs    chan *DeliveryJob
+	maxSize int
+	mu      sync.RWMutex
+	closed  bool
+	pending map[string]*DeliveryJob
 }
 
 // NewQueue creates a new delivery queue.

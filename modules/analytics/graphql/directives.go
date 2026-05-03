@@ -11,9 +11,9 @@ import (
 
 // DirectiveContext holds context information for directive execution.
 type DirectiveContext struct {
-	FieldName     string
-	ParentType    string
-	Arguments     map[string]interface{}
+	FieldName      string
+	ParentType     string
+	Arguments      map[string]interface{}
 	IsSubscription bool
 }
 
@@ -223,7 +223,7 @@ func (dce *DirectiveChainExecutor) Execute(
 func RegisterBuiltInDirectives(registry *DirectiveRegistry) {
 	registry.RegisterDirective("auth", AuthDirectiveHandler)
 	registry.RegisterDirective("deprecated", DeprecatedDirectiveHandler)
-	
+
 	// Cache directive is special - needs registry reference
 	registry.RegisterDirective("cache", func(ctx context.Context, next func() error, dirCtx *DirectiveContext) error {
 		return registry.CacheDirectiveHandler(ctx, next, dirCtx)
@@ -332,11 +332,11 @@ func (dv *DirectiveValidator) ValidateDirectiveUsage(query string) error {
 }
 
 var (
-	directiveDefinitionRegex   = regexp.MustCompile(`directive\s+@([A-Za-z_][A-Za-z0-9_]*)\s*(\(([^)]*)\))?\s+on\s+([A-Z_\s|]+)`)
-	directiveArgumentRegex     = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z!\[\]_][A-Za-z0-9!\[\]_]*)(\s*=\s*([^,)]+))?`)
-	directiveUsageRegex        = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)(\(([^)]*)\))?`)
-	authDirectiveArgsRegex     = regexp.MustCompile(`^\s*required\s*:\s*(true|false)\s*$`)
-	cacheDirectiveArgsRegex    = regexp.MustCompile(`^\s*ttl\s*:\s*\d+\s*$`)
+	directiveDefinitionRegex     = regexp.MustCompile(`directive\s+@([A-Za-z_][A-Za-z0-9_]*)\s*(\(([^)]*)\))?\s+on\s+([A-Z_\s|]+)`)
+	directiveArgumentRegex       = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z!\[\]_][A-Za-z0-9!\[\]_]*)(\s*=\s*([^,)]+))?`)
+	directiveUsageRegex          = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)(\(([^)]*)\))?`)
+	authDirectiveArgsRegex       = regexp.MustCompile(`^\s*required\s*:\s*(true|false)\s*$`)
+	cacheDirectiveArgsRegex      = regexp.MustCompile(`^\s*ttl\s*:\s*\d+\s*$`)
 	deprecatedDirectiveArgsRegex = regexp.MustCompile(`^\s*reason\s*:\s*"[^"]*"\s*$`)
 )
 

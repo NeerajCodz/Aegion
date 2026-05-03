@@ -74,12 +74,12 @@ type RestAPIConfig struct {
 
 // CORSConfig holds CORS configuration
 type CORSConfig struct {
-	Enabled         bool     `yaml:"enabled"`
-	AllowedOrigins  []string `yaml:"allowed_origins"`
-	AllowedMethods  []string `yaml:"allowed_methods"`
-	AllowedHeaders  []string `yaml:"allowed_headers"`
-	AllowCredentials bool    `yaml:"allow_credentials"`
-	MaxAge          int      `yaml:"max_age"`
+	Enabled          bool     `yaml:"enabled"`
+	AllowedOrigins   []string `yaml:"allowed_origins"`
+	AllowedMethods   []string `yaml:"allowed_methods"`
+	AllowedHeaders   []string `yaml:"allowed_headers"`
+	AllowCredentials bool     `yaml:"allow_credentials"`
+	MaxAge           int      `yaml:"max_age"`
 }
 
 // SecurityConfig holds security-related configuration
@@ -118,9 +118,9 @@ type EncryptionConfig struct {
 
 // RateLimitingConfig holds rate limiting configuration
 type RateLimitingConfig struct {
-	Enabled            bool          `yaml:"enabled"`
-	RequestsPerMinute  int           `yaml:"requests_per_minute"`
-	Endpoints          map[string]int `yaml:"endpoints"`
+	Enabled           bool           `yaml:"enabled"`
+	RequestsPerMinute int            `yaml:"requests_per_minute"`
+	Endpoints         map[string]int `yaml:"endpoints"`
 }
 
 // AuditConfig holds audit logging configuration
@@ -163,14 +163,14 @@ type DuckDBConfig struct {
 // PerformanceConfig holds performance tuning settings
 type PerformanceConfig struct {
 	// Query execution settings
-	QueryTimeoutSeconds    int `yaml:"query_timeout_seconds"`
-	MaxConcurrentQueries   int `yaml:"max_concurrent_queries"`
-	ExplainThresholdMs     int `yaml:"explain_threshold_ms"`
+	QueryTimeoutSeconds  int `yaml:"query_timeout_seconds"`
+	MaxConcurrentQueries int `yaml:"max_concurrent_queries"`
+	ExplainThresholdMs   int `yaml:"explain_threshold_ms"`
 
 	// Caching settings
-	CachingEnabled bool `yaml:"caching_enabled"`
-	CacheTTLMinutes int `yaml:"cache_ttl_minutes"`
-	CacheMaxSizeMB int `yaml:"cache_max_size_mb"`
+	CachingEnabled  bool `yaml:"caching_enabled"`
+	CacheTTLMinutes int  `yaml:"cache_ttl_minutes"`
+	CacheMaxSizeMB  int  `yaml:"cache_max_size_mb"`
 
 	// Memory and threading
 	GCIntervalMs int `yaml:"gc_interval_ms"`
@@ -491,13 +491,13 @@ func DefaultConfig() *Config {
 				DefaultRole: "user",
 			},
 			Encryption: EncryptionConfig{
-				Enabled:          true,
-				Algorithm:        "aes256",
-				KeyRotationDays:  90,
+				Enabled:         true,
+				Algorithm:       "aes256",
+				KeyRotationDays: 90,
 			},
 			RateLimiting: RateLimitingConfig{
-				Enabled:            true,
-				RequestsPerMinute:  1000,
+				Enabled:           true,
+				RequestsPerMinute: 1000,
 				Endpoints: map[string]int{
 					"export": 60,
 				},
@@ -513,12 +513,12 @@ func DefaultConfig() *Config {
 			},
 		},
 		DuckDB: DuckDBConfig{
-			Path:                   "analytics.duckdb",
-			MaxMemory:              4096,
-			Threads:                4,
-			ConnectionPoolSize:     10,
-			HealthCheckInterval:    30 * time.Second,
-			InitializeOnStartup:    true,
+			Path:                "analytics.duckdb",
+			MaxMemory:           4096,
+			Threads:             4,
+			ConnectionPoolSize:  10,
+			HealthCheckInterval: 30 * time.Second,
+			InitializeOnStartup: true,
 		},
 		Storage: StorageConfig{
 			Type:      StorageTypeLocal,
@@ -528,11 +528,11 @@ func DefaultConfig() *Config {
 			Enabled:    false,
 			Strategies: []string{"batch"},
 			RealTime: RealTimeSyncConfig{
-				Enabled:        false,
-				BatchSize:      100,
+				Enabled:         false,
+				BatchSize:       100,
 				FlushIntervalMs: 5000,
-				MaxRetries:     3,
-				RetryBackoffMs: 100,
+				MaxRetries:      3,
+				RetryBackoffMs:  100,
 			},
 			Batch: BatchSyncConfig{
 				Enabled:   false,
@@ -561,12 +561,12 @@ func DefaultConfig() *Config {
 			MaxPageSize:         1000,
 			DefaultPageSize:     50,
 			CORS: CORSConfig{
-				Enabled:         true,
-				AllowedOrigins:  []string{"http://localhost:3000"},
-				AllowedMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-				AllowedHeaders:  []string{"Content-Type", "Authorization"},
+				Enabled:          true,
+				AllowedOrigins:   []string{"http://localhost:3000"},
+				AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+				AllowedHeaders:   []string{"Content-Type", "Authorization"},
 				AllowCredentials: true,
-				MaxAge:          3600,
+				MaxAge:           3600,
 			},
 		},
 		GraphQL: GraphQLAPIConfig{
@@ -601,14 +601,14 @@ func DefaultConfig() *Config {
 			StoreDeliveryHistoryDays: 30,
 		},
 		Retention: RetentionConfig{
-			Enabled:           true,
-			DefaultPolicy:     "tiered",
-			HotTTLDays:        7,
-			WarmTTLDays:       90,
-			ColdTTLDays:       730,
-			ArchivalInterval:  "24h",
-			CleanupInterval:   "168h",
-			TieringInterval:   "6h",
+			Enabled:          true,
+			DefaultPolicy:    "tiered",
+			HotTTLDays:       7,
+			WarmTTLDays:      90,
+			ColdTTLDays:      730,
+			ArchivalInterval: "24h",
+			CleanupInterval:  "168h",
+			TieringInterval:  "6h",
 			Categories: map[string]CategoryConfig{
 				"audit_events": {
 					HotDays:  30,

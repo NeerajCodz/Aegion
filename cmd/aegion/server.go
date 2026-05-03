@@ -756,13 +756,13 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 		defer func() {
 			// Use wide events pattern - one context-rich log per request
 			s.log.LogWideEvent(ctx, "HTTP request", map[string]any{
-				"http.method":       r.Method,
-				"http.path":         r.URL.Path,
-				"http.status":       ww.Status(),
-				"latency_ms":        time.Since(start).Milliseconds(),
-				"http.user_agent":   r.UserAgent(),
-				"http.remote_addr":  r.RemoteAddr,
-				"outcome":           map[bool]string{true: "success", false: "error"}[ww.Status() < 400],
+				"http.method":      r.Method,
+				"http.path":        r.URL.Path,
+				"http.status":      ww.Status(),
+				"latency_ms":       time.Since(start).Milliseconds(),
+				"http.user_agent":  r.UserAgent(),
+				"http.remote_addr": r.RemoteAddr,
+				"outcome":          map[bool]string{true: "success", false: "error"}[ww.Status() < 400],
 			})
 		}()
 

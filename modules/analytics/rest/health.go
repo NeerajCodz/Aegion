@@ -10,15 +10,15 @@ import (
 
 // HealthStatus represents the health status of the analytics service.
 type HealthStatus struct {
-	Status        string                 `json:"status"`
-	Timestamp     time.Time              `json:"timestamp"`
-	Version       string                 `json:"version"`
-	Uptime        float64                `json:"uptime"`
-	Services      map[string]interface{} `json:"services"`
-	Metrics       map[string]interface{} `json:"metrics"`
-	SyncLag       *int64                 `json:"sync_lag_ms,omitempty"`
-	CacheHitRate  float64                `json:"cache_hit_rate"`
-	QueryLatencyP95 int64                `json:"query_latency_p95_ms"`
+	Status          string                 `json:"status"`
+	Timestamp       time.Time              `json:"timestamp"`
+	Version         string                 `json:"version"`
+	Uptime          float64                `json:"uptime"`
+	Services        map[string]interface{} `json:"services"`
+	Metrics         map[string]interface{} `json:"metrics"`
+	SyncLag         *int64                 `json:"sync_lag_ms,omitempty"`
+	CacheHitRate    float64                `json:"cache_hit_rate"`
+	QueryLatencyP95 int64                  `json:"query_latency_p95_ms"`
 }
 
 // ReadinessStatus represents readiness check status.
@@ -98,7 +98,9 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	var syncLag *int64
 	if h.queries != nil {
 		// Query sync lag from store
-		if syncQB, ok := h.queries.(interface{ GetSyncLag(context.Context) (int64, error) }); ok {
+		if syncQB, ok := h.queries.(interface {
+			GetSyncLag(context.Context) (int64, error)
+		}); ok {
 			if lag, err := syncQB.GetSyncLag(ctx); err == nil {
 				syncLag = &lag
 			}
@@ -106,14 +108,14 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	}
 
 	healthStatus := HealthStatus{
-		Status:        status,
-		Timestamp:     time.Now(),
-		Version:       "1.0.0",
-		Uptime:        uptime,
-		Services:      services,
-		Metrics:       cacheMetrics,
-		SyncLag:       syncLag,
-		CacheHitRate:  extractFloat(cacheMetrics, "hit_rate", 0.0),
+		Status:          status,
+		Timestamp:       time.Now(),
+		Version:         "1.0.0",
+		Uptime:          uptime,
+		Services:        services,
+		Metrics:         cacheMetrics,
+		SyncLag:         syncLag,
+		CacheHitRate:    extractFloat(cacheMetrics, "hit_rate", 0.0),
 		QueryLatencyP95: int64(extractFloat(cacheMetrics, "query_latency_p95_ms", 0.0)),
 	}
 

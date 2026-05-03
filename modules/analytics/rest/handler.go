@@ -15,33 +15,33 @@ import (
 
 // Handler handles REST API requests for analytics
 type Handler struct {
-	logger  *slog.Logger
-	config  Config
-	queries QueryBuilder
-	exports ExportBuilder
-	cache   ResultCache
-	validator *Validator
+	logger         *slog.Logger
+	config         Config
+	queries        QueryBuilder
+	exports        ExportBuilder
+	cache          ResultCache
+	validator      *Validator
 	webhookManager WebhookManager
 }
 
 // Config holds REST API configuration
 type Config struct {
-	BasePath            string
-	RateLimit           int
-	QueryTimeoutSeconds int
+	BasePath              string
+	RateLimit             int
+	QueryTimeoutSeconds   int
 	ResultCacheTTLMinutes int
-	MaxPageSize         int
-	DefaultPageSize     int
+	MaxPageSize           int
+	DefaultPageSize       int
 }
 
 // HandlerDeps holds dependencies for the handler
 type HandlerDeps struct {
-	Logger  *slog.Logger
-	Config  Config
-	Queries QueryBuilder
-	Exports ExportBuilder
-	Cache   ResultCache
-	Validator *Validator
+	Logger         *slog.Logger
+	Config         Config
+	Queries        QueryBuilder
+	Exports        ExportBuilder
+	Cache          ResultCache
+	Validator      *Validator
 	WebhookManager WebhookManager
 }
 
@@ -86,12 +86,12 @@ func NewHandler(deps HandlerDeps) *Handler {
 		v = NewValidator()
 	}
 	return &Handler{
-		logger:    deps.Logger,
-		config:    deps.Config,
-		queries:   deps.Queries,
-		exports:   deps.Exports,
-		cache:     deps.Cache,
-		validator: v,
+		logger:         deps.Logger,
+		config:         deps.Config,
+		queries:        deps.Queries,
+		exports:        deps.Exports,
+		cache:          deps.Cache,
+		validator:      v,
 		webhookManager: deps.WebhookManager,
 	}
 }

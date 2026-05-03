@@ -27,8 +27,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
-	"github.com/aegion/aegion/internal/platform/logger"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/logger"
 	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"

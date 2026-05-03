@@ -14,14 +14,14 @@ type Builder struct {
 func NewBuilder(id string) *Builder {
 	return &Builder{
 		dashboard: &Dashboard{
-			ID:            id,
+			ID:              id,
 			RefreshInterval: 30,
-			Layout:        "grid-3col",
-			Public:        false,
-			Pinned:        false,
-			Components:    []Component{},
-			CreatedAt:     time.Now(),
-			UpdatedAt:     time.Now(),
+			Layout:          "grid-3col",
+			Public:          false,
+			Pinned:          false,
+			Components:      []Component{},
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
 		},
 	}
 }
@@ -156,8 +156,8 @@ func (b *Builder) AddTableComponent(id, title, queryID string) *Builder {
 		QueryID:   queryID,
 		TimeRange: "1d",
 		Config: map[string]interface{}{
-			"pageable":   true,
-			"page_size":  10,
+			"pageable":  true,
+			"page_size": 10,
 		},
 	}
 	return b.AddComponent(component)
@@ -303,13 +303,13 @@ type ComponentBuilder struct {
 func NewComponentBuilder(id, componentType string) *ComponentBuilder {
 	return &ComponentBuilder{
 		component: Component{
-			ID:        id,
-			Type:      componentType,
-			GridCol:   1,
-			GridRow:   1,
-			GridWidth: 1,
+			ID:         id,
+			Type:       componentType,
+			GridCol:    1,
+			GridRow:    1,
+			GridWidth:  1,
 			GridHeight: 1,
-			Config:    make(map[string]interface{}),
+			Config:     make(map[string]interface{}),
 		},
 	}
 }

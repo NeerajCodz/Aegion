@@ -60,11 +60,11 @@ type Store interface {
 // NewResolver creates a new GraphQL resolver.
 func NewResolver(logger *slog.Logger, store Store) *Resolver {
 	return &Resolver{
-		logger:       logger,
-		store:        store,
-		startTime:    time.Now(),
-		eventSubs:    make(map[string]chan *EventNode),
-		metricSubs:   make(map[string]chan *MetricNode),
+		logger:        logger,
+		store:         store,
+		startTime:     time.Now(),
+		eventSubs:     make(map[string]chan *EventNode),
+		metricSubs:    make(map[string]chan *MetricNode),
 		dashboardSubs: make(map[string]chan *DashboardNode),
 	}
 }

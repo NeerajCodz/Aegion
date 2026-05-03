@@ -78,27 +78,27 @@ func (c *Config) Validate() error {
 
 // Module represents the GraphQL module.
 type Module struct {
-	logger               *slog.Logger
-	config               *Config
-	server               *Server
-	directiveRegistry    *DirectiveRegistry
-	complexityAnalyzer   ComplexityAnalyzer
-	rateLimiter          RateLimiter
-	requestLogger        RequestLogger
-	queryExecutor        QueryExecutor
-	resolver             *Resolver
+	logger             *slog.Logger
+	config             *Config
+	server             *Server
+	directiveRegistry  *DirectiveRegistry
+	complexityAnalyzer ComplexityAnalyzer
+	rateLimiter        RateLimiter
+	requestLogger      RequestLogger
+	queryExecutor      QueryExecutor
+	resolver           *Resolver
 }
 
 // InitOptions holds options for initializing the GraphQL module.
 type InitOptions struct {
-	Logger               *slog.Logger
-	Config               *Config
-	Store                Store
-	DirectiveRegistry    *DirectiveRegistry
-	ComplexityAnalyzer   ComplexityAnalyzer
-	RateLimiter          RateLimiter
-	RequestLogger        RequestLogger
-	QueryExecutor        QueryExecutor
+	Logger             *slog.Logger
+	Config             *Config
+	Store              Store
+	DirectiveRegistry  *DirectiveRegistry
+	ComplexityAnalyzer ComplexityAnalyzer
+	RateLimiter        RateLimiter
+	RequestLogger      RequestLogger
+	QueryExecutor      QueryExecutor
 }
 
 // Initialize initializes the GraphQL module.
@@ -168,15 +168,15 @@ func Initialize(ctx context.Context, opts InitOptions) (*Module, error) {
 	)
 
 	module := &Module{
-		logger:              logger,
-		config:              opts.Config,
-		server:              server,
-		directiveRegistry:   directiveRegistry,
-		complexityAnalyzer:  complexityAnalyzer,
-		rateLimiter:         rateLimiter,
-		requestLogger:       requestLogger,
-		queryExecutor:       queryExecutor,
-		resolver:            resolver,
+		logger:             logger,
+		config:             opts.Config,
+		server:             server,
+		directiveRegistry:  directiveRegistry,
+		complexityAnalyzer: complexityAnalyzer,
+		rateLimiter:        rateLimiter,
+		requestLogger:      requestLogger,
+		queryExecutor:      queryExecutor,
+		resolver:           resolver,
 	}
 
 	logger.Info("GraphQL module initialized",
@@ -199,7 +199,6 @@ func (m *Module) Stop(ctx context.Context) error {
 	m.logger.Info("GraphQL module stopped")
 	return nil
 }
-
 
 // GetServer returns the GraphQL server.
 func (m *Module) GetServer() *Server {

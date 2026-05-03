@@ -70,7 +70,7 @@ func TestLoggingInterceptor_EmitsLine(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "ok", resp)
-	
+
 	// Verify the log output contains expected fields
 	var logData map[string]interface{}
 	if err := json.Unmarshal(buf.Bytes(), &logData); err == nil {
@@ -92,7 +92,7 @@ func TestStreamLoggingInterceptor_EmitsLine(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	
+
 	// Verify the log output contains expected fields
 	var logData map[string]interface{}
 	if err := json.Unmarshal(buf.Bytes(), &logData); err == nil {

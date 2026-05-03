@@ -74,7 +74,7 @@ func TestModuleProxyServeHTTP_PolicyAllowAdditionalBranches(t *testing.T) {
 		ModuleID:      "policy-allow",
 		InternalToken: "int-token",
 		PolicyChecker: checker,
-		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	sess := &session.Session{
@@ -112,7 +112,7 @@ func TestModuleProxyIdentityAndForwarded_AdditionalBranches(t *testing.T) {
 		ModuleID:              "module-a",
 		SignedIdentityHeaders: []string{"X-User-ID", "  ", "X-User-AAL"},
 		TrustForwardedHeaders: true,
-		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
+		Logger:                logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	sess := &session.Session{
@@ -195,4 +195,3 @@ func TestModuleProxyErrorAndEndpoint_AdditionalBranches(t *testing.T) {
 		t.Fatalf("expected endpoint URL parse error")
 	}
 }
-

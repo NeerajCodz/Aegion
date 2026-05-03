@@ -11,10 +11,10 @@ import (
 
 // InitParams holds parameters for initializing the REST API module
 type InitParams struct {
-	Config  Config
-	Logger  *slog.Logger
-	DB      Database
-	Validator *Validator
+	Config         Config
+	Logger         *slog.Logger
+	DB             Database
+	Validator      *Validator
 	WebhookManager WebhookManager
 }
 
@@ -61,12 +61,12 @@ func Initialize(params InitParams) (*Handler, error) {
 
 	// Create handler
 	handler := NewHandler(HandlerDeps{
-		Logger:  params.Logger,
-		Config:  params.Config,
-		Queries: queryBuilder,
-		Exports: exportBuilder,
-		Cache:   cache,
-		Validator: params.Validator,
+		Logger:         params.Logger,
+		Config:         params.Config,
+		Queries:        queryBuilder,
+		Exports:        exportBuilder,
+		Cache:          cache,
+		Validator:      params.Validator,
 		WebhookManager: params.WebhookManager,
 	})
 

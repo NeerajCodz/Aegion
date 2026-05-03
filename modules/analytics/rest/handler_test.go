@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/webhooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 // MockDatabase implements Database interface for testing
@@ -60,15 +60,15 @@ func newTestHandler(db Database) *Handler {
 }
 
 type mockWebhookManager struct {
-	registerFn           func(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
-	updateFn             func(ctx context.Context, userID, webhookID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
-	deleteFn             func(ctx context.Context, userID, webhookID string) error
-	listFn               func(ctx context.Context, userID string) ([]*analytics.Webhook, error)
-	getFn                func(ctx context.Context, webhookID string) (*analytics.Webhook, error)
-	testFn               func(ctx context.Context, webhookID string) (string, error)
-	getHistoryFn         func(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error)
-	getDeliveryFn        func(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error)
-	replayFn             func(ctx context.Context, deliveryID string) error
+	registerFn    func(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	updateFn      func(ctx context.Context, userID, webhookID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	deleteFn      func(ctx context.Context, userID, webhookID string) error
+	listFn        func(ctx context.Context, userID string) ([]*analytics.Webhook, error)
+	getFn         func(ctx context.Context, webhookID string) (*analytics.Webhook, error)
+	testFn        func(ctx context.Context, webhookID string) (string, error)
+	getHistoryFn  func(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error)
+	getDeliveryFn func(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error)
+	replayFn      func(ctx context.Context, deliveryID string) error
 }
 
 func (m *mockWebhookManager) RegisterWebhook(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error) {
@@ -826,4 +826,3 @@ func TestWriteWebhookError_Default(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
-

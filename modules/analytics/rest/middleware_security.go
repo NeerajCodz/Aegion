@@ -133,14 +133,14 @@ func AuditLoggingMiddleware(auditStore *store.AuditStore, log *logger.Logger) fu
 			}
 
 			event := store.AuditEvent{
-				ID:           generateID(),
-				Timestamp:    time.Now(),
-				UserID:       userID,
-				EventType:    eventType,
-				Action:       r.Method + " " + r.URL.Path,
-				Status:       status,
-				IPAddress:    r.RemoteAddr,
-				UserAgent:    r.Header.Get("User-Agent"),
+				ID:        generateID(),
+				Timestamp: time.Now(),
+				UserID:    userID,
+				EventType: eventType,
+				Action:    r.Method + " " + r.URL.Path,
+				Status:    status,
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
 				Details: map[string]interface{}{
 					"status_code":  lrw.statusCode,
 					"method":       r.Method,

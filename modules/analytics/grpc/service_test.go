@@ -314,8 +314,8 @@ func TestStreamEvents(t *testing.T) {
 	service := NewService(lgr, store, syncManager, config)
 
 	req := &pb.StreamEventsRequest{
-		Category:           "test",
-		IncludeHistorical:  true,
+		Category:          "test",
+		IncludeHistorical: true,
 	}
 
 	// Create a mock stream
@@ -339,7 +339,7 @@ func TestExportData(t *testing.T) {
 	service := NewService(lgr, store, syncManager, config)
 
 	req := &pb.ExportDataRequest{
-		Format:    pb.ExportFormat_JSON,
+		Format:     pb.ExportFormat_JSON,
 		MaxRecords: 100,
 	}
 
@@ -362,7 +362,7 @@ type mockServerStream struct {
 func (s *mockServerStream) SetHeader(md metadata.MD) error  { return nil }
 func (s *mockServerStream) SendHeader(md metadata.MD) error { return nil }
 func (s *mockServerStream) SetTrailer(md metadata.MD)       {}
-func (s *mockServerStream) Context() context.Context              { return s.ctx }
+func (s *mockServerStream) Context() context.Context        { return s.ctx }
 func (s *mockServerStream) SendMsg(m interface{}) error {
 	s.messages = append(s.messages, m)
 	return nil
@@ -393,4 +393,3 @@ func TestServer(t *testing.T) {
 	// Cleanup
 	_ = server.Stop(1 * time.Second)
 }
-

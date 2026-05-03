@@ -18,13 +18,13 @@ import (
 
 // MockStore implements the Store interface for testing.
 type MockStore struct {
-	events              []*analytics.Event
-	dashboards          []*analytics.Dashboard
-	queries             []*analytics.Query
-	metrics             []*analytics.Metric
-	webhooks            []*analytics.Webhook
-	shouldFailEventGet  bool
-	shouldFailDashGet   bool
+	events             []*analytics.Event
+	dashboards         []*analytics.Dashboard
+	queries            []*analytics.Query
+	metrics            []*analytics.Metric
+	webhooks           []*analytics.Webhook
+	shouldFailEventGet bool
+	shouldFailDashGet  bool
 }
 
 func NewMockStore() *MockStore {

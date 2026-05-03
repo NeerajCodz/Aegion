@@ -26,9 +26,9 @@ func TestDeliveryWorker_processJob_Success(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var (
-		mu                 sync.Mutex
-		saveDeliveryCalls  int
-		resetFailureCalls  int
+		mu                sync.Mutex
+		saveDeliveryCalls int
+		resetFailureCalls int
 	)
 
 	db := &fakeDB{
@@ -163,8 +163,8 @@ func TestDeliveryWorker_processJob_RetryPath_Requeues(t *testing.T) {
 
 func TestDeliveryWorker_processJob_DisabledMovesToDLQ(t *testing.T) {
 	var (
-		mu          sync.Mutex
-		dlqCalls    int
+		mu       sync.Mutex
+		dlqCalls int
 	)
 
 	db := &fakeDB{
@@ -229,9 +229,9 @@ func TestDeliveryWorker_processJob_CircuitBreakFinalFailureMovesToDLQ(t *testing
 	t.Cleanup(srv.Close)
 
 	var (
-		mu          sync.Mutex
-		dlqCalls    int
-		incCalls    int
+		mu       sync.Mutex
+		dlqCalls int
+		incCalls int
 	)
 
 	db := &fakeDB{

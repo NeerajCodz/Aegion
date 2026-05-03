@@ -477,12 +477,12 @@ func dashboardToProto(data map[string]interface{}) *pb.Dashboard {
 
 func healthStatusToProto(data map[string]interface{}, syncLag int64) *pb.HealthStatus {
 	return &pb.HealthStatus{
-		IsHealthy:       toBool(data["is_healthy"]),
-		Status:          toString(data["status"]),
-		Duckdb:          toBool(data["duckdb"]),
-		Storage:         toBool(data["storage"]),
-		Migrations:      toBool(data["migrations"]),
-		SyncLagSeconds:  syncLag,
+		IsHealthy:      toBool(data["is_healthy"]),
+		Status:         toString(data["status"]),
+		Duckdb:         toBool(data["duckdb"]),
+		Storage:        toBool(data["storage"]),
+		Migrations:     toBool(data["migrations"]),
+		SyncLagSeconds: syncLag,
 	}
 }
 

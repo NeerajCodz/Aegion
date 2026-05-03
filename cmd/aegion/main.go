@@ -182,8 +182,7 @@ func defaultMainDeps() mainDeps {
 					err = serveHTTP(httpServer)
 				}
 				if err != nil && err != http.ErrServerClosed {
-					log.Error("HTTP server failed", "error", err)
-					exitProcess(1)
+					fatalHTTPServerHook(log, "HTTP server failed", "error", err)
 				}
 			}()
 		},

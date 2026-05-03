@@ -100,3 +100,4 @@ modules/admin/spa/node_modules/flatted/golang/
 skills-lock.json
 github.com
 .venv
+.junie/

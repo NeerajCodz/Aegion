@@ -12,25 +12,25 @@ import (
 
 // AsyncSync implements message queue based async synchronization.
 type AsyncSync struct {
-	enabled        bool
-	broker         string
-	topic          string
-	consumerGroup  string
-	workerCount    int
-	maxRetries     int
-	retryBackoff   time.Duration
-	logger         Logger
-	db             DB
-	duckdb         DuckDB
-	mu             sync.RWMutex
-	eventQueue     chan *analytics.SyncEvent
-	done           chan struct{}
-	isRunning      bool
-	errorCount     int
-	warningCount   int
-	lastErrorMsg   *string
-	lastSyncAt     *time.Time
-	positions      map[string]*analytics.SyncPosition
+	enabled       bool
+	broker        string
+	topic         string
+	consumerGroup string
+	workerCount   int
+	maxRetries    int
+	retryBackoff  time.Duration
+	logger        Logger
+	db            DB
+	duckdb        DuckDB
+	mu            sync.RWMutex
+	eventQueue    chan *analytics.SyncEvent
+	done          chan struct{}
+	isRunning     bool
+	errorCount    int
+	warningCount  int
+	lastErrorMsg  *string
+	lastSyncAt    *time.Time
+	positions     map[string]*analytics.SyncPosition
 }
 
 // NewAsyncSync creates a new async sync strategy instance.

@@ -497,17 +497,17 @@ func parseComponents(data []interface{}) []Component {
 	for _, item := range data {
 		if m, ok := item.(map[string]interface{}); ok {
 			c := Component{
-				ID:         stringValue(m["id"]),
-				Type:       stringValue(m["type"]),
-				Title:      stringValue(m["title"]),
+				ID:          stringValue(m["id"]),
+				Type:        stringValue(m["type"]),
+				Title:       stringValue(m["title"]),
 				Description: stringValue(m["description"]),
-				QueryID:    stringValue(m["query_id"]),
-				TimeRange:  stringValue(m["time_range"]),
-				GridCol:    intValue(m["grid_col"]),
-				GridRow:    intValue(m["grid_row"]),
-				GridWidth:  intValue(m["grid_width"]),
-				GridHeight: intValue(m["grid_height"]),
-				Config:     mapValue(m["config"]),
+				QueryID:     stringValue(m["query_id"]),
+				TimeRange:   stringValue(m["time_range"]),
+				GridCol:     intValue(m["grid_col"]),
+				GridRow:     intValue(m["grid_row"]),
+				GridWidth:   intValue(m["grid_width"]),
+				GridHeight:  intValue(m["grid_height"]),
+				Config:      mapValue(m["config"]),
 			}
 			if metrics, ok := m["metrics"].([]interface{}); ok {
 				c.Metrics = stringSlice(metrics)

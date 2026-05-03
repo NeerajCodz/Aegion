@@ -422,10 +422,10 @@ func (h *Handler) GenerateReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	report := map[string]interface{}{
-		"id":        fmt.Sprintf("report_%d", time.Now().Unix()),
-		"title":     req.Title,
-		"format":    req.Format,
-		"status":    "completed",
+		"id":         fmt.Sprintf("report_%d", time.Now().Unix()),
+		"title":      req.Title,
+		"format":     req.Format,
+		"status":     "completed",
 		"created_at": time.Now(),
 	}
 
@@ -443,9 +443,9 @@ func (h *Handler) GetReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	report := map[string]interface{}{
-		"id":        id,
-		"title":     "Sample Report",
-		"status":    "completed",
+		"id":         id,
+		"title":      "Sample Report",
+		"status":     "completed",
 		"created_at": time.Now(),
 	}
 
@@ -472,13 +472,13 @@ func (h *Handler) DownloadReport(w http.ResponseWriter, r *http.Request) {
 // GetStorageConfig handles GET /config/storage
 func (h *Handler) GetStorageConfig(w http.ResponseWriter, r *http.Request) {
 	storageConfig := map[string]interface{}{
-		"backend":                    "local",
+		"backend": "local",
 		"local_config": map[string]interface{}{
 			"path":        "./analytics_data",
 			"max_size_gb": 1024,
 		},
-		"current_usage_bytes":          107374182400,
-		"estimated_monthly_cost_usd":   0.0,
+		"current_usage_bytes":        107374182400,
+		"estimated_monthly_cost_usd": 0.0,
 	}
 	h.writeResponse(w, http.StatusOK, storageConfig, nil, 0, false)
 }
@@ -519,17 +519,17 @@ func (h *Handler) GetSyncConfig(w http.ResponseWriter, r *http.Request) {
 	syncConfig := map[string]interface{}{
 		"active_strategies": []string{"real-time"},
 		"real_time": map[string]interface{}{
-			"enabled":              true,
-			"batch_size":           100,
-			"flush_interval_ms":    5000,
-			"enable_compression":   true,
+			"enabled":            true,
+			"batch_size":         100,
+			"flush_interval_ms":  5000,
+			"enable_compression": true,
 		},
 		"batch": map[string]interface{}{
-			"enabled": false,
+			"enabled":  false,
 			"schedule": "0 2 * * *",
 		},
-		"last_sync_at": "2024-01-15T14:30:00Z",
-		"next_sync_at": "2024-01-16T02:00:00Z",
+		"last_sync_at":     "2024-01-15T14:30:00Z",
+		"next_sync_at":     "2024-01-16T02:00:00Z",
 		"sync_lag_seconds": 5,
 	}
 	h.writeResponse(w, http.StatusOK, syncConfig, nil, 0, false)
@@ -579,18 +579,18 @@ func (h *Handler) GetSyncStatus(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetRetentionPolicy(w http.ResponseWriter, r *http.Request) {
 	policy := map[string]interface{}{
 		"hot_tier": map[string]interface{}{
-			"ttl_days":          7,
-			"storage_backend":   "local",
+			"ttl_days":            7,
+			"storage_backend":     "local",
 			"compression_enabled": true,
 		},
 		"warm_tier": map[string]interface{}{
-			"ttl_days":          90,
-			"storage_backend":   "s3",
+			"ttl_days":            90,
+			"storage_backend":     "s3",
 			"compression_enabled": true,
 		},
 		"cold_tier": map[string]interface{}{
-			"ttl_days":          730,
-			"storage_backend":   "s3",
+			"ttl_days":            730,
+			"storage_backend":     "s3",
 			"compression_enabled": true,
 		},
 		"estimated_storage_cost_monthly_usd": 150.00,
@@ -634,15 +634,15 @@ func (h *Handler) GetArchiveHistory(w http.ResponseWriter, r *http.Request) {
 
 	history := []map[string]interface{}{
 		{
-			"id":        "archive_001",
-			"timestamp": "2024-01-14T02:00:00Z",
-			"status":    "completed",
+			"id":         "archive_001",
+			"timestamp":  "2024-01-14T02:00:00Z",
+			"status":     "completed",
 			"size_bytes": 53687091200,
 		},
 		{
-			"id":        "archive_002",
-			"timestamp": "2024-01-13T02:00:00Z",
-			"status":    "completed",
+			"id":         "archive_002",
+			"timestamp":  "2024-01-13T02:00:00Z",
+			"status":     "completed",
 			"size_bytes": 48318382080,
 		},
 	}
@@ -724,14 +724,14 @@ func (h *Handler) ValidateWebhookConfig(w http.ResponseWriter, r *http.Request) 
 
 // GetUserPreferences handles GET /user/preferences
 func (h *Handler) GetUserPreferences(w http.ResponseWriter, r *http.Request) {
-	
+
 	preferences := map[string]interface{}{
-		"favorite_dashboards":         []string{},
-		"recent_dashboards":           []string{},
-		"refresh_interval_seconds":    30,
-		"auto_refresh_enabled":        true,
-		"timezone":                    "UTC",
-		"date_format":                 "YYYY-MM-DD",
+		"favorite_dashboards":      []string{},
+		"recent_dashboards":        []string{},
+		"refresh_interval_seconds": 30,
+		"auto_refresh_enabled":     true,
+		"timezone":                 "UTC",
+		"date_format":              "YYYY-MM-DD",
 	}
 	h.writeResponse(w, http.StatusOK, preferences, nil, 0, false)
 }
@@ -804,7 +804,7 @@ func (h *Handler) ShareDashboard(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ExecuteDashboardQuery(w http.ResponseWriter, r *http.Request) {
 	dashboardId := r.PathValue("id")
 	componentId := r.PathValue("componentId")
-	
+
 	if dashboardId == "" || componentId == "" {
 		h.writeError(w, http.StatusBadRequest, "MISSING_PARAM", "missing id or componentId parameter", "")
 		return
@@ -919,8 +919,8 @@ func (h *Handler) GenerateReportNow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"report_id":   id,
-		"status":      "generating",
+		"report_id":    id,
+		"status":       "generating",
 		"generated_at": time.Now().Format(time.RFC3339),
 	}
 	h.writeResponse(w, http.StatusOK, response, nil, 0, false)
