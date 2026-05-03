@@ -3,13 +3,13 @@ package proxy
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/aegion/aegion/core/session"
@@ -31,7 +31,7 @@ func TestAuthMiddleware_InjectHeaders_Complete(t *testing.T) {
 		AAL:             session.AAL2,
 	}
 
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	am.InjectHeaders(req, sess)
@@ -46,7 +46,7 @@ func TestAuthMiddleware_InjectHeaders_Complete(t *testing.T) {
 
 // TestAuthMiddleware_InjectHeaders_NilSession tests nil session handling
 func TestAuthMiddleware_InjectHeaders_NilSession(t *testing.T) {
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	am.InjectHeaders(req, nil)
@@ -75,7 +75,7 @@ func TestAuthMiddleware_InjectHeaders_WithImpersonation(t *testing.T) {
 		ImpersonatorID:  &impersonatorID,
 	}
 
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	am.InjectHeaders(req, sess)
@@ -104,7 +104,7 @@ func TestAuthMiddleware_InjectHeaders_WithAuthMethods(t *testing.T) {
 		},
 	}
 
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	am.InjectHeaders(req, sess)
@@ -140,7 +140,7 @@ func TestAuthMiddleware_InjectHeaders_WithDevices(t *testing.T) {
 		},
 	}
 
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	am.InjectHeaders(req, sess)
@@ -172,7 +172,7 @@ func TestAuthMiddleware_InjectHeaders_WithDevices_EmptyFields(t *testing.T) {
 		},
 	}
 
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	am.InjectHeaders(req, sess)
@@ -184,7 +184,7 @@ func TestAuthMiddleware_InjectHeaders_WithDevices_EmptyFields(t *testing.T) {
 
 // TestAuthMiddleware_HandleAuthError_SessionNotFound tests error handling for missing session
 func TestAuthMiddleware_HandleAuthError_SessionNotFound(t *testing.T) {
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req = req.WithContext(withRequestID(req.Context(), "test-123"))
@@ -201,7 +201,7 @@ func TestAuthMiddleware_HandleAuthError_SessionNotFound(t *testing.T) {
 
 // TestAuthMiddleware_HandleAuthError_SessionExpired tests error handling for expired session
 func TestAuthMiddleware_HandleAuthError_SessionExpired(t *testing.T) {
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req = req.WithContext(withRequestID(req.Context(), "test-123"))
@@ -215,7 +215,7 @@ func TestAuthMiddleware_HandleAuthError_SessionExpired(t *testing.T) {
 
 // TestAuthMiddleware_HandleAuthError_SessionInvalid tests error handling for invalid session
 func TestAuthMiddleware_HandleAuthError_SessionInvalid(t *testing.T) {
-	am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+	am := NewAuthMiddleware(nil, slog.Default(), false)
 
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	req = req.WithContext(withRequestID(req.Context(), "test-123"))
@@ -375,7 +375,7 @@ func TestWriteErrorResponse_Unauthorized(t *testing.T) {
 
 // TestNewAuthMiddleware tests the NewAuthMiddleware constructor
 func TestNewAuthMiddleware(t *testing.T) {
-	logger := zerolog.New(zerolog.NewTestWriter(t))
+	logger := slog.Default()
 
 	// Test with optional=false
 	am := NewAuthMiddleware(nil, logger, false)
@@ -400,7 +400,7 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 	}
 
 	t.Run("optional allows missing session", func(t *testing.T) {
-		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), true)
+		am := NewAuthMiddleware(nil, slog.Default(), true)
 		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
 			return nil, session.ErrSessionNotFound
 		}
@@ -421,7 +421,7 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 	})
 
 	t.Run("required returns auth error on missing session", func(t *testing.T) {
-		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		am := NewAuthMiddleware(nil, slog.Default(), false)
 		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
 			return nil, session.ErrSessionNotFound
 		}
@@ -440,7 +440,7 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 	})
 
 	t.Run("optional with inactive session continues", func(t *testing.T) {
-		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), true)
+		am := NewAuthMiddleware(nil, slog.Default(), true)
 		inactive := *baseSession
 		inactive.Active = false
 		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
@@ -463,7 +463,7 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 	})
 
 	t.Run("required rejects inactive session", func(t *testing.T) {
-		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		am := NewAuthMiddleware(nil, slog.Default(), false)
 		inactive := *baseSession
 		inactive.Active = false
 		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
@@ -484,7 +484,7 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 	})
 
 	t.Run("required rejects expired session", func(t *testing.T) {
-		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		am := NewAuthMiddleware(nil, slog.Default(), false)
 		expired := *baseSession
 		expired.ExpiresAt = time.Now().UTC().Add(-time.Minute)
 		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
@@ -505,7 +505,7 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 	})
 
 	t.Run("successful auth attaches session to context", func(t *testing.T) {
-		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		am := NewAuthMiddleware(nil, slog.Default(), false)
 		am.getFromRequest = func(context.Context, *http.Request) (*session.Session, error) {
 			return baseSession, nil
 		}
@@ -528,10 +528,11 @@ func TestAuthMiddleware_Middleware(t *testing.T) {
 	})
 
 	t.Run("resolveSession nil manager", func(t *testing.T) {
-		am := NewAuthMiddleware(nil, zerolog.New(zerolog.NewTestWriter(t)), false)
+		am := NewAuthMiddleware(nil, slog.Default(), false)
 		_, err := am.resolveSession(context.Background(), httptest.NewRequest(http.MethodGet, "/", nil))
 		if !errors.Is(err, session.ErrSessionNotFound) {
 			t.Fatalf("expected ErrSessionNotFound for nil manager, got %v", err)
 		}
 	})
 }
+

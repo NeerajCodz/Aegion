@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
-	"github.com/aegion/aegion/internal/platform/logger"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
@@ -51,13 +51,13 @@ type ModuleProxyConfig struct {
 	PolicyChecker PolicyChecker
 	RequirePolicy bool
 	PolicyModel   string
-	Logger        *logger.Logger
+	Logger        *slog.Logger
 }
 
 // ModuleProxy forwards requests to module containers.
 type ModuleProxy struct {
 	config    ModuleProxyConfig
-	logger    *logger.Logger
+	logger    *slog.Logger
 	transport *http.Transport
 	now       func() time.Time
 }
@@ -580,24 +580,22 @@ func (p *ModuleProxy) logResponse(resp *http.Response, requestID string, start t
 	}
 
 	// Use wide event pattern for response logging
-	attrs := map[string]any{
-		"request_id":    requestID,
-		"upstream":      upstreamHost,
-		"upstream_path": upstreamPath,
-		"http.status":   resp.StatusCode,
-		"latency_ms":    duration.Milliseconds(),
-		"outcome":       "success",
+	attrs := []any{
+		"request_id", requestID,
+		"upstream", upstreamHost,
+		"upstream_path", upstreamPath,
+		"http.status", resp.StatusCode,
+		"latency_ms", duration.Milliseconds(),
+		"outcome", "success",
 	}
 
 	switch {
 	case resp.StatusCode >= 500:
-		attrs["outcome"] = "error"
-		p.logger.LogWideEvent(ctx, "module response", attrs)
+		p.logger.ErrorContext(ctx, "module response", append(attrs, "outcome", "error")...)
 	case resp.StatusCode >= 400:
-		attrs["outcome"] = "warning"
-		p.logger.LogWideEvent(ctx, "module response", attrs)
+		p.logger.WarnContext(ctx, "module response", append(attrs, "outcome", "warning")...)
 	default:
-		p.logger.LogWideEvent(ctx, "module response", attrs)
+		p.logger.InfoContext(ctx, "module response", attrs...)
 	}
 }
 

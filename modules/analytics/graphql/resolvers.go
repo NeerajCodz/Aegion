@@ -9,12 +9,12 @@ import (
 
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/rbac"
-	"github.com/rs/zerolog"
+	"log/slog"
 )
 
 // Resolver handles GraphQL query, mutation, and subscription resolving.
 type Resolver struct {
-	logger    zerolog.Logger
+	logger    *slog.Logger
 	store     Store
 	startTime time.Time
 	// Subscription channels
@@ -58,7 +58,7 @@ type Store interface {
 }
 
 // NewResolver creates a new GraphQL resolver.
-func NewResolver(logger zerolog.Logger, store Store) *Resolver {
+func NewResolver(logger *slog.Logger, store Store) *Resolver {
 	return &Resolver{
 		logger:       logger,
 		store:        store,
@@ -94,7 +94,7 @@ func (r *Resolver) Events(ctx context.Context, filter *EventFilter, first *int, 
 
 	events, total, err := r.store.ListEvents(ctx, filter, limit, offset)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to list events")
+		r.logger.ErrorContext(ctx, "failed to list events", "error", err)
 		return nil, fmt.Errorf("failed to list events: %w", err)
 	}
 
@@ -133,7 +133,7 @@ func (r *Resolver) Event(ctx context.Context, id string) (*EventNode, error) {
 
 	event, err := r.store.GetEvent(ctx, id)
 	if err != nil {
-		r.logger.Error().Err(err).Str("id", id).Msg("failed to get event")
+		r.logger.ErrorContext(ctx, "failed to get event", "error", err, "id", id)
 		return nil, fmt.Errorf("failed to get event: %w", err)
 	}
 	if event == nil {
@@ -158,7 +158,7 @@ func (r *Resolver) Dashboards(ctx context.Context, isDefault *bool, public *bool
 	}
 
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to list dashboards")
+		r.logger.ErrorContext(ctx, "failed to list dashboards", "error", err)
 		return nil, fmt.Errorf("failed to list dashboards: %w", err)
 	}
 
@@ -192,7 +192,7 @@ func (r *Resolver) Dashboard(ctx context.Context, id string) (*DashboardNode, er
 
 	dashboard, err := r.store.GetDashboard(ctx, id)
 	if err != nil {
-		r.logger.Error().Err(err).Str("id", id).Msg("failed to get dashboard")
+		r.logger.ErrorContext(ctx, "failed to get dashboard", "error", err, "id", id)
 		return nil, fmt.Errorf("failed to get dashboard: %w", err)
 	}
 	if dashboard == nil {
@@ -217,7 +217,7 @@ func (r *Resolver) Queries(ctx context.Context, limit *int, offset *int) ([]*Sav
 
 	queries, err := r.store.ListQueries(ctx, &ownerID)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to list queries")
+		r.logger.ErrorContext(ctx, "failed to list queries", "error", err)
 		return nil, fmt.Errorf("failed to list queries: %w", err)
 	}
 
@@ -237,7 +237,7 @@ func (r *Resolver) Query(ctx context.Context, id string) (*SavedQueryNode, error
 
 	query, err := r.store.GetQuery(ctx, id)
 	if err != nil {
-		r.logger.Error().Err(err).Str("id", id).Msg("failed to get query")
+		r.logger.ErrorContext(ctx, "failed to get query", "error", err, "id", id)
 		return nil, fmt.Errorf("failed to get query: %w", err)
 	}
 	if query == nil {
@@ -253,7 +253,7 @@ func (r *Resolver) Query(ctx context.Context, id string) (*SavedQueryNode, error
 func (r *Resolver) Health(ctx context.Context) (*HealthStatusNode, error) {
 	health, err := r.store.GetHealth(ctx)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to get health status")
+		r.logger.ErrorContext(ctx, "failed to get health status", "error", err)
 		return nil, fmt.Errorf("failed to get health status: %w", err)
 	}
 	return healthToNode(health), nil
@@ -263,7 +263,7 @@ func (r *Resolver) Health(ctx context.Context) (*HealthStatusNode, error) {
 func (r *Resolver) Stats(ctx context.Context) (*SystemStatsNode, error) {
 	eventCount, err := r.store.CountEvents(ctx)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to count events")
+		r.logger.ErrorContext(ctx, "failed to count events", "error", err)
 		eventCount = 0
 	}
 
@@ -287,7 +287,7 @@ func (r *Resolver) Metrics(ctx context.Context, category *string, timeRange *Tim
 
 	metrics, err := r.store.ListMetrics(ctx, category)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to list metrics")
+		r.logger.ErrorContext(ctx, "failed to list metrics", "error", err)
 		return nil, fmt.Errorf("failed to list metrics: %w", err)
 	}
 
@@ -332,7 +332,7 @@ func (r *Resolver) CreateDashboard(ctx context.Context, input *CreateDashboardIn
 
 	created, err := r.store.CreateDashboard(ctx, dashboard)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to create dashboard")
+		r.logger.ErrorContext(ctx, "failed to create dashboard", "error", err)
 		return &CreateDashboardPayload{
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to create dashboard: %v", err)}},
 		}, nil
@@ -382,7 +382,7 @@ func (r *Resolver) UpdateDashboard(ctx context.Context, id string, input *Update
 
 	updated, err := r.store.UpdateDashboard(ctx, dashboard)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to update dashboard")
+		r.logger.ErrorContext(ctx, "failed to update dashboard", "error", err)
 		return &UpdateDashboardPayload{
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to update dashboard: %v", err)}},
 		}, nil
@@ -417,7 +417,7 @@ func (r *Resolver) DeleteDashboard(ctx context.Context, id string) (*DeleteDashb
 	}
 
 	if err := r.store.DeleteDashboard(ctx, id); err != nil {
-		r.logger.Error().Err(err).Msg("failed to delete dashboard")
+		r.logger.ErrorContext(ctx, "failed to delete dashboard", "error", err)
 		return &DeleteDashboardPayload{
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to delete dashboard: %v", err)}},
 		}, nil
@@ -452,7 +452,7 @@ func (r *Resolver) SaveQuery(ctx context.Context, input *SaveQueryInput) (*SaveQ
 
 	created, err := r.store.CreateQuery(ctx, query)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to save query")
+		r.logger.ErrorContext(ctx, "failed to save query", "error", err)
 		return &SaveQueryPayload{
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to save query: %v", err)}},
 		}, nil
@@ -487,7 +487,7 @@ func (r *Resolver) DeleteQuery(ctx context.Context, id string) (*DeleteQueryPayl
 	}
 
 	if err := r.store.DeleteQuery(ctx, id); err != nil {
-		r.logger.Error().Err(err).Msg("failed to delete query")
+		r.logger.ErrorContext(ctx, "failed to delete query", "error", err)
 		return &DeleteQueryPayload{
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to delete query: %v", err)}},
 		}, nil
@@ -536,7 +536,7 @@ func (r *Resolver) CreateWebhook(ctx context.Context, input *CreateWebhookInput)
 
 	created, err := r.store.CreateWebhook(ctx, webhook)
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to create webhook")
+		r.logger.ErrorContext(ctx, "failed to create webhook", "error", err)
 		return &CreateWebhookPayload{
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to create webhook: %v", err)}},
 		}, nil
@@ -567,7 +567,7 @@ func (r *Resolver) ExecuteQuery(ctx context.Context, sql string, timeout *int) (
 	executionTimeMs := int(time.Since(start).Milliseconds())
 
 	if err != nil {
-		r.logger.Error().Err(err).Msg("failed to execute query")
+		r.logger.ErrorContext(ctx, "failed to execute query", "error", err)
 		return &ExecuteQueryPayload{
 			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to execute query: %v", err)}},
 		}, nil

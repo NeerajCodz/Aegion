@@ -243,7 +243,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	reg := registry.New(registry.Config{
 		HealthCheckInterval: cfg.Config.Server.InternalNet.HealthCheckInt.Duration(),
 		HealthCheckTimeout:  cfg.Config.Server.InternalNet.HealthCheckTimeout.Duration(),
-	})
+	}, cfg.Log.Logger)
 
 	// Initialize flow store and service
 	flowStore := flows.NewPostgresFlowStore(cfg.DB.Pool)

@@ -11,13 +11,15 @@ func TestWithTraceContext_AddsTraceSpanAndRequestID(t *testing.T) {
 	l := New(Config{Level: "info", Format: "json"})
 
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, traceInfoContextKey, TraceInfo{
+	ctx = context.WithValue(ctx, observability.TraceInfoContextKey, observability.TraceInfoForLogger{
 		TraceID: "trace-123",
 		SpanID:  "span-456",
 	})
-	ctx = context.WithValue(ctx, requestIDContextKey, "req-789")
+	ctx = context.WithValue(ctx, observability.RequestIDContextKey, "req-789")
 
-	got := l.withTraceContext(ctx)
+	// In the new implementation, Handle() extracts these from context automatically.
+	// We just need to verify it doesn't panic and FromContext works.
+	got := FromContext(l.WithContext(ctx))
 	if got == nil {
 		t.Fatalf("expected non-nil logger with trace context")
 	}
@@ -25,7 +27,7 @@ func TestWithTraceContext_AddsTraceSpanAndRequestID(t *testing.T) {
 
 func TestGetRequestIDFromContext_ObservabilityContext(t *testing.T) {
 	ctx := observability.WithRequestIDForLogger(context.Background(), "obs-req-123")
-	got := getRequestIDFromContext(ctx)
+	got := observability.GetRequestIDForLogger(ctx)
 	if got != "obs-req-123" {
 		t.Fatalf("expected observability request ID, got %q", got)
 	}
@@ -37,7 +39,7 @@ func TestGetTraceInfoFromContext_ObservabilityContext(t *testing.T) {
 		SpanID:  "obs-span-456",
 	})
 
-	info := getTraceInfoFromContext(ctx)
+	info := observability.GetTraceInfoForLogger(ctx)
 	if info.TraceID != "obs-trace-123" || info.SpanID != "obs-span-456" {
 		t.Fatalf("unexpected trace info: %+v", info)
 	}

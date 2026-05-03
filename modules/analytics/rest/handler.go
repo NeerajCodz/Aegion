@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/webhooks"
 )
 
 // Handler handles REST API requests for analytics
 type Handler struct {
-	logger  *logger.Logger
+	logger  *slog.Logger
 	config  Config
 	queries QueryBuilder
 	exports ExportBuilder
@@ -36,7 +36,7 @@ type Config struct {
 
 // HandlerDeps holds dependencies for the handler
 type HandlerDeps struct {
-	Logger  *logger.Logger
+	Logger  *slog.Logger
 	Config  Config
 	Queries QueryBuilder
 	Exports ExportBuilder

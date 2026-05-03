@@ -4,14 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog"
 )
 
 // Manager handles dashboard operations including CRUD, metrics computation, and real-time updates.
@@ -21,18 +20,21 @@ type Manager struct {
 	cacheMu  sync.RWMutex
 	cacheTTL map[string]time.Time
 	cacheAt  map[string]time.Time
-	logger   zerolog.Logger
+	logger   *slog.Logger
 	config   DashboardConfig
 }
 
 // NewManager creates a new dashboard manager.
-func NewManager(db *sql.DB, logger zerolog.Logger, config DashboardConfig) *Manager {
+func NewManager(db *sql.DB, logger *slog.Logger, config DashboardConfig) *Manager {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Manager{
 		db:       db,
 		cache:    make(map[string]*QueryResult),
 		cacheTTL: make(map[string]time.Time),
 		cacheAt:  make(map[string]time.Time),
-		logger:   logger,
+		logger:   logger.With("component", "dashboard-manager"),
 		config:   config,
 	}
 }
@@ -82,11 +84,11 @@ func (m *Manager) CreateDashboard(ctx context.Context, dashboard *Dashboard) (*D
 		&dashboard.UpdatedAt,
 	)
 	if err != nil {
-		m.logger.Error().Err(err).Msg("failed to create dashboard")
+		m.logger.ErrorContext(ctx, "failed to create dashboard", "error", err)
 		return nil, fmt.Errorf("failed to create dashboard: %w", err)
 	}
 
-	m.logger.Info().Str("id", dashboard.ID).Str("name", dashboard.Name).Msg("dashboard created")
+	m.logger.InfoContext(ctx, "dashboard created", "id", dashboard.ID, "name", dashboard.Name)
 	return dashboard, nil
 }
 
@@ -172,11 +174,11 @@ func (m *Manager) UpdateDashboard(ctx context.Context, id string, updates map[st
 		id,
 	)
 	if err != nil {
-		m.logger.Error().Err(err).Str("id", id).Msg("failed to update dashboard")
+		m.logger.ErrorContext(ctx, "failed to update dashboard", "error", err, "id", id)
 		return nil, fmt.Errorf("failed to update dashboard: %w", err)
 	}
 
-	m.logger.Info().Str("id", id).Msg("dashboard updated")
+	m.logger.InfoContext(ctx, "dashboard updated", "id", id)
 	return dashboard, nil
 }
 
@@ -196,7 +198,7 @@ func (m *Manager) DeleteDashboard(ctx context.Context, id string) error {
 		return fmt.Errorf("dashboard not found")
 	}
 
-	m.logger.Info().Str("id", id).Msg("dashboard deleted")
+	m.logger.InfoContext(ctx, "dashboard deleted", "id", id)
 	return nil
 }
 
@@ -234,13 +236,13 @@ func (m *Manager) ListDashboards(ctx context.Context, ownerID *string, includeDe
 			&dashboard.UpdatedAt,
 		)
 		if err != nil {
-			m.logger.Error().Err(err).Msg("failed to scan dashboard row")
+			m.logger.ErrorContext(ctx, "failed to scan dashboard row", "error", err)
 			continue
 		}
 
 		config, err := unmarshalJSON(configJSON)
 		if err != nil {
-			m.logger.Error().Err(err).Str("dashboard_id", dashboard.ID).Msg("failed to parse dashboard config")
+			m.logger.ErrorContext(ctx, "failed to parse dashboard config", "error", err, "dashboard_id", dashboard.ID)
 			continue
 		}
 		applyDashboardConfig(dashboard, config)
@@ -271,7 +273,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, queryID string, query *Dashb
 	// Execute query
 	rows, err := m.db.QueryContext(ctx, query.SQL)
 	if err != nil {
-		m.logger.Error().Err(err).Str("query_id", queryID).Msg("failed to execute query")
+		m.logger.ErrorContext(ctx, "failed to execute query", "error", err, "query_id", queryID)
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer rows.Close()
@@ -291,7 +293,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, queryID string, query *Dashb
 
 		err := rows.Scan(valuePtrs...)
 		if err != nil {
-			m.logger.Error().Err(err).Msg("failed to scan row")
+			m.logger.ErrorContext(ctx, "failed to scan row", "error", err)
 			continue
 		}
 
@@ -323,7 +325,7 @@ func (m *Manager) ExecuteQuery(ctx context.Context, queryID string, query *Dashb
 		m.cacheMu.Unlock()
 	}
 
-	m.logger.Debug().Str("query_id", queryID).Int("rows", len(data)).Int("duration_ms", executionTime).Msg("query executed")
+	m.logger.DebugContext(ctx, "query executed", "query_id", queryID, "rows", len(data), "duration_ms", executionTime)
 	return result, rows.Err()
 }
 
@@ -358,11 +360,11 @@ func (m *Manager) CreateShare(ctx context.Context, dashboardID string, expiresIn
 		share.UpdatedAt,
 	)
 	if err != nil {
-		m.logger.Error().Err(err).Msg("failed to create share")
+		m.logger.ErrorContext(ctx, "failed to create share", "error", err)
 		return nil, fmt.Errorf("failed to create share: %w", err)
 	}
 
-	m.logger.Info().Str("dashboard_id", dashboardID).Str("token", share.Token).Msg("dashboard share created")
+	m.logger.InfoContext(ctx, "dashboard share created", "dashboard_id", dashboardID, "token", share.Token)
 	return share, nil
 }
 
@@ -434,11 +436,11 @@ func (m *Manager) SaveAlert(ctx context.Context, alert *AlertThreshold) (*AlertT
 		&alert.UpdatedAt,
 	)
 	if err != nil {
-		m.logger.Error().Err(err).Msg("failed to save alert")
+		m.logger.ErrorContext(ctx, "failed to save alert", "error", err)
 		return nil, fmt.Errorf("failed to save alert: %w", err)
 	}
 
-	m.logger.Info().Str("alert_id", alert.ID).Str("metric", alert.MetricName).Msg("alert saved")
+	m.logger.InfoContext(ctx, "alert saved", "alert_id", alert.ID, "metric", alert.MetricName)
 	return alert, nil
 }
 
@@ -450,7 +452,7 @@ func (m *Manager) ClearCache() {
 	m.cache = make(map[string]*QueryResult)
 	m.cacheTTL = make(map[string]time.Time)
 	m.cacheAt = make(map[string]time.Time)
-	m.logger.Info().Msg("dashboard cache cleared")
+	m.logger.Info("dashboard cache cleared")
 }
 
 // Helper functions

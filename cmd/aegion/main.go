@@ -229,11 +229,16 @@ func run(args []string, deps mainDeps) int {
 	}
 
 	log := deps.newLogger(logger.Config{
-		Level:       cfg.Log.Level,
-		Format:      cfg.Log.Format,
-		ServiceName: "aegion",
-		Version:     version,
-		RedactFields: cfg.Log.RedactFields,
+		Level:            cfg.Log.Level,
+		Format:           cfg.Log.Format,
+		ServiceName:      "aegion",
+		ServiceNamespace: cfg.Log.ServiceNamespace,
+		CloudRegion:      cfg.Log.CloudRegion,
+		Environment:      os.Getenv("AEGION_ENV"),
+		Version:          version,
+		CommitHash:       os.Getenv("GIT_COMMIT"),
+		Developer:        os.Getenv("DEV_NAME"),
+		RedactFields:     cfg.Log.RedactFields,
 	})
 
 	log.Info("Starting Aegion",

@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog"
-)
+	"log/slog"
+	)
 
-// Server handles GraphQL HTTP and WebSocket requests.
-type Server struct {
-	logger                 zerolog.Logger
+	// Server handles GraphQL HTTP and WebSocket requests.
+	type Server struct {
+	logger                 *slog.Logger
 	resolver               *Resolver
 	schemaBuilder          *SchemaBuilder
 	maxQueryDepth          int
@@ -76,7 +76,7 @@ type GraphQLRequest struct {
 
 // NewServer creates a new GraphQL HTTP server.
 func NewServer(
-	logger zerolog.Logger,
+	logger *slog.Logger,
 	resolver *Resolver,
 	schemaBuilder *SchemaBuilder,
 	executor QueryExecutor,
@@ -248,7 +248,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	executionTimeMs := time.Since(start).Milliseconds()
 
 	if err != nil {
-		s.logger.Error().Err(err).Msg("query execution failed")
+		s.logger.ErrorContext(ctx, "query execution failed", "error", err)
 		result = &ExecutionResult{
 			Errors: []*GraphQLError{
 				{
@@ -387,14 +387,14 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 		return fmt.Errorf("unsupported router type %T", mux)
 	}
 
-	s.logger.Info().
-		Str("basePath", basePath).
-		Str("playgroundPath", playgroundPath).
-		Str("introspectionPath", introspectionPath).
-		Str("healthPath", healthPath).
-		Bool("playgroundEnabled", s.enablePlayground).
-		Bool("introspectionEnabled", s.enableIntrospection).
-		Msg("GraphQL routes registered")
+	s.logger.Info("GraphQL routes registered",
+		"basePath", basePath,
+		"playgroundPath", playgroundPath,
+		"introspectionPath", introspectionPath,
+		"healthPath", healthPath,
+		"playgroundEnabled", s.enablePlayground,
+		"introspectionEnabled", s.enableIntrospection,
+	)
 	return nil
 }
 
@@ -500,11 +500,11 @@ const playgroundHTML = `
 // SimpleQueryExecutor is a basic implementation of QueryExecutor.
 type SimpleQueryExecutor struct {
 	resolver *Resolver
-	logger   zerolog.Logger
+	logger   *slog.Logger
 }
 
 // NewSimpleQueryExecutor creates a new simple query executor.
-func NewSimpleQueryExecutor(resolver *Resolver, logger zerolog.Logger) *SimpleQueryExecutor {
+func NewSimpleQueryExecutor(resolver *Resolver, logger *slog.Logger) *SimpleQueryExecutor {
 	return &SimpleQueryExecutor{
 		resolver: resolver,
 		logger:   logger,

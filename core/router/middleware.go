@@ -3,13 +3,13 @@ package router
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/google/uuid"
@@ -82,12 +82,12 @@ func (rr *responseRecorder) Write(b []byte) (int, error) {
 }
 
 // Logger middleware provides structured request logging.
-func Logger(log *logger.Logger) func(http.Handler) http.Handler {
+func Logger(log *slog.Logger) func(http.Handler) http.Handler {
 	return LoggerWithTrustProxy(log, false)
 }
 
 // LoggerWithTrustProxy controls whether forwarded client-IP headers are trusted.
-func LoggerWithTrustProxy(log *logger.Logger, trustProxy bool) func(http.Handler) http.Handler {
+func LoggerWithTrustProxy(log *slog.Logger, trustProxy bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := GetRequestID(r.Context())
@@ -101,36 +101,34 @@ func LoggerWithTrustProxy(log *logger.Logger, trustProxy bool) func(http.Handler
 			route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
 
 			// Build wide event attributes
-			attrs := map[string]any{
-				"http.method":       r.Method,
-				"http.route":        route,
-				"http.path":         r.URL.Path,
-				"http.remote_addr":  getClientIPWithTrust(r, trustProxy),
-				"http.status":       rr.statusCode,
-				"http.bytes":        rr.written,
-				"latency_ms":        duration.Milliseconds(),
-				"http.user_agent":   r.UserAgent(),
-				"request_id":        requestID,
-				"outcome":           "success",
+			attrs := []any{
+				"http.method", r.Method,
+				"http.route", route,
+				"http.path", r.URL.Path,
+				"http.remote_addr", getClientIPWithTrust(r, trustProxy),
+				"http.status", rr.statusCode,
+				"http.bytes", rr.written,
+				"latency_ms", duration.Milliseconds(),
+				"http.user_agent", r.UserAgent(),
+				"request_id", requestID,
+				"outcome", "success",
 			}
 
 			// Log level based on status code
 			switch {
 			case rr.statusCode >= 500:
-				attrs["outcome"] = "error"
-				log.LogWideEvent(ctx, "request completed", attrs)
+				log.ErrorContext(ctx, "request completed", append(attrs, "outcome", "error")...)
 			case rr.statusCode >= 400:
-				attrs["outcome"] = "warning"
-				log.LogWideEvent(ctx, "request completed", attrs)
+				log.WarnContext(ctx, "request completed", append(attrs, "outcome", "warning")...)
 			default:
-				log.LogWideEvent(ctx, "request completed", attrs)
+				log.InfoContext(ctx, "request completed", attrs...)
 			}
 		})
 	}
 }
 
 // Recoverer middleware recovers from panics and logs them.
-func Recoverer(log *logger.Logger) func(http.Handler) http.Handler {
+func Recoverer(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {

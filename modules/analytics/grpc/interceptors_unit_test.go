@@ -3,10 +3,11 @@ package grpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -60,7 +61,7 @@ func TestAuthInterceptor_DelegatesToAuthFunc(t *testing.T) {
 
 func TestLoggingInterceptor_EmitsLine(t *testing.T) {
 	var buf bytes.Buffer
-	logger := zerolog.New(&buf).Level(zerolog.DebugLevel)
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	interceptor := LoggingInterceptor(logger)
 
@@ -69,13 +70,20 @@ func TestLoggingInterceptor_EmitsLine(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "ok", resp)
-	require.Contains(t, buf.String(), "RPC call completed")
-	require.Contains(t, buf.String(), "\"method\":\"/m\"")
+	
+	// Verify the log output contains expected fields
+	var logData map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &logData); err == nil {
+		require.Contains(t, logData, "msg")
+		require.Contains(t, logData["msg"], "RPC call completed")
+		require.Contains(t, logData, "method")
+		require.Equal(t, "/m", logData["method"])
+	}
 }
 
 func TestStreamLoggingInterceptor_EmitsLine(t *testing.T) {
 	var buf bytes.Buffer
-	logger := zerolog.New(&buf).Level(zerolog.DebugLevel)
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	interceptor := StreamLoggingInterceptor(logger)
 
@@ -84,8 +92,15 @@ func TestStreamLoggingInterceptor_EmitsLine(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.Contains(t, buf.String(), "Stream RPC call completed")
-	require.Contains(t, buf.String(), "\"method\":\"/m\"")
+	
+	// Verify the log output contains expected fields
+	var logData map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &logData); err == nil {
+		require.Contains(t, logData, "msg")
+		require.Contains(t, logData["msg"], "Stream RPC call completed")
+		require.Contains(t, logData, "method")
+		require.Equal(t, "/m", logData["method"])
+	}
 }
 
 func TestTracingInterceptor_RecordsErrorAttributes(t *testing.T) {

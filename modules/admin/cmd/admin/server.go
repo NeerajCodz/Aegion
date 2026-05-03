@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,7 +18,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog/log"
 
 	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	admin "github.com/aegion/aegion/modules/admin"
@@ -219,19 +219,22 @@ func (s *Server) logRequest(next http.Handler) http.Handler {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
 		defer func() {
-			event := log.Info().
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Int("status", ww.Status()).
-				Int("bytes", ww.BytesWritten()).
-				Dur("duration", time.Since(start))
-			if requestID := middleware.GetReqID(r.Context()); requestID != "" {
-				event = event.Str("request_id", requestID)
+			ctx := r.Context()
+			requestID := middleware.GetReqID(ctx)
+			operatorID := ""
+			if operator := handler.OperatorFromContext(ctx); operator != nil {
+				operatorID = operator.ID.String()
 			}
-			if operator := handler.OperatorFromContext(r.Context()); operator != nil {
-				event = event.Str("operator_id", operator.ID.String())
-			}
-			event.Msg("request completed")
+
+			slog.InfoContext(ctx, "request completed",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", ww.Status(),
+				"bytes", ww.BytesWritten(),
+				"duration", time.Since(start),
+				"request_id", requestID,
+				"operator_id", operatorID,
+			)
 		}()
 
 		next.ServeHTTP(ww, r)
@@ -250,7 +253,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(health); err != nil {
-		log.Error().Err(err).Msg("Failed to encode health response")
+		slog.ErrorContext(r.Context(), "Failed to encode health response", "error", err)
 	}
 }
 
@@ -268,7 +271,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if pinger == nil {
-		log.Error().Msg("No database connection configured")
+		slog.ErrorContext(ctx, "No database connection configured")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
@@ -278,7 +281,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := pinger.Ping(ctx); err != nil {
-		log.Error().Err(err).Msg("Database health check failed")
+		slog.ErrorContext(ctx, "Database health check failed", "error", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
@@ -819,7 +822,7 @@ func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerWithCore(ctx context.Context) error {
 	s.ensureRoutingAssets()
 	if s.Config.Core.ServiceURL == "" {
-		log.Warn().Msg("Core service URL not configured, skipping registration")
+		slog.WarnContext(ctx, "Core service URL not configured, skipping registration")
 		return nil
 	}
 
@@ -878,10 +881,10 @@ func (s *Server) registerWithCore(ctx context.Context) error {
 		return fmt.Errorf("registration failed with status %d", resp.StatusCode)
 	}
 
-	log.Info().
-		Str("core_url", s.Config.Core.ServiceURL).
-		Str("module_id", registration.ID).
-		Msg("Successfully registered with core service")
+	slog.InfoContext(ctx, "Successfully registered with core service",
+		"core_url", s.Config.Core.ServiceURL,
+		"module_id", registration.ID,
+	)
 
 	return nil
 }

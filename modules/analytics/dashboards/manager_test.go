@@ -7,14 +7,14 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/rs/zerolog"
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestManagerExecuteQueryUsesCache(t *testing.T) {
 	db := openDashboardTestDB(t)
-	manager := NewManager(db, zerolog.Nop(), DashboardConfig{})
+	manager := NewManager(db, logger.TestLogger(), DashboardConfig{})
 
 	first, err := manager.ExecuteQuery(context.Background(), "query-1", &DashboardQuery{
 		ID:       "query-1",
@@ -41,7 +41,7 @@ func TestManagerExecuteQueryUsesCache(t *testing.T) {
 
 func TestListDashboardsParsesStoredConfig(t *testing.T) {
 	db := openDashboardTestDB(t)
-	manager := NewManager(db, zerolog.Nop(), DashboardConfig{})
+	manager := NewManager(db, logger.TestLogger(), DashboardConfig{})
 
 	configJSON, err := marshalJSON(map[string]interface{}{
 		"category":         "security",

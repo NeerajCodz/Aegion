@@ -3,8 +3,7 @@ package graphql
 import (
 	"context"
 	"fmt"
-
-	"github.com/rs/zerolog"
+	"log/slog"
 )
 
 // Config holds GraphQL module configuration.
@@ -79,7 +78,7 @@ func (c *Config) Validate() error {
 
 // Module represents the GraphQL module.
 type Module struct {
-	logger               zerolog.Logger
+	logger               *slog.Logger
 	config               *Config
 	server               *Server
 	directiveRegistry    *DirectiveRegistry
@@ -92,7 +91,7 @@ type Module struct {
 
 // InitOptions holds options for initializing the GraphQL module.
 type InitOptions struct {
-	Logger               zerolog.Logger
+	Logger               *slog.Logger
 	Config               *Config
 	Store                Store
 	DirectiveRegistry    *DirectiveRegistry
@@ -110,6 +109,9 @@ func Initialize(ctx context.Context, opts InitOptions) (*Module, error) {
 	}
 
 	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 
 	// Create resolver
 	resolver := NewResolver(logger, opts.Store)
@@ -177,26 +179,27 @@ func Initialize(ctx context.Context, opts InitOptions) (*Module, error) {
 		resolver:            resolver,
 	}
 
-	logger.Info().
-		Str("endpoint", opts.Config.Endpoint).
-		Bool("playground", opts.Config.EnablePlayground).
-		Bool("introspection", opts.Config.EnableIntrospection).
-		Msg("GraphQL module initialized")
+	logger.Info("GraphQL module initialized",
+		"endpoint", opts.Config.Endpoint,
+		"playground", opts.Config.EnablePlayground,
+		"introspection", opts.Config.EnableIntrospection,
+	)
 
 	return module, nil
 }
 
 // Start starts the GraphQL module.
 func (m *Module) Start(ctx context.Context) error {
-	m.logger.Info().Msg("GraphQL module started")
+	m.logger.Info("GraphQL module started")
 	return nil
 }
 
 // Stop stops the GraphQL module.
 func (m *Module) Stop(ctx context.Context) error {
-	m.logger.Info().Msg("GraphQL module stopped")
+	m.logger.Info("GraphQL module stopped")
 	return nil
 }
+
 
 // GetServer returns the GraphQL server.
 func (m *Module) GetServer() *Server {

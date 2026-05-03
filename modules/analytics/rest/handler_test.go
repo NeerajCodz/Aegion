@@ -14,7 +14,7 @@ import (
 	"github.com/aegion/aegion/modules/analytics/webhooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/rs/zerolog"
+	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 // MockDatabase implements Database interface for testing
@@ -51,7 +51,7 @@ func (m *MockDatabase) Count(ctx context.Context, sql string) (int, error) {
 
 func newTestHandler(db Database) *Handler {
 	return NewHandler(HandlerDeps{
-		Logger:  zerolog.Nop(),
+		Logger:  logger.TestLogger(),
 		Config:  Config{DefaultPageSize: 100, MaxPageSize: 10000, QueryTimeoutSeconds: 300},
 		Queries: NewQueryBuilder(db),
 		Exports: NewExportBuilder(db),
@@ -109,7 +109,7 @@ func (m *mockWebhookManager) ReplayEvent(ctx context.Context, deliveryID string)
 
 func newWebhookTestHandler(manager WebhookManager) *Handler {
 	return NewHandler(HandlerDeps{
-		Logger:         zerolog.Nop(),
+		Logger:         logger.TestLogger(),
 		Config:         Config{DefaultPageSize: 100, MaxPageSize: 10000, QueryTimeoutSeconds: 300},
 		Queries:        NewQueryBuilder(&MockDatabase{}),
 		Exports:        NewExportBuilder(&MockDatabase{}),
@@ -501,7 +501,7 @@ func TestInitialize_Success(t *testing.T) {
 			MaxPageSize:           10000,
 			DefaultPageSize:       100,
 		},
-		Logger: zerolog.Nop(),
+		Logger: logger.TestLogger(),
 		DB:     db,
 	})
 
@@ -512,7 +512,7 @@ func TestInitialize_Success(t *testing.T) {
 func TestInitialize_MissingDatabase(t *testing.T) {
 	handler, err := Initialize(InitParams{
 		Config: Config{},
-		Logger: zerolog.Nop(),
+		Logger: logger.TestLogger(),
 		DB:     nil,
 	})
 
@@ -826,3 +826,4 @@ func TestWriteWebhookError_Default(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 }
+

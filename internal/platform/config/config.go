@@ -116,6 +116,8 @@ type SecretsConfig struct {
 type LogConfig struct {
 	Level            string   `yaml:"level"`
 	Format           string   `yaml:"format"`
+	ServiceNamespace string   `yaml:"service_namespace"`
+	CloudRegion      string   `yaml:"cloud_region"`
 	IncludeRequestID bool     `yaml:"include_request_id"`
 	RedactFields     []string `yaml:"redact_fields"`
 }
@@ -630,6 +632,12 @@ func applyEnvOverrides(cfg *Config) error {
 	}
 	if v := os.Getenv("AEGION_LOG_LEVEL"); v != "" {
 		cfg.Log.Level = v
+	}
+	if v := os.Getenv("AEGION_LOG_NAMESPACE"); v != "" {
+		cfg.Log.ServiceNamespace = v
+	}
+	if v := os.Getenv("AEGION_CLOUD_REGION"); v != "" {
+		cfg.Log.CloudRegion = v
 	}
 	if v := os.Getenv("AEGION_SERVER_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
