@@ -1294,6 +1294,41 @@ func TestLoginCreateAPIKeyFailure(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
+func TestLoginInactiveProfileRejected(t *testing.T) {
+	operator := &store.Operator{
+		ID:         uuid.New(),
+		IdentityID: uuid.New(),
+		Role:       "admin",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	storeStub := &fakeStore{
+		authenticateFn: func(ctx context.Context, email, password string) (*store.Operator, error) {
+			return operator, nil
+		},
+		getIdentityProfileFn: func(ctx context.Context, identityID uuid.UUID) (*store.IdentityProfile, error) {
+			return &store.IdentityProfile{
+				Email: "admin@example.com",
+				Name:  "Admin",
+				State: "banned",
+			}, nil
+		},
+		createAPIKeyFn: func(ctx context.Context, key *store.APIKey) error {
+			t.Fatalf("CreateAPIKey should not be called for inactive profiles")
+			return nil
+		},
+	}
+
+	h := New(&fakeService{store: storeStub})
+	req := httptest.NewRequest(http.MethodPost, "/admin/auth/login", bytes.NewBufferString(`{"email":"admin@example.com","password":"secret"}`))
+	rec := httptest.NewRecorder()
+
+	h.Login(rec, req)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_credentials")
+}
+
 func TestLoginSuccess(t *testing.T) {
 	operator := &store.Operator{
 		ID:         uuid.New(),
