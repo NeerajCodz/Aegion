@@ -98,7 +98,7 @@ func TestDockerCLI_CreateContainerPreservesExpectedFlags(t *testing.T) {
 		"-e FEATURE=on",
 		"-e AEGION_AUTH_TOKEN",
 		"-e AEGION_MODULE_ID=password",
-		"-p 18080:8080/tcp",
+		"-p 127.0.0.1:18080:8080/tcp",
 		"-v C:\\data:/data:ro",
 		"--memory 512m",
 		"--cpus 1.5",

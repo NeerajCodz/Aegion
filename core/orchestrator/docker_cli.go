@@ -128,7 +128,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 		if protocol == "" {
 			protocol = "tcp"
 		}
-		args = append(args, "-p", fmt.Sprintf("%s:%s/%s", p.HostPort, p.ContainerPort, protocol))
+		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%s:%s/%s", p.HostPort, p.ContainerPort, protocol))
 	}
 	for _, v := range cfg.Volumes {
 		mountSpec := fmt.Sprintf("%s:%s", v.HostPath, v.ContainerPath)
