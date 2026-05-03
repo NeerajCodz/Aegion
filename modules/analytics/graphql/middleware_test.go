@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aegion/aegion/modules/analytics/rbac"
 	"github.com/rs/zerolog"
 )
 
@@ -96,23 +95,10 @@ func TestAuthMiddleware_SupportsSessionTokenHeader(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_SetsRoleFromTokenClaim(t *testing.T) {
+func TestAuthMiddleware_DoesNotSetRoleFromTokenContents(t *testing.T) {
 	handler := AuthMiddleware(zerolog.Nop(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID, _ := r.Context().Value("userID").(string)
-		role, _ := r.Context().Value("role").(string)
-		manager := rbac.FromContext(r.Context())
-		resolvedRole, err := manager.GetUserRole(userID)
-		if err != nil {
-			t.Fatalf("unexpected role lookup error: %v", err)
-		}
-		if userID != "admin-1" {
-			t.Fatalf("expected admin-1, got %q", userID)
-		}
-		if role != "admin" {
-			t.Fatalf("expected admin role in context, got %q", role)
-		}
-		if resolvedRole != rbac.RoleAdmin {
-			t.Fatalf("expected rbac manager admin role, got %q", resolvedRole)
+		if role, ok := r.Context().Value("role").(string); ok && role != "" {
+			t.Fatalf("expected no role in context, got %q", role)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
