@@ -569,7 +569,7 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 			return nil, ErrInvalidSAMLResponse
 		}
 	}
-	signatureScope, err := verifySAMLSignature(decoded, connection)
+	signatureScope, signedAssertion, err := verifySAMLSignature(decoded, connection)
 	if err != nil {
 		return nil, ErrInvalidSAMLResponse
 	}
@@ -581,14 +581,27 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 		status != "urn:oasis:names:tc:SAML:2.0:status:Success" {
 		return nil, ErrInvalidSAMLResponse
 	}
-	assertionInResponseTo := envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.InResponseTo
-	assertionRecipient := envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.Recipient
+	assertion := envelope.Assertion
+	if signatureScope == signatureScopeAssertion {
+		assertionDoc := etree.NewDocument()
+		assertionDoc.SetRoot(signedAssertion.Copy())
+		signedAssertionXML, err := assertionDoc.WriteToString()
+		if err != nil {
+			return nil, ErrInvalidSAMLResponse
+		}
+		if err := xml.Unmarshal([]byte(signedAssertionXML), &assertion); err != nil {
+			return nil, ErrInvalidSAMLResponse
+		}
+	}
+
+	assertionInResponseTo := assertion.Subject.SubjectConfirmation.SubjectConfirmationData.InResponseTo
+	assertionRecipient := assertion.Subject.SubjectConfirmation.SubjectConfirmationData.Recipient
 	switch signatureScope {
 	case signatureScopeAssertion:
 		if !matchesRequestID(expectedRequestID, assertionInResponseTo) {
 			return nil, ErrInvalidSAMLResponse
 		}
-		if !matchesIssuer(connection, envelope.Assertion.Issuer) {
+		if !matchesIssuer(connection, assertion.Issuer) {
 			return nil, ErrInvalidSAMLResponse
 		}
 		if !matchesRecipients(expectedRecipients, assertionRecipient) {
@@ -598,7 +611,7 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 		if !matchesRequestID(expectedRequestID, envelope.InResponseTo, assertionInResponseTo) {
 			return nil, ErrInvalidSAMLResponse
 		}
-		if !matchesIssuer(connection, envelope.Issuer, envelope.Assertion.Issuer) {
+		if !matchesIssuer(connection, envelope.Issuer, assertion.Issuer) {
 			return nil, ErrInvalidSAMLResponse
 		}
 		if !matchesRecipients(expectedRecipients, envelope.Destination, assertionRecipient) {
@@ -607,17 +620,17 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 	default:
 		return nil, ErrInvalidSAMLResponse
 	}
-	if !validTimeWindow(now, envelope.Assertion.Conditions.NotBefore, envelope.Assertion.Conditions.NotOnOrAfter) {
+	if !validTimeWindow(now, assertion.Conditions.NotBefore, assertion.Conditions.NotOnOrAfter) {
 		return nil, ErrInvalidSAMLResponse
 	}
-	if !validNotOnOrAfter(now, envelope.Assertion.Subject.SubjectConfirmation.SubjectConfirmationData.NotOnOrAfter) {
+	if !validNotOnOrAfter(now, assertion.Subject.SubjectConfirmation.SubjectConfirmationData.NotOnOrAfter) {
 		return nil, ErrInvalidSAMLResponse
 	}
 	result := &parsedSAMLResponse{
-		Subject:    strings.TrimSpace(envelope.Assertion.Subject.NameID),
+		Subject:    strings.TrimSpace(assertion.Subject.NameID),
 		Attributes: map[string]interface{}{},
 	}
-	for _, attr := range envelope.Assertion.AttributeStatement.Attributes {
+	for _, attr := range assertion.AttributeStatement.Attributes {
 		key := strings.TrimSpace(attr.Name)
 		if key == "" || len(attr.Values) == 0 {
 			continue
@@ -641,31 +654,47 @@ func parseSAMLResponse(raw string, connection *store.Connection, expectedRequest
 	return result, nil
 }
 
-func verifySAMLSignature(rawXML []byte, connection *store.Connection) (samlSignatureScope, error) {
+func verifySAMLSignature(rawXML []byte, connection *store.Connection) (samlSignatureScope, *etree.Element, error) {
 	if connection == nil {
-		return 0, ErrInvalidSAMLResponse
+		return 0, nil, ErrInvalidSAMLResponse
 	}
 	certs, err := parseCertificatesPEM(connection.CertificatePEM)
 	if err != nil {
-		return 0, ErrInvalidSAMLResponse
+		return 0, nil, ErrInvalidSAMLResponse
 	}
 
 	doc := etree.NewDocument()
 	if err := doc.ReadFromBytes(rawXML); err != nil {
-		return 0, ErrInvalidSAMLResponse
+		return 0, nil, ErrInvalidSAMLResponse
 	}
 	root := doc.Root()
 	if root == nil {
-		return 0, ErrInvalidSAMLResponse
+		return 0, nil, ErrInvalidSAMLResponse
 	}
 
 	if verifySignedElement(root, certs) == nil {
-		return signatureScopeResponse, nil
+		return signatureScopeResponse, nil, nil
 	}
-	if assertion := findElementByLocalName(root, "Assertion"); assertion != nil && verifySignedElement(assertion, certs) == nil {
-		return signatureScopeAssertion, nil
+	if assertion := findDirectChildByLocalName(root, "Assertion"); assertion != nil && verifySignedElement(assertion, certs) == nil {
+		return signatureScopeAssertion, assertion, nil
 	}
-	return 0, ErrInvalidSAMLResponse
+	return 0, nil, ErrInvalidSAMLResponse
+}
+
+func findDirectChildByLocalName(root *etree.Element, localName string) *etree.Element {
+	if root == nil {
+		return nil
+	}
+	for _, child := range root.ChildElements() {
+		tag := child.Tag
+		if idx := strings.Index(tag, ":"); idx >= 0 {
+			tag = tag[idx+1:]
+		}
+		if strings.EqualFold(tag, localName) {
+			return child
+		}
+	}
+	return nil
 }
 
 func parseCertificatesPEM(certPEM string) ([]*x509.Certificate, error) {

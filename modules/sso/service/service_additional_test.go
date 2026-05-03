@@ -545,10 +545,10 @@ func TestServiceAdditionalParseAndValidationHelpers(t *testing.T) {
 
 		signer := newSAMLTestSigner(t)
 		conn := &store.Connection{CertificatePEM: signer.certificatePEM}
-		if _, err := verifySAMLSignature([]byte("<"), conn); err == nil {
+		if _, _, err := verifySAMLSignature([]byte("<"), conn); err == nil {
 			t.Fatalf("verifySAMLSignature(invalid xml bytes) expected error")
 		}
-		if _, err := verifySAMLSignature([]byte(`<Response><Issuer>urn:test:idp</Issuer></Response>`), conn); !errors.Is(err, ErrInvalidSAMLResponse) {
+		if _, _, err := verifySAMLSignature([]byte(`<Response><Issuer>urn:test:idp</Issuer></Response>`), conn); !errors.Is(err, ErrInvalidSAMLResponse) {
 			t.Fatalf("verifySAMLSignature(no assertion) = %v", err)
 		}
 	})
