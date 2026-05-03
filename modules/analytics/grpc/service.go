@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -296,28 +297,18 @@ func validateReadOnlySQL(query string) error {
 	if trimmed == "" {
 		return fmt.Errorf("saved query SQL is empty")
 	}
+	if strings.Contains(trimmed, ";") {
+		return fmt.Errorf("saved query must contain exactly one statement")
+	}
 
 	upper := strings.ToUpper(trimmed)
 	if !(strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "WITH ")) {
 		return fmt.Errorf("saved query must be read-only")
 	}
 
-	disallowed := []string{
-		" INSERT ",
-		" UPDATE ",
-		" DELETE ",
-		" DROP ",
-		" ALTER ",
-		" CREATE ",
-		" TRUNCATE ",
-		" ATTACH ",
-		" DETACH ",
-	}
-	padded := " " + upper + " "
-	for _, keyword := range disallowed {
-		if strings.Contains(padded, keyword) {
-			return fmt.Errorf("saved query contains disallowed statement")
-		}
+	disallowedPattern := regexp.MustCompile(`\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|ATTACH|DETACH)\b`)
+	if disallowedPattern.FindStringIndex(upper) != nil {
+		return fmt.Errorf("saved query contains disallowed statement")
 	}
 
 	return nil
@@ -489,12 +480,12 @@ func dashboardToProto(data map[string]interface{}) *pb.Dashboard {
 
 func healthStatusToProto(data map[string]interface{}, syncLag int64) *pb.HealthStatus {
 	return &pb.HealthStatus{
-		IsHealthy:       toBool(data["is_healthy"]),
-		Status:          toString(data["status"]),
-		Duckdb:          toBool(data["duckdb"]),
-		Storage:         toBool(data["storage"]),
-		Migrations:      toBool(data["migrations"]),
-		SyncLagSeconds:  syncLag,
+		IsHealthy:      toBool(data["is_healthy"]),
+		Status:         toString(data["status"]),
+		Duckdb:         toBool(data["duckdb"]),
+		Storage:        toBool(data["storage"]),
+		Migrations:     toBool(data["migrations"]),
+		SyncLagSeconds: syncLag,
 	}
 }
 
