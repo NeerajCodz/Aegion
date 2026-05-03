@@ -2,12 +2,15 @@ package rest
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
 	"github.com/rs/zerolog"
 )
 
@@ -192,22 +195,29 @@ func (rl *RateLimiter) cleanup() {
 
 // Token validation with expiration check
 func validateToken(token string) (string, error) {
-	// This is a simplified implementation
-	// In production, verify JWT signature and extract claims
 	if token == "" {
 		return "", fmt.Errorf("empty token")
 	}
 
-	// For now, just extract user ID from token (assuming format user_id:rest)
-	// In production, parse and verify JWT
-	parts := strings.Split(token, ":")
-	if len(parts) >= 1 {
-		userID := parts[0]
-		if userID == "" {
-			return "", fmt.Errorf("invalid token: empty user ID")
-		}
-		return userID, nil
+	publicKeyB64 := strings.TrimSpace(os.Getenv("AEGION_ANALYTICS_REST_JWT_PUBLIC_KEY_BASE64"))
+	if publicKeyB64 == "" {
+		return "", fmt.Errorf("jwt verification key is not configured")
 	}
 
-	return "", fmt.Errorf("invalid token format")
+	publicKey, err := base64.StdEncoding.DecodeString(publicKeyB64)
+	if err != nil {
+		return "", fmt.Errorf("invalid jwt verification key: %w", err)
+	}
+
+	verified, err := platformjwt.Verify(token, publicKey, "ES256", platformjwt.VerifyOptions{})
+	if err != nil {
+		return "", fmt.Errorf("token verification failed: %w", err)
+	}
+
+	userID := strings.TrimSpace(verified.Claims.Subject)
+	if userID == "" {
+		return "", fmt.Errorf("invalid token: missing sub claim")
+	}
+
+	return userID, nil
 }
