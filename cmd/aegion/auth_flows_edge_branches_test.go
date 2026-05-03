@@ -130,6 +130,27 @@ func TestMFAFlowErrorBranches(t *testing.T) {
 		if _, err := s.finishPrimaryAuthentication(context.Background(), httptest.NewRecorder(), req, flow, uuid.New(), "person@example.com", coresession.AuthMethodPassword); err == nil || !strings.Contains(err.Error(), "update-flow-failed") {
 			t.Fatalf("expected update-flow-failed error, got %v", err)
 		}
+
+		s, _ = newFlowServer(t)
+		s.sessionManager = &stubRouteSessionManager{}
+		flow, _ = s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
+		s.dbQueryRowFn = func(context.Context, string, ...any) pgx.Row {
+			return adminTestRow{scanFn: func(dest ...any) error {
+				if len(dest) != 1 {
+					return errors.New("unexpected destination length")
+				}
+				if v, ok := dest[0].(*bool); ok {
+					*v = false
+					return nil
+				}
+				return errors.New("expected bool destination")
+			}}
+		}
+		if _, err := s.finishPrimaryAuthentication(context.Background(), httptest.NewRecorder(), req, flow, uuid.New(), "person@example.com", coresession.AuthMethodPassword); err == nil {
+			t.Fatal("expected inactive identity rejection")
+		} else {
+			expectFlowHTTPError(t, err, http.StatusUnauthorized)
+		}
 	})
 
 	t.Run("ensureSecondFactorOrTrustedDevice errors", func(t *testing.T) {
