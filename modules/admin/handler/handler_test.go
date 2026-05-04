@@ -851,6 +851,9 @@ func TestAdminHandler_ConfigAndLoginAdditionalBranches(t *testing.T) {
 		assert.Equal(t, 32, h.config.APIKeyEntropyBytes)
 		assert.NotNil(t, h.log)
 
+		hNegativePrefixLen := New(&fakeService{store: &fakeStore{}}, HandlerConfig{APIKeyPrefixLen: -3})
+		assert.Equal(t, 12, hNegativePrefixLen.config.APIKeyPrefixLen)
+
 		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
 		req.Header.Set("X-Forwarded-For", "5.5.5.5")
 		req.RemoteAddr = "203.0.113.9:8080"
