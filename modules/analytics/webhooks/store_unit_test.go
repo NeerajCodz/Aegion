@@ -79,26 +79,26 @@ func (r fakeResult) RowsAffected() (int64, error) {
 }
 
 type fakeDB struct {
-	queryRowFn func(ctx context.Context, query string, args ...interface{}) RowScanner
-	queryFn    func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error)
-	execFn     func(ctx context.Context, query string, args ...interface{}) (ExecResult, error)
+	queryRowFn func(ctx context.Context, query string, args ...interface{}) interface{}
+	queryFn    func(ctx context.Context, query string, args ...interface{}) (interface{}, error)
+	execFn     func(ctx context.Context, query string, args ...interface{}) (interface{}, error)
 }
 
-func (f *fakeDB) QueryRowContext(ctx context.Context, query string, args ...interface{}) RowScanner {
+func (f *fakeDB) QueryRowContext(ctx context.Context, query string, args ...interface{}) interface{} {
 	return f.queryRowFn(ctx, query, args...)
 }
 
-func (f *fakeDB) QueryContext(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+func (f *fakeDB) QueryContext(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 	return f.queryFn(ctx, query, args...)
 }
 
-func (f *fakeDB) ExecContext(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+func (f *fakeDB) ExecContext(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 	return f.execFn(ctx, query, args...)
 }
 
 func TestStore_GetWebhook_NotFound(t *testing.T) {
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			return fakeRow{scanFn: func(dest ...interface{}) error { return sql.ErrNoRows }}
 		},
 	}
@@ -113,7 +113,7 @@ func TestStore_GetWebhook_NotFound(t *testing.T) {
 func TestStore_GetWebhook_RoundTripJSONFields(t *testing.T) {
 	now := time.Now().UTC()
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			return fakeRow{scanFn: func(dest ...interface{}) error {
 				// id, user_id, url, event_types, categories, custom_filter, secret, active, failure_count, created_at, updated_at
 				*(dest[0].(*string)) = "wh_1"
@@ -147,7 +147,7 @@ func TestStore_GetWebhook_RoundTripJSONFields(t *testing.T) {
 func TestStore_ListDeliveries_DefaultLimit(t *testing.T) {
 	var gotLimit interface{}
 	db := &fakeDB{
-		queryFn: func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+		queryFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			// args: webhookID, limit
 			if len(args) >= 2 {
 				gotLimit = args[1]
@@ -164,7 +164,7 @@ func TestStore_ListDeliveries_DefaultLimit(t *testing.T) {
 
 func TestStore_UpdateWebhook_NoRowsAffected(t *testing.T) {
 	db := &fakeDB{
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			return fakeResult{affected: 0}, nil
 		},
 	}
@@ -175,7 +175,7 @@ func TestStore_UpdateWebhook_NoRowsAffected(t *testing.T) {
 
 func TestStore_DeleteWebhook_NoRowsAffected(t *testing.T) {
 	db := &fakeDB{
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			return fakeResult{affected: 0}, nil
 		},
 	}
@@ -189,7 +189,7 @@ func TestStore_CreateWebhook_MarshalsFieldsAndExecs(t *testing.T) {
 	var gotArgs []interface{}
 
 	db := &fakeDB{
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			gotArgs = args
 			return fakeResult{affected: 1}, nil
 		},
@@ -224,7 +224,7 @@ func TestStore_CreateWebhook_MarshalsFieldsAndExecs(t *testing.T) {
 func TestStore_ListWebhooks_ParsesRows(t *testing.T) {
 	now := time.Now().UTC()
 	db := &fakeDB{
-		queryFn: func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+		queryFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			return &fakeRows{data: [][]interface{}{
 				// id, user_id, url, event_types, categories, custom_filter, secret, active, failure_count, created_at, updated_at
 				{"wh_1", "user_1", "https://example.test/hook", `["evt.a","evt.b"]`, `["cat.a"]`, `{"k":"v"}`, "secret", true, 2, now, now},
@@ -245,7 +245,7 @@ func TestStore_ListWebhooks_ParsesRows(t *testing.T) {
 
 func TestStore_GetDelivery_NotFound(t *testing.T) {
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			return fakeRow{scanFn: func(dest ...interface{}) error { return sql.ErrNoRows }}
 		},
 	}
@@ -263,7 +263,7 @@ func TestStore_GetDelivery_ScansNullableTimes(t *testing.T) {
 	done := now.Add(10 * time.Minute)
 
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			return fakeRow{scanFn: func(dest ...interface{}) error {
 				// id, webhook_id, event_id, status, status_code, response_body, error, attempts, max_retries,
 				// next_retry_at, last_attempt_at, completed_at, created_at, updated_at
@@ -298,7 +298,7 @@ func TestStore_GetDelivery_ScansNullableTimes(t *testing.T) {
 func TestStore_UpdateDelivery_Execs(t *testing.T) {
 	var gotArgs []interface{}
 	db := &fakeDB{
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			gotArgs = args
 			return fakeResult{affected: 1}, nil
 		},

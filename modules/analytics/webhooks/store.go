@@ -35,9 +35,9 @@ type ExecResult interface {
 
 // DB interface for database operations.
 type DB interface {
-	QueryRowContext(ctx context.Context, query string, args ...interface{}) RowScanner
-	QueryContext(ctx context.Context, query string, args ...interface{}) (RowsScanner, error)
-	ExecContext(ctx context.Context, query string, args ...interface{}) (ExecResult, error)
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) interface{}
+	QueryContext(ctx context.Context, query string, args ...interface{}) (interface{}, error)
+	ExecContext(ctx context.Context, query string, args ...interface{}) (interface{}, error)
 }
 
 // NewStore creates a new webhook store.
@@ -71,7 +71,11 @@ func (s *Store) GetWebhook(ctx context.Context, webhookID string) (*analytics.We
 		FROM webhooks WHERE id = ?
 	`
 
-	row := s.db.QueryRowContext(ctx, query, webhookID)
+	rowAny := s.db.QueryRowContext(ctx, query, webhookID)
+	row, ok := rowAny.(RowScanner)
+	if !ok {
+		return nil, fmt.Errorf("webhooks: QueryRowContext returned %T, does not implement RowScanner", rowAny)
+	}
 	webhook := &analytics.Webhook{}
 
 	var eventTypesJSON, categoriesJSON, customFilterJSON string
@@ -100,9 +104,13 @@ func (s *Store) ListWebhooks(ctx context.Context, userID string) ([]*analytics.W
 		FROM webhooks WHERE user_id = ? ORDER BY created_at DESC
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, userID)
+	rowsAny, err := s.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, err
+	}
+	rows, ok := rowsAny.(RowsScanner)
+	if !ok {
+		return nil, fmt.Errorf("webhooks: QueryContext returned %T, does not implement RowsScanner", rowsAny)
 	}
 	defer rows.Close()
 
@@ -140,13 +148,18 @@ func (s *Store) UpdateWebhook(ctx context.Context, webhook *analytics.Webhook) e
 		WHERE id = ? AND user_id = ?
 	`
 
-	result, err := s.db.ExecContext(ctx, query,
+	resultAny, err := s.db.ExecContext(ctx, query,
 		webhook.URL, string(eventTypesJSON), string(categoriesJSON), string(customFilterJSON),
 		webhook.Active, webhook.FailureCount, time.Now(), webhook.ID, webhook.UserID,
 	)
 
 	if err != nil {
 		return err
+	}
+
+	result, ok := resultAny.(ExecResult)
+	if !ok {
+		return fmt.Errorf("webhooks: ExecContext returned %T, does not implement ExecResult", resultAny)
 	}
 
 	rows, err := result.RowsAffected()
@@ -165,9 +178,14 @@ func (s *Store) UpdateWebhook(ctx context.Context, webhook *analytics.Webhook) e
 func (s *Store) DeleteWebhook(ctx context.Context, webhookID, userID string) error {
 	query := `UPDATE webhooks SET active = false, updated_at = ? WHERE id = ? AND user_id = ?`
 
-	result, err := s.db.ExecContext(ctx, query, time.Now(), webhookID, userID)
+	resultAny, err := s.db.ExecContext(ctx, query, time.Now(), webhookID, userID)
 	if err != nil {
 		return err
+	}
+
+	result, ok := resultAny.(ExecResult)
+	if !ok {
+		return fmt.Errorf("webhooks: ExecContext returned %T, does not implement ExecResult", resultAny)
 	}
 
 	rows, err := result.RowsAffected()
@@ -235,7 +253,11 @@ func (s *Store) GetDelivery(ctx context.Context, deliveryID string) (*analytics.
 		FROM webhook_deliveries WHERE id = ?
 	`
 
-	row := s.db.QueryRowContext(ctx, query, deliveryID)
+	rowAny := s.db.QueryRowContext(ctx, query, deliveryID)
+	row, ok := rowAny.(RowScanner)
+	if !ok {
+		return nil, fmt.Errorf("webhooks: QueryRowContext returned %T, does not implement RowScanner", rowAny)
+	}
 	delivery := &analytics.WebhookDelivery{}
 
 	err := row.Scan(&delivery.ID, &delivery.WebhookID, &delivery.EventID, &delivery.Status, &delivery.StatusCode,
@@ -263,9 +285,13 @@ func (s *Store) ListDeliveries(ctx context.Context, webhookID string, limit int)
 		FROM webhook_deliveries WHERE webhook_id = ? ORDER BY created_at DESC LIMIT ?
 	`
 
-	rows, err := s.db.QueryContext(ctx, query, webhookID, limit)
+	rowsAny, err := s.db.QueryContext(ctx, query, webhookID, limit)
 	if err != nil {
 		return nil, err
+	}
+	rows, ok := rowsAny.(RowsScanner)
+	if !ok {
+		return nil, fmt.Errorf("webhooks: QueryContext returned %T, does not implement RowsScanner", rowsAny)
 	}
 	defer rows.Close()
 
