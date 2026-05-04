@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1624,6 +1626,58 @@ func TestSession_Lifecycle_Expiration(t *testing.T) {
 			assert.Equal(t, tt.isExpired, isExpired)
 		})
 	}
+}
+
+type pgxRowStub struct {
+	scanFn func(dest ...interface{}) error
+}
+
+func (r pgxRowStub) Scan(dest ...interface{}) error { return r.scanFn(dest...) }
+
+type pgxRowsStub struct{}
+
+func (r *pgxRowsStub) Close()                                        {}
+func (r *pgxRowsStub) Err() error                                    { return nil }
+func (r *pgxRowsStub) CommandTag() pgconn.CommandTag                 { return pgconn.CommandTag{} }
+func (r *pgxRowsStub) FieldDescriptions() []pgconn.FieldDescription  { return nil }
+func (r *pgxRowsStub) Next() bool                                    { return false }
+func (r *pgxRowsStub) Scan(dest ...interface{}) error                { return nil }
+func (r *pgxRowsStub) Values() ([]interface{}, error)                { return nil, nil }
+func (r *pgxRowsStub) RawValues() [][]byte                           { return nil }
+func (r *pgxRowsStub) Conn() *pgx.Conn                               { return nil }
+
+func TestManagerGet_RejectsIdleExpiredSession(t *testing.T) {
+	now := time.Now().UTC()
+	manager := createTestManager()
+	manager.idleTimeout = 30 * time.Minute
+	manager.now = func() time.Time { return now }
+	manager.queryRowFn = func(context.Context, string, ...interface{}) pgx.Row {
+		return pgxRowStub{scanFn: func(dest ...interface{}) error {
+			*(dest[0].(*uuid.UUID)) = uuid.New()
+			*(dest[1].(*string)) = ""
+			*(dest[2].(*uuid.UUID)) = uuid.New()
+			*(dest[3].(*AAL)) = AAL1
+			*(dest[4].(*time.Time)) = now.Add(-2 * time.Hour)
+			*(dest[5].(*time.Time)) = now.Add(22 * time.Hour)
+			*(dest[6].(*time.Time)) = now.Add(-2 * time.Hour)
+			*(dest[7].(*string)) = ""
+			*(dest[8].(*[]DeviceInfo)) = nil
+			*(dest[9].(*bool)) = true
+			*(dest[10].(*bool)) = false
+			*(dest[11].(**uuid.UUID)) = nil
+			*(dest[12].(*time.Time)) = now.Add(-2 * time.Hour)
+			*(dest[13].(*time.Time)) = now.Add(-31 * time.Minute)
+			return nil
+		}}
+	}
+	manager.queryRows = func(context.Context, string, ...interface{}) (pgx.Rows, error) {
+		return &pgxRowsStub{}, nil
+	}
+
+	session, err := manager.Get(context.Background(), "idle-stale-token")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrSessionExpired)
+	assert.Nil(t, session)
 }
 
 // ============================================================================
