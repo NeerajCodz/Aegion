@@ -198,6 +198,8 @@ func (p *ModuleProxy) buildPolicyCheckRequest(r *http.Request) *policypb.CheckRe
 	subject := "anonymous"
 	if sess := session.FromContext(r.Context()); sess != nil {
 		subject = "user:" + sess.IdentityID.String()
+	} else if moduleID := strings.TrimSpace(authtoken.ModuleIDFromContext(r.Context())); moduleID != "" {
+		subject = "module:" + moduleID
 	}
 
 	resourcePath := strings.TrimPrefix(r.URL.Path, "/")
@@ -230,7 +232,7 @@ func (p *ModuleProxy) buildPolicyCheckRequest(r *http.Request) *policypb.CheckRe
 		Model:        normalizePolicyModel(p.config.PolicyModel),
 		Context: &policypb.Context{
 			Ip:       clientIP,
-			TenantId: strings.TrimSpace(r.Header.Get("X-Aegion-Tenant-ID")),
+			TenantId: "",
 			Extra:    extra,
 		},
 	}
