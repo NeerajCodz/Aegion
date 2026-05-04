@@ -62,3 +62,14 @@ func withResolverRole(userID string, role rbac.Role) context.Context {
 	_ = manager.SetUserRole(userID, role)
 	return rbac.WithManager(ctx, manager)
 }
+
+func TestAdditionalResolverExecuteQueryDisabled(t *testing.T) {
+	store := NewMockStore()
+	resolver := NewResolver(logger.TestLogger(), store)
+
+	payload, err := resolver.ExecuteQuery(withResolverRole("analyst-1", rbac.RoleAnalyst), "SELECT 1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, payload)
+	require.NotEmpty(t, payload.Errors)
+	assert.Contains(t, payload.Errors[0].Message, "disabled")
+}

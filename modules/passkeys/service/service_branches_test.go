@@ -20,6 +20,7 @@ type mockChallengeStore struct {
 	getCredentialErr     error
 	listCredentialsResp  []store.Credential
 	updateSignCountErr   error
+	createCredentialErr  error
 
 	savedChallenges []store.Challenge
 	upserted        []store.Credential
@@ -36,8 +37,9 @@ func (m *mockChallengeStore) ConsumeChallenge(challengeID string) (store.Challen
 	return m.consumeChallengeResp, nil
 }
 
-func (m *mockChallengeStore) UpsertCredential(credential store.Credential) {
+func (m *mockChallengeStore) CreateCredential(credential store.Credential) error {
 	m.upserted = append(m.upserted, credential)
+	return m.createCredentialErr
 }
 
 func (m *mockChallengeStore) GetCredential(credentialID string) (store.Credential, error) {

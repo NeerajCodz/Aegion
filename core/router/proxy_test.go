@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
@@ -275,6 +276,38 @@ func TestModuleProxyDirectorPreserveHost(t *testing.T) {
 			t.Fatalf("expected target host, got %q", req.Host)
 		}
 	})
+}
+
+func TestBuildPolicyCheckRequestUsesAuthenticatedModuleSubject(t *testing.T) {
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		ModuleID: "admin",
+		Logger:   zerolog.Nop(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://gateway.local/resource", nil)
+	ctx := context.WithValue(req.Context(), contextKeyRequestID, "req-1")
+	ctx = context.WithValue(ctx, authtoken.ContextKeyModuleID, "billing")
+	req = req.WithContext(ctx)
+
+	checkReq := proxy.buildPolicyCheckRequest(req)
+	if checkReq.GetSubject() != "module:billing" {
+		t.Fatalf("expected module subject, got %q", checkReq.GetSubject())
+	}
+}
+
+func TestBuildPolicyCheckRequestDoesNotTrustInboundTenantHeader(t *testing.T) {
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		ModuleID: "admin",
+		Logger:   zerolog.Nop(),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://gateway.local/resource", nil)
+	req.Header.Set("X-Aegion-Tenant-ID", "tenant-admin")
+
+	checkReq := proxy.buildPolicyCheckRequest(req)
+	if checkReq.GetContext().GetTenantId() != "" {
+		t.Fatalf("expected empty tenant id, got %q", checkReq.GetContext().GetTenantId())
+	}
 }
 
 func TestModuleProxyErrorHandlers(t *testing.T) {

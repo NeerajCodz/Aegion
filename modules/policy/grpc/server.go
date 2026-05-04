@@ -329,8 +329,6 @@ func buildABACActivation(ctx context.Context, req *policypb.CheckRequest) (map[s
 		}
 	}
 
-	rolesRaw, _ := contextExtra["subject_roles"].(string)
-	subjectRoles := splitCSV(rolesRaw)
 	clientIP := ""
 	tenantID := ""
 	if requestContext != nil {
@@ -344,7 +342,7 @@ func buildABACActivation(ctx context.Context, req *policypb.CheckRequest) (map[s
 	activation := map[string]any{
 		"subject": map[string]any{
 			"id":    normalizeSubject(req.GetSubject()),
-			"roles": subjectRoles,
+			"roles": []string{},
 		},
 		"resource": map[string]any{
 			"id":   strings.TrimSpace(req.GetResource()),

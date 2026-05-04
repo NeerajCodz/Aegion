@@ -58,7 +58,7 @@ func TestNetworkCLI_EnsureNetworkAndInspect(t *testing.T) {
 	got := string(args)
 	for _, want := range []string{
 		"network ls --filter name=aegion_modules --format \"{{json .}}\"",
-		"network create --driver bridge --label aegion.network=true --subnet 10.10.0.0/16 aegion_modules",
+		"network create --driver bridge --internal --label aegion.network=true --subnet 10.10.0.0/16 aegion_modules",
 		"network inspect aegion_modules",
 	} {
 		if !strings.Contains(got, want) {

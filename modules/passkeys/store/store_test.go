@@ -35,7 +35,7 @@ func TestChallengeLifecycle(t *testing.T) {
 
 func TestCredentialLifecycle(t *testing.T) {
 	s := New()
-	s.UpsertCredential(Credential{
+	s.CreateCredential(Credential{
 		ID:         "cred-1",
 		IdentityID: "identity-1",
 		PublicKey:  "pk",

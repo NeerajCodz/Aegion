@@ -39,6 +39,30 @@ func AuthInterceptor(authFunc func(context.Context) error) grpc.UnaryServerInter
 	}
 }
 
+// StreamAuthInterceptor verifies internal service identity via headers for stream RPCs.
+func StreamAuthInterceptor(authFunc func(context.Context) error) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		ctx := ss.Context()
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return status.Error(codes.Unauthenticated, "missing service identity")
+		}
+		tokens := md.Get("x-service-id")
+		if len(tokens) == 0 {
+			return status.Error(codes.Unauthenticated, "missing service identity")
+		}
+
+		if authFunc != nil {
+			if err := authFunc(ctx); err != nil {
+				return status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
+			}
+		}
+
+		return handler(srv, ss)
+	}
+}
+
 // LoggingInterceptor logs all unary RPC calls.
 func LoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	if logger == nil {
@@ -208,6 +232,26 @@ func ChainUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) grpc.Un
 		}
 
 		return chainedHandler(ctx, req)
+	}
+}
+
+// ChainStreamInterceptors chains multiple stream interceptors.
+func ChainStreamInterceptors(interceptors ...grpc.StreamServerInterceptor) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if len(interceptors) == 0 {
+			return handler(srv, ss)
+		}
+
+		chainedHandler := handler
+		for i := len(interceptors) - 1; i >= 0; i-- {
+			interceptor := interceptors[i]
+			currentHandler := chainedHandler
+			chainedHandler = func(currentSrv interface{}, currentStream grpc.ServerStream) error {
+				return interceptor(currentSrv, currentStream, info, currentHandler)
+			}
+		}
+
+		return chainedHandler(srv, ss)
 	}
 }
 

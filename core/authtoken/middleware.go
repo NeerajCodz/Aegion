@@ -34,11 +34,7 @@ type MiddlewareConfig struct {
 func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 	skipPaths := make(map[string]bool)
 	for _, p := range cfg.SkipPaths {
-		normalized := path.Clean(p)
-		if normalized == "." {
-			normalized = "/"
-		}
-		skipPaths[normalized] = true
+		skipPaths[p] = true
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -49,7 +45,7 @@ func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 				currentPath = "/"
 			}
 			// Skip configured paths
-			if skipPaths[currentPath] {
+			if skipPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
 			}

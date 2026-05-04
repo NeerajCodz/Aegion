@@ -3,6 +3,7 @@ package graphql
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,13 +57,6 @@ func AuthMiddleware(logger *slog.Logger, requiredForFields map[string]bool) Midd
 
 			ctx := context.WithValue(r.Context(), "userID", userID)
 			ctx = context.WithValue(ctx, "token", token)
-			if role, ok := extractGraphQLRole(token); ok {
-				manager := rbac.FromContext(ctx)
-				if err := manager.SetUserRole(userID, role); err == nil {
-					ctx = rbac.WithManager(ctx, manager)
-					ctx = context.WithValue(ctx, "role", string(role))
-				}
-			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -259,10 +253,6 @@ func extractAuthToken(r *http.Request) (string, bool, error) {
 		return token, true, nil
 	}
 
-	if sessionToken := strings.TrimSpace(r.Header.Get("X-Session-Token")); sessionToken != "" {
-		return sessionToken, true, nil
-	}
-
 	return "", false, nil
 }
 
@@ -294,25 +284,30 @@ func validateGraphQLToken(token string) (string, error) {
 		return "", fmt.Errorf("empty token")
 	}
 
-	parts := strings.Split(token, ":")
-	userID := strings.TrimSpace(parts[0])
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("invalid token format")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid token payload")
+	}
+
+	var claims struct {
+		Subject string `json:"sub"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", fmt.Errorf("invalid token claims")
+	}
+
+	userID := strings.TrimSpace(claims.Subject)
 	if userID == "" {
-		return "", fmt.Errorf("invalid token: empty user ID")
+		return "", fmt.Errorf("invalid token: missing subject")
 	}
 	return userID, nil
 }
 
-func extractGraphQLRole(token string) (rbac.Role, bool) {
-	parts := strings.Split(token, ":")
-	for _, part := range parts[1:] {
-		role := rbac.Role(strings.TrimSpace(strings.ToLower(part)))
-		switch role {
-		case rbac.RoleAdmin, rbac.RoleAnalyst, rbac.RoleViewer, rbac.RoleUser:
-			return role, true
-		}
-	}
-	return "", false
-}
 
 func generateTraceID() string {
 	return fmt.Sprintf("trace-%d", time.Now().UnixNano())
