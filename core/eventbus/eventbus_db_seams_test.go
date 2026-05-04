@@ -311,6 +311,22 @@ func TestBusDefaults_DBUnavailableSentinel(t *testing.T) {
 	}
 }
 
+func TestNew_BatchSizeBounds(t *testing.T) {
+	t.Run("defaults when non-positive", func(t *testing.T) {
+		b := New(Config{BatchSize: -1})
+		if b.batchSize != defaultBatchSize {
+			t.Fatalf("expected default batch size %d, got %d", defaultBatchSize, b.batchSize)
+		}
+	})
+
+	t.Run("caps excessively large values", func(t *testing.T) {
+		b := New(Config{BatchSize: maxBatchSize + 1})
+		if b.batchSize != maxBatchSize {
+			t.Fatalf("expected capped batch size %d, got %d", maxBatchSize, b.batchSize)
+		}
+	})
+}
+
 func TestStubRows_ScanUnsupportedDestination(t *testing.T) {
 	rows := &stubRows{
 		rows: [][]interface{}{
