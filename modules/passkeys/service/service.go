@@ -191,7 +191,7 @@ func (s *Service) FinishAuthentication(req *AuthenticationFinishRequest) error {
 	if credential.IdentityID != req.IdentityID {
 		return ErrInvalidCredential
 	}
-	if req.SignCount <= credential.SignCount {
+	if req.SignCount != credential.SignCount+1 {
 		return ErrSignCountReplay
 	}
 

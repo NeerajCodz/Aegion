@@ -10,6 +10,7 @@ var (
 	ErrCredentialNotFound = errors.New("credential not found")
 	ErrChallengeNotFound  = errors.New("challenge not found")
 	ErrChallengeExpired   = errors.New("challenge expired")
+	ErrSignCountReplay    = errors.New("credential sign count must increase")
 )
 
 type Credential struct {
@@ -84,6 +85,9 @@ func (s *Store) UpdateCredentialSignCount(credentialID string, signCount uint32)
 	credential, ok := s.credentials[credentialID]
 	if !ok {
 		return ErrCredentialNotFound
+	}
+	if signCount <= credential.SignCount {
+		return ErrSignCountReplay
 	}
 	credential.SignCount = signCount
 	s.credentials[credentialID] = credential
