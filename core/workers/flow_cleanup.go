@@ -2,7 +2,6 @@ package workers
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/logger"
@@ -26,7 +25,13 @@ func NewFlowCleanupWorker(cfg FlowCleanupConfig) *FlowCleanupWorker {
 	if cfg.ExpiredAfter == 0 {
 		cfg.ExpiredAfter = time.Hour
 	}
+	if cfg.ExpiredAfter < 0 {
+		cfg.ExpiredAfter = time.Hour
+	}
 	if cfg.CompletedAfter == 0 {
+		cfg.CompletedAfter = 24 * time.Hour
+	}
+	if cfg.CompletedAfter < 0 {
 		cfg.CompletedAfter = 24 * time.Hour
 	}
 
@@ -79,16 +84,13 @@ func (w *FlowCleanupWorker) cleanup(ctx context.Context) error {
 
 // cleanupFlows removes expired and old completed flows.
 func (w *FlowCleanupWorker) cleanupFlows(ctx context.Context) (int64, error) {
-	expiredHours := int(w.expiredAfter.Hours())
-	completedHours := int(w.completedAfter.Hours())
-
-	sql := fmt.Sprintf(`
+	sql := `
 		DELETE FROM core_flows
-		WHERE (state = 'active' AND expires_at < NOW() - INTERVAL '%d hours')
-		   OR (state IN ('complete', 'failed') AND updated_at < NOW() - INTERVAL '%d hours')
-	`, expiredHours, completedHours)
+		WHERE (state = 'active' AND expires_at < NOW() - ($1 * INTERVAL '1 second'))
+		   OR (state IN ('complete', 'failed') AND updated_at < NOW() - ($2 * INTERVAL '1 second'))
+	`
 
-	result, err := w.exec(ctx, sql)
+	result, err := w.exec(ctx, sql, w.expiredAfter.Seconds(), w.completedAfter.Seconds())
 	if err != nil {
 		return 0, err
 	}

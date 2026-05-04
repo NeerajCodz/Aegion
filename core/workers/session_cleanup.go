@@ -2,7 +2,6 @@ package workers
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/logger"
@@ -26,7 +25,13 @@ func NewSessionCleanupWorker(cfg SessionCleanupConfig) *SessionCleanupWorker {
 	if cfg.ExpiredAfter == 0 {
 		cfg.ExpiredAfter = 7 * 24 * time.Hour
 	}
+	if cfg.ExpiredAfter < 0 {
+		cfg.ExpiredAfter = 7 * 24 * time.Hour
+	}
 	if cfg.InactiveAfter == 0 {
+		cfg.InactiveAfter = 24 * time.Hour
+	}
+	if cfg.InactiveAfter < 0 {
 		cfg.InactiveAfter = 24 * time.Hour
 	}
 
@@ -53,17 +58,13 @@ func (w *SessionCleanupWorker) Start(ctx context.Context) error {
 func (w *SessionCleanupWorker) cleanup(ctx context.Context) error {
 	w.Log().Debug("starting session cleanup")
 
-	// Build dynamic SQL based on configured durations
-	days := int(w.expiredAfter.Hours() / 24)
-	hours := int(w.inactiveAfter.Hours())
-
-	sql := fmt.Sprintf(`
+	sql := `
 		DELETE FROM core_sessions
-		WHERE expires_at < NOW() - INTERVAL '%d days'
-		   OR (active = FALSE AND updated_at < NOW() - INTERVAL '%d hours')
-	`, days, hours)
+		WHERE expires_at < NOW() - ($1 * INTERVAL '1 second')
+		   OR (active = FALSE AND updated_at < NOW() - ($2 * INTERVAL '1 second'))
+	`
 
-	result, err := w.exec(ctx, sql)
+	result, err := w.exec(ctx, sql, w.expiredAfter.Seconds(), w.inactiveAfter.Seconds())
 	if err != nil {
 		return err
 	}
