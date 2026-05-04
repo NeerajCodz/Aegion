@@ -3,6 +3,7 @@ package graphql
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -259,10 +260,6 @@ func extractAuthToken(r *http.Request) (string, bool, error) {
 		return token, true, nil
 	}
 
-	if sessionToken := strings.TrimSpace(r.Header.Get("X-Session-Token")); sessionToken != "" {
-		return sessionToken, true, nil
-	}
-
 	return "", false, nil
 }
 
@@ -294,10 +291,26 @@ func validateGraphQLToken(token string) (string, error) {
 		return "", fmt.Errorf("empty token")
 	}
 
-	parts := strings.Split(token, ":")
-	userID := strings.TrimSpace(parts[0])
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("invalid token format")
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("invalid token payload")
+	}
+
+	var claims struct {
+		Subject string `json:"sub"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", fmt.Errorf("invalid token claims")
+	}
+
+	userID := strings.TrimSpace(claims.Subject)
 	if userID == "" {
-		return "", fmt.Errorf("invalid token: empty user ID")
+		return "", fmt.Errorf("invalid token: missing subject")
 	}
 	return userID, nil
 }
