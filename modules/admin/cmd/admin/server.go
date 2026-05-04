@@ -159,7 +159,7 @@ func (s *Server) setupRouter() chi.Router {
 			r.Use(security.RateLimitAdmin)
 			r.Use(security.CSRFProtection)
 			r.Use(security.SecurityAudit)
-			r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermAuditRead)).
+			r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigRead)).
 				Get("/dashboard/observability", s.handleDashboardObservability)
 			if s.SCIMService != nil {
 				r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigRead)).
