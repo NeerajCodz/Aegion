@@ -109,11 +109,11 @@ services:
     command:
       - --config=/etc/otelcol-contrib/config.yaml
     ports:
-      - "4317:4317"   # OTLP gRPC ingest
-      - "4318:4318"   # OTLP HTTP ingest
-      - "8888:8888"   # Collector self-metrics
-      - "8889:8889"   # Prometheus exporter for app metrics
-      - "13133:13133" # Collector health
+      - "127.0.0.1:4317:4317"   # OTLP gRPC ingest
+      - "127.0.0.1:4318:4318"   # OTLP HTTP ingest
+      - "127.0.0.1:8888:8888"   # Collector self-metrics
+      - "127.0.0.1:8889:8889"   # Prometheus exporter for app metrics
+      - "127.0.0.1:13133:13133" # Collector health
     volumes:
       - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
 
@@ -125,9 +125,8 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --web.enable-lifecycle
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
@@ -139,7 +138,7 @@ services:
     command:
       - -config.file=/etc/tempo.yaml
     ports:
-      - "3200:3200"
+      - "127.0.0.1:3200:3200"
     volumes:
       - ./tempo.yaml:/etc/tempo.yaml:ro
 
@@ -151,7 +150,7 @@ services:
     command:
       - -config.file=/etc/loki/local-config.yaml
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     volumes:
       - ./loki.yaml:/etc/loki/local-config.yaml:ro
 
@@ -161,11 +160,11 @@ services:
   grafana:
     image: grafana/grafana:11.2.2
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-aegion-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-now}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
