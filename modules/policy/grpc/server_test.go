@@ -380,6 +380,32 @@ func TestServer_Check_RBACAnonymousSubjectDeniedWithoutStoreLookup(t *testing.T)
 	assert.Empty(t, st.lastIdentity)
 }
 
+
+func TestServer_Check_RBACModelStillHonorsABACDeny(t *testing.T) {
+	st := &mockRBACStore{
+		roleIDs: []string{"role-1"},
+		permissions: []policystore.Permission{
+			{ResourceType: "documents", Action: "read"},
+		},
+		abacRules: []policystore.ABACRule{
+			{Name: "deny_reads", Effect: "deny", Expression: `action == "read"`, Enabled: true},
+		},
+	}
+	s := NewServer(st)
+
+	resp, err := s.Check(context.Background(), &policypb.CheckRequest{
+		Subject:      "user:alice",
+		ResourceType: "documents",
+		Action:       "read",
+		Model:        "rbac",
+	})
+	require.NoError(t, err)
+	assert.False(t, resp.GetAllowed())
+	assert.Equal(t, "abac", resp.GetModelUsed())
+	assert.Equal(t, "abac_deny_rule_matched", resp.GetDenyReason())
+	assert.Equal(t, []string{"abac:deny:deny_reads"}, resp.GetEvalPath())
+}
+
 func TestServer_Check_ReBACSubjectSetWithPrefixedObject(t *testing.T) {
 	st := &mockRBACStore{
 		rebacTuples: []policystore.ReBACTuple{
