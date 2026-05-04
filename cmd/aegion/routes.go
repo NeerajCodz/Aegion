@@ -2009,6 +2009,10 @@ func (s *Server) handleAdminRestartModule(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "module id is required", nil)
 		return
 	}
+	if _, err := s.registry.GetModule(moduleID); err != nil {
+		writeError(w, http.StatusNotFound, "module not found", err)
+		return
+	}
 	if s.orchestrator == nil {
 		writeError(w, http.StatusServiceUnavailable, "module orchestrator unavailable", nil)
 		return
