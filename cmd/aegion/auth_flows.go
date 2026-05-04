@@ -1171,7 +1171,7 @@ func (s *Server) handleMagicLinkVerify(w http.ResponseWriter, r *http.Request, c
 			writeError(w, http.StatusBadRequest, "recovery link is invalid", nil)
 			return
 		}
-		flow, createErr := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), *identityID)
+		flow, createErr := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), *identityID, uuid.Nil)
 		if createErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create recovery settings flow", createErr)
 			return

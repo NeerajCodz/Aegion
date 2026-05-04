@@ -384,6 +384,7 @@ func (s *Server) handleGetLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+
 	writeJSON(w, http.StatusOK, flow)
 }
 
@@ -500,7 +501,7 @@ func (s *Server) handleInitSettingsBrowser(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID)
+	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID, currentSession.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create settings flow", err)
 		return
@@ -528,12 +529,43 @@ func (s *Server) handleInitSettingsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID)
+	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID, currentSession.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create settings flow", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, flow)
+}
+
+
+func (s *Server) requireSettingsFlowAccess(ctx context.Context, r *http.Request, flow *flows.Flow) error {
+	if s.sessionManager == nil {
+		return errors.New("session manager unavailable")
+	}
+
+	currentSession, err := s.sessionManager.GetFromRequest(ctx, r)
+	if err != nil {
+		return err
+	}
+	if flow.IdentityID == nil || *flow.IdentityID != currentSession.IdentityID {
+		return coresession.ErrSessionInvalid
+	}
+	if flow.SessionID != nil && *flow.SessionID != currentSession.ID {
+		return coresession.ErrSessionInvalid
+	}
+
+	return nil
+}
+
+func (s *Server) writeSettingsSessionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, coresession.ErrSessionNotFound),
+		errors.Is(err, coresession.ErrSessionExpired),
+		errors.Is(err, coresession.ErrSessionInvalid):
+		writeError(w, http.StatusUnauthorized, "active session required", nil)
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to resolve session", err)
+	}
 }
 
 func (s *Server) handleGetSettingsFlow(w http.ResponseWriter, r *http.Request) {
@@ -552,6 +584,11 @@ func (s *Server) handleGetSettingsFlow(w http.ResponseWriter, r *http.Request) {
 	flow, err := s.flowService.GetFlow(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "flow not found", err)
+		return
+	}
+
+	if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
+		s.writeSettingsSessionError(w, err)
 		return
 	}
 
@@ -629,6 +666,13 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 	if flow.Type != expectedType {
 		writeError(w, http.StatusBadRequest, "flow type mismatch for submission endpoint", nil)
 		return
+	}
+
+	if expectedType == flows.TypeSettings {
+		if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
+			s.writeSettingsSessionError(w, err)
+			return
+		}
 	}
 
 	var result *flowExecutionResult

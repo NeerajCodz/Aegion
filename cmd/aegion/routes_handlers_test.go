@@ -1287,7 +1287,7 @@ func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
 				handler: s.handleSubmitSettings,
 				path:    "/api/v1/self-service/settings",
 				create: func() (*flows.Flow, error) {
-					return s.flowService.CreateSettingsFlow(context.Background(), "http://example.com/settings", uuid.New())
+					return s.flowService.CreateSettingsFlow(context.Background(), "http://example.com/settings", uuid.New(), uuid.New())
 				},
 			},
 			{
@@ -1339,7 +1339,7 @@ func TestSelfServiceFlowGetHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create recovery flow: %v", err)
 	}
-	settingsFlow, err := s.flowService.CreateSettingsFlow(ctx, "http://example.com/settings", uuid.New())
+	settingsFlow, err := s.flowService.CreateSettingsFlow(ctx, "http://example.com/settings", uuid.New(), uuid.New())
 	if err != nil {
 		t.Fatalf("failed to create settings flow: %v", err)
 	}
