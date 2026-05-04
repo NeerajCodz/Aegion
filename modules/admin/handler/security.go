@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type IPBanRequest struct {
@@ -114,13 +115,13 @@ func (h *Handler) UpsertIPBan(w http.ResponseWriter, r *http.Request) {
 	err = h.dbConn().QueryRow(r.Context(), `
 		INSERT INTO adm_ip_bans (id, cidr, reason, created_by, created_at, updated_at, expires_at)
 		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
-		ON CONFLICT (cidr) DO UPDATE SET
-			reason = EXCLUDED.reason,
-			created_by = EXCLUDED.created_by,
-			updated_at = EXCLUDED.updated_at,
-			expires_at = EXCLUDED.expires_at
+		ON CONFLICT (cidr) DO NOTHING
 		RETURNING id, COALESCE(created_by::text, ''), created_at, updated_at, expires_at
 	`, cidr, req.Reason, operator.ID, now, now, req.ExpiresAt).Scan(&id, &createdByValue, &createdAt, &updatedAt, &expiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, "already_exists", "IP ban already exists")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save IP ban")
 		return
