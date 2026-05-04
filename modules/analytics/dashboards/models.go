@@ -6,21 +6,21 @@ import (
 
 // Dashboard represents a pre-built or custom analytics dashboard.
 type Dashboard struct {
-	ID                string                 `json:"id"`
-	Name              string                 `json:"name"`
-	Description       string                 `json:"description,omitempty"`
-	Category          string                 `json:"category"`
-	IsDefault         bool                   `json:"is_default"`
-	Layout            string                 `json:"layout"` // "grid-3col", "grid-4col", "flex"
-	RefreshInterval   int                    `json:"refresh_interval_seconds"`
-	Components        []Component            `json:"components"`
-	Config            map[string]interface{} `json:"config,omitempty"`
-	OwnerID           *string                `json:"owner_id,omitempty"`
-	Public            bool                   `json:"public"`
-	ShareToken        *string                `json:"share_token,omitempty"`
-	Pinned            bool                   `json:"pinned"`
-	CreatedAt         time.Time              `json:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description,omitempty"`
+	Category        string                 `json:"category"`
+	IsDefault       bool                   `json:"is_default"`
+	Layout          string                 `json:"layout"` // "grid-3col", "grid-4col", "flex"
+	RefreshInterval int                    `json:"refresh_interval_seconds"`
+	Components      []Component            `json:"components"`
+	Config          map[string]interface{} `json:"config,omitempty"`
+	OwnerID         *string                `json:"owner_id,omitempty"`
+	Public          bool                   `json:"public"`
+	ShareToken      *string                `json:"share_token,omitempty"`
+	Pinned          bool                   `json:"pinned"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
 }
 
 // Component represents a widget/chart in a dashboard.
@@ -67,11 +67,11 @@ type DashboardMetadata struct {
 
 // DashboardConfig holds dashboard-specific configuration.
 type DashboardConfig struct {
-	AutoRefreshInterval int    `json:"auto_refresh_interval_seconds"`
-	DefaultTimeRange    string `json:"default_time_range_days"`
-	MaxCustomDashboards int    `json:"max_custom_dashboards"`
-	EnableSharing       bool   `json:"enable_sharing"`
-	EnableScheduledReports bool `json:"enable_scheduled_reports"`
+	AutoRefreshInterval    int    `json:"auto_refresh_interval_seconds"`
+	DefaultTimeRange       string `json:"default_time_range_days"`
+	MaxCustomDashboards    int    `json:"max_custom_dashboards"`
+	EnableSharing          bool   `json:"enable_sharing"`
+	EnableScheduledReports bool   `json:"enable_scheduled_reports"`
 }
 
 // QueryResult represents the result of a dashboard query.
@@ -87,23 +87,23 @@ type QueryResult struct {
 
 // ExportRequest represents a request to export dashboard data.
 type ExportRequest struct {
-	DashboardID string `json:"dashboard_id"`
-	Format      string `json:"format"` // "csv", "json", "pdf"
-	TimeRange   string `json:"time_range"`
-	IncludeCharts bool `json:"include_charts"`
+	DashboardID   string `json:"dashboard_id"`
+	Format        string `json:"format"` // "csv", "json", "pdf"
+	TimeRange     string `json:"time_range"`
+	IncludeCharts bool   `json:"include_charts"`
 }
 
 // AlertThreshold represents an alert configuration for a dashboard metric.
 type AlertThreshold struct {
-	ID            string      `json:"id"`
-	DashboardID   string      `json:"dashboard_id"`
-	MetricName    string      `json:"metric_name"`
-	Operator      string      `json:"operator"` // "gt", "lt", "eq", "gte", "lte"
-	Threshold     float64     `json:"threshold"`
-	SeverityLevel string      `json:"severity_level"` // "info", "warning", "critical"
-	Enabled       bool        `json:"enabled"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	ID            string    `json:"id"`
+	DashboardID   string    `json:"dashboard_id"`
+	MetricName    string    `json:"metric_name"`
+	Operator      string    `json:"operator"` // "gt", "lt", "eq", "gte", "lte"
+	Threshold     float64   `json:"threshold"`
+	SeverityLevel string    `json:"severity_level"` // "info", "warning", "critical"
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // DashboardShare represents a shared dashboard link.

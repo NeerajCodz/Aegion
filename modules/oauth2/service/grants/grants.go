@@ -4,6 +4,7 @@ package grants
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -101,7 +102,10 @@ func (s *ClientCredentialsService) IssueClientCredentials(ctx context.Context, r
 
 	// Issue access token (no subject, client is the subject)
 	now := time.Now().UTC()
-	jti := store.GenerateAccessTokenJTI()
+	jti, err := store.GenerateAccessTokenJTI()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token JTI: %w", err)
+	}
 	expiresAt := now.Add(time.Duration(client.AccessTokenTTL) * time.Second)
 
 	claims := map[string]interface{}{
@@ -225,7 +229,10 @@ func (s *JWTBearerService) IssueJWTBearer(ctx context.Context, req *JWTBearerReq
 
 	// Issue access token
 	now := time.Now().UTC()
-	jti := store.GenerateAccessTokenJTI()
+	jti, err := store.GenerateAccessTokenJTI()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token JTI: %w", err)
+	}
 	expiresAt := now.Add(time.Duration(client.AccessTokenTTL) * time.Second)
 
 	tokenClaims := map[string]interface{}{

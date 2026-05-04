@@ -21,33 +21,33 @@ type QueryCacheConfig struct {
 
 // CacheStats tracks cache performance metrics
 type CacheStats struct {
-	Hits       int64
-	Misses     int64
-	Evictions  int64
-	Size       int
-	MaxSize    int
-	HitRate    float64
-	LastReset  time.Time
+	Hits      int64
+	Misses    int64
+	Evictions int64
+	Size      int
+	MaxSize   int
+	HitRate   float64
+	LastReset time.Time
 }
 
 // cacheNode represents a node in the LRU doubly-linked list
 type cacheNode struct {
-	key      string
-	value    interface{}
+	key       string
+	value     interface{}
 	expiresAt time.Time
-	prev     *cacheNode
-	next     *cacheNode
+	prev      *cacheNode
+	next      *cacheNode
 }
 
 // LRUQueryCache provides LRU caching with TTL and statistics
 type LRUQueryCache struct {
-	mu         sync.RWMutex
-	config     QueryCacheConfig
-	cache      map[string]*cacheNode
-	head       *cacheNode // most recently used
-	tail       *cacheNode // least recently used
-	stats      CacheStats
-	statsTick  *time.Ticker
+	mu        sync.RWMutex
+	config    QueryCacheConfig
+	cache     map[string]*cacheNode
+	head      *cacheNode // most recently used
+	tail      *cacheNode // least recently used
+	stats     CacheStats
+	statsTick *time.Ticker
 	stopCh    chan struct{}
 }
 
@@ -216,7 +216,7 @@ func (c *LRUQueryCache) GetStats() CacheStats {
 
 	stats := c.stats
 	stats.Size = len(c.cache)
-	
+
 	total := stats.Hits + stats.Misses
 	if total > 0 {
 		stats.HitRate = float64(stats.Hits) / float64(total)

@@ -46,21 +46,21 @@ func (s *Signature) Verify(secret string, payload interface{}, signature string)
 
 // WebhookPayloadWithSignature wraps a payload with signing headers.
 type WebhookPayloadWithSignature struct {
-	Payload   interface{}            `json:"payload"`
-	Headers   map[string]string      `json:"headers"`
-	Signature string                 `json:"-"` // Not included in payload JSON
-	Timestamp time.Time              `json:"timestamp"`
+	Payload   interface{}       `json:"payload"`
+	Headers   map[string]string `json:"headers"`
+	Signature string            `json:"-"` // Not included in payload JSON
+	Timestamp time.Time         `json:"timestamp"`
 }
 
 // SignPayload creates a signed payload with all necessary headers.
 func SignPayload(eventID string, eventType string, category string, data map[string]interface{}, secret string) (interface{}, map[string]string, error) {
 	payload := map[string]interface{}{
-		"id":        eventID,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"id":         eventID,
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		"event_type": eventType,
-		"category":  category,
-		"data":      data,
-		"attempts":  1,
+		"category":   category,
+		"data":       data,
+		"attempts":   1,
 		"signatures": map[string]string{},
 	}
 
@@ -75,11 +75,11 @@ func SignPayload(eventID string, eventType string, category string, data map[str
 	}
 
 	headers := map[string]string{
-		"X-Aegion-Event-ID":     eventID,
-		"X-Aegion-Event-Type":   eventType,
-		"X-Aegion-Timestamp":    time.Now().UTC().Format(time.RFC3339),
-		"X-Aegion-Signature":    sig,
-		"Content-Type":          "application/json",
+		"X-Aegion-Event-ID":   eventID,
+		"X-Aegion-Event-Type": eventType,
+		"X-Aegion-Timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"X-Aegion-Signature":  sig,
+		"Content-Type":        "application/json",
 	}
 
 	return payload, headers, nil

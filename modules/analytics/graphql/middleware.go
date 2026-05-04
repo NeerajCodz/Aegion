@@ -6,24 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/aegion/aegion/modules/analytics/rbac"
 )
 
 // Middleware represents a GraphQL middleware function.
 type Middleware func(http.Handler) http.Handler
 
 // AuthMiddleware enforces authentication for GraphQL queries.
-func AuthMiddleware(logger zerolog.Logger, requiredForFields map[string]bool) Middleware {
+func AuthMiddleware(logger *slog.Logger, requiredForFields map[string]bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			query, updatedRequest, err := extractGraphQLQuery(r)
 			if err != nil {
-				logger.Warn().Err(err).Msg("failed to parse graphql auth request")
+				logger.WarnContext(r.Context(), "failed to parse graphql auth request", "error", err)
 				http.Error(w, "invalid graphql request", http.StatusBadRequest)
 				return
 			}
@@ -31,14 +32,14 @@ func AuthMiddleware(logger zerolog.Logger, requiredForFields map[string]bool) Mi
 
 			token, hasToken, err := extractAuthToken(r)
 			if err != nil {
-				logger.Warn().Err(err).Msg("invalid authorization header format")
+				logger.WarnContext(r.Context(), "invalid authorization header format", "error", err)
 				http.Error(w, "invalid authorization header", http.StatusUnauthorized)
 				return
 			}
 
 			if !hasToken {
 				if queryRequiresAuthentication(query, requiredForFields) {
-					logger.Debug().Msg("graphql auth required but token missing")
+					logger.DebugContext(r.Context(), "graphql auth required but token missing")
 					http.Error(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
@@ -48,7 +49,7 @@ func AuthMiddleware(logger zerolog.Logger, requiredForFields map[string]bool) Mi
 
 			userID, err := validateGraphQLToken(token)
 			if err != nil {
-				logger.Warn().Err(err).Msg("invalid graphql auth token")
+				logger.WarnContext(r.Context(), "invalid graphql auth token", "error", err)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -61,7 +62,7 @@ func AuthMiddleware(logger zerolog.Logger, requiredForFields map[string]bool) Mi
 }
 
 // InstrumentationMiddleware adds tracing and logging to GraphQL requests.
-func InstrumentationMiddleware(logger zerolog.Logger) Middleware {
+func InstrumentationMiddleware(logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -72,38 +73,34 @@ func InstrumentationMiddleware(logger zerolog.Logger) Middleware {
 			ctx = context.WithValue(ctx, "startTime", start)
 
 			// Log request
-			logger.Info().
-				Str("traceID", traceID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Str("ip", getClientIP(r)).
-				Msg("GraphQL request started")
+			logger.InfoContext(ctx, "GraphQL request started",
+				"traceID", traceID,
+				"method", r.Method,
+				"path", r.URL.Path,
+				"ip", getClientIP(r))
 
 			// Call next handler
 			next.ServeHTTP(w, r.WithContext(ctx))
 
 			// Log response
 			duration := time.Since(start)
-			logger.Info().
-				Str("traceID", traceID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Dur("duration", duration).
-				Msg("GraphQL request completed")
+			logger.InfoContext(ctx, "GraphQL request completed",
+				"traceID", traceID,
+				"method", r.Method,
+				"path", r.URL.Path,
+				"duration", duration)
 		})
 	}
 }
 
 // RateLimitMiddleware enforces per-user or per-IP rate limiting.
-func RateLimitMiddleware(logger zerolog.Logger, limiter RateLimiter) Middleware {
+func RateLimitMiddleware(logger *slog.Logger, limiter RateLimiter) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			clientID := getClientID(r)
 
 			if !limiter.AllowRequest(r.Context(), clientID) {
-				logger.Warn().
-					Str("clientID", clientID).
-					Msg("rate limit exceeded")
+				logger.WarnContext(r.Context(), "rate limit exceeded", "clientID", clientID)
 
 				w.Header().Set("Retry-After", "60")
 				w.Header().Set("X-RateLimit-Remaining", "0")
@@ -120,18 +117,17 @@ func RateLimitMiddleware(logger zerolog.Logger, limiter RateLimiter) Middleware 
 }
 
 // ErrorHandlingMiddleware catches and formats errors consistently.
-func ErrorHandlingMiddleware(logger zerolog.Logger) Middleware {
+func ErrorHandlingMiddleware(logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// In a real implementation, this would wrap the response writer
 			// to capture panics and format errors
 			defer func() {
 				if err := recover(); err != nil {
-					logger.Error().
-						Interface("panic", err).
-						Str("method", r.Method).
-						Str("path", r.URL.Path).
-						Msg("panic recovered in GraphQL handler")
+					logger.ErrorContext(r.Context(), "panic recovered in GraphQL handler",
+						"panic", err,
+						"method", r.Method,
+						"path", r.URL.Path)
 
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
@@ -178,16 +174,14 @@ func CORSMiddleware(allowedOrigins []string) Middleware {
 }
 
 // RequestValidationMiddleware validates incoming requests.
-func RequestValidationMiddleware(logger zerolog.Logger) Middleware {
+func RequestValidationMiddleware(logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Validate content type for POST requests
 			if r.Method == http.MethodPost {
 				contentType := r.Header.Get("Content-Type")
 				if !strings.Contains(contentType, "application/json") {
-					logger.Warn().
-						Str("contentType", contentType).
-						Msg("invalid content type for GraphQL request")
+					logger.WarnContext(r.Context(), "invalid content type for GraphQL request", "contentType", contentType)
 
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusBadRequest)
@@ -428,11 +422,11 @@ func (sca *SimpleComplexityAnalyzer) ValidateDepth(query string, maxDepth int) (
 
 // SimpleRequestLogger logs GraphQL requests and responses.
 type SimpleRequestLogger struct {
-	logger zerolog.Logger
+	logger *slog.Logger
 }
 
 // NewSimpleRequestLogger creates a new request logger.
-func NewSimpleRequestLogger(logger zerolog.Logger) *SimpleRequestLogger {
+func NewSimpleRequestLogger(logger *slog.Logger) *SimpleRequestLogger {
 	return &SimpleRequestLogger{
 		logger: logger,
 	}
@@ -445,11 +439,10 @@ func (srl *SimpleRequestLogger) LogRequest(
 	operationName string,
 	variables map[string]interface{},
 ) {
-	srl.logger.Debug().
-		Str("operationName", operationName).
-		Int("queryLength", len(query)).
-		Interface("variables", variables).
-		Msg("GraphQL request")
+	srl.logger.DebugContext(ctx, "GraphQL request",
+		"operationName", operationName,
+		"queryLength", len(query),
+		"variables", variables)
 }
 
 // LogResponse logs a GraphQL response.
@@ -458,9 +451,8 @@ func (srl *SimpleRequestLogger) LogResponse(
 	result *ExecutionResult,
 	durationMs int64,
 ) {
-	srl.logger.Debug().
-		Bool("hasErrors", len(result.Errors) > 0).
-		Int("errorCount", len(result.Errors)).
-		Int64("durationMs", durationMs).
-		Msg("GraphQL response")
+	srl.logger.DebugContext(ctx, "GraphQL response",
+		"hasErrors", len(result.Errors) > 0,
+		"errorCount", len(result.Errors),
+		"durationMs", durationMs)
 }

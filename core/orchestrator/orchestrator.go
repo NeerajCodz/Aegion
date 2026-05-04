@@ -9,7 +9,7 @@ import (
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
-	"github.com/rs/zerolog/log"
+	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 var (
@@ -53,6 +53,7 @@ type Orchestrator struct {
 	registry       *registry.Registry
 	configLoader   *ConfigLoader
 	tokenGenerator *authtoken.Generator
+	logger         *logger.Logger
 
 	modules map[string]*moduleInstance
 	mu      sync.RWMutex
@@ -143,7 +144,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		return fmt.Errorf("ensuring network: %w", err)
 	}
 
-	log.Info().Msg("orchestrator started")
+	o.logger.Info("orchestrator started")
 	return nil
 }
 
@@ -157,17 +158,17 @@ func (o *Orchestrator) Stop(ctx context.Context) error {
 	var lastErr error
 	for moduleID := range o.modules {
 		if err := o.StopModule(ctx, moduleID); err != nil {
-			log.Error().Err(err).Str("module_id", moduleID).Msg("failed to stop module during shutdown")
+			o.logger.Error("failed to stop module during shutdown", "error", err, "module_id", moduleID)
 			lastErr = err
 		}
 	}
 
 	if err := o.closeDocker(); err != nil {
-		log.Error().Err(err).Msg("failed to close docker client")
+		o.logger.Error("failed to close docker client", "error", err)
 		lastErr = err
 	}
 
-	log.Info().Msg("orchestrator stopped")
+	o.logger.Info("orchestrator stopped")
 	return lastErr
 }
 
@@ -194,7 +195,7 @@ func (o *Orchestrator) StartModule(ctx context.Context, moduleID string) error {
 	}
 	o.mu.Unlock()
 
-	log.Info().Str("module_id", moduleID).Msg("starting module")
+	o.logger.Info("starting module", "module_id", moduleID)
 
 	// Load module config
 	cfg, err := o.loadModuleConfig(moduleID)
@@ -236,10 +237,7 @@ func (o *Orchestrator) StartModule(ctx context.Context, moduleID string) error {
 	}
 	o.mu.Unlock()
 
-	log.Info().
-		Str("module_id", moduleID).
-		Str("container_id", containerID[:12]).
-		Msg("module started")
+	o.logger.Info("module started", "module_id", moduleID, "container_id", containerID[:12])
 
 	return nil
 }
@@ -260,7 +258,7 @@ func (o *Orchestrator) StopModule(ctx context.Context, moduleID string) error {
 	inst.state = StateStopping
 	o.mu.Unlock()
 
-	log.Info().Str("module_id", moduleID).Msg("stopping module")
+	o.logger.Info("stopping module", "module_id", moduleID)
 
 	// Stop container
 	if err := o.stopContainer(ctx, inst.containerID, DefaultStopTimeout); err != nil {
@@ -270,13 +268,13 @@ func (o *Orchestrator) StopModule(ctx context.Context, moduleID string) error {
 
 	// Remove container
 	if err := o.removeContainer(ctx, inst.containerID, false); err != nil {
-		log.Warn().Err(err).Str("module_id", moduleID).Msg("failed to remove container")
+		o.logger.Warn("failed to remove container", "error", err, "module_id", moduleID)
 	}
 
 	// Deregister from registry
 	if o.registry != nil {
 		if _, err := o.registry.Deregister(moduleID); err != nil {
-			log.Warn().Err(err).Str("module_id", moduleID).Msg("failed to deregister module")
+			o.logger.Warn("failed to deregister module", "error", err, "module_id", moduleID)
 		}
 	}
 
@@ -285,14 +283,14 @@ func (o *Orchestrator) StopModule(ctx context.Context, moduleID string) error {
 	delete(o.modules, moduleID)
 	o.mu.Unlock()
 
-	log.Info().Str("module_id", moduleID).Msg("module stopped")
+	o.logger.Info("module stopped", "module_id", moduleID)
 
 	return nil
 }
 
 // RestartModule stops and starts a module.
 func (o *Orchestrator) RestartModule(ctx context.Context, moduleID string) error {
-	log.Info().Str("module_id", moduleID).Msg("restarting module")
+	o.logger.Info("restarting module", "module_id", moduleID)
 
 	// Stop if running
 	o.mu.RLock()
@@ -337,7 +335,7 @@ func (o *Orchestrator) GetModuleStatus(ctx context.Context, moduleID string) (*M
 	if inst.containerID != "" && (inst.state == StateRunning || inst.state == StateStarting) {
 		info, err := o.getContainerInfo(ctx, inst.containerID)
 		if err != nil {
-			log.Warn().Err(err).Str("module_id", moduleID).Msg("failed to get container info")
+			o.logger.Warn("failed to get container info", "error", err, "module_id", moduleID)
 		} else {
 			status.Health = info.Health
 			status.IPAddress = info.IPAddress
@@ -375,7 +373,7 @@ func (o *Orchestrator) ListModules(ctx context.Context) ([]*ModuleStatus, error)
 	for _, id := range moduleIDs {
 		status, err := o.GetModuleStatus(ctx, id)
 		if err != nil {
-			log.Warn().Err(err).Str("module_id", id).Msg("failed to get module status")
+			o.logger.Warn("failed to get module status", "error", err, "module_id", id)
 			continue
 		}
 		statuses = append(statuses, status)

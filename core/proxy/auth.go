@@ -3,10 +3,9 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
-
-	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/session"
 )
@@ -22,16 +21,19 @@ func withRequestID(ctx context.Context, requestID string) context.Context {
 // AuthMiddleware provides authentication middleware for the proxy.
 type AuthMiddleware struct {
 	sessionManager *session.Manager
-	logger         zerolog.Logger
+	logger         *slog.Logger
 	optional       bool // If true, missing sessions are not treated as errors
 	getFromRequest func(context.Context, *http.Request) (*session.Session, error)
 }
 
 // NewAuthMiddleware creates a new authentication middleware.
-func NewAuthMiddleware(sessionManager *session.Manager, logger zerolog.Logger, optional bool) *AuthMiddleware {
+func NewAuthMiddleware(sessionManager *session.Manager, logger *slog.Logger, optional bool) *AuthMiddleware {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &AuthMiddleware{
 		sessionManager: sessionManager,
-		logger:         logger.With().Str("component", "auth-middleware").Logger(),
+		logger:         logger.With("component", "auth-middleware"),
 		optional:       optional,
 	}
 }
@@ -40,26 +42,23 @@ func NewAuthMiddleware(sessionManager *session.Manager, logger zerolog.Logger, o
 func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		requestID := getRequestIDFromContext(ctx)
 
 		// Attempt to get session from request
 		sess, err := am.resolveSession(ctx, r)
 		if err != nil {
 			// Log the authentication failure
-			am.logger.Debug().
-				Str("request_id", requestID).
-				Err(err).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Msg("authentication failed")
+			am.logger.DebugContext(ctx, "authentication failed",
+				"error", err,
+				"method", r.Method,
+				"path", r.URL.Path,
+			)
 
 			// If authentication is optional, continue without session
 			if am.optional {
-				am.logger.Warn().
-					Str("request_id", requestID).
-					Str("method", r.Method).
-					Str("path", r.URL.Path).
-					Msg("optional authentication bypassed due to auth resolution failure")
+				am.logger.WarnContext(ctx, "optional authentication bypassed due to auth resolution failure",
+					"method", r.Method,
+					"path", r.URL.Path,
+				)
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -71,53 +70,48 @@ func (am *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 
 		// Validate session is still valid and active
 		if !sess.Active {
-			am.logger.Debug().
-				Str("request_id", requestID).
-				Str("session_id", sess.ID.String()).
-				Msg("session is inactive")
+			am.logger.DebugContext(ctx, "session is inactive",
+				"session_id", sess.ID.String(),
+			)
 
 			if !am.optional {
 				am.handleAuthError(w, r, session.ErrSessionInvalid)
 				return
 			}
-			am.logger.Warn().
-				Str("request_id", requestID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Str("session_id", sess.ID.String()).
-				Msg("optional authentication bypassed inactive session")
+			am.logger.WarnContext(ctx, "optional authentication bypassed inactive session",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"session_id", sess.ID.String(),
+			)
 		}
 
 		// Check if session has expired
 		if time.Now().UTC().After(sess.ExpiresAt) {
-			am.logger.Debug().
-				Str("request_id", requestID).
-				Str("session_id", sess.ID.String()).
-				Time("expires_at", sess.ExpiresAt).
-				Msg("session has expired")
+			am.logger.DebugContext(ctx, "session has expired",
+				"session_id", sess.ID.String(),
+				"expires_at", sess.ExpiresAt,
+			)
 
 			if !am.optional {
 				am.handleAuthError(w, r, session.ErrSessionExpired)
 				return
 			}
-			am.logger.Warn().
-				Str("request_id", requestID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Str("session_id", sess.ID.String()).
-				Msg("optional authentication bypassed expired session")
+			am.logger.WarnContext(ctx, "optional authentication bypassed expired session",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"session_id", sess.ID.String(),
+			)
 		}
 
 		// Add session to request context
 		ctx = session.WithSession(ctx, sess)
 
 		// Log successful authentication
-		am.logger.Debug().
-			Str("request_id", requestID).
-			Str("session_id", sess.ID.String()).
-			Str("identity_id", sess.IdentityID.String()).
-			Str("aal", string(sess.AAL)).
-			Msg("authentication successful")
+		am.logger.DebugContext(ctx, "authentication successful",
+			"session_id", sess.ID.String(),
+			"identity_id", sess.IdentityID.String(),
+			"aal", string(sess.AAL),
+		)
 
 		// Continue to next handler
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -176,7 +170,8 @@ func (am *AuthMiddleware) InjectHeaders(r *http.Request, sess *session.Session) 
 
 // handleAuthError handles authentication errors by returning appropriate HTTP responses.
 func (am *AuthMiddleware) handleAuthError(w http.ResponseWriter, r *http.Request, err error) {
-	requestID := getRequestIDFromContext(r.Context())
+	ctx := r.Context()
+	requestID := getRequestIDFromContext(ctx)
 
 	var statusCode int
 	var message string
@@ -220,10 +215,9 @@ func (am *AuthMiddleware) handleAuthError(w http.ResponseWriter, r *http.Request
 
 	// Don't fail if we can't encode the JSON response
 	if err := writeJSON(w, response); err != nil {
-		am.logger.Error().
-			Str("request_id", requestID).
-			Err(err).
-			Msg("failed to write authentication error response")
+		am.logger.ErrorContext(ctx, "failed to write authentication error response",
+			"error", err,
+		)
 	}
 }
 

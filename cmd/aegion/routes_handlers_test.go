@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -165,7 +166,7 @@ func newTestServer(t *testing.T) *Server {
 	return &Server{
 		cfg:      cfg,
 		log:      logger.New(logger.Config{Level: "error", Format: "json"}),
-		registry: registry.New(registry.DefaultConfig()),
+		registry: registry.New(registry.DefaultConfig(), slog.Default()),
 		tokenGen: tokenGen,
 	}
 }
@@ -1900,8 +1901,9 @@ func TestHandleAdminRestartModule(t *testing.T) {
 	})
 
 	t.Run("orchestrator unavailable", func(t *testing.T) {
+		registerTestModule(t, s, "password-unavailable", registry.EndpointHTTP, "http://password:8080")
 		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-unavailable/restart", nil), "id", "password-unavailable")
 		s.handleAdminRestartModule(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
@@ -1921,11 +1923,12 @@ func TestHandleAdminRestartModule(t *testing.T) {
 	})
 
 	t.Run("orchestrator closed", func(t *testing.T) {
+		registerTestModule(t, s, "password-closed", registry.EndpointHTTP, "http://password:8080")
 		stub := &stubRouteOrchestrator{restartErr: orchestrator.ErrOrchestratorClosed}
 		s.orchestrator = stub
 
 		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-closed/restart", nil), "id", "password-closed")
 		s.handleAdminRestartModule(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
@@ -1933,11 +1936,12 @@ func TestHandleAdminRestartModule(t *testing.T) {
 	})
 
 	t.Run("restart error", func(t *testing.T) {
+		registerTestModule(t, s, "password-error", registry.EndpointHTTP, "http://password:8080")
 		stub := &stubRouteOrchestrator{restartErr: errors.New("restart failed")}
 		s.orchestrator = stub
 
 		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-error/restart", nil), "id", "password-error")
 		s.handleAdminRestartModule(rec, req)
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
@@ -1945,17 +1949,18 @@ func TestHandleAdminRestartModule(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
+		registerTestModule(t, s, "password-success", registry.EndpointHTTP, "http://password:8080")
 		stub := &stubRouteOrchestrator{}
 		s.orchestrator = stub
 
 		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password/restart", nil), "id", "password")
+		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-success/restart", nil), "id", "password-success")
 		s.handleAdminRestartModule(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
-		if len(stub.restartCalls) != 1 || stub.restartCalls[0] != "password" {
-			t.Fatalf("expected restart to be called for password, got %+v", stub.restartCalls)
+		if len(stub.restartCalls) != 1 || stub.restartCalls[0] != "password-success" {
+			t.Fatalf("expected restart to be called for password-success, got %+v", stub.restartCalls)
 		}
 
 		var resp map[string]string
@@ -1965,8 +1970,8 @@ func TestHandleAdminRestartModule(t *testing.T) {
 		if resp["status"] != "restarted" {
 			t.Fatalf("expected status restarted, got %q", resp["status"])
 		}
-		if resp["module_id"] != "password" {
-			t.Fatalf("expected module_id=password, got %q", resp["module_id"])
+		if resp["module_id"] != "password-success" {
+			t.Fatalf("expected module_id=password-success, got %q", resp["module_id"])
 		}
 	})
 }

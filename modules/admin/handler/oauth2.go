@@ -495,7 +495,7 @@ func (h *Handler) ListOAuth2Tokens(w http.ResponseWriter, r *http.Request) {
 	}
 	if tokenType == "" || tokenType == "refresh_token" {
 		unionQueries = append(unionQueries, `
-			SELECT 'refresh_token' AS token_type, id, client_id, identity_id, session_id, scopes, audience,
+			SELECT 'refresh_token' AS token_type, '[redacted]' AS id, client_id, identity_id, session_id, scopes, audience,
 				CASE WHEN active = false THEN 'revoked' WHEN expires_at <= NOW() THEN 'expired' WHEN used THEN 'used' ELSE 'active' END AS status,
 				expires_at, created_at, extra_claims
 			FROM oa2_refresh_tokens`+buildWhereClause(whereRefresh))

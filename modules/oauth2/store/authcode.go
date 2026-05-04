@@ -31,7 +31,11 @@ type AuthCode struct {
 // CreateAuthCode creates a new authorization code.
 func (s *Store) CreateAuthCode(ctx context.Context, code *AuthCode) error {
 	if code.Code == "" {
-		code.Code = GenerateAuthCode()
+		var err error
+		code.Code, err = GenerateAuthCode()
+		if err != nil {
+			return err
+		}
 	}
 	now := nowUTC()
 	code.CreatedAt = now

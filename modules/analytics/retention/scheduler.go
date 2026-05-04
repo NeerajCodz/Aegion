@@ -27,16 +27,16 @@ type ScheduleConfig struct {
 
 // JobScheduler orchestrates scheduled retention jobs.
 type JobScheduler struct {
-	config          *ScheduleConfig
-	executor        *ArchivalExecutor
-	tieringEngine   *TieringEngine
-	cleanupManager  *CleanupManager
-	auditLog        AuditLog
-	mu              sync.RWMutex
-	running         bool
-	cancel          context.CancelFunc
-	jobHistory      map[string][]interface{}
-	lastRunTimes    map[string]time.Time
+	config         *ScheduleConfig
+	executor       *ArchivalExecutor
+	tieringEngine  *TieringEngine
+	cleanupManager *CleanupManager
+	auditLog       AuditLog
+	mu             sync.RWMutex
+	running        bool
+	cancel         context.CancelFunc
+	jobHistory     map[string][]interface{}
+	lastRunTimes   map[string]time.Time
 }
 
 // NewJobScheduler creates a new job scheduler.
@@ -133,14 +133,14 @@ func (js *JobScheduler) runArchivalJobs(ctx context.Context) {
 
 	for _, category := range categories {
 		job := &ArchivalJob{
-			ID:       fmt.Sprintf("arch_%s_%d", category, time.Now().UnixNano()),
-			Category: category,
+			ID:         fmt.Sprintf("arch_%s_%d", category, time.Now().UnixNano()),
+			Category:   category,
 			SourceTier: TierHot,
 			TargetTier: TierWarm,
 		}
 
 		if err := js.executor.ArchiveData(ctx, job); err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler", 
+			js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Archival failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("archival", job)
@@ -148,14 +148,14 @@ func (js *JobScheduler) runArchivalJobs(ctx context.Context) {
 
 		// Then archive warm to cold
 		job2 := &ArchivalJob{
-			ID:       fmt.Sprintf("arch_%s_c_%d", category, time.Now().UnixNano()),
-			Category: category,
+			ID:         fmt.Sprintf("arch_%s_c_%d", category, time.Now().UnixNano()),
+			Category:   category,
 			SourceTier: TierWarm,
 			TargetTier: TierCold,
 		}
 
 		if err := js.executor.ArchiveData(ctx, job2); err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler", 
+			js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Warm->Cold archival failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("archival", job2)
@@ -175,7 +175,7 @@ func (js *JobScheduler) runTieringJobs(ctx context.Context) {
 	for _, category := range categories {
 		transition, err := js.tieringEngine.TransitionStaleData(ctx, category)
 		if err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler", 
+			js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Tiering failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("tiering", transition)
@@ -196,7 +196,7 @@ func (js *JobScheduler) runCleanupJobs(ctx context.Context) {
 		// Cleanup expired data
 		job, err := js.cleanupManager.CleanupExpiredData(ctx, category)
 		if err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler", 
+			js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Cleanup expired data failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("cleanup_expired", job)
@@ -205,7 +205,7 @@ func (js *JobScheduler) runCleanupJobs(ctx context.Context) {
 		// Cleanup soft-deleted data (older than 30 days)
 		softDeleteJob, err := js.cleanupManager.CleanupSoftDeletedData(ctx, category, 30)
 		if err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler", 
+			js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Cleanup soft-deleted failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("cleanup_soft", softDeleteJob)
@@ -214,14 +214,14 @@ func (js *JobScheduler) runCleanupJobs(ctx context.Context) {
 		// Find and report orphans
 		orphans, err := js.cleanupManager.FindOrphanRecords(ctx, category)
 		if err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler", 
+			js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Orphan detection failed for category %s: %v", category, err))
 		} else if len(orphans) > 0 {
-			js.auditLog.LogMessage(ctx, "JobScheduler", 
+			js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Found %d orphan records in category %s", len(orphans), category))
 			// Attempt repair
 			if err := js.cleanupManager.RepairOrphanRecords(ctx, orphans); err != nil {
-				js.auditLog.LogMessage(ctx, "JobScheduler", 
+				js.auditLog.LogMessage(ctx, "JobScheduler",
 					fmt.Sprintf("Orphan repair failed for category %s: %v", category, err))
 			}
 		}
@@ -287,7 +287,7 @@ func DefaultScheduleConfig() *ScheduleConfig {
 		ArchivalInterval: 24 * time.Hour,     // Daily
 		CleanupInterval:  7 * 24 * time.Hour, // Weekly
 		TieringInterval:  6 * time.Hour,      // Every 6 hours
-		StartTime:        "02:00",             // 2 AM
-		Categories:       []string{},          // All categories
+		StartTime:        "02:00",            // 2 AM
+		Categories:       []string{},         // All categories
 	}
 }

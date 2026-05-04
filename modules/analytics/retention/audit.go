@@ -10,11 +10,11 @@ import (
 
 // AuditLogEntry represents a single audit log entry.
 type AuditLogEntry struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Component string    `json:"component"`
-	Operation string    `json:"operation"`
-	Details   string    `json:"details"`
+	ID        string                 `json:"id"`
+	Timestamp time.Time              `json:"timestamp"`
+	Component string                 `json:"component"`
+	Operation string                 `json:"operation"`
+	Details   string                 `json:"details"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -84,7 +84,7 @@ func (dal *DatabaseAuditLog) LogArchival(ctx context.Context, job *ArchivalJob) 
 		Timestamp: time.Now(),
 		Component: "ArchivalExecutor",
 		Operation: "Archive",
-		Details:   fmt.Sprintf("Archived %d rows from %s to %s (status: %s, error: %s)",
+		Details: fmt.Sprintf("Archived %d rows from %s to %s (status: %s, error: %s)",
 			job.RowCount, job.SourceTier, job.TargetTier, job.Status, job.Error),
 		Metadata: metadata,
 	}, string(metaJSON))
@@ -107,7 +107,7 @@ func (dal *DatabaseAuditLog) LogTierTransition(ctx context.Context, transition *
 		Timestamp: time.Now(),
 		Component: "TieringEngine",
 		Operation: "TierTransition",
-		Details:   fmt.Sprintf("Transitioned %d rows from %s to %s for category %s (status: %s, error: %s)",
+		Details: fmt.Sprintf("Transitioned %d rows from %s to %s for category %s (status: %s, error: %s)",
 			transition.RowsAffected, transition.FromTier, transition.ToTier, transition.Category, transition.Status, transition.Error),
 		Metadata: metadata,
 	}, string(metaJSON))
@@ -116,9 +116,9 @@ func (dal *DatabaseAuditLog) LogTierTransition(ctx context.Context, transition *
 // LogCleanup logs a cleanup job.
 func (dal *DatabaseAuditLog) LogCleanup(ctx context.Context, job *CleanupJob) error {
 	metadata := map[string]interface{}{
-		"job_id":        job.ID,
-		"job_type":      job.JobType,
-		"category":      job.Category,
+		"job_id":         job.ID,
+		"job_type":       job.JobType,
+		"category":       job.Category,
 		"rows_processed": job.RowsProcessed,
 		"rows_deleted":   job.RowsDeleted,
 	}
@@ -130,7 +130,7 @@ func (dal *DatabaseAuditLog) LogCleanup(ctx context.Context, job *CleanupJob) er
 		Timestamp: time.Now(),
 		Component: "CleanupManager",
 		Operation: fmt.Sprintf("Cleanup-%s", job.JobType),
-		Details:   fmt.Sprintf("Cleaned up %d rows (deleted %d) for category %s (status: %s, error: %s)",
+		Details: fmt.Sprintf("Cleaned up %d rows (deleted %d) for category %s (status: %s, error: %s)",
 			job.RowsProcessed, job.RowsDeleted, job.Category, job.Status, job.Error),
 		Metadata: metadata,
 	}, string(metaJSON))
@@ -255,9 +255,11 @@ func (dal *DatabaseAuditLog) ArchiveAuditLogs(ctx context.Context, daysOld int) 
 // NoopAuditLog is a no-operation audit log for testing.
 type NoopAuditLog struct{}
 
-func (nal *NoopAuditLog) LogArchival(ctx context.Context, job *ArchivalJob) error      { return nil }
-func (nal *NoopAuditLog) LogTierTransition(ctx context.Context, transition *TierTransition) error { return nil }
-func (nal *NoopAuditLog) LogCleanup(ctx context.Context, job *CleanupJob) error         { return nil }
+func (nal *NoopAuditLog) LogArchival(ctx context.Context, job *ArchivalJob) error { return nil }
+func (nal *NoopAuditLog) LogTierTransition(ctx context.Context, transition *TierTransition) error {
+	return nil
+}
+func (nal *NoopAuditLog) LogCleanup(ctx context.Context, job *CleanupJob) error           { return nil }
 func (nal *NoopAuditLog) LogMessage(ctx context.Context, component, message string) error { return nil }
 func (nal *NoopAuditLog) GetLogs(ctx context.Context, component string, limit int) ([]AuditLogEntry, error) {
 	return []AuditLogEntry{}, nil

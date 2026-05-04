@@ -38,8 +38,8 @@ func TestSignatureVerifyDetectsTampering(t *testing.T) {
 
 func TestRetryPolicyAdditionalScenarios(t *testing.T) {
 	policy := NewRetryPolicy(RetryConfig{
-		MaxRetries:             3,
-		BackoffBaseMs:          100,
+		MaxRetries:              3,
+		BackoffBaseMs:           100,
 		CircuitBreakerThreshold: 2,
 	})
 

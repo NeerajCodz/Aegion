@@ -66,7 +66,11 @@ type IDToken struct {
 // CreateAccessToken stores a new access token.
 func (s *Store) CreateAccessToken(ctx context.Context, token *AccessToken) error {
 	if token.JTI == "" {
-		token.JTI = GenerateAccessTokenJTI()
+		var err error
+		token.JTI, err = GenerateAccessTokenJTI()
+		if err != nil {
+			return err
+		}
 	}
 	token.CreatedAt = nowUTC()
 
@@ -177,10 +181,18 @@ func (s *Store) RevokeAccessTokensBySession(ctx context.Context, sessionID strin
 // CreateRefreshToken stores a new refresh token.
 func (s *Store) CreateRefreshToken(ctx context.Context, token *RefreshToken) error {
 	if token.ID == "" {
-		token.ID = GenerateRefreshToken()
+		var err error
+		token.ID, err = GenerateRefreshToken()
+		if err != nil {
+			return err
+		}
 	}
 	if token.FamilyID == "" {
-		token.FamilyID = GenerateRefreshTokenFamily()
+		var err error
+		token.FamilyID, err = GenerateRefreshTokenFamily()
+		if err != nil {
+			return err
+		}
 	}
 	token.CreatedAt = nowUTC()
 
@@ -288,7 +300,11 @@ func (s *Store) RevokeRefreshTokensBySession(ctx context.Context, sessionID stri
 // CreateIDToken stores a new ID token.
 func (s *Store) CreateIDToken(ctx context.Context, token *IDToken) error {
 	if token.JTI == "" {
-		token.JTI = GenerateIDTokenJTI()
+		var err error
+		token.JTI, err = GenerateIDTokenJTI()
+		if err != nil {
+			return err
+		}
 	}
 	token.CreatedAt = nowUTC()
 

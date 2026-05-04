@@ -243,7 +243,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	reg := registry.New(registry.Config{
 		HealthCheckInterval: cfg.Config.Server.InternalNet.HealthCheckInt.Duration(),
 		HealthCheckTimeout:  cfg.Config.Server.InternalNet.HealthCheckTimeout.Duration(),
-	})
+	}, cfg.Log.Logger)
 
 	// Initialize flow store and service
 	flowStore := flows.NewPostgresFlowStore(cfg.DB.Pool)
@@ -422,7 +422,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 
 	// Start registry
 	reg.Start()
-	s.log.Info().Msg("Service registry started")
+	s.log.Info("Service registry started")
 
 	if cfg.ConfigPath != "" {
 		moduleOrchestrator, err := newModuleOrchestrator(orchestrator.Config{
@@ -439,13 +439,13 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 			return nil, err
 		}
 		s.orchestrator = moduleOrchestrator
-		s.log.Info().Str("config_path", cfg.ConfigPath).Msg("Module orchestrator started")
+		s.log.Info("Module orchestrator started", "config_path", cfg.ConfigPath)
 	}
 
 	// Bootstrap admin if requested
 	if cfg.AdminBootstrap {
 		if err := s.bootstrapAdmin(ctx); err != nil {
-			s.log.Warn().Err(err).Msg("Admin bootstrap failed")
+			s.log.Warn("Admin bootstrap failed", "error", err)
 		}
 	}
 
@@ -462,16 +462,14 @@ func (s *Server) bootstrapAdmin(ctx context.Context) error {
 	email := strings.ToLower(strings.TrimSpace(s.cfg.Operator.Email))
 	password := strings.TrimSpace(s.cfg.Operator.Password)
 	if email == "" || password == "" {
-		s.log.Info().Msg("Admin bootstrap skipped: no operator credentials configured")
+		s.log.Info("Admin bootstrap skipped: no operator credentials configured")
 		return nil
 	}
 	if config.IsPlaceholderValue(password) {
 		return errors.New("admin bootstrap blocked: operator.password must be rotated from placeholder value")
 	}
 
-	s.log.Info().
-		Str("email", email).
-		Msg("Admin bootstrap requested")
+	s.log.Info("Admin bootstrap requested", "email", email)
 
 	outcome, err := ensureBootstrapAdminOperator(ctx, s.db, email, password)
 	if err != nil {
@@ -479,21 +477,20 @@ func (s *Server) bootstrapAdmin(ctx context.Context) error {
 	}
 
 	if !outcome.CreatedIdentity && !outcome.CreatedOperator {
-		s.log.Info().
-			Str("email", email).
-			Msg("Admin bootstrap skipped: operator already exists")
+		s.log.Info("Admin bootstrap skipped: operator already exists", "email", email)
 		return nil
 	}
 
-	logEvent := s.log.Info().
-		Str("email", email).
-		Str("identity_id", outcome.IdentityID.String()).
-		Bool("created_identity", outcome.CreatedIdentity).
-		Bool("created_operator", outcome.CreatedOperator)
-	if outcome.OperatorID != uuid.Nil {
-		logEvent = logEvent.Str("operator_id", outcome.OperatorID.String())
+	attrs := map[string]any{
+		"email":            email,
+		"identity_id":      outcome.IdentityID.String(),
+		"created_identity": outcome.CreatedIdentity,
+		"created_operator": outcome.CreatedOperator,
 	}
-	logEvent.Msg("Admin bootstrap completed")
+	if outcome.OperatorID != uuid.Nil {
+		attrs["operator_id"] = outcome.OperatorID.String()
+	}
+	s.log.LogWideEvent(ctx, "Admin bootstrap completed", attrs)
 
 	return nil
 }
@@ -696,7 +693,7 @@ func (s *Server) registerWorkers() {
 		Interval: 10 * time.Minute,
 	}))
 
-	s.log.Info().Msg("Background workers registered")
+	s.log.Info("Background workers registered")
 }
 
 // Handler returns the HTTP handler for the server.
@@ -706,23 +703,23 @@ func (s *Server) Handler() http.Handler {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.log.Info().Msg("Shutting down server components")
+	s.log.Info("Shutting down server components")
 
 	var shutdownErr error
 
 	if s.orchestrator != nil {
 		if err := s.orchestrator.Stop(ctx); err != nil {
-			s.log.Error().Err(err).Msg("Failed to stop module orchestrator")
+			s.log.Error("Failed to stop module orchestrator", "error", err)
 			shutdownErr = err
 		} else {
-			s.log.Info().Msg("Module orchestrator stopped")
+			s.log.Info("Module orchestrator stopped")
 		}
 	}
 
 	// Stop registry
 	if s.registry != nil {
 		s.registry.Stop()
-		s.log.Info().Msg("Service registry stopped")
+		s.log.Info("Service registry stopped")
 	}
 
 	return shutdownErr
@@ -754,15 +751,19 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		ctx := r.Context()
 
 		defer func() {
-			s.log.Info().
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Int("status", ww.Status()).
-				Dur("duration", time.Since(start)).
-				Str("request_id", middleware.GetReqID(r.Context())).
-				Msg("HTTP request")
+			// Use wide events pattern - one context-rich log per request
+			s.log.LogWideEvent(ctx, "HTTP request", map[string]any{
+				"http.method":      r.Method,
+				"http.path":        r.URL.Path,
+				"http.status":      ww.Status(),
+				"latency_ms":       time.Since(start).Milliseconds(),
+				"http.user_agent":  r.UserAgent(),
+				"http.remote_addr": r.RemoteAddr,
+				"outcome":          map[bool]string{true: "success", false: "error"}[ww.Status() < 400],
+			})
 		}()
 
 		next.ServeHTTP(ww, r)

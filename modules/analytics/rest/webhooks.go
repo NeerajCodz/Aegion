@@ -8,17 +8,17 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/webhooks"
+	"github.com/go-chi/chi/v5"
 )
 
 // RegisterWebhookRequest is the API request for registering a webhook.
 type RegisterWebhookRequest struct {
-	URL          string                 `json:"url"`
-	EventFilter  webhooks.EventFilter   `json:"event_filter"`
-	Secret       string                 `json:"secret,omitempty"`
-	Active       bool                   `json:"active,omitempty"`
+	URL         string               `json:"url"`
+	EventFilter webhooks.EventFilter `json:"event_filter"`
+	Secret      string               `json:"secret,omitempty"`
+	Active      bool                 `json:"active,omitempty"`
 }
 
 // ListWebhooksResponse wraps webhook responses.
@@ -415,5 +415,3 @@ func (h *Handler) ReplayDelivery(w http.ResponseWriter, r *http.Request) {
 		"status":      "replay_queued",
 	}, nil, 0, false)
 }
-
-
