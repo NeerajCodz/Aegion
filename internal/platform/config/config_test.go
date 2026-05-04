@@ -221,6 +221,39 @@ secrets:
 	assert.Equal(t, "example-app-secret-for-tests", cfg.Secrets.Cookie[0])
 }
 
+
+func TestLoad_ProxyUpstreamTimeoutEnvironmentVariableExpansion(t *testing.T) {
+	if err := os.Setenv("AEGION_PROXY_UPSTREAM_TIMEOUT", "45s"); err != nil {
+		t.Fatalf("failed to set AEGION_PROXY_UPSTREAM_TIMEOUT: %v", err)
+	}
+	defer func() {
+		_ = os.Unsetenv("AEGION_PROXY_UPSTREAM_TIMEOUT")
+	}()
+
+	configContent := `
+secrets:
+  cookie:
+    - "test-cookie-secret-32-characters-long"
+  cipher:
+    - "test-cipher-secret-32-characters-long"
+  internal:
+    - "test-internal-secret-32-characters-long"
+
+proxy:
+  upstream_timeout: ${AEGION_PROXY_UPSTREAM_TIMEOUT}
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	require.NoError(t, err)
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, Duration(45*time.Second), cfg.Proxy.UpstreamTimeout)
+}
+
 func TestLoad_FileNotFound(t *testing.T) {
 	_, err := Load("/nonexistent/path/config.yaml")
 	assert.Error(t, err)
