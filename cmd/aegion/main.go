@@ -36,6 +36,9 @@ var (
 )
 
 // Command line flags
+const defaultShutdownTimeout = 30 * time.Second
+
+// Command line flags
 type flags struct {
 	configPath      string
 	migrateOnly     bool
@@ -88,7 +91,7 @@ func parseFlags() *flags {
 	flag.BoolVar(&f.showVersion, "version", false, "Show version and exit")
 	flag.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
 	flag.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
-	flag.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "Graceful shutdown timeout")
+	flag.DurationVar(&f.shutdownTimeout, "shutdown-timeout", defaultShutdownTimeout, "Graceful shutdown timeout")
 	flag.Parse()
 	return f
 }
@@ -103,13 +106,27 @@ func parseFlagsWithArgs(args []string) (*flags, error) {
 	fs.BoolVar(&f.showVersion, "version", false, "Show version and exit")
 	fs.BoolVar(&f.adminBootstrap, "admin-bootstrap", false, "Bootstrap admin user on startup")
 	fs.BoolVar(&f.enableWorkers, "workers", true, "Enable background workers")
-	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", 30*time.Second, "Graceful shutdown timeout")
+	fs.DurationVar(&f.shutdownTimeout, "shutdown-timeout", defaultShutdownTimeout, "Graceful shutdown timeout")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
+
+	if err := validateShutdownTimeout(f.shutdownTimeout); err != nil {
+		return nil, err
+	}
+
 	return f, nil
 }
+
+func validateShutdownTimeout(timeout time.Duration) error {
+	if timeout <= 0 {
+		return fmt.Errorf("invalid --shutdown-timeout %q: must be greater than 0", timeout)
+	}
+
+	return nil
+}
+
 
 func defaultMainDeps() mainDeps {
 	return mainDeps{
