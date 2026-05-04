@@ -130,7 +130,10 @@ func (r *fakeRows) Conn() *pgx.Conn { return nil }
 func TestStore_ListRoleIDsByIdentity(t *testing.T) {
 	st := NewWithDB(&fakeDB{
 		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-			assert.Contains(t, sql, "FROM pol_role_assignments")
+			assert.Contains(t, sql, "FROM pol_role_assignments pra")
+			assert.Contains(t, sql, "INNER JOIN core_identities ci")
+			assert.Contains(t, sql, "ci.state = 'active'")
+			assert.Contains(t, sql, "ci.deleted_at IS NULL")
 			assert.Equal(t, []any{"id-1"}, args)
 			return &fakeRows{data: [][]any{{"role-1"}, {"role-2"}}}, nil
 		},
