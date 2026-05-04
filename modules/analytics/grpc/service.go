@@ -290,28 +290,18 @@ func validateReadOnlySQL(query string) error {
 	if trimmed == "" {
 		return fmt.Errorf("saved query SQL is empty")
 	}
+	if strings.Contains(trimmed, ";") {
+		return fmt.Errorf("saved query must contain exactly one statement")
+	}
 
 	upper := strings.ToUpper(trimmed)
 	if !(strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "WITH ")) {
 		return fmt.Errorf("saved query must be read-only")
 	}
 
-	disallowed := []string{
-		" INSERT ",
-		" UPDATE ",
-		" DELETE ",
-		" DROP ",
-		" ALTER ",
-		" CREATE ",
-		" TRUNCATE ",
-		" ATTACH ",
-		" DETACH ",
-	}
-	padded := " " + upper + " "
-	for _, keyword := range disallowed {
-		if strings.Contains(padded, keyword) {
-			return fmt.Errorf("saved query contains disallowed statement")
-		}
+	disallowedPattern := regexp.MustCompile(`\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|ATTACH|DETACH)\b`)
+	if disallowedPattern.FindStringIndex(upper) != nil {
+		return fmt.Errorf("saved query contains disallowed statement")
 	}
 
 	return nil
