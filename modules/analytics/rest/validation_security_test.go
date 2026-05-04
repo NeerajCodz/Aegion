@@ -148,17 +148,18 @@ func TestValidateSQLWithDangerousPatterns(t *testing.T) {
 		valid bool
 		desc  string
 	}{
-		{"SELECT * FROM events", true, "valid SELECT"},
-		{"SELECT COUNT(*) FROM users", true, "valid SELECT with aggregate"},
+		{"SELECT * FROM analytics_events", true, "valid SELECT"},
+		{"SELECT COUNT(*) FROM analytics_events", true, "valid SELECT with aggregate"},
+		{"SELECT * FROM users", false, "select from non-events table"},
 		{"DROP TABLE users", false, "dangerous DROP"},
 		{"DELETE FROM users", false, "dangerous DELETE"},
 		{"INSERT INTO users VALUES (1)", false, "dangerous INSERT"},
 		{"UPDATE users SET x=1", false, "dangerous UPDATE"},
 		{"ALTER TABLE users", false, "dangerous ALTER"},
 		{"TRUNCATE TABLE users", false, "dangerous TRUNCATE"},
-		{"SELECT * FROM events; DROP TABLE users", false, "multiple statements"},
-		{"SELECT * FROM events -- comment", false, "comment injection"},
-		{"SELECT * FROM events /* comment */", false, "block comment injection"},
+		{"SELECT * FROM analytics_events; DROP TABLE users", false, "multiple statements"},
+		{"SELECT * FROM analytics_events -- comment", false, "comment injection"},
+		{"SELECT * FROM analytics_events /* comment */", false, "block comment injection"},
 	}
 
 	for _, tt := range tests {
