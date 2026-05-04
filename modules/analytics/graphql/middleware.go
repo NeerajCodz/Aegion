@@ -56,13 +56,6 @@ func AuthMiddleware(logger *slog.Logger, requiredForFields map[string]bool) Midd
 
 			ctx := context.WithValue(r.Context(), "userID", userID)
 			ctx = context.WithValue(ctx, "token", token)
-			if role, ok := extractGraphQLRole(token); ok {
-				manager := rbac.FromContext(ctx)
-				if err := manager.SetUserRole(userID, role); err == nil {
-					ctx = rbac.WithManager(ctx, manager)
-					ctx = context.WithValue(ctx, "role", string(role))
-				}
-			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -302,17 +295,6 @@ func validateGraphQLToken(token string) (string, error) {
 	return userID, nil
 }
 
-func extractGraphQLRole(token string) (rbac.Role, bool) {
-	parts := strings.Split(token, ":")
-	for _, part := range parts[1:] {
-		role := rbac.Role(strings.TrimSpace(strings.ToLower(part)))
-		switch role {
-		case rbac.RoleAdmin, rbac.RoleAnalyst, rbac.RoleViewer, rbac.RoleUser:
-			return role, true
-		}
-	}
-	return "", false
-}
 
 func generateTraceID() string {
 	return fmt.Sprintf("trace-%d", time.Now().UnixNano())
