@@ -339,6 +339,33 @@ func TestIntrospectToken(t *testing.T) {
 		require.NotNil(t, resp)
 		assert.False(t, resp.Active)
 	})
+
+	t.Run("public client cannot introspect", func(t *testing.T) {
+		mockStore := &mockTokenStore{
+			client: &store.Client{
+				ID:                      "public-client",
+				TokenEndpointAuthMethod: "none",
+			},
+			accessTokenByJTI: map[string]*store.AccessToken{
+				"at-jti-1": {
+					JTI:       "at-jti-1",
+					ClientID:  "victim-client",
+					Subject:   "identity-1",
+					Scopes:    []string{"openid"},
+					Audience:  []string{"api"},
+					Issuer:    "https://issuer.example.com",
+					ExpiresAt: time.Now().UTC().Add(time.Minute),
+				},
+			},
+		}
+		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://issuer.example.com")
+
+		_, err := svc.IntrospectToken(ctx, &IntrospectionRequest{
+			Token:    "at-jti-1",
+			ClientID: "public-client",
+		})
+		assert.ErrorIs(t, err, ErrUnauthorizedClient)
+	})
 }
 
 func TestRefreshAccessToken(t *testing.T) {
