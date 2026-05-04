@@ -127,7 +127,10 @@ function Test-NoSecretsInEnv {
         
         if ($env) {
             Write-Warning-Custom "Found environment variables with secret-like names in $Container"
-            $env | ForEach-Object { Write-Host "  $_" }
+            $env | ForEach-Object {
+                $name = ($_ -split '=', 2)[0]
+                if ($name) { Write-Host "  ${name}=<redacted>" }
+            }
             return $false
         }
         

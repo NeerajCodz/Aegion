@@ -137,8 +137,8 @@ test_no_secrets_in_env() {
     if env_vars=$(docker exec "$container" env 2>/dev/null | grep -E "(PASSWORD|SECRET|KEY|TOKEN)" | grep -v "CHANGE" | grep -v "xxx" || true); then
         if [ -n "$env_vars" ]; then
             warning "Found environment variables with secret-like names in $container"
-            echo "$env_vars" | while read -r line; do
-                echo "  $line"
+            echo "$env_vars" | while IFS='=' read -r name _; do
+                [ -n "$name" ] && echo "  ${name}=<redacted>"
             done
             return 1
         fi
