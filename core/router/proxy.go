@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
@@ -344,14 +345,21 @@ func (p *ModuleProxy) injectSessionHeaders(req *http.Request) {
 }
 
 func (p *ModuleProxy) stripIdentityHeaders(req *http.Request) {
-	for _, header := range []string{
+	headers := []string{
 		"X-User-ID",
 		"X-User-Email",
 		"X-User-Roles",
 		"X-User-Session-ID",
 		"X-User-AAL",
 		p.config.IdentitySignatureHeader,
-	} {
+	}
+	headers = append(headers, p.config.SignedIdentityHeaders...)
+
+	for _, header := range headers {
+		header = strings.TrimSpace(header)
+		if header == "" {
+			continue
+		}
 		req.Header.Del(header)
 	}
 }

@@ -118,6 +118,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 		InternalToken:               "module-token",
 		SessionSecret:               []byte("module-secret"),
 		IdentitySigningSecret:       []byte("identity-signing-secret"),
+		SignedIdentityHeaders:       []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL", "X-User-Is-Admin"},
 		TrustForwardedHeaders:       false,
 		StripInboundIdentityHeaders: true,
 		ModuleID:                    "admin",
@@ -145,6 +146,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	original = original.WithContext(session.WithSession(original.Context(), sess))
 
 	req := httptest.NewRequest(http.MethodPost, "http://placeholder/module/path?drop=true", strings.NewReader("payload"))
+	req.Header.Set("X-User-Is-Admin", "true")
 	req = req.WithContext(original.Context())
 
 	proxy.director(target, original)(req)
@@ -187,6 +189,9 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	}
 	if req.Header.Get("X-User-AAL") != string(sess.AAL) {
 		t.Fatalf("expected canonical AAL header to be injected")
+	}
+	if req.Header.Get("X-User-Is-Admin") != "" {
+		t.Fatalf("expected non-canonical signed identity header to be stripped before signing")
 	}
 	if sig := req.Header.Get("X-Aegion-Signature"); sig == "" {
 		t.Fatalf("expected signed identity header")
@@ -281,7 +286,7 @@ func TestModuleProxyDirectorPreserveHost(t *testing.T) {
 func TestBuildPolicyCheckRequestUsesAuthenticatedModuleSubject(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "admin",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "http://gateway.local/resource", nil)
@@ -298,7 +303,7 @@ func TestBuildPolicyCheckRequestUsesAuthenticatedModuleSubject(t *testing.T) {
 func TestBuildPolicyCheckRequestDoesNotTrustInboundTenantHeader(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "admin",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "http://gateway.local/resource", nil)
