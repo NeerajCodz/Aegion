@@ -63,15 +63,16 @@ cp ./aegion-analytics $BACKUP_DIR/$BACKUP_TIMESTAMP/aegion-analytics_$CURRENT_VE
 ### 4. Download and Install New Version
 
 ```bash
-# Download new version
+# Download new version and checksum file
 cd /opt/aegion
 wget https://releases.example.com/aegion-analytics-$NEW_VERSION.tar.gz
+wget https://releases.example.com/aegion-analytics-$NEW_VERSION.tar.gz.sha256
 
-# Extract
-tar -xzf aegion-analytics-$NEW_VERSION.tar.gz
-
-# Verify checksum (important for security)
+# Verify checksum before extracting (important for security)
 sha256sum -c aegion-analytics-$NEW_VERSION.tar.gz.sha256
+
+# Extract only after verification succeeds
+tar -xzf aegion-analytics-$NEW_VERSION.tar.gz
 ```
 
 ### 5. Run Database Migrations
