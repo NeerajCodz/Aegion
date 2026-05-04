@@ -126,6 +126,15 @@ func (s *Service) SendLoginCode(ctx context.Context, email string) error {
 
 // VerifyCode verifies an OTP code and returns the recipient.
 func (s *Service) VerifyCode(ctx context.Context, email, otpCode string) (string, *uuid.UUID, error) {
+	// Check rate limit to prevent OTP brute-force attempts
+	rateLimitKey := fmt.Sprintf("login_verify:%s", email)
+	if err := s.store.CheckRateLimit(ctx, rateLimitKey, s.config.RateLimit, s.config.RateWindow); err != nil {
+		if errors.Is(err, store.ErrRateLimited) {
+			return "", nil, ErrRateLimited
+		}
+		return "", nil, err
+	}
+
 	code, err := s.store.GetByCode(ctx, email, otpCode, store.CodeTypeLogin)
 	if err != nil {
 		if errors.Is(err, store.ErrCodeNotFound) || errors.Is(err, store.ErrCodeExpired) {

@@ -299,6 +299,24 @@ func TestVerifyCode(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidCode)
 	})
 
+	t.Run("rate limited", func(t *testing.T) {
+		stRate := newMemoryStore()
+		stRate.checkRateLimitErr = store.ErrRateLimited
+		svc := makeService(stRate, nil)
+
+		_, _, err := svc.VerifyCode(context.Background(), "u@example.com", "123456")
+		assert.ErrorIs(t, err, ErrRateLimited)
+	})
+
+	t.Run("verify rate limit key is incremented", func(t *testing.T) {
+		stRate := newMemoryStore()
+		svc := makeService(stRate, nil)
+
+		_, _, err := svc.VerifyCode(context.Background(), "u@example.com", "bad")
+		assert.ErrorIs(t, err, ErrInvalidCode)
+		assert.Equal(t, 1, stRate.rateCounts["login_verify:u@example.com"])
+	})
+
 	t.Run("lookup and mark used errors", func(t *testing.T) {
 		stErr := newMemoryStore()
 		stErr.getByCodeErr = errors.New("db read failed")
