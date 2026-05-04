@@ -10,7 +10,7 @@ The easiest way to deploy Aegion:
 
 ```bash
 # Clone repository
-git clone https://github.com/NeerajCodz/Aegion
+git clone https://github.com/Astraive/Aegion
 cd Aegion
 
 # Start services
@@ -689,4 +689,4 @@ docker stats
 AEGION_LOG_LEVEL=debug docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml up -d
 ```
 
-For more help, check the [Development Guide](development.md) or create an issue on [GitHub](https://github.com/NeerajCodz/Aegion/issues).
+For more help, check the [Development Guide](development.md) or create an issue on [GitHub](https://github.com/Astraive/Aegion/issues).

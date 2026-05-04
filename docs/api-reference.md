@@ -447,4 +447,4 @@ req.Header.Add("Content-Type", "application/json")
 resp, err := client.Do(req)
 ```
 
-For more examples and SDKs, see the [GitHub repository](https://github.com/NeerajCodz/Aegion).
+For more examples and SDKs, see the [GitHub repository](https://github.com/Astraive/Aegion).

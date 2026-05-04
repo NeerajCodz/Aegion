@@ -19,7 +19,7 @@ Ensure you have these tools installed:
 
 ```bash
 # Clone repository
-git clone https://github.com/NeerajCodz/Aegion
+git clone https://github.com/Astraive/Aegion
 cd Aegion
 
 # Install Go dependencies
@@ -509,8 +509,8 @@ AEGION_PORT=8081 go run ./cmd/aegion -config configs/development.yaml
 
 ### Getting Help
 
-- Check existing [GitHub Issues](https://github.com/NeerajCodz/Aegion/issues)
-- Join discussions in [GitHub Discussions](https://github.com/NeerajCodz/Aegion/discussions)  
+- Check existing [GitHub Issues](https://github.com/Astraive/Aegion/issues)
+- Join discussions in [GitHub Discussions](https://github.com/Astraive/Aegion/discussions)  
 - Read the [Architecture documentation](architecture.md)
 - Review the [Configuration reference](config.md)
 
