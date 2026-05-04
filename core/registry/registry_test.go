@@ -92,6 +92,26 @@ func TestRegister(t *testing.T) {
 			},
 			wantErr: ErrInvalidModule,
 		},
+		{
+			name: "invalid health URL",
+			req: RegistrationRequest{
+				ID:        "test-module-invalid-url",
+				Name:      "Test Module",
+				Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
+				HealthURL: "://invalid",
+			},
+			wantErr: ErrInvalidModule,
+		},
+		{
+			name: "health URL host must match endpoint",
+			req: RegistrationRequest{
+				ID:        "test-module-mismatch-host",
+				Name:      "Test Module",
+				Endpoints: []Endpoint{{Type: EndpointHTTP, URL: "http://localhost:8080"}},
+				HealthURL: "http://evil.example.com/health",
+			},
+			wantErr: ErrInvalidModule,
+		},
 	}
 
 	for _, tt := range tests {
