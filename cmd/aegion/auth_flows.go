@@ -443,6 +443,14 @@ func (s *Server) createSession(ctx context.Context, w http.ResponseWriter, r *ht
 }
 
 func (s *Server) finishPrimaryAuthentication(ctx context.Context, w http.ResponseWriter, r *http.Request, flow *flows.Flow, identityID uuid.UUID, identifier string, method coresession.AuthMethod) (*flowExecutionResult, error) {
+	active, err := s.identityIsActive(ctx, identityID)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		return nil, &flowHTTPError{Status: http.StatusUnauthorized, Message: "invalid credentials"}
+	}
+
 	trustedDeviceSatisfied, pendingFlow, err := s.ensureSecondFactorOrTrustedDevice(ctx, r, flow, identityID, identifier, method)
 	if err != nil {
 		return nil, err
@@ -683,6 +691,31 @@ func (s *Server) writeMFATrustedDeviceCookie(w http.ResponseWriter, token string
 	})
 }
 
+
+func (s *Server) identityIsActive(ctx context.Context, identityID uuid.UUID) (bool, error) {
+	if identityID == uuid.Nil || !s.hasDatabaseAccess() {
+		return false, nil
+	}
+
+	var exists bool
+	err := s.queryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM core_identities
+			WHERE id = $1
+			  AND state = 'active'
+			  AND deleted_at IS NULL
+		)
+	`, identityID).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return exists, nil
+}
+
 func (s *Server) lookupIdentityByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" || !s.hasDatabaseAccess() {
@@ -696,6 +729,7 @@ func (s *Server) lookupIdentityByEmail(ctx context.Context, email string) (*uuid
 		JOIN core_identity_addresses a ON a.identity_id = i.id
 		WHERE a.type = 'email'
 		  AND LOWER(a.value) = LOWER($1)
+		  AND i.state = 'active'
 		  AND i.deleted_at IS NULL
 		ORDER BY a.verified DESC, a.is_primary DESC, a.created_at DESC
 		LIMIT 1
