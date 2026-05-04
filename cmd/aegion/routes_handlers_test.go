@@ -1886,6 +1886,23 @@ func TestOIDCRootRoutesProxyToOAuth2Module(t *testing.T) {
 			t.Fatalf("expected authorization header to be forwarded, got %q", gotUserInfoAuthz)
 		}
 	})
+
+	t.Run("oidc userinfo route is also proxied", func(t *testing.T) {
+		gotUserInfoPath = ""
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/oidc/userinfo", nil)
+		req.Header.Set("Authorization", "Bearer test-token-2")
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+		if gotUserInfoPath != "/oidc/userinfo" {
+			t.Fatalf("unexpected upstream userinfo path: %q", gotUserInfoPath)
+		}
+		if gotUserInfoAuthz != "Bearer test-token-2" {
+			t.Fatalf("expected authorization header to be forwarded, got %q", gotUserInfoAuthz)
+		}
+	})
 }
 
 func TestHandleAdminRestartModule(t *testing.T) {

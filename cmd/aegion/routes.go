@@ -142,6 +142,8 @@ func SetupRoutes(s *Server) chi.Router {
 	r.Get("/health/live", s.handleLive)
 	r.Get("/.well-known/openid-configuration", s.handleOIDCDiscovery)
 	r.Get("/.well-known/jwks.json", s.handleJWKS)
+	r.Get("/oidc/userinfo", s.handleOAuth2UserInfo)
+	r.Post("/oidc/userinfo", s.handleOAuth2UserInfo)
 	r.Get("/oauth2/userinfo", s.handleOAuth2UserInfo)
 	r.Post("/oauth2/userinfo", s.handleOAuth2UserInfo)
 	r.Get("/self-service/login/methods/link/verify", s.handleMagicLinkLoginVerify)
