@@ -26,7 +26,7 @@ CREATE TABLE adm_operators (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
     CONSTRAINT fk_adm_operators_identity
-        FOREIGN KEY (identity_id) REFERENCES core_identities(id) ON DELETE CASCADE,
+        FOREIGN KEY (identity_id) REFERENCES core_identities(id) ON DELETE RESTRICT,
     CONSTRAINT adm_operators_role_check
         CHECK (role IN ('super_admin', 'admin', 'operator', 'viewer'))
 );
@@ -46,7 +46,7 @@ CREATE TABLE adm_audit_log (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
     CONSTRAINT fk_adm_audit_log_operator
-        FOREIGN KEY (operator_id) REFERENCES adm_operators(id) ON DELETE SET NULL,
+        FOREIGN KEY (operator_id) REFERENCES adm_operators(id) ON DELETE RESTRICT,
     CONSTRAINT adm_audit_log_action_check
         CHECK (action IN ('create', 'read', 'update', 'delete'))
 );
