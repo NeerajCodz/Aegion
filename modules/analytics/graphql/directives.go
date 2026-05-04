@@ -3,18 +3,17 @@ package graphql
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/rs/zerolog"
 )
 
 // DirectiveContext holds context information for directive execution.
 type DirectiveContext struct {
-	FieldName     string
-	ParentType    string
-	Arguments     map[string]interface{}
+	FieldName      string
+	ParentType     string
+	Arguments      map[string]interface{}
 	IsSubscription bool
 }
 
@@ -23,7 +22,7 @@ type DirectiveHandler func(ctx context.Context, next func() error, dirCtx *Direc
 
 // DirectiveRegistry manages custom directives.
 type DirectiveRegistry struct {
-	logger     zerolog.Logger
+	logger     *slog.Logger
 	directives map[string]DirectiveHandler
 	caches     map[string]Cache
 }
@@ -36,7 +35,7 @@ type Cache interface {
 }
 
 // NewDirectiveRegistry creates a new directive registry.
-func NewDirectiveRegistry(logger zerolog.Logger) *DirectiveRegistry {
+func NewDirectiveRegistry(logger *slog.Logger) *DirectiveRegistry {
 	return &DirectiveRegistry{
 		logger:     logger,
 		directives: make(map[string]DirectiveHandler),
@@ -47,7 +46,7 @@ func NewDirectiveRegistry(logger zerolog.Logger) *DirectiveRegistry {
 // RegisterDirective registers a custom directive handler.
 func (dr *DirectiveRegistry) RegisterDirective(name string, handler DirectiveHandler) {
 	dr.directives[name] = handler
-	dr.logger.Debug().Str("directive", name).Msg("directive registered")
+	dr.logger.Debug("directive registered", "directive", name)
 }
 
 // GetDirective retrieves a directive handler.
@@ -176,11 +175,11 @@ func (sc *SimpleCache) Clear() {
 // DirectiveChainExecutor executes a chain of directives.
 type DirectiveChainExecutor struct {
 	registry *DirectiveRegistry
-	logger   zerolog.Logger
+	logger   *slog.Logger
 }
 
 // NewDirectiveChainExecutor creates a new directive chain executor.
-func NewDirectiveChainExecutor(registry *DirectiveRegistry, logger zerolog.Logger) *DirectiveChainExecutor {
+func NewDirectiveChainExecutor(registry *DirectiveRegistry, logger *slog.Logger) *DirectiveChainExecutor {
 	return &DirectiveChainExecutor{
 		registry: registry,
 		logger:   logger,
@@ -202,9 +201,7 @@ func (dce *DirectiveChainExecutor) Execute(
 		handler, ok := dce.registry.GetDirective(dirCtx.FieldName)
 
 		if !ok {
-			dce.logger.Warn().
-				Str("directive", dirCtx.FieldName).
-				Msg("directive handler not found")
+			dce.logger.Warn("directive handler not found", "directive", dirCtx.FieldName)
 			continue
 		}
 
@@ -226,7 +223,7 @@ func (dce *DirectiveChainExecutor) Execute(
 func RegisterBuiltInDirectives(registry *DirectiveRegistry) {
 	registry.RegisterDirective("auth", AuthDirectiveHandler)
 	registry.RegisterDirective("deprecated", DeprecatedDirectiveHandler)
-	
+
 	// Cache directive is special - needs registry reference
 	registry.RegisterDirective("cache", func(ctx context.Context, next func() error, dirCtx *DirectiveContext) error {
 		return registry.CacheDirectiveHandler(ctx, next, dirCtx)
@@ -237,11 +234,11 @@ func RegisterBuiltInDirectives(registry *DirectiveRegistry) {
 
 // DirectiveParser parses directive definitions from schema.
 type DirectiveParser struct {
-	logger zerolog.Logger
+	logger *slog.Logger
 }
 
 // NewDirectiveParser creates a new directive parser.
-func NewDirectiveParser(logger zerolog.Logger) *DirectiveParser {
+func NewDirectiveParser(logger *slog.Logger) *DirectiveParser {
 	return &DirectiveParser{
 		logger: logger,
 	}
@@ -284,11 +281,11 @@ func extractDirectiveDefinitions(schema string) (map[string]interface{}, error) 
 // DirectiveValidator validates directive usage in queries.
 type DirectiveValidator struct {
 	registry *DirectiveRegistry
-	logger   zerolog.Logger
+	logger   *slog.Logger
 }
 
 // NewDirectiveValidator creates a new directive validator.
-func NewDirectiveValidator(registry *DirectiveRegistry, logger zerolog.Logger) *DirectiveValidator {
+func NewDirectiveValidator(registry *DirectiveRegistry, logger *slog.Logger) *DirectiveValidator {
 	return &DirectiveValidator{
 		registry: registry,
 		logger:   logger,
@@ -335,11 +332,11 @@ func (dv *DirectiveValidator) ValidateDirectiveUsage(query string) error {
 }
 
 var (
-	directiveDefinitionRegex   = regexp.MustCompile(`directive\s+@([A-Za-z_][A-Za-z0-9_]*)\s*(\(([^)]*)\))?\s+on\s+([A-Z_\s|]+)`)
-	directiveArgumentRegex     = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z!\[\]_][A-Za-z0-9!\[\]_]*)(\s*=\s*([^,)]+))?`)
-	directiveUsageRegex        = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)(\(([^)]*)\))?`)
-	authDirectiveArgsRegex     = regexp.MustCompile(`^\s*required\s*:\s*(true|false)\s*$`)
-	cacheDirectiveArgsRegex    = regexp.MustCompile(`^\s*ttl\s*:\s*\d+\s*$`)
+	directiveDefinitionRegex     = regexp.MustCompile(`directive\s+@([A-Za-z_][A-Za-z0-9_]*)\s*(\(([^)]*)\))?\s+on\s+([A-Z_\s|]+)`)
+	directiveArgumentRegex       = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z!\[\]_][A-Za-z0-9!\[\]_]*)(\s*=\s*([^,)]+))?`)
+	directiveUsageRegex          = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)(\(([^)]*)\))?`)
+	authDirectiveArgsRegex       = regexp.MustCompile(`^\s*required\s*:\s*(true|false)\s*$`)
+	cacheDirectiveArgsRegex      = regexp.MustCompile(`^\s*ttl\s*:\s*\d+\s*$`)
 	deprecatedDirectiveArgsRegex = regexp.MustCompile(`^\s*reason\s*:\s*"[^"]*"\s*$`)
 )
 

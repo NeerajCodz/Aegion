@@ -67,7 +67,7 @@ func TestServiceHookedUncoveredBranches(t *testing.T) {
 		connWithInvalidCert := &store.Connection{
 			CertificatePEM: "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----",
 		}
-		if _, err := verifySAMLSignature([]byte("<Response/>"), connWithInvalidCert); err == nil {
+		if _, _, err := verifySAMLSignature([]byte("<Response/>"), connWithInvalidCert); err == nil {
 			t.Fatal("expected verifySAMLSignature to fail with parseable-but-invalid cert bytes")
 		}
 

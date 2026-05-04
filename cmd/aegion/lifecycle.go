@@ -59,7 +59,7 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 	}
 
 	l.shutdownOnce.Do(func() {
-		l.log.Info().Msg("Starting graceful shutdown")
+		l.log.Info("Starting graceful shutdown")
 
 		// Mark as draining
 		l.setDraining(true)
@@ -70,9 +70,9 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			l.log.Info().Msg("Draining HTTP connections")
+			l.log.Info("Draining HTTP connections")
 			if err := l.drainHTTP(ctx); err != nil {
-				l.log.Error().Err(err).Msg("Error draining HTTP")
+				l.log.Error("Error draining HTTP", "error", err)
 				recordShutdownErr(err)
 			}
 		}()
@@ -82,9 +82,9 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			if l.workerManager != nil {
-				l.log.Info().Msg("Stopping background workers")
+				l.log.Info("Stopping background workers")
 				l.workerManager.Stop()
-				l.log.Info().Msg("Background workers stopped")
+				l.log.Info("Background workers stopped")
 			}
 		}()
 
@@ -97,29 +97,29 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 
 		select {
 		case <-done:
-			l.log.Info().Msg("HTTP and workers shutdown complete")
+			l.log.Info("HTTP and workers shutdown complete")
 		case <-ctx.Done():
-			l.log.Warn().Msg("Shutdown timeout reached for HTTP/workers")
+			l.log.Warn("Shutdown timeout reached for HTTP/workers")
 		}
 
 		// 3. Cleanup registry (deregister all modules)
-		l.log.Info().Msg("Cleaning up service registry")
+		l.log.Info("Cleaning up service registry")
 		if err := l.cleanupRegistry(ctx); err != nil {
-			l.log.Error().Err(err).Msg("Error cleaning up registry")
+			l.log.Error("Error cleaning up registry", "error", err)
 		}
 
 		// 4. Shutdown server components
-		l.log.Info().Msg("Shutting down server components")
+		l.log.Info("Shutting down server components")
 		if err := l.server.Shutdown(ctx); err != nil {
-			l.log.Error().Err(err).Msg("Error shutting down server")
+			l.log.Error("Error shutting down server", "error", err)
 			recordShutdownErr(err)
 		}
 
 		// 5. Shutdown observability provider
 		if l.observability != nil {
-			l.log.Info().Msg("Shutting down observability provider")
+			l.log.Info("Shutting down observability provider")
 			if err := l.observability.Shutdown(ctx); err != nil {
-				l.log.Error().Err(err).Msg("Error shutting down observability provider")
+				l.log.Error("Error shutting down observability provider", "error", err)
 				recordShutdownErr(err)
 			}
 		}
@@ -138,9 +138,10 @@ func (l *Lifecycle) drainHTTP(ctx context.Context) error {
 	// Shutdown HTTP server (stops accepting new connections)
 	if err := l.httpServer.Shutdown(drainCtx); err != nil {
 		if err == context.DeadlineExceeded {
-			l.log.Warn().Msg("HTTP drain timeout, forcing close")
+			l.log.Warn("HTTP drain timeout, forcing close")
 			return l.httpServer.Close()
 		}
+		l.log.Error("Error shutting down HTTP server", "error", err)
 		return err
 	}
 
@@ -156,17 +157,15 @@ func (l *Lifecycle) cleanupRegistry(ctx context.Context) error {
 	// Get all registered modules
 	modules := l.server.registry.ListModules(nil)
 
-	l.log.Info().
-		Int("count", len(modules)).
-		Msg("Deregistering modules")
+	l.log.Info("Deregistering modules", "count", len(modules))
 
 	// Deregister each module
 	for _, module := range modules {
 		if _, err := l.server.registry.Deregister(module.ID); err != nil {
-			l.log.Warn().
-				Str("module_id", module.ID).
-				Err(err).
-				Msg("Failed to deregister module")
+			l.log.Warn("Failed to deregister module",
+				"module_id", module.ID,
+				"error", err,
+			)
 		}
 	}
 
@@ -245,9 +244,9 @@ func (h *ShutdownHooks) Run(ctx context.Context, log *logger.Logger) error {
 	var lastErr error
 	for i := len(hooks) - 1; i >= 0; i-- {
 		hook := hooks[i]
-		log.Info().Str("hook", hook.name).Msg("Running shutdown hook")
+		log.Info("Running shutdown hook", "hook", hook.name)
 		if err := hook.fn(ctx); err != nil {
-			log.Error().Err(err).Str("hook", hook.name).Msg("Shutdown hook failed")
+			log.Error("Shutdown hook failed", "error", err, "hook", hook.name)
 			lastErr = err
 		}
 	}

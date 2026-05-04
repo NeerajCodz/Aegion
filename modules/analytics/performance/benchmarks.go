@@ -49,7 +49,7 @@ func NewBenchmarkSuite() *BenchmarkSuite {
 // BenchmarkQuerySingleEvent tests querying a single event
 func (bs *BenchmarkSuite) BenchmarkQuerySingleEvent(t testing.TB) {
 	bs.testCount++
-	
+
 	start := time.Now()
 	// Simulate query for 1 event
 	time.Sleep(1 * time.Millisecond)
@@ -76,7 +76,7 @@ func (bs *BenchmarkSuite) BenchmarkQuerySingleEvent(t testing.TB) {
 func (bs *BenchmarkSuite) BenchmarkQuery100Events(t testing.TB) {
 	bs.testCount++
 	target := bs.baseline["query_100_events"]
-	
+
 	start := time.Now()
 	// Simulate query for 100 events
 	time.Sleep(time.Duration(target/2) * time.Millisecond)
@@ -103,7 +103,7 @@ func (bs *BenchmarkSuite) BenchmarkQuery100Events(t testing.TB) {
 func (bs *BenchmarkSuite) BenchmarkQuery1000EventsWithFilter(t testing.TB) {
 	bs.testCount++
 	target := bs.baseline["query_1000_events_filter"]
-	
+
 	start := time.Now()
 	// Simulate filtered query on 1000 events
 	time.Sleep(time.Duration(target/2) * time.Millisecond)
@@ -130,7 +130,7 @@ func (bs *BenchmarkSuite) BenchmarkQuery1000EventsWithFilter(t testing.TB) {
 func (bs *BenchmarkSuite) BenchmarkAggregation1MEvents(t testing.TB) {
 	bs.testCount++
 	target := bs.baseline["aggregation_1m_events"]
-	
+
 	start := time.Now()
 	// Simulate aggregation on 1M events
 	time.Sleep(time.Duration(target/2) * time.Millisecond)
@@ -157,7 +157,7 @@ func (bs *BenchmarkSuite) BenchmarkAggregation1MEvents(t testing.TB) {
 func (bs *BenchmarkSuite) BenchmarkExport10KEvents(t testing.TB) {
 	bs.testCount++
 	target := bs.baseline["export_10k_events"]
-	
+
 	start := time.Now()
 	// Simulate export of 10K events
 	time.Sleep(time.Duration(target/2) * time.Millisecond)
@@ -184,7 +184,7 @@ func (bs *BenchmarkSuite) BenchmarkExport10KEvents(t testing.TB) {
 func (bs *BenchmarkSuite) BenchmarkRealtimeSync(t testing.TB) {
 	bs.testCount++
 	target := bs.baseline["realtime_sync"]
-	
+
 	start := time.Now()
 	// Simulate real-time sync latency
 	time.Sleep(time.Duration(target/2) * time.Millisecond)
@@ -211,7 +211,7 @@ func (bs *BenchmarkSuite) BenchmarkRealtimeSync(t testing.TB) {
 func (bs *BenchmarkSuite) BenchmarkBatchSync100KEvents(t testing.TB) {
 	bs.testCount++
 	target := bs.baseline["batch_sync_100k_events"]
-	
+
 	start := time.Now()
 	// Simulate batch sync of 100K events
 	time.Sleep(time.Duration(target/2) * time.Millisecond)
@@ -239,7 +239,7 @@ func (bs *BenchmarkSuite) BenchmarkBatchSync100KEvents(t testing.TB) {
 func (bs *BenchmarkSuite) BenchmarkDashboardLoad(t testing.TB) {
 	bs.testCount++
 	target := bs.baseline["dashboard_load"]
-	
+
 	start := time.Now()
 	// Simulate dashboard load (queries + rendering)
 	time.Sleep(time.Duration(target/2) * time.Millisecond)
@@ -265,10 +265,10 @@ func (bs *BenchmarkSuite) BenchmarkDashboardLoad(t testing.TB) {
 // BenchmarkConcurrentQueries tests concurrent query handling
 func (bs *BenchmarkSuite) BenchmarkConcurrentQueries(t testing.TB) {
 	bs.testCount++
-	
+
 	concurrency := 50
 	start := time.Now()
-	
+
 	// Simulate concurrent queries
 	for i := 0; i < concurrency; i++ {
 		time.Sleep(10 * time.Millisecond)
@@ -290,7 +290,7 @@ func (bs *BenchmarkSuite) BenchmarkConcurrentQueries(t testing.TB) {
 // BenchmarkMemoryUsage measures memory usage under load
 func (bs *BenchmarkSuite) BenchmarkMemoryUsage(t testing.TB) {
 	bs.testCount++
-	
+
 	// Simulate memory-intensive operation
 	start := time.Now()
 	time.Sleep(100 * time.Millisecond)
@@ -317,7 +317,7 @@ func (bs *BenchmarkSuite) BenchmarkMemoryUsage(t testing.TB) {
 // RunAllBenchmarks runs the complete benchmark suite
 func (bs *BenchmarkSuite) RunAllBenchmarks(t testing.TB) {
 	fmt.Println("\n=== Performance Benchmark Suite ===")
-	
+
 	bs.BenchmarkQuerySingleEvent(t)
 	bs.BenchmarkQuery100Events(t)
 	bs.BenchmarkQuery1000EventsWithFilter(t)
@@ -339,20 +339,20 @@ func (bs *BenchmarkSuite) PrintReport() {
 	fmt.Println()
 	fmt.Println("| Benchmark | Events | Duration (ms) | Status |")
 	fmt.Println("|-----------|--------|---------------|--------|")
-	
+
 	for _, result := range bs.results {
 		eventStr := fmt.Sprintf("%d", result.EventCount)
 		if result.EventCount == 0 {
 			eventStr = "-"
 		}
-		fmt.Printf("| %s | %s | %d | %s |\n", 
+		fmt.Printf("| %s | %s | %d | %s |\n",
 			result.Name, eventStr, result.DurationMs, result.Status)
-		
+
 		if result.ThroughputPsSec > 0 {
 			fmt.Printf("|   Throughput: %.0f events/sec |\n", result.ThroughputPsSec)
 		}
 	}
-	
+
 	fmt.Println()
 	fmt.Printf("Pass Rate: %.1f%%\n", float64(bs.passCount)/float64(bs.testCount)*100)
 }

@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog"
 )
 
 // HealthStatus represents the health status of an upstream.
@@ -44,7 +43,7 @@ type HealthCheckerConfig struct {
 	Timeout time.Duration
 
 	// Logger for health check events
-	Logger zerolog.Logger
+	Logger *slog.Logger
 
 	// ExpectedStatus is the HTTP status code expected for a healthy response
 	ExpectedStatus int
@@ -63,7 +62,7 @@ type HealthCheckerConfig struct {
 type HealthChecker struct {
 	config HealthCheckerConfig
 	client *http.Client
-	logger zerolog.Logger
+	logger *slog.Logger
 
 	status       HealthStatus
 	lastCheck    time.Time
@@ -92,6 +91,10 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 		config.Method = "GET"
 	}
 
+	if config.Logger == nil {
+		config.Logger = slog.Default()
+	}
+
 	client := &http.Client{
 		Timeout: config.Timeout,
 		// Don't follow redirects for health checks
@@ -103,7 +106,7 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 	return &HealthChecker{
 		config:  config,
 		client:  client,
-		logger:  config.Logger.With().Str("component", "health-checker").Logger(),
+		logger:  config.Logger.With("component", "health-checker"),
 		status:  HealthStatusUnknown,
 		stop:    make(chan struct{}),
 		stopped: make(chan struct{}),
@@ -123,7 +126,7 @@ func (hc *HealthChecker) Start() {
 	for {
 		select {
 		case <-hc.stop:
-			hc.logger.Info().Str("url", hc.config.URL).Msg("stopping health checker")
+			hc.logger.Info("stopping health checker", "url", hc.config.URL)
 			return
 		case <-ticker.C:
 			hc.performCheck()
@@ -233,14 +236,14 @@ func (hc *HealthChecker) recordSuccess() {
 
 	// Log status change
 	if previousStatus != HealthStatusHealthy {
-		hc.logger.Info().
-			Str("url", hc.config.URL).
-			Str("previous_status", previousStatus.String()).
-			Msg("upstream is now healthy")
+		hc.logger.Info("upstream is now healthy",
+			"url", hc.config.URL,
+			"previous_status", previousStatus.String(),
+		)
 	} else {
-		hc.logger.Debug().
-			Str("url", hc.config.URL).
-			Msg("health check successful")
+		hc.logger.Debug("health check successful",
+			"url", hc.config.URL,
+		)
 	}
 }
 
@@ -255,16 +258,16 @@ func (hc *HealthChecker) recordFailure(err error) {
 
 	// Log status change or failure
 	if previousStatus != HealthStatusUnhealthy {
-		hc.logger.Warn().
-			Str("url", hc.config.URL).
-			Err(err).
-			Str("previous_status", previousStatus.String()).
-			Msg("upstream is now unhealthy")
+		hc.logger.Warn("upstream is now unhealthy",
+			"url", hc.config.URL,
+			"error", err,
+			"previous_status", previousStatus.String(),
+		)
 	} else {
-		hc.logger.Debug().
-			Str("url", hc.config.URL).
-			Err(err).
-			Msg("health check failed")
+		hc.logger.Debug("health check failed",
+			"url", hc.config.URL,
+			"error", err,
+		)
 	}
 }
 

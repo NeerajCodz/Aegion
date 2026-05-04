@@ -2,12 +2,12 @@ package proxy
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +39,7 @@ func TestHealthChecker_SuccessfulCheck(t *testing.T) {
 		Interval:       100 * time.Millisecond,
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -72,7 +72,7 @@ func TestHealthChecker_FailedCheck(t *testing.T) {
 		Interval:       100 * time.Millisecond,
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -104,7 +104,7 @@ func TestHealthChecker_ExpectedBodyMismatch(t *testing.T) {
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
 		ExpectedBody:   "OK",
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	})
 
 	hc.performCheck()
@@ -126,7 +126,7 @@ func TestHealthChecker_ExpectedBodyMatch(t *testing.T) {
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
 		ExpectedBody:   "READY",
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	})
 
 	hc.performCheck()
@@ -143,7 +143,7 @@ func TestHealthChecker_NetworkError(t *testing.T) {
 		Interval:       100 * time.Millisecond,
 		Timeout:        100 * time.Millisecond,
 		ExpectedStatus: http.StatusOK,
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -183,7 +183,7 @@ func TestHealthChecker_CustomHeaders(t *testing.T) {
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
 		Headers:        expectedHeaders,
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -209,7 +209,7 @@ func TestHealthChecker_CustomMethod(t *testing.T) {
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
 		Method:         "POST",
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -235,7 +235,7 @@ func TestHealthChecker_Start_Stop(t *testing.T) {
 		Interval:       50 * time.Millisecond,
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -275,7 +275,7 @@ func TestHealthChecker_StatusTransitions(t *testing.T) {
 		Interval:       100 * time.Millisecond,
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -311,7 +311,7 @@ func TestHealthChecker_Timeout(t *testing.T) {
 		Interval:       100 * time.Millisecond,
 		Timeout:        50 * time.Millisecond, // Short timeout
 		ExpectedStatus: http.StatusOK,
-		Logger:         zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -350,7 +350,7 @@ func TestNewHealthChecker_DisablesRedirectFollowing(t *testing.T) {
 	hc := NewHealthChecker(HealthCheckerConfig{
 		URL:     server.URL + "/redirect",
 		Timeout: time.Second,
-		Logger:  zerolog.New(zerolog.NewTestWriter(t)),
+		Logger:  slog.Default(),
 	})
 
 	resp, err := hc.client.Get(server.URL + "/redirect")
@@ -366,7 +366,7 @@ func TestNewHealthChecker_DisablesRedirectFollowing(t *testing.T) {
 func TestHealthChecker_RecordFailure_AlreadyUnhealthy(t *testing.T) {
 	hc := NewHealthChecker(HealthCheckerConfig{
 		URL:    "http://example.com/health",
-		Logger: zerolog.New(zerolog.NewTestWriter(t)),
+		Logger: slog.Default(),
 	})
 
 	firstErr := errors.New("first failure")
@@ -445,7 +445,7 @@ func TestProxy_GetUpstreamHealth(t *testing.T) {
 		},
 	}
 
-	logger := zerolog.New(zerolog.NewTestWriter(t))
+	logger := slog.Default()
 	proxy := NewProxy(config, nil, logger)
 	defer stopProxyHealthCheckers(proxy)
 
@@ -501,7 +501,7 @@ func TestProxy_IsUpstreamHealthy(t *testing.T) {
 		},
 	}
 
-	logger := zerolog.New(zerolog.NewTestWriter(t))
+	logger := slog.Default()
 	proxy := NewProxy(config, nil, logger)
 	defer stopProxyHealthCheckers(proxy)
 
@@ -523,7 +523,7 @@ func TestProxy_IsUpstreamHealthy(t *testing.T) {
 func TestHealthCheckerConfig_Defaults(t *testing.T) {
 	config := HealthCheckerConfig{
 		URL:    "http://example.com/health",
-		Logger: zerolog.New(zerolog.NewTestWriter(t)),
+		Logger: slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)
@@ -546,7 +546,7 @@ func BenchmarkHealthChecker_PerformCheck(b *testing.B) {
 		Interval:       time.Minute,
 		Timeout:        time.Second,
 		ExpectedStatus: http.StatusOK,
-		Logger:         zerolog.New(zerolog.NewTestWriter(&testing.T{})),
+		Logger:         slog.Default(),
 	}
 
 	hc := NewHealthChecker(config)

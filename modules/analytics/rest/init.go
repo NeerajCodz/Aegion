@@ -3,26 +3,26 @@ package rest
 import (
 	"context"
 	"fmt"
-	"os"
+	"log/slog"
 	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 // InitParams holds parameters for initializing the REST API module
 type InitParams struct {
-	Config  Config
-	Logger  zerolog.Logger
-	DB      Database
-	Validator *Validator
+	Config         Config
+	Logger         *slog.Logger
+	DB             Database
+	Validator      *Validator
 	WebhookManager WebhookManager
 }
 
 // Initialize sets up the REST API module
 func Initialize(params InitParams) (*Handler, error) {
 	// Create a default logger if not provided
-	if params.Logger.GetLevel() == zerolog.Disabled {
-		params.Logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+	if params.Logger == nil {
+		params.Logger = logger.New(logger.Config{Level: "info", Format: "json"}).Logger
 	}
 
 	// Validate config
@@ -61,20 +61,20 @@ func Initialize(params InitParams) (*Handler, error) {
 
 	// Create handler
 	handler := NewHandler(HandlerDeps{
-		Logger:  params.Logger,
-		Config:  params.Config,
-		Queries: queryBuilder,
-		Exports: exportBuilder,
-		Cache:   cache,
-		Validator: params.Validator,
+		Logger:         params.Logger,
+		Config:         params.Config,
+		Queries:        queryBuilder,
+		Exports:        exportBuilder,
+		Cache:          cache,
+		Validator:      params.Validator,
 		WebhookManager: params.WebhookManager,
 	})
 
-	params.Logger.Info().
-		Str("base_path", params.Config.BasePath).
-		Int("rate_limit", params.Config.RateLimit).
-		Int("query_timeout_seconds", params.Config.QueryTimeoutSeconds).
-		Msg("REST API module initialized")
+	params.Logger.Info("REST API module initialized",
+		"base_path", params.Config.BasePath,
+		"rate_limit", params.Config.RateLimit,
+		"query_timeout_seconds", params.Config.QueryTimeoutSeconds,
+	)
 
 	return handler, nil
 }

@@ -16,10 +16,9 @@ pub fn lookup_prefix(token: &str, length: usize) -> String {
         return String::new();
     }
 
-    if token.len() <= length {
-        token.to_string()
-    } else {
-        token[..length].to_string()
+    match token.char_indices().nth(length) {
+        Some((idx, _)) => token[..idx].to_string(),
+        None => token.to_string(),
     }
 }
 
@@ -46,5 +45,10 @@ mod tests {
         assert_eq!(lookup_prefix("abcdef", 0), "");
         assert_eq!(lookup_prefix("abcdef", 3), "abc");
         assert_eq!(lookup_prefix("abcdef", 10), "abcdef");
+    }
+
+    #[test]
+    fn prefix_handles_multibyte_characters() {
+        assert_eq!(lookup_prefix("aaaaaaaaaaaéx", 12), "aaaaaaaaaaaé");
     }
 }

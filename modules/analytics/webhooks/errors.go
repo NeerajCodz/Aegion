@@ -35,9 +35,9 @@ func ValidateWebhookRequest(req *WebhookRequest, maxFiltersDepth int) error {
 	}
 
 	// URL must be HTTPS except for localhost
-	isLocalhost := req.URL == "http://localhost" || 
+	isLocalhost := req.URL == "http://localhost" ||
 		(len(req.URL) > 17 && req.URL[:17] == "http://localhost:")
-	
+
 	if !isLocalhost && len(req.URL) > 7 && req.URL[:7] != "https://" {
 		return ErrInvalidURL
 	}

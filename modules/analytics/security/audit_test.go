@@ -18,14 +18,14 @@ type MockAuditLogger struct {
 
 // AuditEntry represents a single audit log entry
 type AuditEntry struct {
-	ID          string                 `json:"id"`
-	UserID      string                 `json:"user_id"`
-	Action      string                 `json:"action"`
-	ResourceType string                `json:"resource_type"`
-	ResourceID  string                 `json:"resource_id"`
-	Details     map[string]interface{} `json:"details"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Status      string                 `json:"status"` // success, failure
+	ID           string                 `json:"id"`
+	UserID       string                 `json:"user_id"`
+	Action       string                 `json:"action"`
+	ResourceType string                 `json:"resource_type"`
+	ResourceID   string                 `json:"resource_id"`
+	Details      map[string]interface{} `json:"details"`
+	Timestamp    time.Time              `json:"timestamp"`
+	Status       string                 `json:"status"` // success, failure
 }
 
 // Log records an audit entry
@@ -99,7 +99,7 @@ func TestAudit_AllOperationsLogged(t *testing.T) {
 			ResourceType: op.resource,
 			ResourceID:   op.id,
 			Details: map[string]interface{}{
-				"timestamp": time.Now(),
+				"timestamp":  time.Now(),
 				"ip_address": "192.168.1.1",
 			},
 			Status: "success",
@@ -139,7 +139,7 @@ func TestAudit_SensitiveDataNotInLogs(t *testing.T) {
 		ResourceType: "config",
 		ResourceID:   "config_1",
 		Details: map[string]interface{}{
-			"field":    "api_key",
+			"field":     "api_key",
 			"old_value": "[REDACTED]",
 			"new_value": "[REDACTED]",
 		},
@@ -364,7 +364,7 @@ func TestAudit_ResourceChangeTracking(t *testing.T) {
 		ResourceType: "dashboard",
 		ResourceID:   resourceID,
 		Details: map[string]interface{}{
-			"field":    "name",
+			"field":     "name",
 			"old_value": "Analytics Dashboard",
 			"new_value": "Updated Analytics Dashboard",
 		},

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -11,7 +12,7 @@ import (
 
 func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 	t.Run("GetHealthyEndpoint returns single endpoint directly", func(t *testing.T) {
-		reg := New(DefaultConfig())
+		reg := New(DefaultConfig(), slog.Default())
 		_, err := reg.Register(RegistrationRequest{
 			ID:   "single-instance",
 			Name: "single-service",
@@ -33,7 +34,7 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 	})
 
 	t.Run("run loop executes ticker branch", func(t *testing.T) {
-		reg := New(DefaultConfig())
+		reg := New(DefaultConfig(), slog.Default())
 		var checks atomic.Int64
 		healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			checks.Add(1)
@@ -51,7 +52,7 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 			t.Fatalf("register failed: %v", err)
 		}
 
-		hc := NewHealthChecker(reg, 10*time.Millisecond, 100*time.Millisecond)
+		hc := NewHealthChecker(reg, 10*time.Millisecond, 100*time.Millisecond, slog.Default())
 		hc.initialDelay = 0
 		hc.Start()
 		time.Sleep(45 * time.Millisecond)
@@ -63,7 +64,7 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 	})
 
 	t.Run("checkAll handles status update errors and unhealthy counts", func(t *testing.T) {
-		reg := New(DefaultConfig())
+		reg := New(DefaultConfig(), slog.Default())
 
 		var moduleID string
 		healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -97,7 +98,7 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 			t.Fatalf("register unknown-health failed: %v", err)
 		}
 
-		hc := NewHealthChecker(reg, 50*time.Millisecond, 200*time.Millisecond)
+		hc := NewHealthChecker(reg, 50*time.Millisecond, 200*time.Millisecond, slog.Default())
 		hc.checkAll()
 
 		// Module can be removed by health handler; assert that checkAll completed and still processed remaining module.
@@ -111,8 +112,8 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 	})
 
 	t.Run("checkModule handles malformed health URL request creation failure", func(t *testing.T) {
-		reg := New(DefaultConfig())
-		hc := NewHealthChecker(reg, time.Second, time.Second)
+		reg := New(DefaultConfig(), slog.Default())
+		hc := NewHealthChecker(reg, time.Second, time.Second, slog.Default())
 
 		result := hc.checkModule(&Module{
 			ID:        "bad-url-module",
@@ -129,8 +130,8 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 	})
 
 	t.Run("checkModule logs recovered path from previously unhealthy status", func(t *testing.T) {
-		reg := New(DefaultConfig())
-		hc := NewHealthChecker(reg, time.Second, time.Second)
+		reg := New(DefaultConfig(), slog.Default())
+		hc := NewHealthChecker(reg, time.Second, time.Second, slog.Default())
 
 		healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -149,7 +150,7 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 	})
 
 	t.Run("CheckNow returns status update error when module disappears", func(t *testing.T) {
-		reg := New(DefaultConfig())
+		reg := New(DefaultConfig(), slog.Default())
 
 		moduleID := "checknow-disappears"
 		healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -168,7 +169,7 @@ func TestDiscoveryAndHealthChecker_AdditionalCoverageBranches(t *testing.T) {
 			t.Fatalf("register failed: %v", err)
 		}
 
-		result, err := NewHealthChecker(reg, time.Second, time.Second).CheckNow(moduleID)
+		result, err := NewHealthChecker(reg, time.Second, time.Second, slog.Default()).CheckNow(moduleID)
 		if err == nil {
 			t.Fatalf("expected status update error when module is removed during CheckNow")
 		}

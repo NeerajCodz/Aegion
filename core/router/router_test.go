@@ -2,11 +2,11 @@ package router
 
 import (
 	"errors"
+	"github.com/aegion/aegion/internal/platform/logger"
 	"net/http"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog"
 )
 
 func TestSingleJoiningSlash(t *testing.T) {
@@ -190,8 +190,8 @@ func TestTimeToSeconds(t *testing.T) {
 func TestRouterWrapperMethods(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.RateLimit.Enabled = false // Disable rate limiting for tests
-	logger := zerolog.Nop()
-	r := New(cfg, logger, nil)
+	l := logger.TestLogger()
+	r := New(cfg, l, nil)
 
 	// Test Get
 	t.Run("Get", func(t *testing.T) {
@@ -310,10 +310,10 @@ func TestRouterModuleProxy(t *testing.T) {
 	cfg.InternalToken = "test-token"
 	cfg.SessionSecret = []byte("test-secret")
 	cfg.RateLimit.Enabled = false
-	logger := zerolog.Nop()
+	l := logger.New(logger.Config{Level: "error", Format: "text"})
 
 	// Use nil registry (acceptable for this test)
-	r := New(cfg, logger, nil)
+	r := New(cfg, l.Logger, nil)
 
 	t.Run("ProxyToModule", func(t *testing.T) {
 		handler := r.ProxyToModule("test-module")

@@ -241,8 +241,8 @@ func (m *Manager) ArchiveCategory(ctx context.Context, category string) (*Archiv
 	m.mu.RUnlock()
 
 	job := &ArchivalJob{
-		ID:       fmt.Sprintf("manual_arch_%s_%d", category, time.Now().UnixNano()),
-		Category: category,
+		ID:         fmt.Sprintf("manual_arch_%s_%d", category, time.Now().UnixNano()),
+		Category:   category,
 		SourceTier: TierHot,
 		TargetTier: TierWarm,
 	}

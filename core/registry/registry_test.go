@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 )
@@ -30,7 +31,7 @@ func TestNew(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			registry := New(tt.config)
+			registry := New(tt.config, slog.Default())
 			if registry == nil {
 				t.Fatal("New() returned nil registry")
 				return
@@ -49,7 +50,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	tests := []struct {
 		name    string
@@ -125,7 +126,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestRegisterDuplicate(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "test-module",
@@ -147,7 +148,7 @@ func TestRegisterDuplicate(t *testing.T) {
 }
 
 func TestDeregister(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register a module first
 	req := RegistrationRequest{
@@ -209,7 +210,7 @@ func TestDeregister(t *testing.T) {
 }
 
 func TestGetModule(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register a module first
 	req := RegistrationRequest{
@@ -277,7 +278,7 @@ func TestGetModule(t *testing.T) {
 }
 
 func TestListModules(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register multiple modules
 	modules := []RegistrationRequest{
@@ -369,7 +370,7 @@ func TestListModules(t *testing.T) {
 }
 
 func TestUpdateStatus(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register a module first
 	req := RegistrationRequest{
@@ -437,7 +438,7 @@ func TestUpdateStatus(t *testing.T) {
 }
 
 func TestModuleCount(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	if count := registry.ModuleCount(); count != 0 {
 		t.Errorf("Empty registry ModuleCount() = %d, want 0", count)
@@ -462,7 +463,7 @@ func TestModuleCount(t *testing.T) {
 }
 
 func TestHealthyCount(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register modules with different statuses
 	modules := []string{"module1", "module2", "module3"}
@@ -495,7 +496,7 @@ func TestHealthyCount(t *testing.T) {
 }
 
 func TestRegistryClosed(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "test-module",
@@ -520,7 +521,7 @@ func TestRegistryClosed(t *testing.T) {
 }
 
 func TestGetAccessors(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	if discovery := registry.Discovery(); discovery == nil {
 		t.Error("Discovery() returned nil")

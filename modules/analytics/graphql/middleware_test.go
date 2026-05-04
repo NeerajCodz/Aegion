@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/modules/analytics/rbac"
-	"github.com/rs/zerolog"
 )
 
 func TestAuthMiddleware_RequiresAuthForProtectedField(t *testing.T) {
-	handler := AuthMiddleware(zerolog.Nop(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -28,7 +28,7 @@ func TestAuthMiddleware_RequiresAuthForProtectedField(t *testing.T) {
 }
 
 func TestAuthMiddleware_AllowsPublicQueryWithoutAuth(t *testing.T) {
-	handler := AuthMiddleware(zerolog.Nop(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := r.Context().Value("userID").(string); ok {
 			t.Fatal("expected no user context for unauthenticated public query")
 		}
@@ -47,7 +47,7 @@ func TestAuthMiddleware_AllowsPublicQueryWithoutAuth(t *testing.T) {
 }
 
 func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
-	handler := AuthMiddleware(zerolog.Nop(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, _ := r.Context().Value("userID").(string)
 		token, _ := r.Context().Value("token").(string)
 		role, _ := r.Context().Value("role").(string)
@@ -76,7 +76,7 @@ func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
 }
 
 func TestAuthMiddleware_SupportsSessionTokenHeader(t *testing.T) {
-	handler := AuthMiddleware(zerolog.Nop(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, _ := r.Context().Value("userID").(string)
 		if userID != "user-2" {
 			t.Fatalf("expected user-2, got %q", userID)
@@ -97,7 +97,7 @@ func TestAuthMiddleware_SupportsSessionTokenHeader(t *testing.T) {
 }
 
 func TestAuthMiddleware_SetsRoleFromTokenClaim(t *testing.T) {
-	handler := AuthMiddleware(zerolog.Nop(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, _ := r.Context().Value("userID").(string)
 		role, _ := r.Context().Value("role").(string)
 		manager := rbac.FromContext(r.Context())

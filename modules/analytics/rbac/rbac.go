@@ -21,22 +21,22 @@ const (
 	RoleGuest   Role = "guest" // Unauthenticated users
 
 	// Permissions
-	PermViewEvents         Permission = "view_events"
-	PermExportData         Permission = "export_data"
-	PermManageWebhooks     Permission = "manage_webhooks"
-	PermManageDashboards   Permission = "manage_dashboards"
-	PermManageAudit        Permission = "manage_audit"
-	PermManageUsers        Permission = "manage_users"
-	PermManageRoles        Permission = "manage_roles"
-	PermViewAudit          Permission = "view_audit"
-	PermViewDashboards     Permission = "view_dashboards"
-	PermModifyQueries      Permission = "modify_queries"
+	PermViewEvents       Permission = "view_events"
+	PermExportData       Permission = "export_data"
+	PermManageWebhooks   Permission = "manage_webhooks"
+	PermManageDashboards Permission = "manage_dashboards"
+	PermManageAudit      Permission = "manage_audit"
+	PermManageUsers      Permission = "manage_users"
+	PermManageRoles      Permission = "manage_roles"
+	PermViewAudit        Permission = "view_audit"
+	PermViewDashboards   Permission = "view_dashboards"
+	PermModifyQueries    Permission = "modify_queries"
 )
 
 var (
-	ErrUnauthorized     = errors.New("unauthorized")
-	ErrForbidden        = errors.New("forbidden")
-	ErrInvalidRole      = errors.New("invalid role")
+	ErrUnauthorized      = errors.New("unauthorized")
+	ErrForbidden         = errors.New("forbidden")
+	ErrInvalidRole       = errors.New("invalid role")
 	ErrInvalidPermission = errors.New("invalid permission")
 )
 
@@ -78,11 +78,11 @@ var rolePermissionMap = map[Role][]Permission{
 // Manager handles role and permission management
 type Manager struct {
 	mu                 sync.RWMutex
-	userRoles          map[string]Role          // userID -> Role
-	userCustomPerms    map[string][]Permission  // userID -> custom permissions
-	resourceOwnership  map[string]string        // resourceID -> ownerUserID
-	dashboardOwnership map[string]string        // dashboardID -> ownerUserID
-	webhookOwnership   map[string]string        // webhookID -> ownerUserID
+	userRoles          map[string]Role         // userID -> Role
+	userCustomPerms    map[string][]Permission // userID -> custom permissions
+	resourceOwnership  map[string]string       // resourceID -> ownerUserID
+	dashboardOwnership map[string]string       // dashboardID -> ownerUserID
+	webhookOwnership   map[string]string       // webhookID -> ownerUserID
 }
 
 // NewManager creates a new RBAC manager

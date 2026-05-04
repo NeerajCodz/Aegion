@@ -19,15 +19,16 @@ import (
 	"syscall"
 	"time"
 
+	"log/slog"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/logger"
 	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	adminmodule "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
@@ -190,7 +191,8 @@ func defaultMainDeps() mainDeps {
 
 func main() {
 	if err := run(os.Args[1:], defaultMainDeps()); err != nil {
-		log.Fatal().Err(err).Msg("Admin module startup failed")
+		slog.Error("Admin module startup failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -233,7 +235,7 @@ func run(args []string, deps mainDeps) error {
 	}
 
 	deps.setupLogger(cfg.Log)
-	log.Info().Str("config", flags.configPath).Msg("Starting Aegion Admin Module")
+	slog.Info("Starting Aegion Admin Module", "config", flags.configPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -262,13 +264,13 @@ func run(args []string, deps mainDeps) error {
 	if err := deps.pingDB(ctx, db); err != nil {
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
-	log.Info().Msg("Database connected successfully")
+	slog.Info("Database connected successfully")
 
 	if flags.migrate {
 		if err := deps.runMigrations(ctx, db); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
 		}
-		log.Info().Msg("Migrations completed")
+		slog.Info("Migrations completed")
 		return nil
 	}
 
@@ -278,7 +280,7 @@ func run(args []string, deps mainDeps) error {
 	}
 
 	if err := serverRuntime.registerWithCore(ctx); err != nil {
-		log.Error().Err(err).Msg("Failed to register with core service")
+		slog.Error("Failed to register with core service", "error", err)
 	}
 
 	sigCh := deps.newSignalChan()
@@ -286,7 +288,7 @@ func run(args []string, deps mainDeps) error {
 	defer deps.stopSignalChan(sigCh)
 
 	sig := <-sigCh
-	log.Info().Str("signal", sig.String()).Msg("Shutting down gracefully...")
+	slog.Info("Shutting down gracefully...", "signal", sig.String())
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
@@ -295,7 +297,7 @@ func run(args []string, deps mainDeps) error {
 		return fmt.Errorf("server shutdown error: %w", err)
 	}
 
-	log.Info().Msg("Server stopped")
+	slog.Info("Server stopped")
 	return nil
 }
 
@@ -364,9 +366,7 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 	}
 
 	go func() {
-		log.Info().
-			Str("address", httpServer.Addr).
-			Msg("Starting HTTP server")
+		slog.Info("Starting HTTP server", "address", httpServer.Addr)
 
 		var err error
 		if cfg.Server.TLS.Enabled {
@@ -375,7 +375,8 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 			err = httpServer.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("Failed to start HTTP server")
+			slog.Error("Failed to start HTTP server", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -702,21 +703,18 @@ func buildTLSConfig(cfg *Config) (*tls.Config, error) {
 }
 
 func setupLogger(logConfig LogConfig) {
-	// Set log level
-	level := zerolog.InfoLevel
-	if logConfig.Level != "" {
-		if l, err := zerolog.ParseLevel(logConfig.Level); err == nil {
-			level = l
-		}
-	}
-	zerolog.SetGlobalLevel(level)
+	logger.New(logger.Config{
+		Level:            logConfig.Level,
+		Format:           logConfig.Format,
+		ServiceName:      "admin",
+		ServiceNamespace: os.Getenv("AEGION_LOG_NAMESPACE"),
+		Environment:      os.Getenv("AEGION_ENV"),
+		CloudRegion:      os.Getenv("AEGION_CLOUD_REGION"),
+		Developer:        os.Getenv("DEV_NAME"),
+		Version:          "1.0.0",
+	})
 
-	// Set log format
-	if logConfig.Format == "pretty" || os.Getenv("AEGION_LOG_PRETTY") == "true" {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	}
-
-	log.Info().Str("level", level.String()).Msg("Logger initialized")
+	slog.Info("Logger initialized")
 }
 
 type adminMigrationDB interface {
@@ -743,7 +741,7 @@ func runMigrationsWithFS(ctx context.Context, db adminMigrationDB, migrationFS f
 		return fmt.Errorf("failed to load admin migrations: %w", err)
 	}
 	if len(migrations) == 0 {
-		log.Info().Msg("No admin migrations found")
+		slog.InfoContext(ctx, "No admin migrations found")
 		return nil
 	}
 
@@ -775,10 +773,7 @@ func runMigrationsWithFS(ctx context.Context, db adminMigrationDB, migrationFS f
 		if err := applyAdminMigration(ctx, db, migration); err != nil {
 			return err
 		}
-		log.Info().
-			Int("version", migration.Version).
-			Str("name", migration.Name).
-			Msg("Applied admin migration")
+		slog.InfoContext(ctx, "Applied admin migration", "version", migration.Version, "name", migration.Name)
 	}
 
 	return nil

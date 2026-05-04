@@ -121,6 +121,12 @@ func (s *ClientService) CreateClient(ctx context.Context, req *CreateClientReque
 		allowOfflineAccess = *req.AllowOfflineAccess
 	}
 
+	// Generate client ID
+	clientID, err := store.GenerateClientID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate client ID: %w", err)
+	}
+
 	// Generate client secret if needed
 	var secretHash *string
 	var plainSecret *string
@@ -135,7 +141,7 @@ func (s *ClientService) CreateClient(ctx context.Context, req *CreateClientReque
 	}
 
 	client := &store.Client{
-		ID:                       store.GenerateClientID(),
+		ID:                       clientID,
 		SecretHash:               secretHash,
 		Name:                     req.Name,
 		Description:              req.Description,

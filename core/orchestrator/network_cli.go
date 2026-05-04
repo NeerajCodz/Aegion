@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rs/zerolog/log"
+	"log/slog"
 )
 
 type NetworkManager struct {
@@ -221,5 +221,5 @@ type dockerNetworkInspect struct {
 }
 
 func init() {
-	log.Debug().Msg("using docker CLI orchestrator backend")
+	slog.Debug("using docker CLI orchestrator backend")
 }

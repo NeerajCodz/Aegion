@@ -28,11 +28,11 @@ func issueTestCert(t *testing.T, tmpl, parent *x509.Certificate, pub *rsa.Public
 }
 
 func TestVerifyCertificateChainAdditionalBranches(t *testing.T) {
-	if _, err := verifySAMLSignature(nil, nil); err == nil {
+	if _, _, err := verifySAMLSignature(nil, nil); err == nil {
 		t.Fatal("verifySAMLSignature(nil connection) expected error")
 	}
 
-	if _, err := verifySAMLSignature([]byte("<Response/>"), &store.Connection{CertificatePEM: ""}); !errors.Is(err, ErrInvalidSAMLResponse) {
+	if _, _, err := verifySAMLSignature([]byte("<Response/>"), &store.Connection{CertificatePEM: ""}); !errors.Is(err, ErrInvalidSAMLResponse) {
 		t.Fatalf("verifySAMLSignature(empty cert pem) = %v", err)
 	}
 
