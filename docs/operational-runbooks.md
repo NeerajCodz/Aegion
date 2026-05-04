@@ -410,20 +410,30 @@ docker compose -f deploy/docker-compose.yml up -d
 
 DATE=$(date +%Y%m%d)
 BACKUP_DIR="/backups/aegion"
+S3_BUCKET="s3://aegion-backups/$(date +%Y/%m)/"
+KMS_KEY_ID="alias/aegion-backup-kms"
+
+mkdir -p "$BACKUP_DIR"
+umask 077
 
 # Database backup
-pg_dump -h $DB_HOST -U aegion aegion | gzip > $BACKUP_DIR/db_$DATE.sql.gz
+pg_dump -h "$DB_HOST" -U aegion aegion | gzip > "$BACKUP_DIR/db_$DATE.sql.gz"
 
 # Configuration backup
-kubectl get configmap aegion-config -n aegion -o yaml > $BACKUP_DIR/config_$DATE.yaml
-kubectl get secret aegion-secrets -n aegion -o yaml > $BACKUP_DIR/secrets_$DATE.yaml
+kubectl get configmap aegion-config -n aegion -o yaml > "$BACKUP_DIR/config_$DATE.yaml"
+kubectl get secret aegion-secrets -n aegion -o yaml > "$BACKUP_DIR/secrets_$DATE.yaml"
+
+# Encrypt all backup artifacts before off-host transfer
+for f in "$BACKUP_DIR"/db_"$DATE".sql.gz "$BACKUP_DIR"/config_"$DATE".yaml "$BACKUP_DIR"/secrets_"$DATE".yaml; do
+  gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase "$BACKUP_ENCRYPTION_PASSPHRASE" -o "$f.gpg" "$f"
+  shred -u "$f"
+done
 
 # Retention: Keep 30 days
-find $BACKUP_DIR -name "*.sql.gz" -mtime +30 -delete
-find $BACKUP_DIR -name "*.yaml" -mtime +30 -delete
+find "$BACKUP_DIR" -name "*.gpg" -mtime +30 -delete
 
-# Upload to S3 (optional)
-aws s3 sync $BACKUP_DIR s3://aegion-backups/$(date +%Y/%m)/
+# Upload to S3 with KMS encryption
+aws s3 sync "$BACKUP_DIR" "$S3_BUCKET" --exclude "*" --include "*.gpg" --sse aws:kms --sse-kms-key-id "$KMS_KEY_ID"
 ```
 
 ### 4.2 Point-in-Time Recovery
