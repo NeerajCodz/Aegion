@@ -178,6 +178,11 @@ func (s *DeviceService) PollDeviceToken(ctx context.Context, req *DeviceTokenReq
 		return nil, ErrInvalidGrant
 	}
 
+	// Device codes are bearer credentials and MUST be one-time use.
+	if err := s.store.MarkDeviceCodeUsed(ctx, dc.DeviceCode); err != nil {
+		return nil, err
+	}
+
 	return dc, nil
 }
 
