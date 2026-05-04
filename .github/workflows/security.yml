@@ -131,7 +131,6 @@ jobs:
             -v "$PWD:/work" \
             -w /work \
             aquasec/trivy:0.69.3 fs \
-            --scanners vuln \
             --severity CRITICAL,HIGH \
             --exit-code 1 \
             --ignore-unfixed \
@@ -157,7 +156,6 @@ jobs:
             -v "$PWD:/work" \
             -w /work \
             aquasec/trivy:0.69.3 image \
-            --scanners vuln \
             --severity CRITICAL,HIGH \
             --exit-code 1 \
             --ignore-unfixed \
