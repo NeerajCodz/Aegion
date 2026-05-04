@@ -97,3 +97,56 @@ func TestMemoryStoreProviderAndIdentityLifecycle(t *testing.T) {
 		t.Fatalf("expected created linked identity, got %#v", link)
 	}
 }
+
+func TestMemoryStoreSaveStatePurgesExpiredEntries(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+
+	expired := AuthState{ID: "expired", ProviderSlug: "google", ExpiresAt: time.Now().UTC().Add(-time.Minute)}
+	fresh := AuthState{ID: "fresh", ProviderSlug: "google", ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	if err := s.SaveState(ctx, expired); err != nil {
+		t.Fatalf("SaveState(expired) failed: %v", err)
+	}
+	if err := s.SaveState(ctx, fresh); err != nil {
+		t.Fatalf("SaveState(fresh) failed: %v", err)
+	}
+
+	if _, err := s.ConsumeState(ctx, "expired"); err != ErrStateNotFound {
+		t.Fatalf("expected expired state to be purged, got %v", err)
+	}
+	if _, err := s.ConsumeState(ctx, "fresh"); err != nil {
+		t.Fatalf("expected fresh state available, got %v", err)
+	}
+}
+
+func TestMemoryStoreSaveStateEnforcesStateCapacity(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+	base := time.Now().UTC().Add(time.Minute)
+
+	for i := 0; i < maxInMemoryAuthStates; i++ {
+		if err := s.SaveState(ctx, AuthState{
+			ID:           "state-" + time.Unix(int64(i), 0).Format("150405") + "-" + uuid.NewString(),
+			ProviderSlug: "google",
+			ExpiresAt:    base.Add(time.Duration(i) * time.Second),
+		}); err != nil {
+			t.Fatalf("SaveState(seed %d) failed: %v", i, err)
+		}
+	}
+
+	oldest := AuthState{ID: "oldest", ProviderSlug: "google", ExpiresAt: base.Add(-time.Second)}
+	if err := s.SaveState(ctx, oldest); err != nil {
+		t.Fatalf("SaveState(oldest) failed: %v", err)
+	}
+	latest := AuthState{ID: "latest", ProviderSlug: "google", ExpiresAt: base.Add(time.Hour)}
+	if err := s.SaveState(ctx, latest); err != nil {
+		t.Fatalf("SaveState(latest) failed: %v", err)
+	}
+
+	if _, err := s.ConsumeState(ctx, "oldest"); err != ErrStateNotFound {
+		t.Fatalf("expected oldest state to be evicted, got %v", err)
+	}
+	if _, err := s.ConsumeState(ctx, "latest"); err != nil {
+		t.Fatalf("expected latest state to remain, got %v", err)
+	}
+}
