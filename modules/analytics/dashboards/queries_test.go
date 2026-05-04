@@ -27,9 +27,9 @@ func TestAdditionalAggregateQueryIncludesFiltersAndGrouping(t *testing.T) {
 		Limit:   5,
 	}).Build()
 
-	assert.Contains(t, query, "FROM analytics_events")
-	assert.Contains(t, query, "event_type = 'auth.login'")
-	assert.Contains(t, query, "GROUP BY category")
+	assert.Contains(t, query, "FROM \"analytics_events\"")
+	assert.Contains(t, query, "\"event_type\" = 'auth.login'")
+	assert.Contains(t, query, "GROUP BY \"category\"")
 	assert.Contains(t, query, "LIMIT 5")
 }
 
@@ -51,12 +51,33 @@ func TestAdditionalExportQueryHelpers(t *testing.T) {
 	}, dashboardQueries)
 	require.NoError(t, err)
 	assert.Contains(t, csvSQL, "SELECT * FROM (")
-	assert.Contains(t, csvSQL, "event_type = 'auth.login'")
+	assert.Contains(t, csvSQL, "\"event_type\" = 'auth.login'")
 	assert.Contains(t, csvSQL, "created_at >= NOW() - INTERVAL '1 day'")
 
 	jsonSQL, err := ExportToJSON(&ExportQuery{DashboardID: "dash-1"}, dashboardQueries)
 	require.NoError(t, err)
 	assert.Contains(t, jsonSQL, "json_agg")
+}
+
+func TestAdditionalExportQueryHelpersIgnoreInvalidFilterIdentifiers(t *testing.T) {
+	dashboardQueries := map[string]*DashboardQuery{
+		"dash-1": {
+			ID:   "dash-1",
+			SQL:  "SELECT event_type, COUNT(*) AS total FROM analytics_events",
+			Name: "events",
+		},
+	}
+
+	csvSQL, err := ExportToCSV(&ExportQuery{
+		DashboardID: "dash-1",
+		Filters: map[string]interface{}{
+			"(SELECT 1)": "x",
+			"event_type": "auth.login",
+		},
+	}, dashboardQueries)
+	require.NoError(t, err)
+	assert.Contains(t, csvSQL, "\"event_type\" = 'auth.login'")
+	assert.NotContains(t, csvSQL, "(SELECT 1)")
 }
 
 func TestAdditionalExportQueryHelpersFallbackToCommonTemplate(t *testing.T) {
