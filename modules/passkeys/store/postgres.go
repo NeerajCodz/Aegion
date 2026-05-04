@@ -72,16 +72,19 @@ func (s *PostgresStore) ConsumeChallenge(challengeID string) (Challenge, error) 
 	return challenge, nil
 }
 
-func (s *PostgresStore) UpsertCredential(credential Credential) {
-	_, _ = s.pool.Exec(context.Background(), `
+func (s *PostgresStore) CreateCredential(credential Credential) error {
+	_, err := s.pool.Exec(context.Background(), `
 		INSERT INTO passkey_credentials (id, identity_id, public_key, sign_count, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, NOW())
-		ON CONFLICT (id) DO UPDATE SET
-			identity_id = EXCLUDED.identity_id,
-			public_key = EXCLUDED.public_key,
-			sign_count = EXCLUDED.sign_count,
-			updated_at = NOW()
 	`, credential.ID, credential.IdentityID, credential.PublicKey, credential.SignCount, credential.CreatedAt.UTC())
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrCredentialExists
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *PostgresStore) GetCredential(credentialID string) (Credential, error) {

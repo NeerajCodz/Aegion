@@ -41,7 +41,7 @@ func TestPostgresStoreErrorPathsOnUnreachableDB(t *testing.T) {
 		t.Fatal("ConsumeChallenge expected error with unreachable DB")
 	}
 
-	store.UpsertCredential(Credential{
+	store.CreateCredential(Credential{
 		ID:         "cred-1",
 		IdentityID: "identity-1",
 		PublicKey:  "pubkey",
