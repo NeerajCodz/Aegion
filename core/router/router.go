@@ -3,11 +3,11 @@ package router
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/registry"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
@@ -17,7 +17,7 @@ import (
 type Router struct {
 	mux       *chi.Mux
 	config    Config
-	logger    zerolog.Logger
+	logger    *slog.Logger
 	startedAt time.Time
 
 	// Dependencies
@@ -115,11 +115,11 @@ func DefaultConfig() Config {
 }
 
 // New creates a new Router with the default middleware stack.
-func New(cfg Config, logger zerolog.Logger, reg *registry.Registry) *Router {
+func New(cfg Config, log *slog.Logger, reg *registry.Registry) *Router {
 	r := &Router{
 		mux:             chi.NewRouter(),
 		config:          cfg,
-		logger:          logger.With().Str("component", "router").Logger(),
+		logger:          log.With("component", "router"),
 		startedAt:       time.Now().UTC(),
 		registry:        reg,
 		policy:          cfg.PolicyChecker,
@@ -174,9 +174,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Mount mounts a sub-router at the given pattern.
 func (r *Router) Mount(pattern string, handler http.Handler) {
 	r.mux.Mount(pattern, handler)
-	r.logger.Debug().
-		Str("pattern", pattern).
-		Msg("mounted sub-router")
+	r.logger.Debug("mounted sub-router", "pattern", pattern)
 }
 
 // Route creates a new route group with the given pattern.
@@ -257,10 +255,10 @@ func (r *Router) ProxyToModule(moduleID string) http.Handler {
 // MountModule mounts a module proxy at the given pattern.
 func (r *Router) MountModule(pattern, moduleID string) {
 	r.mux.Mount(pattern, r.ProxyToModule(moduleID))
-	r.logger.Info().
-		Str("pattern", pattern).
-		Str("module", moduleID).
-		Msg("mounted module proxy")
+	r.logger.Info("mounted module proxy",
+		"pattern", pattern,
+		"module", moduleID,
+	)
 }
 
 // Chi returns the underlying chi.Mux for advanced usage.

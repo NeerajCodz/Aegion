@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -14,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/session"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
@@ -50,7 +49,7 @@ type Proxy struct {
 	ruleLimitersMux sync.RWMutex
 	breakers        map[string]*CircuitBreaker
 	breakersMux     sync.RWMutex
-	logger          zerolog.Logger
+	logger          *slog.Logger
 
 	// Health checking
 	healthCheckers map[string]*HealthChecker
@@ -58,9 +57,13 @@ type Proxy struct {
 }
 
 // NewProxy creates a new proxy instance.
-func NewProxy(config Config, rules *RuleEngine, logger zerolog.Logger) *Proxy {
+func NewProxy(config Config, rules *RuleEngine, logger *slog.Logger) *Proxy {
 	if rules == nil {
 		rules = NewRuleEngine([]Rule{})
+	}
+
+	if logger == nil {
+		logger = slog.Default()
 	}
 
 	// Create HTTP transport
@@ -83,7 +86,7 @@ func NewProxy(config Config, rules *RuleEngine, logger zerolog.Logger) *Proxy {
 		rules:          rules,
 		ruleLimiters:   make(map[string]*RateLimiter),
 		breakers:       make(map[string]*CircuitBreaker),
-		logger:         logger.With().Str("component", "proxy").Logger(),
+		logger:         logger.With("component", "proxy"),
 		healthCheckers: make(map[string]*HealthChecker),
 	}
 
@@ -132,12 +135,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	w.Header().Set("X-Request-ID", requestID)
 
-	p.logger.Debug().
-		Str("request_id", requestID).
-		Str("method", r.Method).
-		Str("path", r.URL.Path).
-		Str("remote_addr", r.RemoteAddr).
-		Msg("received request")
+	p.logger.DebugContext(ctx, "received request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"remote_addr", r.RemoteAddr,
+	)
 
 	// Apply request timeout
 	if p.config.Timeout > 0 {
@@ -207,12 +209,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Record success
 	breaker.RecordSuccess()
 
-	p.logger.Debug().
-		Str("request_id", requestID).
-		Str("rule_id", rule.ID).
-		Str("target", rule.Target).
-		Dur("duration", time.Since(start)).
-		Msg("request completed successfully")
+	p.logger.DebugContext(ctx, "request completed successfully",
+		"rule_id", rule.ID,
+		"target", rule.Target,
+		"duration", time.Since(start),
+	)
 }
 
 // Forward proxies the request to the specified target URL.
@@ -263,12 +264,11 @@ func (p *Proxy) Forward(target *url.URL, w http.ResponseWriter, r *http.Request,
 				req.Header.Set("X-Request-ID", requestID)
 			}
 
-			p.logger.Debug().
-				Str("request_id", getRequestIDFromContext(req.Context())).
-				Str("original_path", originalPath).
-				Str("rewritten_path", req.URL.Path).
-				Str("target_url", req.URL.String()).
-				Msg("forwarding request")
+			p.logger.DebugContext(req.Context(), "forwarding request",
+				"original_path", originalPath,
+				"rewritten_path", req.URL.Path,
+				"target_url", req.URL.String(),
+			)
 		},
 		Transport: p.transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -443,7 +443,7 @@ func (p *Proxy) startHealthCheckers() {
 	defer p.healthMux.Unlock()
 
 	for name, checker := range p.healthCheckers {
-		p.logger.Info().Str("upstream", name).Msg("starting health checker")
+		p.logger.Info("starting health checker", "upstream", name)
 		go checker.Start()
 	}
 }
@@ -456,7 +456,7 @@ func (p *Proxy) Close() {
 	for name, checker := range p.healthCheckers {
 		checker.Stop()
 		delete(p.healthCheckers, name)
-		p.logger.Info().Str("upstream", name).Msg("stopped health checker")
+		p.logger.Info("stopped health checker", "upstream", name)
 	}
 
 	p.ruleLimitersMux.Lock()
@@ -486,21 +486,22 @@ func (p *Proxy) getOrCreateRequestID(r *http.Request) string {
 // Error handling methods
 
 func (p *Proxy) handleError(w http.ResponseWriter, r *http.Request, err error, statusCode int, start time.Time) {
-	requestID := getRequestIDFromContext(r.Context())
+	ctx := r.Context()
+	requestID := getRequestIDFromContext(ctx)
 	duration := time.Since(start)
 
-	p.logger.Error().
-		Str("request_id", requestID).
-		Err(err).
-		Int("status", statusCode).
-		Dur("duration", duration).
-		Msg("proxy error")
+	p.logger.ErrorContext(ctx, "proxy error",
+		"error", err,
+		"status", statusCode,
+		"duration", duration,
+	)
 
 	p.writeErrorResponse(w, statusCode, err.Error(), requestID)
 }
 
 func (p *Proxy) handleRateLimitExceeded(w http.ResponseWriter, r *http.Request, waitTime time.Duration, err error, start time.Time) {
-	requestID := getRequestIDFromContext(r.Context())
+	ctx := r.Context()
+	requestID := getRequestIDFromContext(ctx)
 
 	limit := 100
 	remaining := 0
@@ -512,17 +513,17 @@ func (p *Proxy) handleRateLimitExceeded(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
 	w.Header().Set("Retry-After", strconv.Itoa(int(waitTime.Seconds())))
 
-	p.logger.Warn().
-		Str("request_id", requestID).
-		Dur("wait_time", waitTime).
-		Dur("duration", time.Since(start)).
-		Msg("rate limit exceeded")
+	p.logger.WarnContext(ctx, "rate limit exceeded",
+		"wait_time", waitTime,
+		"duration", time.Since(start),
+	)
 
 	p.writeErrorResponse(w, http.StatusTooManyRequests, "Rate limit exceeded", requestID)
 }
 
 func (p *Proxy) handleAccessError(w http.ResponseWriter, r *http.Request, err error, start time.Time) {
-	requestID := getRequestIDFromContext(r.Context())
+	ctx := r.Context()
+	requestID := getRequestIDFromContext(ctx)
 	var statusCode int
 	var message string
 
@@ -538,18 +539,18 @@ func (p *Proxy) handleAccessError(w http.ResponseWriter, r *http.Request, err er
 		message = "Access denied"
 	}
 
-	p.logger.Warn().
-		Str("request_id", requestID).
-		Err(err).
-		Int("status", statusCode).
-		Dur("duration", time.Since(start)).
-		Msg("access denied")
+	p.logger.WarnContext(ctx, "access denied",
+		"error", err,
+		"status", statusCode,
+		"duration", time.Since(start),
+	)
 
 	p.writeErrorResponse(w, statusCode, message, requestID)
 }
 
 func (p *Proxy) handleProxyError(w http.ResponseWriter, r *http.Request, err error, start time.Time) {
-	requestID := getRequestIDFromContext(r.Context())
+	ctx := r.Context()
+	requestID := getRequestIDFromContext(ctx)
 	statusCode := http.StatusBadGateway
 	message := "Upstream error"
 
@@ -558,12 +559,11 @@ func (p *Proxy) handleProxyError(w http.ResponseWriter, r *http.Request, err err
 		message = "Request timeout"
 	}
 
-	p.logger.Error().
-		Str("request_id", requestID).
-		Err(err).
-		Int("status", statusCode).
-		Dur("duration", time.Since(start)).
-		Msg("proxy error")
+	p.logger.ErrorContext(ctx, "proxy error",
+		"error", err,
+		"status", statusCode,
+		"duration", time.Since(start),
+	)
 
 	p.writeErrorResponse(w, statusCode, message, requestID)
 }
@@ -580,9 +580,6 @@ func (p *Proxy) writeErrorResponse(w http.ResponseWriter, statusCode int, messag
 		},
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		p.logger.Error().
-			Str("request_id", requestID).
-			Err(err).
-			Msg("failed to write error response")
+		p.logger.Error("failed to write error response", "error", err)
 	}
 }

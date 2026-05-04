@@ -75,14 +75,14 @@ func (w *DeliveryWorker) processJob(ctx context.Context, job *DeliveryJob) {
 
 		// Move to DLQ
 		dlqEvent := &analytics.DLQWebhookEvent{
-			ID:         job.ID,
-			WebhookID:  job.WebhookID,
-			EventID:    job.EventID,
-			ErrorMsg:   "webhook disabled or circuit breaker tripped",
-			RetryCount: job.Attempts,
+			ID:          job.ID,
+			WebhookID:   job.WebhookID,
+			EventID:     job.EventID,
+			ErrorMsg:    "webhook disabled or circuit breaker tripped",
+			RetryCount:  job.Attempts,
 			LastErrorAt: time.Now(),
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
 		}
 		w.store.SaveDLQEvent(ctx, dlqEvent)
 		return
@@ -151,14 +151,14 @@ func (w *DeliveryWorker) processJob(ctx context.Context, job *DeliveryJob) {
 
 			// Move to DLQ
 			dlqEvent := &analytics.DLQWebhookEvent{
-				ID:         job.ID,
-				WebhookID:  job.WebhookID,
-				EventID:    job.EventID,
-				ErrorMsg:   "circuit breaker triggered",
-				RetryCount: job.Attempts,
+				ID:          job.ID,
+				WebhookID:   job.WebhookID,
+				EventID:     job.EventID,
+				ErrorMsg:    "circuit breaker triggered",
+				RetryCount:  job.Attempts,
 				LastErrorAt: now,
-				CreatedAt:  now,
-				UpdatedAt:  now,
+				CreatedAt:   now,
+				UpdatedAt:   now,
 			}
 			w.store.SaveDLQEvent(ctx, dlqEvent)
 		}

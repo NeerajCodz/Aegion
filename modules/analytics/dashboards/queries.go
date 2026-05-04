@@ -123,12 +123,12 @@ func QueryWithTimeRange(base string, hours int, granularity string) string {
 
 // AggregateQuery represents a parameterized aggregation query.
 type AggregateQuery struct {
-	Table          string
-	Dimensions     []string
-	Metrics        []string
-	Filters        map[string]interface{}
-	OrderBy        string
-	Limit          int
+	Table      string
+	Dimensions []string
+	Metrics    []string
+	Filters    map[string]interface{}
+	OrderBy    string
+	Limit      int
 }
 
 // Build constructs an aggregate query.
@@ -175,8 +175,8 @@ func (aq *AggregateQuery) Build() string {
 
 // ComparativePeriodQuery generates a query comparing two time periods.
 type ComparativePeriodQuery struct {
-	BaseQuery   string
-	CurrentDays int
+	BaseQuery    string
+	CurrentDays  int
 	PreviousDays int
 }
 
@@ -259,8 +259,8 @@ func (adq *AnomalyDetectionQuery) Build() string {
 
 // FunnelQuery generates a funnel analysis query.
 type FunnelQuery struct {
-	Events []string // Sequential events
-	Table  string
+	Events      []string // Sequential events
+	Table       string
 	UserIDField string
 }
 
@@ -289,12 +289,12 @@ func (fq *FunnelQuery) Build() string {
 
 // CohortQuery generates a cohort analysis query.
 type CohortQuery struct {
-	CohortEvent    string
-	AnalysisEvent  string
-	Table          string
-	UserIDField    string
-	DateField      string
-	DaysToAnalyze  int
+	CohortEvent   string
+	AnalysisEvent string
+	Table         string
+	UserIDField   string
+	DateField     string
+	DaysToAnalyze int
 }
 
 // Build constructs a cohort query.

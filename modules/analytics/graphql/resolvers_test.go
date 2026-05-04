@@ -4,15 +4,15 @@ import (
 	"context"
 	"testing"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/modules/analytics/rbac"
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAdditionalResolverCreateWebhookUsesEventTypes(t *testing.T) {
 	store := NewMockStore()
-	resolver := NewResolver(zerolog.Nop(), store)
+	resolver := NewResolver(logger.TestLogger(), store)
 
 	payload, err := resolver.CreateWebhook(withResolverRole("analyst-1", rbac.RoleAnalyst), &CreateWebhookInput{
 		URL:       "https://example.com/webhook",
@@ -28,7 +28,7 @@ func TestAdditionalResolverCreateWebhookUsesEventTypes(t *testing.T) {
 
 func TestAdditionalResolverDashboardRequiresUserContext(t *testing.T) {
 	store := NewMockStore()
-	resolver := NewResolver(zerolog.Nop(), store)
+	resolver := NewResolver(logger.TestLogger(), store)
 
 	payload, err := resolver.CreateDashboard(context.Background(), &CreateDashboardInput{
 		Name:   "No User",
@@ -43,7 +43,7 @@ func TestAdditionalResolverDashboardRequiresUserContext(t *testing.T) {
 
 func TestAdditionalResolverCreateWebhookRequiresPermission(t *testing.T) {
 	store := NewMockStore()
-	resolver := NewResolver(zerolog.Nop(), store)
+	resolver := NewResolver(logger.TestLogger(), store)
 
 	payload, err := resolver.CreateWebhook(withResolverRole("viewer-1", rbac.RoleViewer), &CreateWebhookInput{
 		URL:       "https://example.com/webhook",

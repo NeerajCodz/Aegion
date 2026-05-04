@@ -10,26 +10,26 @@ import (
 
 // QueryExecutionPlan represents a parsed EXPLAIN output
 type QueryExecutionPlan struct {
-	Query          string
-	Plan           string
-	NodeCount      int
-	EstimatedCost  float64
-	EstimatedRows  int64
-	ExecutionTime  time.Duration
+	Query         string
+	Plan          string
+	NodeCount     int
+	EstimatedCost float64
+	EstimatedRows int64
+	ExecutionTime time.Duration
 }
 
 // QueryAnalyzer analyzes query execution plans
 type QueryAnalyzer struct {
-	db        *sql.DB
-	monitor   *PerformanceMonitor
+	db            *sql.DB
+	monitor       *PerformanceMonitor
 	enableEXPLAIN bool
 }
 
 // NewQueryAnalyzer creates a new query analyzer
 func NewQueryAnalyzer(db *sql.DB, monitor *PerformanceMonitor) *QueryAnalyzer {
 	return &QueryAnalyzer{
-		db:        db,
-		monitor:   monitor,
+		db:            db,
+		monitor:       monitor,
 		enableEXPLAIN: true,
 	}
 }
@@ -46,7 +46,7 @@ func (qa *QueryAnalyzer) AnalyzeQuery(ctx context.Context, query string) (*Query
 
 	// Run EXPLAIN to get execution plan
 	explainQuery := fmt.Sprintf("EXPLAIN %s", query)
-	
+
 	rows, err := qa.db.QueryContext(ctx, explainQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze query: %w", err)
@@ -97,7 +97,7 @@ func (qa *QueryAnalyzer) GetQueryRecommendations(ctx context.Context, query stri
 		recommendations = append(recommendations, "Consider adding ORDER BY to ensure consistent results with LIMIT")
 	}
 
-	// Check for SELECT * 
+	// Check for SELECT *
 	if strings.Contains(queryUpper, "SELECT *") {
 		recommendations = append(recommendations, "Avoid SELECT * - specify only required columns")
 	}
@@ -123,7 +123,7 @@ func (qa *QueryAnalyzer) GetQueryRecommendations(ctx context.Context, query stri
 // OptimizeQuery returns optimization suggestions for a query
 func (qa *QueryAnalyzer) OptimizeQuery(ctx context.Context, query string) (string, []string) {
 	recommendations := qa.GetQueryRecommendations(ctx, query)
-	
+
 	optimized := query
 
 	// Suggest index hints based on query pattern

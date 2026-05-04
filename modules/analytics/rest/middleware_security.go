@@ -5,18 +5,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/modules/analytics/rbac"
 	"github.com/aegion/aegion/modules/analytics/store"
-	"github.com/rs/zerolog"
 )
 
 // PermissionMiddleware enforces permission-based access control
-func PermissionMiddleware(manager *rbac.Manager, logger zerolog.Logger, requiredPerms ...rbac.Permission) func(http.Handler) http.Handler {
+func PermissionMiddleware(manager *rbac.Manager, log *logger.Logger, requiredPerms ...rbac.Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID, ok := userIDFromContext(r.Context())
 			if !ok {
-				logger.Warn().Msg("no user ID in context for permission check")
+				log.Warn("no user ID in context for permission check")
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -25,10 +25,10 @@ func PermissionMiddleware(manager *rbac.Manager, logger zerolog.Logger, required
 			for _, perm := range requiredPerms {
 				hasPermission, err := manager.HasPermission(userID, perm)
 				if err != nil || !hasPermission {
-					logger.Warn().
-						Str("user_id", userID).
-						Str("permission", string(perm)).
-						Msg("permission denied")
+					log.Warn("permission denied",
+						"user_id", userID,
+						"permission", string(perm),
+					)
 					http.Error(w, "Forbidden", http.StatusForbidden)
 					return
 				}
@@ -40,7 +40,7 @@ func PermissionMiddleware(manager *rbac.Manager, logger zerolog.Logger, required
 }
 
 // SecurityHeadersMiddleware adds security headers to responses
-func SecurityHeadersMiddleware(logger zerolog.Logger) func(http.Handler) http.Handler {
+func SecurityHeadersMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Prevent clickjacking
@@ -72,7 +72,7 @@ func SecurityHeadersMiddleware(logger zerolog.Logger) func(http.Handler) http.Ha
 }
 
 // RestrictedCORSMiddleware enforces strict CORS policies
-func RestrictedCORSMiddleware(logger zerolog.Logger, allowedOrigins []string) func(http.Handler) http.Handler {
+func RestrictedCORSMiddleware(log *logger.Logger, allowedOrigins []string) func(http.Handler) http.Handler {
 	originMap := make(map[string]bool)
 	for _, origin := range allowedOrigins {
 		originMap[origin] = true
@@ -102,7 +102,7 @@ func RestrictedCORSMiddleware(logger zerolog.Logger, allowedOrigins []string) fu
 }
 
 // AuditLoggingMiddleware logs all requests to audit store
-func AuditLoggingMiddleware(auditStore *store.AuditStore, logger zerolog.Logger) func(http.Handler) http.Handler {
+func AuditLoggingMiddleware(auditStore *store.AuditStore, log *logger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID, _ := userIDFromContext(r.Context())
@@ -133,14 +133,14 @@ func AuditLoggingMiddleware(auditStore *store.AuditStore, logger zerolog.Logger)
 			}
 
 			event := store.AuditEvent{
-				ID:           generateID(),
-				Timestamp:    time.Now(),
-				UserID:       userID,
-				EventType:    eventType,
-				Action:       r.Method + " " + r.URL.Path,
-				Status:       status,
-				IPAddress:    r.RemoteAddr,
-				UserAgent:    r.Header.Get("User-Agent"),
+				ID:        generateID(),
+				Timestamp: time.Now(),
+				UserID:    userID,
+				EventType: eventType,
+				Action:    r.Method + " " + r.URL.Path,
+				Status:    status,
+				IPAddress: r.RemoteAddr,
+				UserAgent: r.Header.Get("User-Agent"),
 				Details: map[string]interface{}{
 					"status_code":  lrw.statusCode,
 					"method":       r.Method,
@@ -151,7 +151,7 @@ func AuditLoggingMiddleware(auditStore *store.AuditStore, logger zerolog.Logger)
 			}
 
 			if err := auditStore.LogEvent(r.Context(), event); err != nil {
-				logger.Error().Err(err).Msg("failed to log audit event")
+				log.Error("failed to log audit event", "error", err)
 			}
 		})
 	}
@@ -169,7 +169,7 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 }
 
 // AuthenticationCheckMiddleware enforces authentication on all requests
-func AuthenticationCheckMiddleware(logger zerolog.Logger) func(http.Handler) http.Handler {
+func AuthenticationCheckMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Allow health checks without authentication
@@ -180,7 +180,7 @@ func AuthenticationCheckMiddleware(logger zerolog.Logger) func(http.Handler) htt
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				logger.Warn().Str("path", r.URL.Path).Msg("missing authorization header")
+				log.Warn("missing authorization header", "path", r.URL.Path)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -191,16 +191,14 @@ func AuthenticationCheckMiddleware(logger zerolog.Logger) func(http.Handler) htt
 }
 
 // InputValidationMiddleware validates and sanitizes all inputs
-func InputValidationMiddleware(logger zerolog.Logger) func(http.Handler) http.Handler {
+func InputValidationMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Validate Content-Type for POST/PUT requests
 			if r.Method == http.MethodPost || r.Method == http.MethodPut {
 				contentType := r.Header.Get("Content-Type")
 				if !strings.HasPrefix(contentType, "application/json") {
-					logger.Warn().
-						Str("content_type", contentType).
-						Msg("invalid content type")
+					log.Warn("invalid content type", "content_type", contentType)
 					http.Error(w, "Bad Request", http.StatusBadRequest)
 					return
 				}
@@ -215,7 +213,7 @@ func InputValidationMiddleware(logger zerolog.Logger) func(http.Handler) http.Ha
 }
 
 // EndpointRateLimitMiddleware enforces per-endpoint rate limits
-func EndpointRateLimitMiddleware(logger zerolog.Logger, endpointLimits map[string]int) func(http.Handler) http.Handler {
+func EndpointRateLimitMiddleware(log *logger.Logger, endpointLimits map[string]int) func(http.Handler) http.Handler {
 	limiters := make(map[string]*RateLimiter)
 
 	return func(next http.Handler) http.Handler {
@@ -240,10 +238,10 @@ func EndpointRateLimitMiddleware(logger zerolog.Logger, endpointLimits map[strin
 			}
 
 			if !limiter.Allow(userID) {
-				logger.Warn().
-					Str("user_id", userID).
-					Str("endpoint", endpoint).
-					Msg("endpoint rate limit exceeded")
+				log.Warn("endpoint rate limit exceeded",
+					"user_id", userID,
+					"endpoint", endpoint,
+				)
 				w.Header().Set("Retry-After", "60")
 				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 				return

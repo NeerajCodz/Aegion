@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/webhooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/rs/zerolog"
 )
 
 // MockDatabase implements Database interface for testing
@@ -51,7 +51,7 @@ func (m *MockDatabase) Count(ctx context.Context, sql string) (int, error) {
 
 func newTestHandler(db Database) *Handler {
 	return NewHandler(HandlerDeps{
-		Logger:  zerolog.Nop(),
+		Logger:  logger.TestLogger(),
 		Config:  Config{DefaultPageSize: 100, MaxPageSize: 10000, QueryTimeoutSeconds: 300},
 		Queries: NewQueryBuilder(db),
 		Exports: NewExportBuilder(db),
@@ -60,15 +60,15 @@ func newTestHandler(db Database) *Handler {
 }
 
 type mockWebhookManager struct {
-	registerFn           func(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
-	updateFn             func(ctx context.Context, userID, webhookID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
-	deleteFn             func(ctx context.Context, userID, webhookID string) error
-	listFn               func(ctx context.Context, userID string) ([]*analytics.Webhook, error)
-	getFn                func(ctx context.Context, webhookID string) (*analytics.Webhook, error)
-	testFn               func(ctx context.Context, webhookID string) (string, error)
-	getHistoryFn         func(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error)
-	getDeliveryFn        func(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error)
-	replayFn             func(ctx context.Context, deliveryID string) error
+	registerFn    func(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	updateFn      func(ctx context.Context, userID, webhookID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error)
+	deleteFn      func(ctx context.Context, userID, webhookID string) error
+	listFn        func(ctx context.Context, userID string) ([]*analytics.Webhook, error)
+	getFn         func(ctx context.Context, webhookID string) (*analytics.Webhook, error)
+	testFn        func(ctx context.Context, webhookID string) (string, error)
+	getHistoryFn  func(ctx context.Context, webhookID string, limit int) ([]*analytics.WebhookDelivery, error)
+	getDeliveryFn func(ctx context.Context, deliveryID string) (*analytics.WebhookDelivery, error)
+	replayFn      func(ctx context.Context, deliveryID string) error
 }
 
 func (m *mockWebhookManager) RegisterWebhook(ctx context.Context, userID string, req *webhooks.WebhookRequest) (*analytics.Webhook, error) {
@@ -109,7 +109,7 @@ func (m *mockWebhookManager) ReplayEvent(ctx context.Context, deliveryID string)
 
 func newWebhookTestHandler(manager WebhookManager) *Handler {
 	return NewHandler(HandlerDeps{
-		Logger:         zerolog.Nop(),
+		Logger:         logger.TestLogger(),
 		Config:         Config{DefaultPageSize: 100, MaxPageSize: 10000, QueryTimeoutSeconds: 300},
 		Queries:        NewQueryBuilder(&MockDatabase{}),
 		Exports:        NewExportBuilder(&MockDatabase{}),
@@ -501,7 +501,7 @@ func TestInitialize_Success(t *testing.T) {
 			MaxPageSize:           10000,
 			DefaultPageSize:       100,
 		},
-		Logger: zerolog.Nop(),
+		Logger: logger.TestLogger(),
 		DB:     db,
 	})
 
@@ -512,7 +512,7 @@ func TestInitialize_Success(t *testing.T) {
 func TestInitialize_MissingDatabase(t *testing.T) {
 	handler, err := Initialize(InitParams{
 		Config: Config{},
-		Logger: zerolog.Nop(),
+		Logger: logger.TestLogger(),
 		DB:     nil,
 	})
 

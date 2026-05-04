@@ -8,23 +8,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/rbac"
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // MockStore implements the Store interface for testing.
 type MockStore struct {
-	events              []*analytics.Event
-	dashboards          []*analytics.Dashboard
-	queries             []*analytics.Query
-	metrics             []*analytics.Metric
-	webhooks            []*analytics.Webhook
-	shouldFailEventGet  bool
-	shouldFailDashGet   bool
+	events             []*analytics.Event
+	dashboards         []*analytics.Dashboard
+	queries            []*analytics.Query
+	metrics            []*analytics.Metric
+	webhooks           []*analytics.Webhook
+	shouldFailEventGet bool
+	shouldFailDashGet  bool
 }
 
 func NewMockStore() *MockStore {
@@ -182,7 +182,7 @@ func (ms *MockStore) ExecuteSQL(ctx context.Context, sql string, timeout time.Du
 // Tests
 
 func TestResolverEvents(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 
 	// Add test event
@@ -196,7 +196,7 @@ func TestResolverEvents(t *testing.T) {
 	}
 	store.events = append(store.events, event)
 
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	// Test query
 	ctx := withGraphQLRole("test-user", rbac.RoleUser)
@@ -210,7 +210,7 @@ func TestResolverEvents(t *testing.T) {
 }
 
 func TestResolverEvent(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 
 	event := &analytics.Event{
@@ -223,7 +223,7 @@ func TestResolverEvent(t *testing.T) {
 	}
 	store.events = append(store.events, event)
 
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 	ctx := withGraphQLRole("test-user", rbac.RoleUser)
 
 	node, err := resolver.Event(ctx, "1")
@@ -234,9 +234,9 @@ func TestResolverEvent(t *testing.T) {
 }
 
 func TestResolverCreateDashboard(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	ctx := withGraphQLRole("test-user", rbac.RoleAnalyst)
 
@@ -256,9 +256,9 @@ func TestResolverCreateDashboard(t *testing.T) {
 }
 
 func TestResolverUpdateDashboard(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	// Create initial dashboard
 	dashboard := &analytics.Dashboard{
@@ -285,9 +285,9 @@ func TestResolverUpdateDashboard(t *testing.T) {
 }
 
 func TestResolverDeleteDashboard(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	dashboard := &analytics.Dashboard{
 		ID:      "1",
@@ -308,9 +308,9 @@ func TestResolverDeleteDashboard(t *testing.T) {
 }
 
 func TestResolverSaveQuery(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	ctx := withGraphQLRole("test-user", rbac.RoleAnalyst)
 
@@ -332,9 +332,9 @@ func TestResolverSaveQuery(t *testing.T) {
 }
 
 func TestResolverHealth(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	ctx := context.Background()
 
@@ -348,9 +348,9 @@ func TestResolverHealth(t *testing.T) {
 }
 
 func TestResolverStats(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	// Add test event
 	store.events = append(store.events, &analytics.Event{
@@ -368,9 +368,9 @@ func TestResolverStats(t *testing.T) {
 }
 
 func TestResolverDashboardForbidsPrivateDashboardForOtherUser(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	store.dashboards = append(store.dashboards, &analytics.Dashboard{
 		ID:      "private-dash",
@@ -386,9 +386,9 @@ func TestResolverDashboardForbidsPrivateDashboardForOtherUser(t *testing.T) {
 }
 
 func TestResolverQueryForbidsAccessToAnotherUsersSavedQuery(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
+	resolver := NewResolver(lgr, store)
 
 	store.queries = append(store.queries, &analytics.Query{
 		ID:      "query-1",
@@ -449,8 +449,8 @@ func TestComplexityAnalyzer(t *testing.T) {
 }
 
 func TestDirectiveRegistry(t *testing.T) {
-	logger := zerolog.New(nil)
-	registry := NewDirectiveRegistry(logger)
+	lgr := logger.TestLoggerDebug()
+	registry := NewDirectiveRegistry(lgr)
 
 	// Should register directive
 	handler := func(ctx context.Context, next func() error, dirCtx *DirectiveContext) error {
@@ -469,7 +469,7 @@ func TestDirectiveRegistry(t *testing.T) {
 }
 
 func TestDirectiveParserParsesSchemaDefinitions(t *testing.T) {
-	parser := NewDirectiveParser(zerolog.Nop())
+	parser := NewDirectiveParser(logger.TestLogger())
 
 	directives := parser.ParseDirectives(SchemaDefinition)
 
@@ -484,9 +484,9 @@ func TestDirectiveParserParsesSchemaDefinitions(t *testing.T) {
 }
 
 func TestDirectiveValidatorValidatesRegisteredDirectives(t *testing.T) {
-	registry := NewDirectiveRegistry(zerolog.Nop())
+	registry := NewDirectiveRegistry(logger.TestLogger())
 	RegisterBuiltInDirectives(registry)
-	validator := NewDirectiveValidator(registry, zerolog.Nop())
+	validator := NewDirectiveValidator(registry, logger.TestLogger())
 
 	require.NoError(t, validator.ValidateDirectiveUsage(`query { health @cache(ttl: 30) }`))
 	require.NoError(t, validator.ValidateDirectiveUsage(`query { health @deprecated(reason: "old") }`))
@@ -533,10 +533,10 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestServerRegisterRoutesServeMux(t *testing.T) {
-	logger := zerolog.Nop()
+	lgr := logger.TestLogger()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
-	server := NewServer(logger, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, logger))
+	resolver := NewResolver(lgr, store)
+	server := NewServer(lgr, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, lgr))
 	mux := http.NewServeMux()
 
 	require.NoError(t, server.RegisterRoutes(mux, "/graphql"))
@@ -553,10 +553,10 @@ func TestServerRegisterRoutesServeMux(t *testing.T) {
 }
 
 func TestServerRegisterRoutesChiRouter(t *testing.T) {
-	logger := zerolog.Nop()
+	lgr := logger.TestLogger()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
-	server := NewServer(logger, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, logger))
+	resolver := NewResolver(lgr, store)
+	server := NewServer(lgr, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, lgr))
 	router := chi.NewRouter()
 
 	require.NoError(t, server.RegisterRoutes(router, "/graphql"))
@@ -572,10 +572,10 @@ func TestServerRegisterRoutesChiRouter(t *testing.T) {
 }
 
 func TestServerRegisterRoutesRejectsUnsupportedRouter(t *testing.T) {
-	logger := zerolog.Nop()
+	lgr := logger.TestLogger()
 	store := NewMockStore()
-	resolver := NewResolver(logger, store)
-	server := NewServer(logger, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, logger))
+	resolver := NewResolver(lgr, store)
+	server := NewServer(lgr, resolver, NewSchemaBuilder(resolver), NewSimpleQueryExecutor(resolver, lgr))
 
 	assert.Error(t, server.RegisterRoutes(struct{}{}, "/graphql"))
 }

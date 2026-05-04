@@ -140,7 +140,11 @@ func (s *Store) DeleteConsentSession(ctx context.Context, clientID, identityID s
 // CreateLoginChallenge creates a new login challenge.
 func (s *Store) CreateLoginChallenge(ctx context.Context, challenge *LoginChallenge) error {
 	if challenge.ID == "" {
-		challenge.ID = GenerateLoginChallenge()
+		var err error
+		challenge.ID, err = GenerateLoginChallenge()
+		if err != nil {
+			return err
+		}
 	}
 	challenge.CreatedAt = nowUTC()
 
@@ -211,7 +215,11 @@ func (s *Store) AcceptLoginChallenge(ctx context.Context, id, identityID, sessio
 // CreateConsentChallenge creates a new consent challenge.
 func (s *Store) CreateConsentChallenge(ctx context.Context, challenge *ConsentChallenge) error {
 	if challenge.ID == "" {
-		challenge.ID = GenerateConsentChallenge()
+		var err error
+		challenge.ID, err = GenerateConsentChallenge()
+		if err != nil {
+			return err
+		}
 	}
 	challenge.CreatedAt = nowUTC()
 

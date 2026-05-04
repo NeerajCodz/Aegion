@@ -3,9 +3,9 @@ package grpc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
-	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -40,7 +40,10 @@ func AuthInterceptor(authFunc func(context.Context) error) grpc.UnaryServerInter
 }
 
 // LoggingInterceptor logs all unary RPC calls.
-func LoggingInterceptor(logger zerolog.Logger) grpc.UnaryServerInterceptor {
+func LoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		start := time.Now()
 
@@ -49,42 +52,58 @@ func LoggingInterceptor(logger zerolog.Logger) grpc.UnaryServerInterceptor {
 
 		// Log request
 		duration := time.Since(start)
-		logLevel := logger.Debug()
+		msg := "RPC call completed"
 		if err != nil {
-			logLevel = logger.Error()
+			logger.ErrorContext(ctx, msg,
+				"method", info.FullMethod,
+				"latency_ms", duration.Milliseconds(),
+				"error", err,
+				"outcome", "error",
+			)
+		} else {
+			logger.InfoContext(ctx, msg,
+				"method", info.FullMethod,
+				"latency_ms", duration.Milliseconds(),
+				"outcome", "success",
+			)
 		}
-
-		logLevel.
-			Str("method", info.FullMethod).
-			Dur("duration_ms", duration).
-			Err(err).
-			Msg("RPC call completed")
 
 		return resp, err
 	}
 }
 
 // StreamLoggingInterceptor logs all streaming RPC calls.
-func StreamLoggingInterceptor(logger zerolog.Logger) grpc.StreamServerInterceptor {
+func StreamLoggingInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		start := time.Now()
+		ctx := ss.Context()
 
 		// Call handler
 		err := handler(srv, ss)
 
 		duration := time.Since(start)
-		logLevel := logger.Debug()
+		msg := "Stream RPC call completed"
 		if err != nil {
-			logLevel = logger.Error()
+			logger.ErrorContext(ctx, msg,
+				"method", info.FullMethod,
+				"is_client_stream", info.IsClientStream,
+				"is_server_stream", info.IsServerStream,
+				"latency_ms", duration.Milliseconds(),
+				"error", err,
+				"outcome", "error",
+			)
+		} else {
+			logger.InfoContext(ctx, msg,
+				"method", info.FullMethod,
+				"is_client_stream", info.IsClientStream,
+				"is_server_stream", info.IsServerStream,
+				"latency_ms", duration.Milliseconds(),
+				"outcome", "success",
+			)
 		}
-
-		logLevel.
-			Str("method", info.FullMethod).
-			Bool("is_client_stream", info.IsClientStream).
-			Bool("is_server_stream", info.IsServerStream).
-			Dur("duration_ms", duration).
-			Err(err).
-			Msg("Stream RPC call completed")
 
 		return err
 	}

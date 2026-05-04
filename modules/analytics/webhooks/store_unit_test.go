@@ -197,17 +197,17 @@ func TestStore_CreateWebhook_MarshalsFieldsAndExecs(t *testing.T) {
 
 	s := NewStore(db)
 	wh := &analytics.Webhook{
-		ID:          "wh_1",
-		UserID:      "user_1",
-		URL:         "https://example.test/hook",
-		EventTypes:  []string{"evt.a", "evt.b"},
-		Categories:  []string{"cat.a"},
+		ID:           "wh_1",
+		UserID:       "user_1",
+		URL:          "https://example.test/hook",
+		EventTypes:   []string{"evt.a", "evt.b"},
+		Categories:   []string{"cat.a"},
 		CustomFilter: map[string]interface{}{"k": "v"},
-		Secret:      "secret",
-		Active:      true,
+		Secret:       "secret",
+		Active:       true,
 		FailureCount: 0,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	require.NoError(t, s.CreateWebhook(context.Background(), wh))

@@ -14,51 +14,65 @@ import (
 // Test ID generators
 func TestIDGenerators(t *testing.T) {
 	t.Run("GenerateAccessTokenJTI", func(t *testing.T) {
-		jti1 := GenerateAccessTokenJTI()
-		jti2 := GenerateAccessTokenJTI()
+		jti1, err1 := GenerateAccessTokenJTI()
+		jti2, err2 := GenerateAccessTokenJTI()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, jti1, jti2)
 		assert.Contains(t, jti1, "at_")
 		assert.Greater(t, len(jti1), 40) // at_ + base64 chars
 	})
 
 	t.Run("GenerateRefreshToken", func(t *testing.T) {
-		rt1 := GenerateRefreshToken()
-		rt2 := GenerateRefreshToken()
+		rt1, err1 := GenerateRefreshToken()
+		rt2, err2 := GenerateRefreshToken()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, rt1, rt2)
 		assert.Contains(t, rt1, "rt_")
 	})
 
 	t.Run("GenerateRefreshTokenFamily", func(t *testing.T) {
-		rtf1 := GenerateRefreshTokenFamily()
-		rtf2 := GenerateRefreshTokenFamily()
+		rtf1, err1 := GenerateRefreshTokenFamily()
+		rtf2, err2 := GenerateRefreshTokenFamily()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, rtf1, rtf2)
 		assert.Contains(t, rtf1, "rtf_")
 	})
 
 	t.Run("GenerateIDTokenJTI", func(t *testing.T) {
-		idt1 := GenerateIDTokenJTI()
-		idt2 := GenerateIDTokenJTI()
+		idt1, err1 := GenerateIDTokenJTI()
+		idt2, err2 := GenerateIDTokenJTI()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, idt1, idt2)
 		assert.Contains(t, idt1, "idt_")
 	})
 
 	t.Run("GenerateDeviceCode", func(t *testing.T) {
-		dc1 := GenerateDeviceCode()
-		dc2 := GenerateDeviceCode()
+		dc1, err1 := GenerateDeviceCode()
+		dc2, err2 := GenerateDeviceCode()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, dc1, dc2)
 		assert.Contains(t, dc1, "dc_")
 	})
 
 	t.Run("GenerateLoginChallenge", func(t *testing.T) {
-		lc1 := GenerateLoginChallenge()
-		lc2 := GenerateLoginChallenge()
+		lc1, err1 := GenerateLoginChallenge()
+		lc2, err2 := GenerateLoginChallenge()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, lc1, lc2)
 		assert.Contains(t, lc1, "lc_")
 	})
 
 	t.Run("GenerateConsentChallenge", func(t *testing.T) {
-		cc1 := GenerateConsentChallenge()
-		cc2 := GenerateConsentChallenge()
+		cc1, err1 := GenerateConsentChallenge()
+		cc2, err2 := GenerateConsentChallenge()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, cc1, cc2)
 		assert.Contains(t, cc1, "cc_")
 	})
@@ -181,22 +195,27 @@ func TestErrors(t *testing.T) {
 
 func TestAdditionalIDGeneratorsAndHelpers(t *testing.T) {
 	t.Run("GenerateClientID has expected prefix and entropy", func(t *testing.T) {
-		id1 := GenerateClientID()
-		id2 := GenerateClientID()
+		id1, err1 := GenerateClientID()
+		id2, err2 := GenerateClientID()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEqual(t, id1, id2)
 		assert.Regexp(t, regexp.MustCompile(`^oa2_[A-Za-z0-9_-]+$`), id1)
 	})
 
 	t.Run("GenerateAuthCode produces non-empty unique value", func(t *testing.T) {
-		code1 := GenerateAuthCode()
-		code2 := GenerateAuthCode()
+		code1, err1 := GenerateAuthCode()
+		code2, err2 := GenerateAuthCode()
+		assert.NoError(t, err1)
+		assert.NoError(t, err2)
 		assert.NotEmpty(t, code1)
 		assert.NotEqual(t, code1, code2)
 		assert.NotContains(t, code1, " ")
 	})
 
 	t.Run("GenerateUserCode format and charset", func(t *testing.T) {
-		code := GenerateUserCode()
+		code, err := GenerateUserCode()
+		assert.NoError(t, err)
 		assert.Regexp(t, regexp.MustCompile(`^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$`), code)
 	})
 

@@ -3,15 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/logger"
@@ -99,10 +96,9 @@ func TestDefaultMainDepsStartHTTPServerBranches(t *testing.T) {
 	listenAndServeHTTPHook = func(*http.Server) error { return errors.New("http failed") }
 	listenAndServeTLSHook = func(*http.Server, string, string) error { return errors.New("tls failed") }
 	var fatalCalls int32
-	fatalHTTPServerHook = func(*logger.Logger) *zerolog.Event {
+	fatalHTTPServerHook = func(l *logger.Logger, msg string, args ...any) {
 		atomic.AddInt32(&fatalCalls, 1)
-		zl := zerolog.New(io.Discard)
-		return (&zl).Error()
+		// Logger.Fatal() will log the error and call os.Exit(1), which we'll intercept below
 	}
 
 	deps := defaultMainDeps()

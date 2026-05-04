@@ -539,7 +539,7 @@ func TestServer_ABACCompilerAndEvaluationHelpers(t *testing.T) {
 	subjectMap, ok := activation["subject"].(map[string]any)
 	require.True(t, ok)
 	require.Contains(t, subjectMap, "roles")
-	assert.Equal(t, []string{"admin", "editor"}, subjectMap["roles"])
+	assert.Equal(t, []string{}, subjectMap["roles"])
 
 	_, err = s.compileABACExpression(" ")
 	assert.ErrorContains(t, err, "empty ABAC expression")

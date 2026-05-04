@@ -471,12 +471,12 @@ func (s *handlerDeviceStore) MarkDeviceCodeUsed(ctx context.Context, deviceCode 
 
 func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 	now := time.Now().UTC()
-	
+
 	// Generate a valid secret hash for the confidential client
 	secretHash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
 	require.NoError(t, err)
 	secretHashStr := string(secretHash)
-	
+
 	authCode := &store.AuthCode{
 		Code:        "ac-1",
 		ClientID:    "client-1",
@@ -512,7 +512,7 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 			"urn:ietf:params:oauth:grant-type:device_code",
 		},
 	}
-	
+
 	// Confidential client for client_credentials and jwt-bearer grants
 	confClient := &store.Client{
 		ID:                      "client-confidential",
@@ -532,12 +532,12 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		authCode:     authCode,
 		refreshToken: refreshToken,
 	}, &tokenSvc.MockJWTSigner{}, "https://issuer.example.com")
-	
+
 	// Multi-client grant store for testing both public and confidential clients
 	multiClientGrantStore := &handlerMultiClientGrantStore{
 		clients: map[string]*store.Client{
-			"client-1":             client,
-			"client-confidential":  confClient,
+			"client-1":            client,
+			"client-confidential": confClient,
 		},
 	}
 	clientCredsSvc := grants.NewClientCredentialsService(

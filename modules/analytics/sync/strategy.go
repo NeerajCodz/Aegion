@@ -35,12 +35,12 @@ type Strategy interface {
 
 // Config contains common configuration for sync strategies.
 type Config struct {
-	Enabled     bool
-	MaxRetries  int
+	Enabled        bool
+	MaxRetries     int
 	RetryBackoffMs int
-	Logger      Logger
-	DB          DB
-	DuckDB      DuckDB
+	Logger         Logger
+	DB             DB
+	DuckDB         DuckDB
 }
 
 // Logger defines a minimal logging interface.

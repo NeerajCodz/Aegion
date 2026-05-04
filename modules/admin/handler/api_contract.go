@@ -56,6 +56,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load operator profile")
 		return
 	}
+	if normalizeIdentityState(profile.State) != "active" {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		return
+	}
 
 	token, err := h.generateAPIKeyToken()
 	if err != nil {

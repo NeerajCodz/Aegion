@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,11 +12,11 @@ import (
 )
 
 func TestHealthCheckerNew(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	interval := 10 * time.Second
 	timeout := 5 * time.Second
 
-	hc := NewHealthChecker(registry, interval, timeout)
+	hc := NewHealthChecker(registry, interval, timeout, slog.Default())
 
 	assert.NotNil(t, hc)
 	assert.Equal(t, interval, hc.interval)
@@ -26,8 +27,8 @@ func TestHealthCheckerNew(t *testing.T) {
 }
 
 func TestHealthCheckerStart(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	hc.Start()
 	defer hc.Stop()
@@ -40,8 +41,8 @@ func TestHealthCheckerStart(t *testing.T) {
 }
 
 func TestHealthCheckerStop(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	hc.Start()
 	time.Sleep(100 * time.Millisecond)
@@ -56,8 +57,8 @@ func TestHealthCheckerStop(t *testing.T) {
 }
 
 func TestHealthCheckerStopWithoutStart(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	// Should not panic
 	hc.Stop()
@@ -65,8 +66,8 @@ func TestHealthCheckerStopWithoutStart(t *testing.T) {
 }
 
 func TestHealthCheckerCheckModuleHealthy(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	// Mock health server
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,8 +92,8 @@ func TestHealthCheckerCheckModuleHealthy(t *testing.T) {
 }
 
 func TestHealthCheckerCheckModuleUnhealthy(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	// Mock health server returning 500
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,8 +117,8 @@ func TestHealthCheckerCheckModuleUnhealthy(t *testing.T) {
 }
 
 func TestHealthCheckerCheckModuleTimeout(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 100*time.Millisecond)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 100*time.Millisecond, slog.Default())
 
 	// Mock health server that delays
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,8 +143,8 @@ func TestHealthCheckerCheckModuleTimeout(t *testing.T) {
 }
 
 func TestHealthCheckerCheckModuleNoHealthURL(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	module := &Module{
 		ID:     "test-module",
@@ -160,8 +161,8 @@ func TestHealthCheckerCheckModuleNoHealthURL(t *testing.T) {
 }
 
 func TestHealthCheckerCheckModuleInvalidURL(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	module := &Module{
 		ID:        "test-module",
@@ -178,8 +179,8 @@ func TestHealthCheckerCheckModuleInvalidURL(t *testing.T) {
 }
 
 func TestHealthCheckerCheckNow(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -209,8 +210,8 @@ func TestHealthCheckerCheckNow(t *testing.T) {
 }
 
 func TestHealthCheckerCheckNowNotFound(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	result, err := hc.CheckNow("nonexistent")
 
@@ -220,8 +221,8 @@ func TestHealthCheckerCheckNowNotFound(t *testing.T) {
 }
 
 func TestHealthCheckerSetInterval(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	newInterval := 30 * time.Second
 	hc.SetInterval(newInterval)
@@ -230,8 +231,8 @@ func TestHealthCheckerSetInterval(t *testing.T) {
 }
 
 func TestHealthCheckerSetTimeout(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	newTimeout := 10 * time.Second
 	hc.SetTimeout(newTimeout)
@@ -242,8 +243,8 @@ func TestHealthCheckerSetTimeout(t *testing.T) {
 
 func TestHealthCheckerGetInterval(t *testing.T) {
 	interval := 15 * time.Second
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, interval, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, interval, 1*time.Second, slog.Default())
 
 	retrieved := hc.GetInterval()
 
@@ -252,8 +253,8 @@ func TestHealthCheckerGetInterval(t *testing.T) {
 
 func TestHealthCheckerGetTimeout(t *testing.T) {
 	timeout := 7 * time.Second
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, timeout)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, timeout, slog.Default())
 
 	retrieved := hc.GetTimeout()
 
@@ -261,8 +262,8 @@ func TestHealthCheckerGetTimeout(t *testing.T) {
 }
 
 func TestHealthCheckerCheckAll(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -291,8 +292,8 @@ func TestHealthCheckerCheckAll(t *testing.T) {
 }
 
 func TestHealthCheckerCheckAllNoModules(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	// Should not panic with no modules
 	hc.checkAll()
@@ -300,8 +301,8 @@ func TestHealthCheckerCheckAllNoModules(t *testing.T) {
 }
 
 func TestHealthCheckerRecovery(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	counter := 0
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -331,8 +332,8 @@ func TestHealthCheckerRecovery(t *testing.T) {
 }
 
 func TestHealthCheckerConcurrentChecks(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(50 * time.Millisecond)
@@ -361,8 +362,8 @@ func TestHealthCheckerConcurrentChecks(t *testing.T) {
 }
 
 func TestHealthCheckerContextTimeout(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 100*time.Millisecond)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 100*time.Millisecond, slog.Default())
 
 	// Create a server that never responds
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -405,8 +406,8 @@ func TestHealthCheckerModuleStatusCodeBoundaries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			registry := New(DefaultConfig())
-			hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+			registry := New(DefaultConfig(), slog.Default())
+			hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 			healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.statusCode)
@@ -433,8 +434,8 @@ func TestHealthCheckerModuleStatusCodeBoundaries(t *testing.T) {
 }
 
 func TestHealthCheckerWithContext(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify context is passed
@@ -461,8 +462,8 @@ func TestHealthCheckerWithContext(t *testing.T) {
 }
 
 func TestHealthCheckerLatencyMeasurement(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 5*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 5*time.Second, slog.Default())
 
 	delay := 100 * time.Millisecond
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -485,8 +486,8 @@ func TestHealthCheckerLatencyMeasurement(t *testing.T) {
 }
 
 func TestHealthCheckerStatusUpdate(t *testing.T) {
-	registry := New(DefaultConfig())
-	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second)
+	registry := New(DefaultConfig(), slog.Default())
+	hc := NewHealthChecker(registry, 1*time.Second, 1*time.Second, slog.Default())
 
 	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
