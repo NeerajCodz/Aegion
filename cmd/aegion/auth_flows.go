@@ -286,7 +286,7 @@ func (s *Server) executeRegistrationFlow(ctx context.Context, w http.ResponseWri
 		return nil, &flowHTTPError{Status: http.StatusBadRequest, Message: "password confirmation does not match"}
 	}
 
-	existingIdentityID, err := s.lookupIdentityByEmail(ctx, email)
+	existingIdentityID, err := s.lookupAnyIdentityByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
@@ -717,23 +717,36 @@ func (s *Server) identityIsActive(ctx context.Context, identityID uuid.UUID) (bo
 }
 
 func (s *Server) lookupIdentityByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
+	return s.lookupIdentityByEmailWithState(ctx, email, true)
+}
+
+func (s *Server) lookupAnyIdentityByEmail(ctx context.Context, email string) (*uuid.UUID, error) {
+	return s.lookupIdentityByEmailWithState(ctx, email, false)
+}
+
+func (s *Server) lookupIdentityByEmailWithState(ctx context.Context, email string, onlyActive bool) (*uuid.UUID, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" || !s.hasDatabaseAccess() {
 		return nil, nil
 	}
 
-	var identityID uuid.UUID
-	err := s.queryRow(ctx, `
+	query := `
 		SELECT i.id
 		FROM core_identities i
 		JOIN core_identity_addresses a ON a.identity_id = i.id
 		WHERE a.type = 'email'
 		  AND LOWER(a.value) = LOWER($1)
-		  AND i.state = 'active'
-		  AND i.deleted_at IS NULL
+		  AND i.deleted_at IS NULL`
+	if onlyActive {
+		query += "\n\t\t  AND i.state = 'active'"
+	}
+	query += `
 		ORDER BY a.verified DESC, a.is_primary DESC, a.created_at DESC
 		LIMIT 1
-	`, email).Scan(&identityID)
+	`
+
+	var identityID uuid.UUID
+	err := s.queryRow(ctx, query, email).Scan(&identityID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -1004,7 +1017,7 @@ func (s *Server) resolveExternalSAMLLogin(ctx context.Context, r *http.Request, 
 		return nil, &flowHTTPError{Status: http.StatusUnauthorized, Message: "sso callback did not provide an email address"}
 	}
 
-	identityID, err := s.lookupIdentityByEmail(ctx, email)
+	identityID, err := s.lookupAnyIdentityByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
