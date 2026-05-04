@@ -8,9 +8,9 @@ func TestValidateEmail(t *testing.T) {
 	validator := NewValidator()
 
 	tests := []struct {
-		email   string
-		valid   bool
-		desc    string
+		email string
+		valid bool
+		desc  string
 	}{
 		{"user@example.com", true, "valid email"},
 		{"user.name@example.co.uk", true, "valid email with dots"},
@@ -35,10 +35,10 @@ func TestValidateURL(t *testing.T) {
 	validator := NewValidator()
 
 	tests := []struct {
-		url         string
+		url          string
 		requireHTTPS bool
-		valid       bool
-		desc        string
+		valid        bool
+		desc         string
 	}{
 		{"https://example.com", true, true, "valid HTTPS URL"},
 		{"http://example.com", false, true, "valid HTTP URL"},

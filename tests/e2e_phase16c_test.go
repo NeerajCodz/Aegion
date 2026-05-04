@@ -18,35 +18,35 @@ type Phase16C_E2EWorkflow struct {
 
 // E2ETestResults stores test execution results
 type E2ETestResults struct {
-	TestName              string
-	StartTime             time.Time
-	EndTime               time.Time
-	Duration              time.Duration
-	TotalEventsCreated    int
-	EventsFromRealTime    int
-	EventsFromBatch       int
-	EventsFromAsync       int
-	RestAPIResults        int
-	GraphQLResults        int
-	gRPCResults           int
-	DashboardsCreated     int
-	WebhooksTriggered     int
-	AuditLogsVerified     int
-	RetentionPoliciesOK   bool
-	AllAPIsConsistent     bool
-	Errors                []string
-	Warnings              []string
-	TestSteps             []TestStepResult
+	TestName            string
+	StartTime           time.Time
+	EndTime             time.Time
+	Duration            time.Duration
+	TotalEventsCreated  int
+	EventsFromRealTime  int
+	EventsFromBatch     int
+	EventsFromAsync     int
+	RestAPIResults      int
+	GraphQLResults      int
+	gRPCResults         int
+	DashboardsCreated   int
+	WebhooksTriggered   int
+	AuditLogsVerified   int
+	RetentionPoliciesOK bool
+	AllAPIsConsistent   bool
+	Errors              []string
+	Warnings            []string
+	TestSteps           []TestStepResult
 }
 
 // TestStepResult tracks individual test step outcomes
 type TestStepResult struct {
-	Name        string
-	Status      string // "PASS", "FAIL", "SKIP"
-	Duration    time.Duration
-	Details     string
-	ErrorMsg    string
-	Timestamp   time.Time
+	Name      string
+	Status    string // "PASS", "FAIL", "SKIP"
+	Duration  time.Duration
+	Details   string
+	ErrorMsg  string
+	Timestamp time.Time
 }
 
 // TestPhase16C_CompleteE2EWorkflow main end-to-end test
@@ -95,9 +95,9 @@ func TestPhase16C_CompleteE2EWorkflow(t *testing.T) {
 		eventCount := 50
 		for i := 1; i <= eventCount; i++ {
 			eventData := map[string]interface{}{
-				"user_id":   fmt.Sprintf("user_%d", i),
+				"user_id":    fmt.Sprintf("user_%d", i),
 				"event_type": "user_login",
-				"timestamp": time.Now(),
+				"timestamp":  time.Now(),
 				"metadata": map[string]interface{}{
 					"ip_address": fmt.Sprintf("192.168.1.%d", i%256),
 					"user_agent": "E2E Test Agent",
@@ -200,10 +200,10 @@ func TestPhase16C_CompleteE2EWorkflow(t *testing.T) {
 		defer trackTestStep(results, "All APIs Consistency Check", t)()
 
 		// Verify all APIs return same data
-		allConsistent := (results.RestAPIResults > 0 && 
-			results.GraphQLResults > 0 && 
+		allConsistent := (results.RestAPIResults > 0 &&
+			results.GraphQLResults > 0 &&
 			results.gRPCResults > 0)
-		
+
 		results.AllAPIsConsistent = allConsistent
 		assert.True(t, results.AllAPIsConsistent, "all APIs should return consistent results")
 	})
@@ -290,12 +290,12 @@ func TestPhase16C_CompleteE2EWorkflow(t *testing.T) {
 
 		// Verify metrics endpoint
 		metrics := map[string]interface{}{
-			"query_latency_p50":   "45ms",
-			"query_latency_p95":   "120ms",
-			"query_latency_p99":   "250ms",
-			"events_synced":       results.TotalEventsCreated,
+			"query_latency_p50":    "45ms",
+			"query_latency_p95":    "120ms",
+			"query_latency_p99":    "250ms",
+			"events_synced":        results.TotalEventsCreated,
 			"webhook_success_rate": "100%",
-			"cache_hit_rate":      "85%",
+			"cache_hit_rate":       "85%",
 		}
 		dataJSON, _ := json.Marshal(metrics)
 		assert.NotEmpty(t, dataJSON, "performance metrics should be available")

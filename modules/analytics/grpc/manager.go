@@ -2,9 +2,9 @@ package grpc
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 
 	pb "github.com/aegion/aegion/internal/proto/analytics"
@@ -12,7 +12,7 @@ import (
 
 // Manager manages the gRPC server lifecycle.
 type Manager struct {
-	logger zerolog.Logger
+	logger *slog.Logger
 	server *Server
 	config ServerConfig
 	store  Store
@@ -21,7 +21,7 @@ type Manager struct {
 
 // NewManager creates a new gRPC manager.
 func NewManager(
-	logger zerolog.Logger,
+	logger *slog.Logger,
 	store Store,
 	syncManager SyncManager,
 	port int,
@@ -73,14 +73,14 @@ func (m *Manager) Start(ctx context.Context) error {
 	// Start server in background
 	go func() {
 		if err := server.Start(); err != nil {
-			m.logger.Error().Err(err).Msg("gRPC server error")
+			m.logger.ErrorContext(context.Background(), "gRPC server error", "error", err)
 		}
 	}()
 
 	// Wait for server to start
 	time.Sleep(100 * time.Millisecond)
 
-	m.logger.Info().Int("port", server.Port()).Msg("gRPC server started")
+	m.logger.InfoContext(context.Background(), "gRPC server started", "port", server.Port())
 	return nil
 }
 
@@ -116,7 +116,7 @@ func (m *Manager) IsRunning() bool {
 
 // BuildInterceptorChain builds a chain of interceptors based on configuration.
 func BuildInterceptorChain(
-	logger zerolog.Logger,
+	logger *slog.Logger,
 	enableLogging bool,
 	enableAuth bool,
 	enableTracing bool,
@@ -140,7 +140,7 @@ func BuildInterceptorChain(
 
 // BuildStreamInterceptorChain builds a chain of stream interceptors.
 func BuildStreamInterceptorChain(
-	logger zerolog.Logger,
+	logger *slog.Logger,
 	enableLogging bool,
 	enableTracing bool,
 ) grpc.StreamServerInterceptor {

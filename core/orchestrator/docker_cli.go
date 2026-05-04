@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"log/slog"
 )
 
 const (
@@ -175,7 +175,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 		return "", fmt.Errorf("creating container: %w", err)
 	}
 	id := strings.TrimSpace(stdout)
-	log.Info().Str("module_id", cfg.ID).Str("container_id", shortID(id)).Str("container_name", containerName).Msg("container created")
+	slog.InfoContext(ctx, "container created", "module_id", cfg.ID, "container_id", shortID(id), "container_name", containerName)
 	return id, nil
 }
 

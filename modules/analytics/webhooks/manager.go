@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	analytics "github.com/aegion/aegion/modules/analytics"
+	"github.com/google/uuid"
 )
 
 // Manager orchestrates webhook registration, event matching, and delivery.
@@ -30,15 +30,15 @@ type Manager struct {
 
 // ManagerConfig holds manager configuration.
 type ManagerConfig struct {
-	MaxPerUser                  int
-	MaxRetries                  int
-	RetryBackoffBaseMs          int
-	TimeoutSeconds              int
-	BatchSize                   int
-	WorkerThreads               int
-	StoreDeliveryHistoryDays    int
-	MaxCustomFilterDepth        int
-	CircuitBreakerFailureCount  int
+	MaxPerUser                 int
+	MaxRetries                 int
+	RetryBackoffBaseMs         int
+	TimeoutSeconds             int
+	BatchSize                  int
+	WorkerThreads              int
+	StoreDeliveryHistoryDays   int
+	MaxCustomFilterDepth       int
+	CircuitBreakerFailureCount int
 }
 
 // NewManager creates a new webhook manager.
@@ -285,15 +285,15 @@ func (m *Manager) DispatchEvent(ctx context.Context, eventID, eventType, categor
 
 		// Create delivery job
 		job := &DeliveryJob{
-			ID:        uuid.New().String(),
-			WebhookID: webhook.ID,
-			EventID:   eventID,
-			EventType: eventType,
-			Category:  category,
-			Payload:   payload,
-			Headers:   headers,
-			CreatedAt: time.Now(),
-			Attempts:  1,
+			ID:         uuid.New().String(),
+			WebhookID:  webhook.ID,
+			EventID:    eventID,
+			EventType:  eventType,
+			Category:   category,
+			Payload:    payload,
+			Headers:    headers,
+			CreatedAt:  time.Now(),
+			Attempts:   1,
 			MaxRetries: m.config.MaxRetries,
 		}
 
@@ -314,7 +314,7 @@ func (m *Manager) TestWebhook(ctx context.Context, webhookID string) (string, er
 	}
 
 	testData := map[string]interface{}{
-		"test": true,
+		"test":    true,
 		"message": "This is a test webhook delivery",
 	}
 
@@ -379,11 +379,11 @@ func (m *Manager) ReplayEvent(ctx context.Context, deliveryID string) error {
 
 	// Create new delivery job for replay
 	job := &DeliveryJob{
-		ID:        uuid.New().String(),
-		WebhookID: webhook.ID,
-		EventID:   delivery.EventID,
-		CreatedAt: time.Now(),
-		Attempts:  1,
+		ID:         uuid.New().String(),
+		WebhookID:  webhook.ID,
+		EventID:    delivery.EventID,
+		CreatedAt:  time.Now(),
+		Attempts:   1,
 		MaxRetries: m.config.MaxRetries,
 	}
 

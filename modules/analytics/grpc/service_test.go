@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -98,12 +98,12 @@ func (m *MockSyncManager) GetSyncLag(ctx context.Context) (int64, error) {
 
 // TestQueryEvents tests the QueryEvents RPC
 func TestQueryEvents(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	req := &pb.QueryEventsRequest{
 		PageSize:  50,
@@ -119,12 +119,12 @@ func TestQueryEvents(t *testing.T) {
 
 // TestQueryEventsNilRequest tests QueryEvents with nil request
 func TestQueryEventsNilRequest(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	resp, err := service.QueryEvents(context.Background(), nil)
 	assert.Error(t, err)
@@ -133,12 +133,12 @@ func TestQueryEventsNilRequest(t *testing.T) {
 
 // TestGetDashboard tests the GetDashboard RPC
 func TestGetDashboard(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	// First create a dashboard
 	store.dashboards["dash-1"] = map[string]interface{}{
@@ -162,12 +162,12 @@ func TestGetDashboard(t *testing.T) {
 
 // TestGetHealthStatus tests the GetHealthStatus RPC
 func TestGetHealthStatus(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	req := &pb.Empty{}
 
@@ -181,12 +181,12 @@ func TestGetHealthStatus(t *testing.T) {
 
 // TestCreateDashboard tests the CreateDashboard RPC
 func TestCreateDashboard(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	config_struct, err := structpb.NewStruct(map[string]interface{}{
 		"chart_type": "line",
@@ -210,12 +210,12 @@ func TestCreateDashboard(t *testing.T) {
 
 // TestUpdateDashboard tests the UpdateDashboard RPC
 func TestUpdateDashboard(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	// Create dashboard first
 	store.dashboards["dash-1"] = map[string]interface{}{
@@ -245,7 +245,7 @@ func TestUpdateDashboard(t *testing.T) {
 }
 
 func TestExecuteQuery(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -258,7 +258,7 @@ func TestExecuteQuery(t *testing.T) {
 		{"id": "2", "name": "event2"},
 	}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
 		QueryId:  "query-1",
@@ -271,12 +271,12 @@ func TestExecuteQuery(t *testing.T) {
 }
 
 func TestExecuteQuery_NotFound(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
 		QueryId: "missing-query",
@@ -286,7 +286,7 @@ func TestExecuteQuery_NotFound(t *testing.T) {
 }
 
 func TestExecuteQuery_RejectsMutatingSQL(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -295,7 +295,7 @@ func TestExecuteQuery_RejectsMutatingSQL(t *testing.T) {
 		{"sql": "DELETE FROM analytics_events"},
 	}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
 		QueryId: "query-bad",
@@ -326,12 +326,12 @@ func TestExecuteQuery_RejectsStackedStatements(t *testing.T) {
 
 // TestStreamEvents tests server streaming
 func TestStreamEvents(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	req := &pb.StreamEventsRequest{
 		Category:          "test",
@@ -351,12 +351,12 @@ func TestStreamEvents(t *testing.T) {
 
 // TestExportData tests server streaming export
 func TestExportData(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	req := &pb.ExportDataRequest{
 		Format:     pb.ExportFormat_JSON,
@@ -393,16 +393,16 @@ func (s *mockServerStream) RecvMsg(m interface{}) error {
 
 // TestServer tests the gRPC server startup
 func TestServer(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	serverCfg := ServerConfig{
 		Port:   0, // Use random port
-		Logger: logger,
+		Logger: lgr,
 	}
 
 	server, err := NewServer(serverCfg, service)

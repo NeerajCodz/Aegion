@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"regexp"
+	"log/slog"
 	"strings"
 
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -18,7 +17,7 @@ import (
 // Service implements the gRPC AnalyticsService.
 type Service struct {
 	pb.UnimplementedAnalyticsServiceServer
-	logger      zerolog.Logger
+	logger      *slog.Logger
 	store       Store
 	syncManager SyncManager
 	config      Config
@@ -50,9 +49,9 @@ type Config struct {
 }
 
 // NewService creates a new gRPC analytics service.
-func NewService(logger zerolog.Logger, store Store, syncManager SyncManager, config Config) *Service {
+func NewService(log *slog.Logger, store Store, syncManager SyncManager, config Config) *Service {
 	return &Service{
-		logger:      logger,
+		logger:      log,
 		store:       store,
 		syncManager: syncManager,
 		config:      config,
@@ -65,10 +64,10 @@ func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (
 		return nil, status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
 
-	s.logger.Debug().
-		Str("category", req.Category).
-		Str("event_type", req.EventType).
-		Msg("Querying events")
+	s.logger.DebugContext(ctx, "Querying events",
+		"category", req.Category,
+		"event_type", req.EventType,
+	)
 
 	// Build filters map
 	filters := make(map[string]interface{})
@@ -88,7 +87,7 @@ func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (
 	// Query events
 	events, totalCount, nextToken, err := s.store.QueryEvents(ctx, filters, pageSize, req.PageToken)
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to query events")
+		s.logger.ErrorContext(ctx, "Failed to query events", "error", err)
 		return nil, status.Error(codes.Internal, "failed to query events")
 	}
 
@@ -97,7 +96,7 @@ func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (
 	for i, e := range events {
 		pbEvent, err := eventToProto(e)
 		if err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to convert event")
+			s.logger.WarnContext(ctx, "Failed to convert event", "error", err)
 			continue
 		}
 		pbEvents[i] = pbEvent
@@ -116,11 +115,11 @@ func (s *Service) GetDashboard(ctx context.Context, req *pb.GetDashboardRequest)
 		return nil, status.Error(codes.InvalidArgument, "dashboard ID is required")
 	}
 
-	s.logger.Debug().Str("dashboard_id", req.Id).Msg("Getting dashboard")
+	s.logger.DebugContext(ctx, "Getting dashboard", "dashboard_id", req.Id)
 
 	dashboard, err := s.store.GetDashboard(ctx, req.Id)
 	if err != nil {
-		s.logger.Error().Err(err).Str("dashboard_id", req.Id).Msg("Failed to get dashboard")
+		s.logger.ErrorContext(ctx, "Failed to get dashboard", "error", err, "dashboard_id", req.Id)
 		return nil, status.Error(codes.NotFound, "dashboard not found")
 	}
 
@@ -135,11 +134,11 @@ func (s *Service) GetDashboard(ctx context.Context, req *pb.GetDashboardRequest)
 
 // GetHealthStatus implements the GetHealthStatus RPC.
 func (s *Service) GetHealthStatus(ctx context.Context, _ *pb.Empty) (*pb.HealthStatus, error) {
-	s.logger.Debug().Msg("Checking health status")
+	s.logger.DebugContext(ctx, "Checking health status")
 
 	health, err := s.store.GetHealthStatus(ctx)
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to get health status")
+		s.logger.ErrorContext(ctx, "Failed to get health status", "error", err)
 		return nil, status.Error(codes.Internal, "failed to check health")
 	}
 
@@ -154,15 +153,12 @@ func (s *Service) ExecuteQuery(ctx context.Context, req *pb.ExecuteQueryRequest)
 		return nil, status.Error(codes.InvalidArgument, "query_id is required")
 	}
 
-	s.logger.Debug().
-		Str("query_id", req.QueryId).
-		Int("page_size", int(req.PageSize)).
-		Msg("Executing query")
+	s.logger.DebugContext(ctx, "Executing query", "query_id", req.QueryId, "page_size", int(req.PageSize))
 
 	lookupSQL := fmt.Sprintf("SELECT sql FROM queries WHERE id = '%s' LIMIT 1", sanitizeSQLLiteral(req.QueryId))
 	queryRows, err := s.store.ExecuteQuery(ctx, lookupSQL, nil)
 	if err != nil {
-		s.logger.Error().Err(err).Str("query_id", req.QueryId).Msg("Failed to load saved query")
+		s.logger.ErrorContext(ctx, "Failed to load saved query", "error", err, "query_id", req.QueryId)
 		return nil, status.Error(codes.Internal, "failed to load saved query")
 	}
 	if len(queryRows) == 0 {
@@ -177,7 +173,7 @@ func (s *Service) ExecuteQuery(ctx context.Context, req *pb.ExecuteQueryRequest)
 	execSQL := applyQueryLimit(rawSQL, int(req.PageSize))
 	rows, err := s.store.ExecuteQuery(ctx, execSQL, nil)
 	if err != nil {
-		s.logger.Error().Err(err).Str("query_id", req.QueryId).Msg("Failed to execute saved query")
+		s.logger.ErrorContext(ctx, "Failed to execute saved query", "error", err, "query_id", req.QueryId)
 		return nil, status.Error(codes.Internal, "failed to execute query")
 	}
 
@@ -193,7 +189,7 @@ func (s *Service) CreateDashboard(ctx context.Context, req *pb.CreateDashboardRe
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
-	s.logger.Debug().Str("name", req.Name).Msg("Creating dashboard")
+	s.logger.DebugContext(ctx, "Creating dashboard", "name", req.Name)
 
 	dashboardData := map[string]interface{}{
 		"name":        req.Name,
@@ -204,7 +200,7 @@ func (s *Service) CreateDashboard(ctx context.Context, req *pb.CreateDashboardRe
 
 	dashboardID, err := s.store.CreateDashboard(ctx, dashboardData)
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to create dashboard")
+		s.logger.ErrorContext(ctx, "Failed to create dashboard", "error", err)
 		return nil, status.Error(codes.Internal, "failed to create dashboard")
 	}
 
@@ -218,7 +214,7 @@ func (s *Service) UpdateDashboard(ctx context.Context, req *pb.UpdateDashboardRe
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
 
-	s.logger.Debug().Str("id", req.Id).Msg("Updating dashboard")
+	s.logger.DebugContext(ctx, "Updating dashboard", "id", req.Id)
 
 	dashboardData := map[string]interface{}{
 		"name":        req.Name,
@@ -228,7 +224,7 @@ func (s *Service) UpdateDashboard(ctx context.Context, req *pb.UpdateDashboardRe
 	}
 
 	if err := s.store.UpdateDashboard(ctx, req.Id, dashboardData); err != nil {
-		s.logger.Error().Err(err).Str("id", req.Id).Msg("Failed to update dashboard")
+		s.logger.ErrorContext(ctx, "Failed to update dashboard", "error", err, "id", req.Id)
 		return nil, status.Error(codes.Internal, "failed to update dashboard")
 	}
 
@@ -243,10 +239,7 @@ func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerSt
 	}
 
 	ctx := stream.Context()
-	s.logger.Debug().
-		Str("category", req.Category).
-		Bool("include_historical", req.IncludeHistorical).
-		Msg("Streaming events")
+	s.logger.DebugContext(ctx, "Streaming events", "category", req.Category, "include_historical", req.IncludeHistorical)
 
 	// Build filters
 	filters := make(map[string]interface{})
@@ -258,14 +251,14 @@ func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerSt
 	if req.IncludeHistorical {
 		events, _, _, err := s.store.QueryEvents(ctx, filters, 1000, "")
 		if err != nil {
-			s.logger.Error().Err(err).Msg("Failed to query historical events")
+			s.logger.ErrorContext(ctx, "Failed to query historical events", "error", err)
 			return status.Error(codes.Internal, "failed to query historical events")
 		}
 
 		for _, e := range events {
 			pbEvent, err := eventToProto(e)
 			if err != nil {
-				s.logger.Warn().Err(err).Msg("Failed to convert event")
+				s.logger.WarnContext(ctx, "Failed to convert event", "error", err)
 				continue
 			}
 
@@ -274,7 +267,7 @@ func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerSt
 				return ctx.Err()
 			default:
 				if err := stream.SendMsg(pbEvent); err != nil {
-					s.logger.Error().Err(err).Msg("Failed to send event")
+					s.logger.ErrorContext(ctx, "Failed to send event", "error", err)
 					return err
 				}
 			}
@@ -284,7 +277,7 @@ func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerSt
 	// In a real implementation, subscribe to live events
 	// For now, we don't have a live subscription mechanism; end the stream once
 	// any historical events are sent.
-	s.logger.Debug().Msg("Event streaming complete (no live subscription configured)")
+	s.logger.DebugContext(ctx, "Event streaming complete (no live subscription configured)")
 	return nil
 }
 
@@ -334,10 +327,7 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream grpc.ServerStream
 	}
 
 	ctx := stream.Context()
-	s.logger.Debug().
-		Str("format", req.Format.String()).
-		Int64("max_records", req.MaxRecords).
-		Msg("Starting data export")
+	s.logger.DebugContext(ctx, "Starting data export", "format", req.Format.String(), "max_records", req.MaxRecords)
 
 	// Build filters
 	filters := make(map[string]interface{})
@@ -357,7 +347,7 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream grpc.ServerStream
 	// Export data
 	data, err := s.store.ExportData(ctx, formatStr, filters, req.MaxRecords)
 	if err != nil {
-		s.logger.Error().Err(err).Msg("Failed to export data")
+		s.logger.ErrorContext(ctx, "Failed to export data", "error", err)
 		return status.Error(codes.Internal, "failed to export data")
 	}
 
@@ -380,20 +370,20 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream grpc.ServerStream
 			return ctx.Err()
 		default:
 			if err := stream.SendMsg(chunk); err != nil {
-				s.logger.Error().Err(err).Msg("Failed to send data chunk")
+				s.logger.ErrorContext(ctx, "Failed to send data chunk", "error", err)
 				return err
 			}
 		}
 	}
 
-	s.logger.Debug().Int("bytes_sent", len(data)).Msg("Data export complete")
+	s.logger.DebugContext(ctx, "Data export complete", "bytes_sent", len(data))
 	return nil
 }
 
 // BatchQuery implements the BatchQuery RPC for bidirectional streaming.
 func (s *Service) BatchQuery(stream grpc.ServerStream) error {
 	ctx := stream.Context()
-	s.logger.Debug().Msg("Starting batch query processing")
+	s.logger.DebugContext(ctx, "Starting batch query processing")
 
 	results := make(chan *pb.QueryResult)
 	errors := make(chan error)
@@ -413,10 +403,7 @@ func (s *Service) BatchQuery(stream grpc.ServerStream) error {
 			}
 
 			// Process query
-			s.logger.Debug().
-				Str("request_id", req.RequestId).
-				Str("query_id", req.QueryId).
-				Msg("Processing batch query")
+			s.logger.DebugContext(ctx, "Processing batch query", "request_id", req.RequestId, "query_id", req.QueryId)
 
 			// In a real implementation, fetch and execute saved query
 			result := &pb.QueryResult{
@@ -440,11 +427,11 @@ func (s *Service) BatchQuery(stream grpc.ServerStream) error {
 				return nil
 			}
 			if err := stream.SendMsg(result); err != nil {
-				s.logger.Error().Err(err).Msg("Failed to send query result")
+				s.logger.ErrorContext(ctx, "Failed to send query result", "error", err)
 				return err
 			}
 		case err := <-errors:
-			s.logger.Error().Err(err).Msg("Error processing batch query")
+			s.logger.ErrorContext(ctx, "Error processing batch query", "error", err)
 			return status.Error(codes.Internal, "error processing batch query")
 		case <-ctx.Done():
 			return ctx.Err()

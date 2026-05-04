@@ -77,14 +77,14 @@ func TestRealTimeSyncStrategy(t *testing.T) {
 	duckdb := &MockDuckDB{}
 
 	strategy := NewRealTimeSync(
-		true,    // enabled
-		10,      // batch size
-		100,     // flush interval ms
-		3,       // max retries
-		100,     // retry backoff ms
-		logger,  // logger
-		db,      // postgres db
-		duckdb,  // duckdb
+		true,   // enabled
+		10,     // batch size
+		100,    // flush interval ms
+		3,      // max retries
+		100,    // retry backoff ms
+		logger, // logger
+		db,     // postgres db
+		duckdb, // duckdb
 	)
 
 	assert.NotNil(t, strategy)
@@ -133,15 +133,15 @@ func TestBatchSyncStrategy(t *testing.T) {
 	duckdb := &MockDuckDB{}
 
 	strategy := NewBatchSync(
-		true,                             // enabled
-		"1h",                             // interval
-		"02:00",                          // start time
-		[]string{"test_table"},           // tables
-		100,                              // batch size
-		10,                               // chunk size
-		logger,                           // logger
-		db,                               // postgres db
-		duckdb,                           // duckdb
+		true,                   // enabled
+		"1h",                   // interval
+		"02:00",                // start time
+		[]string{"test_table"}, // tables
+		100,                    // batch size
+		10,                     // chunk size
+		logger,                 // logger
+		db,                     // postgres db
+		duckdb,                 // duckdb
 	)
 
 	assert.NotNil(t, strategy)
@@ -182,16 +182,16 @@ func TestAsyncSyncStrategy(t *testing.T) {
 	duckdb := &MockDuckDB{}
 
 	strategy := NewAsyncSync(
-		true,                 // enabled
-		"memory",             // broker
-		"test-topic",         // topic
-		"test-group",         // consumer group
-		2,                    // worker count
-		3,                    // max retries
-		100,                  // retry backoff ms
-		logger,               // logger
-		db,                   // postgres db
-		duckdb,               // duckdb
+		true,         // enabled
+		"memory",     // broker
+		"test-topic", // topic
+		"test-group", // consumer group
+		2,            // worker count
+		3,            // max retries
+		100,          // retry backoff ms
+		logger,       // logger
+		db,           // postgres db
+		duckdb,       // duckdb
 	)
 
 	assert.NotNil(t, strategy)

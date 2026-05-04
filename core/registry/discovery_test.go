@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestDiscoveryNew(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := NewDiscovery(registry)
 
 	assert.NotNil(t, discovery)
@@ -19,7 +20,7 @@ func TestDiscoveryNew(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpoint(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register a module
@@ -43,7 +44,7 @@ func TestDiscoveryGetEndpoint(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointNotFound(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	url, err := discovery.GetEndpoint("nonexistent", EndpointHTTP)
@@ -54,7 +55,7 @@ func TestDiscoveryGetEndpointNotFound(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointTypeNotFound(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -75,7 +76,7 @@ func TestDiscoveryGetEndpointTypeNotFound(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointUnhealthy(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -99,7 +100,7 @@ func TestDiscoveryGetEndpointUnhealthy(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointStarting(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -120,7 +121,7 @@ func TestDiscoveryGetEndpointStarting(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointRoundRobin(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -152,7 +153,7 @@ func TestDiscoveryGetEndpointRoundRobin(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointByName(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register multiple instances
@@ -177,7 +178,7 @@ func TestDiscoveryGetEndpointByName(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointByNameNoModules(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	endpoints, err := discovery.GetEndpointByName("Nonexistent", EndpointHTTP)
@@ -188,7 +189,7 @@ func TestDiscoveryGetEndpointByNameNoModules(t *testing.T) {
 }
 
 func TestDiscoveryGetEndpointByNameNoHealthy(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -211,7 +212,7 @@ func TestDiscoveryGetEndpointByNameNoHealthy(t *testing.T) {
 }
 
 func TestDiscoveryGetHealthyEndpoint(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register multiple instances
@@ -240,7 +241,7 @@ func TestDiscoveryGetHealthyEndpoint(t *testing.T) {
 }
 
 func TestDiscoveryGetHealthyEndpointRoundRobin(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register 3 instances
@@ -272,7 +273,7 @@ func TestDiscoveryGetHealthyEndpointRoundRobin(t *testing.T) {
 }
 
 func TestDiscoveryGetHealthyEndpointNotFound(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	endpoint, err := discovery.GetHealthyEndpoint("Nonexistent", EndpointHTTP)
@@ -282,7 +283,7 @@ func TestDiscoveryGetHealthyEndpointNotFound(t *testing.T) {
 }
 
 func TestDiscoveryGetAllEndpoints(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register modules with different endpoint types
@@ -312,7 +313,7 @@ func TestDiscoveryGetAllEndpoints(t *testing.T) {
 }
 
 func TestDiscoveryGetAllEndpointsEmpty(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	endpoints := discovery.GetAllEndpoints(EndpointHTTP)
@@ -322,7 +323,7 @@ func TestDiscoveryGetAllEndpointsEmpty(t *testing.T) {
 }
 
 func TestDiscoveryGetAllEndpointsUnhealthy(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -344,7 +345,7 @@ func TestDiscoveryGetAllEndpointsUnhealthy(t *testing.T) {
 }
 
 func TestDiscoveryResolveModule(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -368,7 +369,7 @@ func TestDiscoveryResolveModule(t *testing.T) {
 }
 
 func TestDiscoveryResolveModulePrefersHealthy(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register unhealthy instance
@@ -399,7 +400,7 @@ func TestDiscoveryResolveModulePrefersHealthy(t *testing.T) {
 }
 
 func TestDiscoveryResolveModuleFallsBackToStarting(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register starting instance
@@ -420,7 +421,7 @@ func TestDiscoveryResolveModuleFallsBackToStarting(t *testing.T) {
 }
 
 func TestDiscoveryResolveModuleNoInstances(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register unhealthy instance - not returned
@@ -441,7 +442,7 @@ func TestDiscoveryResolveModuleNoInstances(t *testing.T) {
 }
 
 func TestDiscoveryResolveModuleNotFound(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	module, err := discovery.ResolveModule("Nonexistent")
@@ -452,7 +453,7 @@ func TestDiscoveryResolveModuleNotFound(t *testing.T) {
 }
 
 func TestDiscoveryResetRoundRobin(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -485,7 +486,7 @@ func TestDiscoveryResetRoundRobin(t *testing.T) {
 }
 
 func TestDiscoveryResetAllRoundRobin(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register modules with MULTIPLE endpoints of the same type per module
@@ -525,7 +526,7 @@ func TestDiscoveryResetAllRoundRobin(t *testing.T) {
 func TestDiscoveryLeastConnectionsPattern(t *testing.T) {
 	// Although the current implementation uses round-robin,
 	// this test validates the pattern works as expected.
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	// Register 2 instances
@@ -557,7 +558,7 @@ func TestDiscoveryLeastConnectionsPattern(t *testing.T) {
 }
 
 func TestDiscoveryConcurrentEndpointSelection(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -592,7 +593,7 @@ func TestDiscoveryConcurrentEndpointSelection(t *testing.T) {
 }
 
 func TestDiscoveryMultipleEndpointTypes(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -623,7 +624,7 @@ func TestDiscoveryMultipleEndpointTypes(t *testing.T) {
 }
 
 func TestDiscoveryEndpointTimestamps(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:   "api-service",
@@ -643,7 +644,7 @@ func TestDiscoveryEndpointTimestamps(t *testing.T) {
 }
 
 func TestDiscoveryRoundRobinDoesNotLoseProgress(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{
@@ -678,7 +679,7 @@ func TestDiscoveryRoundRobinDoesNotLoseProgress(t *testing.T) {
 }
 
 func TestDiscoveryEndpointWithMetadata(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:   "api-service",
@@ -705,7 +706,7 @@ func TestDiscoveryEndpointWithMetadata(t *testing.T) {
 }
 
 func TestDiscoveryRoundRobinWithReset(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	discovery := registry.Discovery()
 
 	req := RegistrationRequest{

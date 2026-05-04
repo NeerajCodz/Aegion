@@ -4,6 +4,7 @@ package security
 import (
 	"context"
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,7 +16,6 @@ import (
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -273,29 +273,23 @@ func logSecurityEvent(r *http.Request, statusCode int) {
 	}
 	route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
 
-	event := log.Info()
+	attrs := []any{
+		"request_id", requestID,
+		"trace_id", traceInfo.TraceID,
+		"span_id", traceInfo.SpanID,
+		"method", r.Method,
+		"route", route,
+		"path", r.URL.Path,
+		"ip", getClientIP(r),
+		"user_agent", r.UserAgent(),
+		"status", statusCode,
+	}
+
 	if statusCode >= http.StatusBadRequest {
-		event = log.Warn()
+		slog.WarnContext(ctx, "admin security event", attrs...)
+	} else {
+		slog.InfoContext(ctx, "admin security event", attrs...)
 	}
-
-	if requestID != "" {
-		event = event.Str("request_id", requestID)
-	}
-	if traceInfo.TraceID != "" {
-		event = event.Str("trace_id", traceInfo.TraceID)
-	}
-	if traceInfo.SpanID != "" {
-		event = event.Str("span_id", traceInfo.SpanID)
-	}
-
-	event.
-		Str("method", r.Method).
-		Str("route", route).
-		Str("path", r.URL.Path).
-		Str("ip", getClientIP(r)).
-		Str("user_agent", r.UserAgent()).
-		Int("status", statusCode).
-		Msg("admin security event")
 }
 
 func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) (string, error) {

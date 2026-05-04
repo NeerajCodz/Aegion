@@ -160,17 +160,32 @@ func TestStoreHelpers(t *testing.T) {
 	})
 
 	t.Run("generators produce prefixed values", func(t *testing.T) {
-		if !strings.HasPrefix(GenerateClientID(), "oa2_") {
+		clientID, err := GenerateClientID()
+		if err != nil {
+			t.Fatalf("failed to generate client ID: %v", err)
+		}
+		if !strings.HasPrefix(clientID, "oa2_") {
 			t.Fatal("client ID is missing oa2_ prefix")
 		}
-		if GenerateAuthCode() == "" {
+		authCode, err := GenerateAuthCode()
+		if err != nil {
+			t.Fatalf("failed to generate auth code: %v", err)
+		}
+		if authCode == "" {
 			t.Fatal("auth code should not be empty")
 		}
-		if !strings.HasPrefix(GenerateDeviceCode(), "dc_") {
+		deviceCode, err := GenerateDeviceCode()
+		if err != nil {
+			t.Fatalf("failed to generate device code: %v", err)
+		}
+		if !strings.HasPrefix(deviceCode, "dc_") {
 			t.Fatal("device code is missing dc_ prefix")
 		}
 
-		code := GenerateUserCode()
+		code, err := GenerateUserCode()
+		if err != nil {
+			t.Fatalf("failed to generate user code: %v", err)
+		}
 		if len(code) != 9 || code[4] != '-' {
 			t.Fatalf("unexpected user code format: %q", code)
 		}

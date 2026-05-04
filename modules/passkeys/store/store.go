@@ -8,6 +8,7 @@ import (
 
 var (
 	ErrCredentialNotFound = errors.New("credential not found")
+	ErrCredentialExists   = errors.New("credential already exists")
 	ErrChallengeNotFound  = errors.New("challenge not found")
 	ErrChallengeExpired   = errors.New("challenge expired")
 )
@@ -62,10 +63,14 @@ func (s *Store) ConsumeChallenge(challengeID string) (Challenge, error) {
 	return challenge, nil
 }
 
-func (s *Store) UpsertCredential(credential Credential) {
+func (s *Store) CreateCredential(credential Credential) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.credentials[credential.ID]; exists {
+		return ErrCredentialExists
+	}
 	s.credentials[credential.ID] = credential
+	return nil
 }
 
 func (s *Store) GetCredential(credentialID string) (Credential, error) {

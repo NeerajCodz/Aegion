@@ -141,7 +141,7 @@ jobs:
           persist-credentials: false
 
       - name: Run gosec
-        uses: securego/gosec@v2.25.0
+        uses: securego/gosec@v2.26.1
         with:
           args: -severity high -confidence high -exclude-generated ./...
 

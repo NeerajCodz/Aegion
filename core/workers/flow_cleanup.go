@@ -51,27 +51,27 @@ func (w *FlowCleanupWorker) Start(ctx context.Context) error {
 
 // cleanup removes expired flows and continuity containers.
 func (w *FlowCleanupWorker) cleanup(ctx context.Context) error {
-	w.Log().Debug().Msg("starting flow cleanup")
+	w.Log().Debug("starting flow cleanup")
 
 	// Clean up expired flows
 	flowsDeleted, err := w.cleanupFlows(ctx)
 	if err != nil {
-		w.Log().Error().Err(err).Msg("failed to clean up flows")
+		w.Log().Error("failed to clean up flows", "error", err)
 	}
 
 	// Clean up expired continuity containers
 	containersDeleted, err := w.cleanupContinuityContainers(ctx)
 	if err != nil {
-		w.Log().Error().Err(err).Msg("failed to clean up continuity containers")
+		w.Log().Error("failed to clean up continuity containers", "error", err)
 	}
 
 	if flowsDeleted > 0 || containersDeleted > 0 {
-		w.Log().Info().
-			Int64("flows_deleted", flowsDeleted).
-			Int64("containers_deleted", containersDeleted).
-			Msg("flow cleanup completed")
+		w.Log().Info("flow cleanup completed",
+			"flows_deleted", flowsDeleted,
+			"containers_deleted", containersDeleted,
+		)
 	} else {
-		w.Log().Debug().Msg("no expired flows or containers to clean up")
+		w.Log().Debug("no expired flows or containers to clean up")
 	}
 
 	return nil

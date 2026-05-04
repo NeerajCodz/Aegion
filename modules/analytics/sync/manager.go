@@ -11,23 +11,23 @@ import (
 
 // Manager orchestrates all sync strategies and provides a unified interface.
 type Manager struct {
-	strategies      map[string]Strategy
-	strategyOrder   []string
-	logger          Logger
-	mu              sync.RWMutex
-	isRunning       bool
-	rateLimiters    map[string]*RateLimiter
-	deduplicator    *EventDeduplicator
+	strategies    map[string]Strategy
+	strategyOrder []string
+	logger        Logger
+	mu            sync.RWMutex
+	isRunning     bool
+	rateLimiters  map[string]*RateLimiter
+	deduplicator  *EventDeduplicator
 }
 
 // NewManager creates a new sync manager instance.
 func NewManager(logger Logger) *Manager {
 	return &Manager{
-		strategies:   make(map[string]Strategy),
+		strategies:    make(map[string]Strategy),
 		strategyOrder: make([]string, 0),
-		logger:       logger,
-		rateLimiters: make(map[string]*RateLimiter),
-		deduplicator: NewEventDeduplicator(10 * time.Minute),
+		logger:        logger,
+		rateLimiters:  make(map[string]*RateLimiter),
+		deduplicator:  NewEventDeduplicator(10 * time.Minute),
 	}
 }
 
@@ -167,10 +167,10 @@ func (m *Manager) Health(ctx context.Context) (*analytics.SyncHealthStatus, erro
 	m.mu.RUnlock()
 
 	status := &analytics.SyncHealthStatus{
-		Overall:        "healthy",
-		LastCheckTime:  time.Now(),
-		ErrorMetrics:   make(map[string]interface{}),
-		SyncPositions:  make([]analytics.SyncPosition, 0),
+		Overall:       "healthy",
+		LastCheckTime: time.Now(),
+		ErrorMetrics:  make(map[string]interface{}),
+		SyncPositions: make([]analytics.SyncPosition, 0),
 	}
 
 	for _, strategy := range strategies {
@@ -286,12 +286,12 @@ func (m *Manager) GetStrategy(name string) (Strategy, error) {
 
 // RateLimiter implements a simple token bucket rate limiter.
 type RateLimiter struct {
-	capacity  int64
-	refillRate int64
+	capacity       int64
+	refillRate     int64
 	refillInterval time.Duration
-	tokens    int64
-	lastRefill time.Time
-	mu        sync.Mutex
+	tokens         int64
+	lastRefill     time.Time
+	mu             sync.Mutex
 }
 
 // NewRateLimiter creates a new rate limiter.

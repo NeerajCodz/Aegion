@@ -76,10 +76,10 @@ func TestArchivalExecutor_ArchiveData_UpdatesRowAndWritesToBackend(t *testing.T)
 	}
 
 	var (
-		tier       string
+		tier        string
 		archivePath sql.NullString
-		archivedAt sql.NullString
-		deletedAt  sql.NullString
+		archivedAt  sql.NullString
+		deletedAt   sql.NullString
 	)
 	if err := db.QueryRowContext(ctx, `SELECT tier, archive_path, archived_at, deleted_at FROM analytics_events WHERE id = ?`, "evt_1").
 		Scan(&tier, &archivePath, &archivedAt, &deletedAt); err != nil {

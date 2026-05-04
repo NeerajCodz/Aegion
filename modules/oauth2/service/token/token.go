@@ -405,7 +405,10 @@ func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, id
 	}
 
 	// Issue access token
-	accessJTI := store.GenerateAccessTokenJTI()
+	accessJTI, err := store.GenerateAccessTokenJTI()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token JTI: %w", err)
+	}
 	expiresAt := now.Add(time.Duration(client.AccessTokenTTL) * time.Second)
 
 	accessClaims := map[string]interface{}{
@@ -450,8 +453,14 @@ func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, id
 
 	// Issue refresh token if offline_access scope is present
 	if client.AllowOfflineAccess && hasScope(scopes, "offline_access") {
-		refreshTokenID := store.GenerateRefreshToken()
-		familyID := store.GenerateRefreshTokenFamily()
+		refreshTokenID, err := store.GenerateRefreshToken()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+		}
+		familyID, err := store.GenerateRefreshTokenFamily()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate refresh token family: %w", err)
+		}
 		refreshExpiresAt := now.Add(time.Duration(client.RefreshTokenTTL) * time.Second)
 
 		refreshToken := &store.RefreshToken{
@@ -475,7 +484,10 @@ func (s *TokenService) issueTokens(ctx context.Context, client *store.Client, id
 
 	// Issue ID token if openid scope is present
 	if hasScope(scopes, "openid") {
-		idJTI := store.GenerateIDTokenJTI()
+		idJTI, err := store.GenerateIDTokenJTI()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate ID token JTI: %w", err)
+		}
 		idExpiresAt := now.Add(time.Duration(client.IDTokenTTL) * time.Second)
 
 		// Compute at_hash (access token hash)

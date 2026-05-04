@@ -122,7 +122,7 @@ func (s *MemoryStore) ResolveIdentity(_ context.Context, provider Provider, prof
 		return &IdentityLinkResult{IdentityID: identityID, Linked: true}, nil
 	}
 
-	if email := strings.ToLower(strings.TrimSpace(profile.Email)); email != "" {
+	if email := strings.ToLower(strings.TrimSpace(profile.Email)); email != "" && provider.TrustEmailVerified && profile.EmailVerified {
 		if identityID, ok := s.identityByMail[email]; ok {
 			s.linkBySubject[key] = identityID
 			return &IdentityLinkResult{IdentityID: identityID, Linked: true}, nil

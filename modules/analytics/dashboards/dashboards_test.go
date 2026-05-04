@@ -13,11 +13,11 @@ func TestPrebuiltDashboards(t *testing.T) {
 	}
 
 	expectedDashboards := map[string]string{
-		"auth-dashboard":      "Authentication Dashboard",
-		"activity-dashboard":  "User Activity Dashboard",
-		"sessions-dashboard":  "Session Analytics Dashboard",
-		"security-dashboard":  "Security Dashboard",
-		"health-dashboard":    "System Health Dashboard",
+		"auth-dashboard":     "Authentication Dashboard",
+		"activity-dashboard": "User Activity Dashboard",
+		"sessions-dashboard": "Session Analytics Dashboard",
+		"security-dashboard": "Security Dashboard",
+		"health-dashboard":   "System Health Dashboard",
 	}
 
 	for id, expectedName := range expectedDashboards {
@@ -258,14 +258,14 @@ func TestDashboardModels(t *testing.T) {
 	}
 
 	component := &Component{
-		ID:        "comp1",
-		Type:      "gauge",
-		Title:     "Test",
-		QueryID:   "query1",
-		TimeRange: "1d",
-		GridCol:   1,
-		GridRow:   1,
-		GridWidth: 1,
+		ID:         "comp1",
+		Type:       "gauge",
+		Title:      "Test",
+		QueryID:    "query1",
+		TimeRange:  "1d",
+		GridCol:    1,
+		GridRow:    1,
+		GridWidth:  1,
 		GridHeight: 1,
 	}
 

@@ -9,11 +9,11 @@ import (
 func PrebuiltDashboards() map[string]*Dashboard {
 	now := time.Now()
 	return map[string]*Dashboard{
-		"auth-dashboard":      authenticationDashboard(now),
-		"activity-dashboard":  userActivityDashboard(now),
-		"sessions-dashboard":  sessionAnalyticsDashboard(now),
-		"security-dashboard":  securityDashboard(now),
-		"health-dashboard":    systemHealthDashboard(now),
+		"auth-dashboard":     authenticationDashboard(now),
+		"activity-dashboard": userActivityDashboard(now),
+		"sessions-dashboard": sessionAnalyticsDashboard(now),
+		"security-dashboard": securityDashboard(now),
+		"health-dashboard":   systemHealthDashboard(now),
 	}
 }
 

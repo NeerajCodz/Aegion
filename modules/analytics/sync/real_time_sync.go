@@ -11,23 +11,23 @@ import (
 
 // RealTimeSync implements real-time CDC/trigger based synchronization.
 type RealTimeSync struct {
-	enabled        bool
-	batchSize      int
-	flushInterval  time.Duration
-	maxRetries     int
-	retryBackoff   time.Duration
-	logger         Logger
-	db             DB
-	duckdb         DuckDB
-	mu             sync.RWMutex
-	eventBuffer    []*analytics.SyncEvent
-	ticker         *time.Ticker
-	done           chan struct{}
-	isRunning      bool
-	errorCount     int
-	lastErrorMsg   *string
-	lastSyncAt     *time.Time
-	positions      map[string]*analytics.SyncPosition
+	enabled       bool
+	batchSize     int
+	flushInterval time.Duration
+	maxRetries    int
+	retryBackoff  time.Duration
+	logger        Logger
+	db            DB
+	duckdb        DuckDB
+	mu            sync.RWMutex
+	eventBuffer   []*analytics.SyncEvent
+	ticker        *time.Ticker
+	done          chan struct{}
+	isRunning     bool
+	errorCount    int
+	lastErrorMsg  *string
+	lastSyncAt    *time.Time
+	positions     map[string]*analytics.SyncPosition
 }
 
 // NewRealTimeSync creates a new real-time sync strategy instance.

@@ -170,11 +170,10 @@ func defaultMainDeps() mainDeps {
 			keyFile := cfg.Server.TLS.KeyFile
 			serveHTTP := listenAndServeHTTPHook
 			serveTLS := listenAndServeTLSHook
-			fatalHTTP := fatalHTTPServerHook
 			go func() {
-				log.Info().
-					Str("addr", httpServer.Addr).
-					Msg("HTTP server listening")
+				log.Info("HTTP server listening",
+					"addr", httpServer.Addr,
+				)
 
 				var err error
 				if tlsEnabled {
@@ -183,7 +182,7 @@ func defaultMainDeps() mainDeps {
 					err = serveHTTP(httpServer)
 				}
 				if err != nil && err != http.ErrServerClosed {
-					fatalHTTP(log).Err(err).Msg("HTTP server failed")
+					fatalHTTPServerHook(log, "HTTP server failed", "error", err)
 				}
 			}()
 		},
@@ -229,16 +228,24 @@ func run(args []string, deps mainDeps) int {
 	}
 
 	log := deps.newLogger(logger.Config{
-		Level:  cfg.Log.Level,
-		Format: cfg.Log.Format,
+		Level:            cfg.Log.Level,
+		Format:           cfg.Log.Format,
+		ServiceName:      "aegion",
+		ServiceNamespace: cfg.Log.ServiceNamespace,
+		CloudRegion:      cfg.Log.CloudRegion,
+		Environment:      os.Getenv("AEGION_ENV"),
+		Version:          version,
+		CommitHash:       os.Getenv("GIT_COMMIT"),
+		Developer:        os.Getenv("DEV_NAME"),
+		RedactFields:     cfg.Log.RedactFields,
 	})
 
-	log.Info().
-		Str("version", version).
-		Str("config", f.configPath).
-		Bool("workers", f.enableWorkers).
-		Bool("admin_bootstrap", f.adminBootstrap).
-		Msg("Starting Aegion")
+	log.Info("Starting Aegion",
+		"version", version,
+		"config", f.configPath,
+		"workers", f.enableWorkers,
+		"admin_bootstrap", f.adminBootstrap,
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -280,32 +287,32 @@ func run(args []string, deps mainDeps) int {
 		return 1
 	}
 	defer db.Close()
-	log.Info().Msg("Connected to database")
+	log.Info("Connected to database")
 
 	migrator := deps.newMigrator(db)
 	if err := migrator.Migrate(ctx); err != nil {
 		_, _ = fmt.Fprintf(deps.stderr, "Failed to run migrations: %v\n", err)
 		return 1
 	}
-	log.Info().Msg("Migrations complete")
+	log.Info("Migrations complete")
 
 	if deps.runModuleMigrate != nil {
 		if err := deps.runModuleMigrate(ctx, cfg, db, f.configPath); err != nil {
 			_, _ = fmt.Fprintf(deps.stderr, "Failed to run module migrations: %v\n", err)
 			return 1
 		}
-		log.Info().Msg("Module migrations complete")
+		log.Info("Module migrations complete")
 	}
 
 	if f.migrateOnly || cfg.Database.MigrateOnly {
-		log.Info().Msg("Migrate-only mode, exiting")
+		log.Info("Migrate-only mode, exiting")
 		return 0
 	}
 
 	var workerMgr *workers.Manager
 	if f.enableWorkers {
 		workerMgr = deps.newWorkerMgr(log, db)
-		log.Info().Msg("Worker manager initialized")
+		log.Info("Worker manager initialized")
 	}
 
 	server, err := deps.newServer(ctx, &ServerConfig{
@@ -323,7 +330,7 @@ func run(args []string, deps mainDeps) int {
 
 	if workerMgr != nil {
 		workerMgr.Start(ctx)
-		log.Info().Msg("Background workers started")
+		log.Info("Background workers started")
 	}
 
 	httpServer := deps.newHTTPServer(cfg, server.Handler())
@@ -342,20 +349,20 @@ func run(args []string, deps mainDeps) int {
 	defer deps.stopSignals(sigCh)
 	sig := <-sigCh
 
-	log.Info().Str("signal", sig.String()).Msg("Shutdown signal received")
+	log.Info("Shutdown signal received", "signal", sig.String())
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), f.shutdownTimeout)
 	defer shutdownCancel()
 
 	if err := lifecycle.Shutdown(shutdownCtx); err != nil {
 		telemetry = nil
-		log.Error().Err(err).Msg("Error during shutdown")
+		log.Error("Error during shutdown", "error", err)
 		_, _ = fmt.Fprintf(deps.stderr, "Error during shutdown: %v\n", err)
 		return 1
 	}
 	telemetry = nil
 
-	log.Info().Msg("Shutdown complete")
+	log.Info("Shutdown complete")
 	return 0
 }
 

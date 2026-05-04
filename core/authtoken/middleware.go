@@ -2,10 +2,9 @@ package authtoken
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"path"
-
-	"github.com/rs/zerolog"
 )
 
 const (
@@ -26,7 +25,7 @@ type MiddlewareConfig struct {
 	// Generator is the token generator/validator
 	Generator *Generator
 	// Logger is optional; if nil, no logging occurs
-	Logger *zerolog.Logger
+	Logger *slog.Logger
 	// SkipPaths are paths that bypass token validation
 	SkipPaths []string
 }
@@ -44,6 +43,7 @@ func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
 			currentPath := path.Clean(r.URL.Path)
 			if currentPath == "." {
 				currentPath = "/"
@@ -56,10 +56,10 @@ func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 
 			if cfg.Generator == nil {
 				if cfg.Logger != nil {
-					cfg.Logger.Error().
-						Str("path", r.URL.Path).
-						Str("method", r.Method).
-						Msg("internal auth generator unavailable")
+					cfg.Logger.ErrorContext(ctx, "internal auth generator unavailable",
+						"path", r.URL.Path,
+						"method", r.Method,
+					)
 				}
 				http.Error(w, "internal auth unavailable", http.StatusServiceUnavailable)
 				return
@@ -68,10 +68,10 @@ func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 			token := r.Header.Get(HeaderInternalToken)
 			if token == "" {
 				if cfg.Logger != nil {
-					cfg.Logger.Warn().
-						Str("path", r.URL.Path).
-						Str("method", r.Method).
-						Msg("missing internal auth token")
+					cfg.Logger.WarnContext(ctx, "missing internal auth token",
+						"path", r.URL.Path,
+						"method", r.Method,
+					)
 				}
 				http.Error(w, "missing internal auth token", http.StatusUnauthorized)
 				return
@@ -80,25 +80,25 @@ func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 			moduleID, err := cfg.Generator.ValidateString(token)
 			if err != nil {
 				if cfg.Logger != nil {
-					cfg.Logger.Warn().
-						Err(err).
-						Str("path", r.URL.Path).
-						Str("method", r.Method).
-						Msg("invalid internal auth token")
+					cfg.Logger.WarnContext(ctx, "invalid internal auth token",
+						"error", err,
+						"path", r.URL.Path,
+						"method", r.Method,
+					)
 				}
 				http.Error(w, "invalid internal auth token", http.StatusUnauthorized)
 				return
 			}
 
 			// Add module ID to context for downstream handlers
-			ctx := context.WithValue(r.Context(), ContextKeyModuleID, moduleID)
+			ctx = context.WithValue(ctx, ContextKeyModuleID, moduleID)
 
 			if cfg.Logger != nil {
-				cfg.Logger.Debug().
-					Str("module_id", moduleID).
-					Str("path", r.URL.Path).
-					Str("method", r.Method).
-					Msg("internal auth validated")
+				cfg.Logger.DebugContext(ctx, "internal auth validated",
+					"module_id", moduleID,
+					"path", r.URL.Path,
+					"method", r.Method,
+				)
 			}
 
 			next.ServeHTTP(w, r.WithContext(ctx))

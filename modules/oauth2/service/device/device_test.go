@@ -313,7 +313,8 @@ func TestDeviceService_ApproveAndDeny(t *testing.T) {
 
 func TestDeviceHelpers(t *testing.T) {
 	for i := 0; i < 10; i++ {
-		code := generateUserCode()
+		code, err := generateUserCode()
+		assert.NoError(t, err)
 		assert.Len(t, code, 9)
 		assert.Equal(t, '-', rune(code[4]))
 		for _, ch := range strings.ReplaceAll(code, "-", "") {

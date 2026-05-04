@@ -160,9 +160,9 @@ func TestWorkflow_REST_IngestQueryDisplay(t *testing.T) {
 	// 1. Ingest: Insert an event (simulating REST API POST)
 	eventID := "evt_rest_1"
 	eventData := map[string]interface{}{
-		"page":      "/dashboard",
-		"referrer":  "/home",
-		"duration":  1234,
+		"page":     "/dashboard",
+		"referrer": "/home",
+		"duration": 1234,
 	}
 	dataJSON, err := json.Marshal(eventData)
 	require.NoError(t, err)

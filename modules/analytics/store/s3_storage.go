@@ -14,13 +14,13 @@ import (
 
 // S3Storage implements StorageBackend for AWS S3 storage.
 type S3Storage struct {
-	bucket      string
-	prefix      string
-	region      string
-	s3Client    *s3.S3
-	uploader    *s3manager.Uploader
-	downloader  *s3manager.Downloader
-	session     *session.Session
+	bucket     string
+	prefix     string
+	region     string
+	s3Client   *s3.S3
+	uploader   *s3manager.Uploader
+	downloader *s3manager.Downloader
+	session    *session.Session
 }
 
 // NewS3Storage creates a new S3 storage backend.
