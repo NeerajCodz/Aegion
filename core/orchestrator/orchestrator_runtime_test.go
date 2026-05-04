@@ -6,10 +6,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aegion/aegion/internal/platform/logger"
 )
 
 func newSeamedOrchestrator() *Orchestrator {
 	return &Orchestrator{
+		logger:  logger.New(logger.Config{}),
 		modules: make(map[string]*moduleInstance),
 		ensureNetworkFn: func(context.Context) (string, error) {
 			return "network-1", nil

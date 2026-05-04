@@ -9,15 +9,15 @@ import (
 
 // CleanupJob represents a data cleanup operation.
 type CleanupJob struct {
-	ID              string    `json:"id"`
-	Category        string    `json:"category"`
-	JobType         string    `json:"job_type"` // expired_data, orphan_records, soft_deleted
-	StartedAt       time.Time `json:"started_at"`
-	CompletedAt     time.Time `json:"completed_at,omitempty"`
-	RowsProcessed   int64     `json:"rows_processed"`
-	RowsDeleted     int64     `json:"rows_deleted"`
-	Status          string    `json:"status"` // pending, in_progress, completed, failed
-	Error           string    `json:"error,omitempty"`
+	ID            string    `json:"id"`
+	Category      string    `json:"category"`
+	JobType       string    `json:"job_type"` // expired_data, orphan_records, soft_deleted
+	StartedAt     time.Time `json:"started_at"`
+	CompletedAt   time.Time `json:"completed_at,omitempty"`
+	RowsProcessed int64     `json:"rows_processed"`
+	RowsDeleted   int64     `json:"rows_deleted"`
+	Status        string    `json:"status"` // pending, in_progress, completed, failed
+	Error         string    `json:"error,omitempty"`
 }
 
 // CleanupManager handles garbage collection and data cleanup.
@@ -207,13 +207,13 @@ func (cm *CleanupManager) CleanupSoftDeletedData(ctx context.Context, category s
 
 // FindOrphanRecords identifies records with no data in secondary storage.
 type OrphanRecord struct {
-	ID            string    `json:"id"`
-	Category      string    `json:"category"`
-	Tier          TierType  `json:"tier"`
-	ArchivePath   *string   `json:"archive_path"`
-	CreatedAt     time.Time `json:"created_at"`
-	ArchivedAt    *time.Time `json:"archived_at"`
-	VerifiedAt    *time.Time `json:"verified_at"`
+	ID          string     `json:"id"`
+	Category    string     `json:"category"`
+	Tier        TierType   `json:"tier"`
+	ArchivePath *string    `json:"archive_path"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ArchivedAt  *time.Time `json:"archived_at"`
+	VerifiedAt  *time.Time `json:"verified_at"`
 }
 
 // FindOrphanRecords finds records with missing archive data.
@@ -286,14 +286,14 @@ func (cm *CleanupManager) RepairOrphanRecords(ctx context.Context, orphans []Orp
 
 // GetCleanupStats returns cleanup statistics for a category.
 type CleanupStats struct {
-	Category             string    `json:"category"`
-	TotalRecords         int64     `json:"total_records"`
-	SoftDeletedRecords   int64     `json:"soft_deleted_records"`
-	ExpiredRecords       int64     `json:"expired_records"`
-	OrphanRecords        int64     `json:"orphan_records"`
-	EstimatedBytesFreed  int64     `json:"estimated_bytes_freed"`
-	LastCleanupTime      *time.Time `json:"last_cleanup_time,omitempty"`
-	LastCleanupDuration  *time.Duration `json:"last_cleanup_duration,omitempty"`
+	Category            string         `json:"category"`
+	TotalRecords        int64          `json:"total_records"`
+	SoftDeletedRecords  int64          `json:"soft_deleted_records"`
+	ExpiredRecords      int64          `json:"expired_records"`
+	OrphanRecords       int64          `json:"orphan_records"`
+	EstimatedBytesFreed int64          `json:"estimated_bytes_freed"`
+	LastCleanupTime     *time.Time     `json:"last_cleanup_time,omitempty"`
+	LastCleanupDuration *time.Duration `json:"last_cleanup_duration,omitempty"`
 }
 
 // GetCleanupStats gathers cleanup statistics for a category.

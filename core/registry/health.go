@@ -2,11 +2,10 @@ package registry
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 // HealthChecker performs periodic health checks on registered modules.
@@ -16,6 +15,7 @@ type HealthChecker struct {
 	timeout      time.Duration
 	initialDelay time.Duration
 	client       *http.Client
+	logger       *slog.Logger
 
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
@@ -24,10 +24,13 @@ type HealthChecker struct {
 }
 
 // NewHealthChecker creates a new health checker.
-func NewHealthChecker(registry *Registry, interval, timeout time.Duration) *HealthChecker {
+func NewHealthChecker(registry *Registry, interval, timeout time.Duration, logger *slog.Logger) *HealthChecker {
 	initialDelay := 5 * time.Second
 	if interval > 0 && interval < 10*time.Second {
 		initialDelay = interval / 2
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	return &HealthChecker{
 		registry:     registry,
@@ -37,6 +40,7 @@ func NewHealthChecker(registry *Registry, interval, timeout time.Duration) *Heal
 		client: &http.Client{
 			Timeout: timeout,
 		},
+		logger: logger,
 		stopCh: make(chan struct{}),
 	}
 }
@@ -54,10 +58,10 @@ func (h *HealthChecker) Start() {
 	h.wg.Add(1)
 	go h.run()
 
-	log.Info().
-		Dur("interval", h.interval).
-		Dur("timeout", h.timeout).
-		Msg("health checker started")
+	h.logger.Info("health checker started",
+		"interval", h.interval,
+		"timeout", h.timeout,
+	)
 }
 
 // Stop stops the health checking goroutine.
@@ -73,7 +77,7 @@ func (h *HealthChecker) Stop() {
 	close(h.stopCh)
 	h.wg.Wait()
 
-	log.Info().Msg("health checker stopped")
+	h.logger.Info("health checker stopped")
 }
 
 // run is the main health checking loop.
@@ -104,7 +108,7 @@ func (h *HealthChecker) checkAll() {
 		return
 	}
 
-	log.Debug().Int("module_count", len(modules)).Msg("starting health checks")
+	h.logger.Debug("starting health checks", "module_count", len(modules))
 
 	var wg sync.WaitGroup
 	results := make(chan HealthCheckResult, len(modules))
@@ -129,7 +133,7 @@ func (h *HealthChecker) checkAll() {
 	unhealthyCount := 0
 	for result := range results {
 		if err := h.registry.UpdateStatus(result.ModuleID, result.Status); err != nil {
-			log.Warn().Err(err).Str("module_id", result.ModuleID).Msg("failed to update module status")
+			h.logger.Warn("failed to update module status", "error", err, "module_id", result.ModuleID)
 		}
 		if result.Status == StatusHealthy {
 			healthyCount++
@@ -138,10 +142,10 @@ func (h *HealthChecker) checkAll() {
 		}
 	}
 
-	log.Debug().
-		Int("healthy", healthyCount).
-		Int("unhealthy", unhealthyCount).
-		Msg("health checks completed")
+	h.logger.Debug("health checks completed",
+		"healthy", healthyCount,
+		"unhealthy", unhealthyCount,
+	)
 }
 
 // checkModule performs a health check on a single module.
@@ -166,7 +170,7 @@ func (h *HealthChecker) checkModule(module *Module) HealthCheckResult {
 		result.Status = StatusUnhealthy
 		result.Error = err.Error()
 		result.Latency = time.Since(start)
-		logHealthCheckFailure(module, result)
+		h.logHealthCheckFailure(module, result)
 		return result
 	}
 
@@ -176,7 +180,7 @@ func (h *HealthChecker) checkModule(module *Module) HealthCheckResult {
 	if err != nil {
 		result.Status = StatusUnhealthy
 		result.Error = err.Error()
-		logHealthCheckFailure(module, result)
+		h.logHealthCheckFailure(module, result)
 		return result
 	}
 	defer func() {
@@ -187,31 +191,31 @@ func (h *HealthChecker) checkModule(module *Module) HealthCheckResult {
 		result.Status = StatusHealthy
 		// Only log if status changed from unhealthy
 		if module.Status != StatusHealthy && module.Status != StatusStarting {
-			log.Info().
-				Str("module_id", module.ID).
-				Str("name", module.Name).
-				Dur("latency", result.Latency).
-				Msg("module recovered")
+			h.logger.Info("module recovered",
+				"module_id", module.ID,
+				"name", module.Name,
+				"latency", result.Latency,
+			)
 		}
 	} else {
 		result.Status = StatusUnhealthy
 		result.Error = "health check returned non-2xx status"
-		logHealthCheckFailure(module, result)
+		h.logHealthCheckFailure(module, result)
 	}
 
 	return result
 }
 
 // logHealthCheckFailure logs a health check failure.
-func logHealthCheckFailure(module *Module, result HealthCheckResult) {
+func (h *HealthChecker) logHealthCheckFailure(module *Module, result HealthCheckResult) {
 	// Only log if module was previously healthy
 	if module.Status == StatusHealthy {
-		log.Warn().
-			Str("module_id", module.ID).
-			Str("name", module.Name).
-			Str("error", result.Error).
-			Dur("latency", result.Latency).
-			Msg("module became unhealthy")
+		h.logger.Warn("module became unhealthy",
+			"module_id", module.ID,
+			"name", module.Name,
+			"error", result.Error,
+			"latency", result.Latency,
+		)
 	}
 }
 
@@ -235,7 +239,7 @@ func (h *HealthChecker) SetInterval(interval time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.interval = interval
-	log.Info().Dur("interval", interval).Msg("health check interval updated")
+	h.logger.Info("health check interval updated", "interval", interval)
 }
 
 // SetTimeout updates the health check timeout.
@@ -244,7 +248,7 @@ func (h *HealthChecker) SetTimeout(timeout time.Duration) {
 	defer h.mu.Unlock()
 	h.timeout = timeout
 	h.client.Timeout = timeout
-	log.Info().Dur("timeout", timeout).Msg("health check timeout updated")
+	h.logger.Info("health check timeout updated", "timeout", timeout)
 }
 
 // GetInterval returns the current health check interval.

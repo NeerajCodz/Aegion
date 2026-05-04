@@ -75,19 +75,19 @@ type QueryResult struct {
 
 // CreateDashboardRequest requests creation of a dashboard.
 type CreateDashboardRequest struct {
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
+	Name        string           `json:"name,omitempty"`
+	Description string           `json:"description,omitempty"`
 	Config      *structpb.Struct `json:"config,omitempty"`
-	Public      bool            `json:"public,omitempty"`
+	Public      bool             `json:"public,omitempty"`
 }
 
 // UpdateDashboardRequest requests updating a dashboard.
 type UpdateDashboardRequest struct {
-	Id          string          `json:"id,omitempty"`
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
+	Id          string           `json:"id,omitempty"`
+	Name        string           `json:"name,omitempty"`
+	Description string           `json:"description,omitempty"`
 	Config      *structpb.Struct `json:"config,omitempty"`
-	Public      bool            `json:"public,omitempty"`
+	Public      bool             `json:"public,omitempty"`
 }
 
 // StreamEventsRequest requests streaming of events.
@@ -172,4 +172,3 @@ func (r *ExportDataRequest) GetFormat() ExportFormat {
 func (r *GetDashboardRequest) String() string {
 	return fmt.Sprintf("GetDashboardRequest{id=%q}", r.Id)
 }
-

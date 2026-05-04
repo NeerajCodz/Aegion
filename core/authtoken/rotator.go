@@ -2,11 +2,11 @@ package authtoken
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/aegion/aegion/core/eventbus"
-	"github.com/rs/zerolog/log"
 )
 
 // Event types for secret rotation.
@@ -93,7 +93,7 @@ func (r *Rotator) Rotate(ctx context.Context, newSecret []byte) error {
 				"grace_period_seconds": r.gracePeriod.Seconds(),
 			},
 		}); err != nil {
-			log.Error().Err(err).Msg("failed to publish secret rotation started event")
+			slog.ErrorContext(ctx, "failed to publish secret rotation started event", "error", err)
 		}
 	}
 
@@ -112,7 +112,7 @@ func (r *Rotator) completeRotation(ctx context.Context, currentSecret []byte) {
 
 	// Remove old secret, keep only current
 	if err := r.generator.SetSecrets(currentSecret); err != nil {
-		log.Error().Err(err).Msg("failed to finalize rotated secret")
+		slog.ErrorContext(ctx, "failed to finalize rotated secret", "error", err)
 	}
 
 	r.rotationTimer = nil
@@ -125,7 +125,7 @@ func (r *Rotator) completeRotation(ctx context.Context, currentSecret []byte) {
 			EntityType:   "secret",
 			Payload:      map[string]interface{}{},
 		}); err != nil {
-			log.Error().Err(err).Msg("failed to publish secret rotation completed event")
+			slog.ErrorContext(ctx, "failed to publish secret rotation completed event", "error", err)
 		}
 	}
 }
@@ -161,7 +161,7 @@ func (r *Rotator) RotateWithCallback(ctx context.Context, newSecret []byte, onCo
 				"grace_period_seconds": r.gracePeriod.Seconds(),
 			},
 		}); err != nil {
-			log.Error().Err(err).Msg("failed to publish secret rotation started event")
+			slog.ErrorContext(ctx, "failed to publish secret rotation started event", "error", err)
 		}
 	}
 

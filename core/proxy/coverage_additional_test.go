@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
+	"log/slog"
 
 	"github.com/aegion/aegion/core/session"
 )
@@ -36,7 +36,7 @@ func (w *failingJSONResponseWriter) Write(_ []byte) (int, error) {
 }
 
 func TestAuthMiddleware_AdditionalCoverageBranches(t *testing.T) {
-	logger := zerolog.New(zerolog.NewTestWriter(t))
+	logger := slog.Default()
 
 	t.Run("optional middleware allows expired session", func(t *testing.T) {
 		am := NewAuthMiddleware(nil, logger, true)
@@ -143,7 +143,7 @@ func TestCircuitBreaker_AdditionalCoverageBranches(t *testing.T) {
 }
 
 func TestProxy_AdditionalCoverageBranches(t *testing.T) {
-	logger := zerolog.New(zerolog.NewTestWriter(t))
+	logger := slog.Default()
 	proxy := newProxyForTest(t, DefaultConfig(), nil, logger)
 
 	if limiter := proxy.getRuleLimiter(nil); limiter != nil {
@@ -228,7 +228,7 @@ func TestRateLimiterAndRules_AdditionalCoverageBranches(t *testing.T) {
 }
 
 func TestProxyLimiterConcurrency_AdditionalCoverageBranches(t *testing.T) {
-	logger := zerolog.New(zerolog.NewTestWriter(t))
+	logger := slog.Default()
 	proxy := newProxyForTest(t, DefaultConfig(), nil, logger)
 
 	rule := &Rule{

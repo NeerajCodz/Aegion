@@ -99,3 +99,5 @@ modules/admin/spa/node_modules/flatted/golang/
 .agents
 skills-lock.json
 github.com
+.venv
+.junie/

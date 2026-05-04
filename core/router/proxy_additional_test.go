@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,10 +13,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog"
 
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/internal/platform/logger"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
 
@@ -33,7 +35,7 @@ func TestPolicyDenyError_AdditionalBranches(t *testing.T) {
 func TestNewModuleProxy_DefaultNowFunction(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "default-clock",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 	if proxy.now().IsZero() {
 		t.Fatalf("expected default now function to return a valid timestamp")
@@ -41,7 +43,7 @@ func TestNewModuleProxy_DefaultNowFunction(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP_PolicyAllowAdditionalBranches(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +74,7 @@ func TestModuleProxyServeHTTP_PolicyAllowAdditionalBranches(t *testing.T) {
 		ModuleID:      "policy-allow",
 		InternalToken: "int-token",
 		PolicyChecker: checker,
-		Logger:        zerolog.Nop(),
+		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	sess := &session.Session{
@@ -110,7 +112,7 @@ func TestModuleProxyIdentityAndForwarded_AdditionalBranches(t *testing.T) {
 		ModuleID:              "module-a",
 		SignedIdentityHeaders: []string{"X-User-ID", "  ", "X-User-AAL"},
 		TrustForwardedHeaders: true,
-		Logger:                zerolog.Nop(),
+		Logger:                logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	sess := &session.Session{
@@ -145,7 +147,7 @@ func TestModuleProxyIdentityAndForwarded_AdditionalBranches(t *testing.T) {
 func TestModuleProxyErrorAndEndpoint_AdditionalBranches(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "module-a",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/module", nil)
@@ -171,7 +173,7 @@ func TestModuleProxyErrorAndEndpoint_AdditionalBranches(t *testing.T) {
 		t.Fatalf("expected invalid module endpoint message, got %q", recURL.Body.String())
 	}
 
-	reg := registry.New(registry.DefaultConfig())
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	defer reg.Stop()
 	mustRegisterModule(t, reg, registry.RegistrationRequest{
 		ID:      "bad-endpoint",
@@ -186,7 +188,7 @@ func TestModuleProxyErrorAndEndpoint_AdditionalBranches(t *testing.T) {
 	badProxy := NewModuleProxy(ModuleProxyConfig{
 		Registry: reg,
 		ModuleID: "bad-endpoint",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	if _, err := badProxy.getModuleEndpoint(context.Background()); err == nil {

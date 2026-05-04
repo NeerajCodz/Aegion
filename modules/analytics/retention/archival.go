@@ -14,27 +14,27 @@ import (
 
 // ArchivalJob represents a data archival operation.
 type ArchivalJob struct {
-	ID            string    `json:"id"`
-	Category      string    `json:"category"`
-	SourceTier    TierType  `json:"source_tier"`
-	TargetTier    TierType  `json:"target_tier"`
-	Status        string    `json:"status"` // pending, in_progress, completed, failed
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	CompletedAt   time.Time `json:"completed_at,omitempty"`
-	RowCount      int64     `json:"row_count"`
-	BytesTransferred int64  `json:"bytes_transferred"`
-	Error         string    `json:"error,omitempty"`
-	Checksum      string    `json:"checksum,omitempty"`
-	RetryCount    int       `json:"retry_count"`
+	ID               string    `json:"id"`
+	Category         string    `json:"category"`
+	SourceTier       TierType  `json:"source_tier"`
+	TargetTier       TierType  `json:"target_tier"`
+	Status           string    `json:"status"` // pending, in_progress, completed, failed
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+	RowCount         int64     `json:"row_count"`
+	BytesTransferred int64     `json:"bytes_transferred"`
+	Error            string    `json:"error,omitempty"`
+	Checksum         string    `json:"checksum,omitempty"`
+	RetryCount       int       `json:"retry_count"`
 }
 
 // ArchivalExecutor handles moving data between tiers.
 type ArchivalExecutor struct {
-	db            *sql.DB
-	policy        *RetentionPolicy
+	db              *sql.DB
+	policy          *RetentionPolicy
 	storageBackends map[TierType]StorageBackendWriter
-	auditLog      AuditLog
-	maxBatchSize  int
+	auditLog        AuditLog
+	maxBatchSize    int
 }
 
 // StorageBackendWriter defines the interface for writing to storage backends.

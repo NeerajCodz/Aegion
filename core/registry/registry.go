@@ -2,10 +2,9 @@ package registry
 
 import (
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -20,6 +19,7 @@ type Registry struct {
 	modules map[string]*Module
 	mu      sync.RWMutex
 	closed  bool
+	logger  *slog.Logger
 
 	// Health checker
 	healthChecker *HealthChecker
@@ -43,19 +43,23 @@ func DefaultConfig() Config {
 }
 
 // New creates a new service registry.
-func New(cfg Config) *Registry {
+func New(cfg Config, logger *slog.Logger) *Registry {
 	if cfg.HealthCheckInterval == 0 {
 		cfg.HealthCheckInterval = 30 * time.Second
 	}
 	if cfg.HealthCheckTimeout == 0 {
 		cfg.HealthCheckTimeout = 5 * time.Second
 	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 
 	r := &Registry{
 		modules: make(map[string]*Module),
+		logger:  logger,
 	}
 
-	r.healthChecker = NewHealthChecker(r, cfg.HealthCheckInterval, cfg.HealthCheckTimeout)
+	r.healthChecker = NewHealthChecker(r, cfg.HealthCheckInterval, cfg.HealthCheckTimeout, logger)
 	r.discovery = NewDiscovery(r)
 
 	return r
@@ -64,7 +68,7 @@ func New(cfg Config) *Registry {
 // Start starts the registry background tasks.
 func (r *Registry) Start() {
 	r.healthChecker.Start()
-	log.Info().Msg("service registry started")
+	r.logger.Info("service registry started")
 }
 
 // Stop stops the registry and its background tasks.
@@ -74,7 +78,7 @@ func (r *Registry) Stop() {
 	r.mu.Unlock()
 
 	r.healthChecker.Stop()
-	log.Info().Msg("service registry stopped")
+	r.logger.Info("service registry stopped")
 }
 
 // Register registers a new module with the registry.
@@ -109,12 +113,12 @@ func (r *Registry) Register(req RegistrationRequest) (*RegistrationResponse, err
 
 	r.modules[req.ID] = module
 
-	log.Info().
-		Str("module_id", module.ID).
-		Str("name", module.Name).
-		Str("version", module.Version).
-		Int("endpoints", len(module.Endpoints)).
-		Msg("module registered")
+	r.logger.Info("module registered",
+		"module_id", module.ID,
+		"name", module.Name,
+		"version", module.Version,
+		"endpoints", len(module.Endpoints),
+	)
 
 	return &RegistrationResponse{
 		Success:      true,
@@ -133,17 +137,14 @@ func (r *Registry) Deregister(moduleID string) (*DeregistrationResponse, error) 
 		return nil, ErrRegistryClosed
 	}
 
-	module, exists := r.modules[moduleID]
+	_, exists := r.modules[moduleID]
 	if !exists {
 		return nil, ErrModuleNotFound
 	}
 
 	delete(r.modules, moduleID)
 
-	log.Info().
-		Str("module_id", module.ID).
-		Str("name", module.Name).
-		Msg("module deregistered")
+	r.logger.Info("module deregistered", "module_id", moduleID)
 
 	return &DeregistrationResponse{
 		Success:  true,
@@ -224,11 +225,11 @@ func (r *Registry) UpdateStatus(moduleID string, status ModuleStatus) error {
 	module.LastHealthAt = time.Now().UTC()
 
 	if oldStatus != status {
-		log.Info().
-			Str("module_id", moduleID).
-			Str("old_status", string(oldStatus)).
-			Str("new_status", string(status)).
-			Msg("module status changed")
+		r.logger.Info("module status changed",
+			"module_id", moduleID,
+			"old_status", string(oldStatus),
+			"new_status", string(status),
+		)
 	}
 
 	return nil

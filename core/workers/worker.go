@@ -68,7 +68,7 @@ func (m *Manager) Register(w Worker) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.workers = append(m.workers, w)
-	m.log.Info().Str("worker", w.Name()).Msg("worker registered")
+	m.log.Info("worker registered", "worker", w.Name())
 }
 
 // Start starts all registered workers.
@@ -82,21 +82,21 @@ func (m *Manager) Start(ctx context.Context) {
 		m.wg.Add(1)
 		go func(worker Worker) {
 			defer m.wg.Done()
-			m.log.Info().Str("worker", worker.Name()).Msg("starting worker")
+			m.log.Info("starting worker", "worker", worker.Name())
 			if err := worker.Start(ctx); err != nil {
-				m.log.Error().Err(err).Str("worker", worker.Name()).Msg("worker stopped with error")
+				m.log.Error("worker stopped with error", "error", err, "worker", worker.Name())
 			} else {
-				m.log.Info().Str("worker", worker.Name()).Msg("worker stopped")
+				m.log.Info("worker stopped", "worker", worker.Name())
 			}
 		}(w)
 	}
 
-	m.log.Info().Int("count", len(m.workers)).Msg("all workers started")
+	m.log.Info("all workers started", "count", len(m.workers))
 }
 
 // Stop gracefully stops all workers.
 func (m *Manager) Stop() {
-	m.log.Info().Msg("stopping all workers")
+	m.log.Info("stopping all workers")
 
 	// Cancel context to signal workers to stop
 	if m.cancel != nil {
@@ -120,9 +120,9 @@ func (m *Manager) Stop() {
 	// Wait with timeout
 	select {
 	case <-done:
-		m.log.Info().Msg("all workers stopped gracefully")
+		m.log.Info("all workers stopped gracefully")
 	case <-time.After(m.stopTimeout):
-		m.log.Warn().Msg("timeout waiting for workers to stop")
+		m.log.Warn("timeout waiting for workers to stop")
 	}
 }
 
@@ -267,7 +267,7 @@ func (w *BaseWorker) RunLoop(ctx context.Context, fn func(ctx context.Context) e
 
 	// Run immediately on start
 	if err := w.safeRun(ctx, fn); err != nil {
-		w.log.Error().Err(err).Msg("initial run failed")
+		w.log.Error("initial run failed", "error", err)
 	}
 
 	for {
@@ -278,7 +278,7 @@ func (w *BaseWorker) RunLoop(ctx context.Context, fn func(ctx context.Context) e
 			return nil
 		case <-ticker.C:
 			if err := w.safeRun(ctx, fn); err != nil {
-				w.log.Error().Err(err).Msg("periodic run failed")
+				w.log.Error("periodic run failed", "error", err)
 			}
 		}
 	}
@@ -288,7 +288,7 @@ func (w *BaseWorker) RunLoop(ctx context.Context, fn func(ctx context.Context) e
 func (w *BaseWorker) safeRun(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			w.log.Error().Interface("panic", r).Msg("worker panicked")
+			w.log.Error("worker panicked", "panic", r)
 			err = nil // Don't propagate panic
 		}
 	}()

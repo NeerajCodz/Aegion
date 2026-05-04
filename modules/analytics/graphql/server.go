@@ -9,24 +9,24 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog"
+	"log/slog"
 )
 
 // Server handles GraphQL HTTP and WebSocket requests.
 type Server struct {
-	logger                 zerolog.Logger
-	resolver               *Resolver
-	schemaBuilder          *SchemaBuilder
-	maxQueryDepth          int
-	maxQueryComplexity     int
-	queryTimeoutSeconds    int
-	rateLimitPerMinute     int
-	enableIntrospection    bool
-	enablePlayground       bool
-	queryExecutor          QueryExecutor
-	requestLogger          RequestLogger
-	complexityAnalyzer     ComplexityAnalyzer
-	rateLimiter            RateLimiter
+	logger              *slog.Logger
+	resolver            *Resolver
+	schemaBuilder       *SchemaBuilder
+	maxQueryDepth       int
+	maxQueryComplexity  int
+	queryTimeoutSeconds int
+	rateLimitPerMinute  int
+	enableIntrospection bool
+	enablePlayground    bool
+	queryExecutor       QueryExecutor
+	requestLogger       RequestLogger
+	complexityAnalyzer  ComplexityAnalyzer
+	rateLimiter         RateLimiter
 }
 
 // QueryExecutor executes parsed GraphQL queries.
@@ -54,8 +54,8 @@ type RateLimiter interface {
 
 // ExecutionResult represents the result of executing a GraphQL query.
 type ExecutionResult struct {
-	Data       interface{}   `json:"data,omitempty"`
-	Errors     []*GraphQLError `json:"errors,omitempty"`
+	Data       interface{}            `json:"data,omitempty"`
+	Errors     []*GraphQLError        `json:"errors,omitempty"`
 	Extensions map[string]interface{} `json:"extensions,omitempty"`
 }
 
@@ -76,7 +76,7 @@ type GraphQLRequest struct {
 
 // NewServer creates a new GraphQL HTTP server.
 func NewServer(
-	logger zerolog.Logger,
+	logger *slog.Logger,
 	resolver *Resolver,
 	schemaBuilder *SchemaBuilder,
 	executor QueryExecutor,
@@ -258,7 +258,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	executionTimeMs := time.Since(start).Milliseconds()
 
 	if err != nil {
-		s.logger.Error().Err(err).Msg("query execution failed")
+		s.logger.ErrorContext(ctx, "query execution failed", "error", err)
 		result = &ExecutionResult{
 			Errors: []*GraphQLError{
 				{
@@ -391,7 +391,9 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 		router.HandleFunc(playgroundPath, s.HandlePlayground)
 		router.HandleFunc(introspectionPath, s.HandleIntrospection)
 		router.HandleFunc(healthPath, s.HandleHealth)
-	case interface{ HandleFunc(string, http.HandlerFunc) }:
+	case interface {
+		HandleFunc(string, http.HandlerFunc)
+	}:
 		router.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodPost:
@@ -409,14 +411,14 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 		return fmt.Errorf("unsupported router type %T", mux)
 	}
 
-	s.logger.Info().
-		Str("basePath", basePath).
-		Str("playgroundPath", playgroundPath).
-		Str("introspectionPath", introspectionPath).
-		Str("healthPath", healthPath).
-		Bool("playgroundEnabled", s.enablePlayground).
-		Bool("introspectionEnabled", s.enableIntrospection).
-		Msg("GraphQL routes registered")
+	s.logger.Info("GraphQL routes registered",
+		"basePath", basePath,
+		"playgroundPath", playgroundPath,
+		"introspectionPath", introspectionPath,
+		"healthPath", healthPath,
+		"playgroundEnabled", s.enablePlayground,
+		"introspectionEnabled", s.enableIntrospection,
+	)
 	return nil
 }
 
@@ -522,11 +524,11 @@ const playgroundHTML = `
 // SimpleQueryExecutor is a basic implementation of QueryExecutor.
 type SimpleQueryExecutor struct {
 	resolver *Resolver
-	logger   zerolog.Logger
+	logger   *slog.Logger
 }
 
 // NewSimpleQueryExecutor creates a new simple query executor.
-func NewSimpleQueryExecutor(resolver *Resolver, logger zerolog.Logger) *SimpleQueryExecutor {
+func NewSimpleQueryExecutor(resolver *Resolver, logger *slog.Logger) *SimpleQueryExecutor {
 	return &SimpleQueryExecutor{
 		resolver: resolver,
 		logger:   logger,

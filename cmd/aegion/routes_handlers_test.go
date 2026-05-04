@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -165,7 +166,7 @@ func newTestServer(t *testing.T) *Server {
 	return &Server{
 		cfg:      cfg,
 		log:      logger.New(logger.Config{Level: "error", Format: "json"}),
-		registry: registry.New(registry.DefaultConfig()),
+		registry: registry.New(registry.DefaultConfig(), slog.Default()),
 		tokenGen: tokenGen,
 	}
 }

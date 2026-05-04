@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestRegistryStartStop(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Start
 	registry.Start()
@@ -24,7 +25,7 @@ func TestRegistryStartStop(t *testing.T) {
 }
 
 func TestRegistryStartStopIdempotent(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	registry.Start()
 	registry.Start() // Should be safe
@@ -36,7 +37,7 @@ func TestRegistryStartStopIdempotent(t *testing.T) {
 }
 
 func TestRegistryRegisterAfterClose(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	registry.Stop()
 
 	req := RegistrationRequest{
@@ -53,7 +54,7 @@ func TestRegistryRegisterAfterClose(t *testing.T) {
 }
 
 func TestRegistryDeregisterAfterClose(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register first
 	req := RegistrationRequest{
@@ -73,7 +74,7 @@ func TestRegistryDeregisterAfterClose(t *testing.T) {
 }
 
 func TestRegistryConcurrentRegisterDeregister(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 	var wg sync.WaitGroup
 	errors := make(chan error, 100)
 
@@ -115,7 +116,7 @@ func TestRegistryConcurrentRegisterDeregister(t *testing.T) {
 }
 
 func TestRegistryConcurrentGetModule(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register modules
 	for i := 0; i < 10; i++ {
@@ -145,7 +146,7 @@ func TestRegistryConcurrentGetModule(t *testing.T) {
 }
 
 func TestRegistryConcurrentListModules(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register modules with different statuses
 	for i := 0; i < 20; i++ {
@@ -178,7 +179,7 @@ func TestRegistryConcurrentListModules(t *testing.T) {
 }
 
 func TestRegistryConcurrentUpdateStatus(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register modules
 	for i := 0; i < 10; i++ {
@@ -214,7 +215,7 @@ func TestRegistryConcurrentUpdateStatus(t *testing.T) {
 }
 
 func TestRegistryGetHealthyModulesConcurrent(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register and update modules
 	for i := 0; i < 15; i++ {
@@ -256,7 +257,7 @@ func TestRegistryGetHealthyModulesConcurrent(t *testing.T) {
 }
 
 func TestRegistryModulesCopy(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "api-service",
@@ -282,7 +283,7 @@ func TestRegistryModulesCopy(t *testing.T) {
 }
 
 func TestRegistryEndpointsCopy(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:   "api-service",
@@ -303,7 +304,7 @@ func TestRegistryEndpointsCopy(t *testing.T) {
 }
 
 func TestRegistryListModulesFilter(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	// Register various modules
 	configs := []struct {
@@ -378,7 +379,7 @@ func TestRegistryListModulesFilter(t *testing.T) {
 }
 
 func TestRegistryResponseStructures(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "api-service",
@@ -400,7 +401,7 @@ func TestRegistryResponseStructures(t *testing.T) {
 }
 
 func TestRegistryDeregistrationResponse(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "api-service",
@@ -419,7 +420,7 @@ func TestRegistryDeregistrationResponse(t *testing.T) {
 }
 
 func TestRegistryMetadataPreservation(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	metadata := map[string]string{
 		"version":     "2.3.4",
@@ -444,7 +445,7 @@ func TestRegistryMetadataPreservation(t *testing.T) {
 }
 
 func TestRegistryVersionTracking(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	versions := []string{"1.0.0", "2.0.0", "1.5.3"}
 
@@ -465,7 +466,7 @@ func TestRegistryVersionTracking(t *testing.T) {
 }
 
 func TestRegistryTimestampAccuracy(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "api-service",
@@ -486,7 +487,7 @@ func TestRegistryTimestampAccuracy(t *testing.T) {
 }
 
 func TestRegistryHealthStatusUpdate(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "api-service",
@@ -508,7 +509,7 @@ func TestRegistryHealthStatusUpdate(t *testing.T) {
 }
 
 func TestRegistryLastHealthAtUpdate(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "api-service",
@@ -530,7 +531,7 @@ func TestRegistryLastHealthAtUpdate(t *testing.T) {
 }
 
 func TestRegistrySingleEndpointModule(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "single-endpoint",
@@ -547,7 +548,7 @@ func TestRegistrySingleEndpointModule(t *testing.T) {
 }
 
 func TestRegistryMultipleEndpoints(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	endpoints := []Endpoint{
 		{Type: EndpointHTTP, URL: "http://localhost:8080"},
@@ -575,7 +576,7 @@ func TestRegistryMultipleEndpoints(t *testing.T) {
 }
 
 func TestRegistryDeregistrationRemovesModule(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	req := RegistrationRequest{
 		ID:        "api-service",
@@ -595,7 +596,7 @@ func TestRegistryDeregistrationRemovesModule(t *testing.T) {
 }
 
 func TestRegistryAccessorsReturnCorrectInstances(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	discovery := registry.Discovery()
 	healthChecker := registry.HealthChecker()
@@ -607,7 +608,7 @@ func TestRegistryAccessorsReturnCorrectInstances(t *testing.T) {
 }
 
 func TestRegistryEmptyListModules(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	modules := registry.ListModules(nil)
 
@@ -615,7 +616,7 @@ func TestRegistryEmptyListModules(t *testing.T) {
 }
 
 func TestRegistryCountWithMultipleModules(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	for i := 0; i < 15; i++ {
 		req := RegistrationRequest{
@@ -648,14 +649,14 @@ func TestRegistryCustomConfigUsed(t *testing.T) {
 		HealthCheckInterval: 1 * time.Minute,
 		HealthCheckTimeout:  10 * time.Second,
 	}
-	registry := New(config)
+	registry := New(config, slog.Default())
 
 	assert.Equal(t, 1*time.Minute, registry.healthChecker.GetInterval())
 	assert.Equal(t, 10*time.Second, registry.healthChecker.GetTimeout())
 }
 
 func TestRegistryGetAllModulesInternal(t *testing.T) {
-	registry := New(DefaultConfig())
+	registry := New(DefaultConfig(), slog.Default())
 
 	for i := 0; i < 5; i++ {
 		req := RegistrationRequest{

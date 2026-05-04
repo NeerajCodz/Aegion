@@ -13,8 +13,8 @@ type EventConnection struct {
 
 // EventEdge represents a single event with its cursor.
 type EventEdge struct {
-	Cursor string      `json:"cursor"`
-	Node   *EventNode  `json:"node"`
+	Cursor string     `json:"cursor"`
+	Node   *EventNode `json:"node"`
 }
 
 // EventNode is the GraphQL representation of an Event.
@@ -94,12 +94,12 @@ type HealthStatusNode struct {
 
 // SystemStatsNode is the GraphQL representation of system statistics.
 type SystemStatsNode struct {
-	EventsTotal      int     `json:"eventsTotal"`
-	DashboardsTotal  int     `json:"dashboardsTotal"`
-	QueriesTotal     int     `json:"queriesTotal"`
-	QueryTimeAvgMs   float64 `json:"queryTimeAvgMs"`
-	CacheHitRate     float64 `json:"cacheHitRate"`
-	Uptime           int     `json:"uptime"`
+	EventsTotal     int     `json:"eventsTotal"`
+	DashboardsTotal int     `json:"dashboardsTotal"`
+	QueriesTotal    int     `json:"queriesTotal"`
+	QueryTimeAvgMs  float64 `json:"queryTimeAvgMs"`
+	CacheHitRate    float64 `json:"cacheHitRate"`
+	Uptime          int     `json:"uptime"`
 }
 
 // WebhookNode is the GraphQL representation of a Webhook.
@@ -257,8 +257,8 @@ type CreateWebhookPayload struct {
 
 // ExecuteQueryPayload is the result of executing a query.
 type ExecuteQueryPayload struct {
-	Rows             []map[string]interface{} `json:"rows"`
-	RowCount         int                      `json:"rowCount"`
-	ExecutionTimeMs  int                      `json:"executionTimeMs"`
-	Errors           []*ErrorNode             `json:"errors,omitempty"`
+	Rows            []map[string]interface{} `json:"rows"`
+	RowCount        int                      `json:"rowCount"`
+	ExecutionTimeMs int                      `json:"executionTimeMs"`
+	Errors          []*ErrorNode             `json:"errors,omitempty"`
 }

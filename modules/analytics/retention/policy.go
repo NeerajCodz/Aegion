@@ -26,16 +26,16 @@ const (
 
 // TierConfig defines the configuration for a storage tier.
 type TierConfig struct {
-	TTLDays    int               `yaml:"ttl_days"`
-	Enabled    bool              `yaml:"enabled"`
-	Storage    string            `yaml:"storage"` // local, s3, s3_iceberg
+	TTLDays     int             `yaml:"ttl_days"`
+	Enabled     bool            `yaml:"enabled"`
+	Storage     string          `yaml:"storage"` // local, s3, s3_iceberg
 	Compression CompressionType `yaml:"compression,omitempty"`
 }
 
 // RetentionPolicy defines how long data is kept in each tier.
 type RetentionPolicy struct {
 	// Default policies for all categories
-	DefaultPolicy string    `yaml:"default_policy"`
+	DefaultPolicy string     `yaml:"default_policy"`
 	Hot           TierConfig `yaml:"hot"`
 	Warm          TierConfig `yaml:"warm"`
 	Cold          TierConfig `yaml:"cold"`
@@ -89,21 +89,21 @@ func DefaultRetentionPolicy() *RetentionPolicy {
 	return &RetentionPolicy{
 		DefaultPolicy: "tiered",
 		Hot: TierConfig{
-			TTLDays:    7,
-			Enabled:    true,
-			Storage:    "local",
+			TTLDays:     7,
+			Enabled:     true,
+			Storage:     "local",
 			Compression: CompressionNone,
 		},
 		Warm: TierConfig{
-			TTLDays:    90,
-			Enabled:    true,
-			Storage:    "s3",
+			TTLDays:     90,
+			Enabled:     true,
+			Storage:     "s3",
 			Compression: CompressionSnappy,
 		},
 		Cold: TierConfig{
-			TTLDays:    730,
-			Enabled:    true,
-			Storage:    "s3_iceberg",
+			TTLDays:     730,
+			Enabled:     true,
+			Storage:     "s3_iceberg",
 			Compression: CompressionNone,
 		},
 		Categories: make(map[string]CategoryRetention),

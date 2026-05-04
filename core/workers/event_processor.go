@@ -68,7 +68,7 @@ func (w *EventProcessorWorker) Start(ctx context.Context) error {
 
 // process handles pending event deliveries.
 func (w *EventProcessorWorker) process(ctx context.Context) error {
-	w.Log().Debug().Msg("processing pending events")
+	w.Log().Debug("processing pending events")
 
 	// Use event bus's ProcessPending if available
 	if w.eventBus != nil {
@@ -126,7 +126,7 @@ func (w *EventProcessorWorker) processDirectly(ctx context.Context) error {
 			&identityID, &payloadJSON, &metadataJSON, &occurredAt,
 		)
 		if err != nil {
-			w.Log().Error().Err(err).Msg("failed to scan delivery row")
+			w.Log().Error("failed to scan delivery row", "error", err)
 			continue
 		}
 
@@ -136,12 +136,12 @@ func (w *EventProcessorWorker) processDirectly(ctx context.Context) error {
 		_ = json.Unmarshal(metadataJSON, &metadata)
 
 		// Log the event being processed
-		w.Log().Debug().
-			Str("delivery_id", deliveryID.String()).
-			Str("event_id", eventID.String()).
-			Str("event_type", eventType).
-			Int("attempt", attemptCount+1).
-			Msg("processing event delivery")
+		w.Log().Debug("processing event delivery",
+			"delivery_id", deliveryID.String(),
+			"event_id", eventID.String(),
+			"event_type", eventType,
+			"attempt", attemptCount+1,
+		)
 
 		// Since we don't have a handler, mark as delivered
 		// In production, this would call the actual handler
@@ -151,7 +151,7 @@ func (w *EventProcessorWorker) processDirectly(ctx context.Context) error {
 	}
 
 	if processed > 0 {
-		w.Log().Info().Int("processed", processed).Msg("events processed")
+		w.Log().Info("events processed", "processed", processed)
 	}
 
 	return rows.Err()
@@ -165,7 +165,7 @@ func (w *EventProcessorWorker) markDelivered(ctx context.Context, deliveryID uui
 		WHERE id = $1
 	`, deliveryID)
 	if err != nil {
-		w.Log().Error().Err(err).Str("delivery_id", deliveryID.String()).Msg("failed to mark delivery as delivered")
+		w.Log().Error("failed to mark delivery as delivered", "error", err, "delivery_id", deliveryID.String())
 	}
 }
 
@@ -189,7 +189,7 @@ func (w *EventProcessorWorker) CleanupOldEvents(ctx context.Context, olderThan t
 
 	deleted := result.RowsAffected()
 	if deleted > 0 {
-		w.Log().Info().Int64("deleted", deleted).Dur("older_than", olderThan).Msg("old events cleaned up")
+		w.Log().Info("old events cleaned up", "deleted", deleted, "older_than", olderThan)
 	}
 
 	return deleted, nil

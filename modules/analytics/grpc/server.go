@@ -3,10 +3,10 @@ package grpc
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
-	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
@@ -16,28 +16,28 @@ import (
 
 // Server holds the gRPC server configuration and components.
 type Server struct {
-	grpcServer      *grpc.Server
-	logger          zerolog.Logger
-	port            int
-	listener        net.Listener
-	service         *Service
-	unaryInterceptor grpc.UnaryServerInterceptor
+	grpcServer        *grpc.Server
+	logger            *slog.Logger
+	port              int
+	listener          net.Listener
+	service           *Service
+	unaryInterceptor  grpc.UnaryServerInterceptor
 	streamInterceptor grpc.StreamServerInterceptor
 }
 
 // ServerConfig holds gRPC server configuration.
 type ServerConfig struct {
-	Port                    int
-	MaxConcurrentStreams    int
-	KeepaliveTime           int
-	KeepaliveTimeout        int
-	MaxConnectionIdleTime   int
-	Logger                  zerolog.Logger
-	UnaryInterceptor        grpc.UnaryServerInterceptor
-	StreamInterceptor       grpc.StreamServerInterceptor
-	AuthVerifier            func(context.Context) error
-	LoggingEnabled          bool
-	TracingEnabled          bool
+	Port                  int
+	MaxConcurrentStreams  int
+	KeepaliveTime         int
+	KeepaliveTimeout      int
+	MaxConnectionIdleTime int
+	Logger                *slog.Logger
+	UnaryInterceptor      grpc.UnaryServerInterceptor
+	StreamInterceptor     grpc.StreamServerInterceptor
+	AuthVerifier          func(context.Context) error
+	LoggingEnabled        bool
+	TracingEnabled        bool
 }
 
 // NewServer creates a new gRPC server for pb.
@@ -98,7 +98,7 @@ func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
 
 // Start starts the gRPC server and blocks until shutdown or error.
 func (s *Server) Start() error {
-	s.logger.Info().Int("port", s.port).Msg("Starting gRPC server")
+	s.logger.Info("Starting gRPC server", "port", s.port)
 
 	if err := s.grpcServer.Serve(s.listener); err != nil {
 		return fmt.Errorf("gRPC server error: %w", err)
@@ -111,7 +111,7 @@ func (s *Server) Start() error {
 func (s *Server) StartAsync() error {
 	go func() {
 		if err := s.Start(); err != nil {
-			s.logger.Error().Err(err).Msg("gRPC server error")
+			s.logger.ErrorContext(context.Background(), "gRPC server error", "error", err)
 		}
 	}()
 
@@ -122,7 +122,7 @@ func (s *Server) StartAsync() error {
 
 // Stop gracefully stops the gRPC server.
 func (s *Server) Stop(timeout time.Duration) error {
-	s.logger.Info().Msg("Stopping gRPC server")
+	s.logger.Info("Stopping gRPC server")
 
 	done := make(chan struct{})
 	go func() {
@@ -132,10 +132,10 @@ func (s *Server) Stop(timeout time.Duration) error {
 
 	select {
 	case <-done:
-		s.logger.Info().Msg("gRPC server stopped gracefully")
+		s.logger.Info("gRPC server stopped gracefully")
 		return nil
 	case <-time.After(timeout):
-		s.logger.Warn().Msg("gRPC server graceful stop timeout, forcing shutdown")
+		s.logger.Warn("gRPC server graceful stop timeout, forcing shutdown")
 		s.grpcServer.Stop()
 		return fmt.Errorf("graceful stop timeout")
 	}
