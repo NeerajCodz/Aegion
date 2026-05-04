@@ -191,8 +191,8 @@ func createAdminTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 			// Create identity
 			identityID := uuid.New()
 			_, err = suite.Pool.Exec(context.Background(),
-				`INSERT INTO identities (id, email, name, created_at, updated_at)
-				 VALUES ($1, $2, $3, NOW(), NOW())`,
+				`INSERT INTO core_identities (id, traits, created_at, updated_at)
+				 VALUES ($1, jsonb_build_object('email', $2, 'name', $3), NOW(), NOW())`,
 				identityID, req.Email, req.Name)
 
 			if err != nil {
@@ -211,8 +211,8 @@ func createAdminTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 				}
 
 				_, err = suite.Pool.Exec(context.Background(),
-					`INSERT INTO identity_credentials (id, identity_id, type, password_hash, created_at, updated_at)
-					 VALUES ($1, $2, 'password', $3, NOW(), NOW())`,
+					`INSERT INTO module_password_credentials (id, identity_id, password_hash, created_at, updated_at)
+					 VALUES ($1, $2, $3, NOW(), NOW())`,
 					uuid.New(), identityID, string(passwordHash))
 
 				if err != nil {
@@ -265,7 +265,8 @@ func createAdminTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 
 			// Update identity
 			_, err := suite.Pool.Exec(context.Background(),
-				`UPDATE identities SET email = $1, name = $2, updated_at = NOW() 
+				`UPDATE core_identities
+				 SET traits = jsonb_build_object('email', $1, 'name', $2), updated_at = NOW()
 				 WHERE id = $3`,
 				req.Email, req.Name, identityID)
 
