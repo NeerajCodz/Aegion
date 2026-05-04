@@ -4,11 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestNetworkCLI_EnsureNetworkAndInspect(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("uses Windows .cmd fake docker executable")
+	}
 	logFile := filepath.Join(t.TempDir(), "network-args.txt")
 	fakeDocker := writeFakeDockerCLI(t, "@echo off\r\n"+
 		"setlocal EnableDelayedExpansion\r\n"+
