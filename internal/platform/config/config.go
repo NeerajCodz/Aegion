@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -414,7 +415,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Expand environment variables
-	expanded := os.ExpandEnv(string(data))
+	expanded := expandEnvWithDefaults(string(data))
 
 	var cfg Config
 	decoder := yaml.NewDecoder(bytes.NewReader([]byte(expanded)))
@@ -432,6 +433,24 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+var shellDefaultEnvPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}`)
+
+func expandEnvWithDefaults(input string) string {
+	withDefaults := shellDefaultEnvPattern.ReplaceAllStringFunc(input, func(match string) string {
+		parts := shellDefaultEnvPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		key := parts[1]
+		def := parts[2]
+		if val, ok := os.LookupEnv(key); ok && val != "" {
+			return val
+		}
+		return def
+	})
+	return os.ExpandEnv(withDefaults)
 }
 
 // applyDefaults sets default values for unset fields.
