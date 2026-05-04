@@ -371,7 +371,7 @@ func (p *Proxy) injectSessionHeaders(req *http.Request, sess *session.Session) {
 }
 
 func (p *Proxy) stripInboundIdentityHeaders(req *http.Request) {
-	for _, header := range p.identityHeaders() {
+	for _, header := range p.trustedIdentityHeaders() {
 		req.Header.Del(header)
 	}
 	if p.config.IdentitySignatureHeader != "" {
@@ -400,6 +400,10 @@ func (p *Proxy) identityHeaders() []string {
 	if len(p.config.SignedIdentityHeaders) > 0 {
 		return p.config.SignedIdentityHeaders
 	}
+	return p.trustedIdentityHeaders()
+}
+
+func (p *Proxy) trustedIdentityHeaders() []string {
 	return []string{
 		"X-Aegion-Session-ID",
 		"X-Aegion-Identity-ID",
