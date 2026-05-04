@@ -2,6 +2,8 @@ package graphql
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,6 +49,7 @@ func TestAuthMiddleware_AllowsPublicQueryWithoutAuth(t *testing.T) {
 }
 
 func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
+	expectedToken := testJWT("user-1")
 	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, _ := r.Context().Value("userID").(string)
 		token, _ := r.Context().Value("token").(string)
@@ -54,7 +57,7 @@ func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
 		if userID != "user-1" {
 			t.Fatalf("expected user-1, got %q", userID)
 		}
-		if token != "user-1:session-token" {
+		if token != expectedToken {
 			t.Fatalf("expected token in context, got %q", token)
 		}
 		if role != "" {
@@ -65,7 +68,7 @@ func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(`{"query":"query { events { totalCount } }"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer user-1:session-token")
+	req.Header.Set("Authorization", "Bearer "+expectedToken)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -75,12 +78,8 @@ func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_SupportsSessionTokenHeader(t *testing.T) {
+func TestAuthMiddleware_RejectsSessionTokenHeader(t *testing.T) {
 	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID, _ := r.Context().Value("userID").(string)
-		if userID != "user-2" {
-			t.Fatalf("expected user-2, got %q", userID)
-		}
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -91,8 +90,8 @@ func TestAuthMiddleware_SupportsSessionTokenHeader(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected ok, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized, got %d", w.Code)
 	}
 }
 
@@ -119,7 +118,7 @@ func TestAuthMiddleware_SetsRoleFromTokenClaim(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(`{"query":"query { events { totalCount } }"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer admin-1:admin:session-token")
+	req.Header.Set("Authorization", "Bearer "+testJWT("admin-1"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -140,11 +139,17 @@ func TestAuthDirectiveHandler_RequiresTokenWhenRequested(t *testing.T) {
 }
 
 func TestValidateGraphQLToken(t *testing.T) {
-	userID, err := validateGraphQLToken("user-3:anything")
+	userID, err := validateGraphQLToken(testJWT("user-3"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if userID != "user-3" {
 		t.Fatalf("expected user-3, got %q", userID)
 	}
+}
+
+func testJWT(sub string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sub":%q}`, sub)))
+	return header + "." + payload + ".sig"
 }
