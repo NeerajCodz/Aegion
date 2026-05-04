@@ -830,6 +830,27 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_NormalizesSecretsInConfig(t *testing.T) {
+	t.Setenv("AEGION_ENV", "")
+	t.Setenv("AEGION_ENVIRONMENT", "")
+
+	cfg := &Config{
+		Database: DatabaseConfig{
+			URL: "postgres://user:pass@localhost/db",
+		},
+		Secrets: SecretsConfig{
+			Cookie:   []string{"", " cookie-secret-32-characters-long!! "},
+			Cipher:   []string{"\t", " cipher-secret-32-characters-long!! "},
+			Internal: []string{"   ", " internal-secret-32-characters-long "},
+		},
+	}
+
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, []string{"cookie-secret-32-characters-long!!"}, cfg.Secrets.Cookie)
+	assert.Equal(t, []string{"cipher-secret-32-characters-long!!"}, cfg.Secrets.Cipher)
+	assert.Equal(t, []string{"internal-secret-32-characters-long"}, cfg.Secrets.Internal)
+}
+
 func TestConfig_Validate_ProductionTLSAndProxyTrustRequirements(t *testing.T) {
 	t.Setenv("AEGION_ENV", "production")
 	t.Setenv("AEGION_ENVIRONMENT", "")
