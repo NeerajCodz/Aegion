@@ -152,9 +152,10 @@ func TestMemoryStoreAdditionalBranches(t *testing.T) {
 		t.Fatalf("ConsumeState(expired) error = %v, want %v", err, ErrStateExpired)
 	}
 
-	firstLink, err := s.ResolveIdentity(ctx, Provider{Slug: "google"}, SocialProfile{
-		ProviderUser: "sub-1",
-		Email:        "User@Example.com",
+	firstLink, err := s.ResolveIdentity(ctx, Provider{Slug: "google", TrustEmailVerified: true}, SocialProfile{
+		ProviderUser:  "sub-1",
+		Email:         "User@Example.com",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("ResolveIdentity(first) error = %v", err)
@@ -163,7 +164,7 @@ func TestMemoryStoreAdditionalBranches(t *testing.T) {
 		t.Fatalf("ResolveIdentity(first) expected created+linked result, got %#v", firstLink)
 	}
 
-	secondBySubject, err := s.ResolveIdentity(ctx, Provider{Slug: "google"}, SocialProfile{
+	secondBySubject, err := s.ResolveIdentity(ctx, Provider{Slug: "google", TrustEmailVerified: true}, SocialProfile{
 		ProviderUser: "sub-1",
 		Email:        "other@example.com",
 	})
@@ -174,15 +175,28 @@ func TestMemoryStoreAdditionalBranches(t *testing.T) {
 		t.Fatalf("ResolveIdentity(subject existing) result = %#v", secondBySubject)
 	}
 
-	secondByEmail, err := s.ResolveIdentity(ctx, Provider{Slug: "google"}, SocialProfile{
-		ProviderUser: "sub-2",
-		Email:        " user@example.com ",
+	secondByEmail, err := s.ResolveIdentity(ctx, Provider{Slug: "google", TrustEmailVerified: true}, SocialProfile{
+		ProviderUser:  "sub-2",
+		Email:         " user@example.com ",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("ResolveIdentity(email existing) error = %v", err)
 	}
 	if secondByEmail.IdentityID != firstLink.IdentityID || secondByEmail.Created {
 		t.Fatalf("ResolveIdentity(email existing) result = %#v", secondByEmail)
+	}
+
+	untrustedEmail, err := s.ResolveIdentity(ctx, Provider{Slug: "google", TrustEmailVerified: true}, SocialProfile{
+		ProviderUser:  "sub-3",
+		Email:         "user@example.com",
+		EmailVerified: false,
+	})
+	if err != nil {
+		t.Fatalf("ResolveIdentity(untrusted email) error = %v", err)
+	}
+	if untrustedEmail.IdentityID == firstLink.IdentityID || !untrustedEmail.Created {
+		t.Fatalf("ResolveIdentity(untrusted email) should create a new identity, got %#v", untrustedEmail)
 	}
 
 	if err := s.DeleteProvider(ctx, "google"); err != nil {
