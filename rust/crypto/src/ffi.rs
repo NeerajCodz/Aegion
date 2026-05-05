@@ -35,15 +35,20 @@ pub struct ParsedTokenResult {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn crypto_hash_password(password: *const c_char) -> CryptoResult {
-    if password.is_null() {
+pub unsafe extern "C" fn crypto_hash_password(password: *const u8, password_len: size_t) -> CryptoResult {
+    if password.is_null() && password_len > 0 {
         return CryptoResult {
             error_code: -1,
             result: ptr::null_mut(),
         };
     }
 
-    let password_str = match CStr::from_ptr(password).to_str() {
+    let password_bytes = if password_len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(password, password_len)
+    };
+    let password_str = match std::str::from_utf8(password_bytes) {
         Ok(s) => s,
         Err(_) => {
             return CryptoResult {
@@ -67,14 +72,20 @@ pub unsafe extern "C" fn crypto_hash_password(password: *const c_char) -> Crypto
 
 #[no_mangle]
 pub unsafe extern "C" fn crypto_verify_password(
-    password: *const c_char,
+    password: *const u8,
+    password_len: size_t,
     hash: *const c_char,
 ) -> c_int {
-    if password.is_null() || hash.is_null() {
+    if (password.is_null() && password_len > 0) || hash.is_null() {
         return -1;
     }
 
-    let password_str = match CStr::from_ptr(password).to_str() {
+    let password_bytes = if password_len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(password, password_len)
+    };
+    let password_str = match std::str::from_utf8(password_bytes) {
         Ok(s) => s,
         Err(_) => return -1,
     };

@@ -27,9 +27,9 @@ struct ParsedTokenResult {
 
 extern "C" {
 
-CryptoResult crypto_hash_password(const char *password);
+CryptoResult crypto_hash_password(const uint8_t *password, size_t password_len);
 
-int crypto_verify_password(const char *password, const char *hash);
+int crypto_verify_password(const uint8_t *password, size_t password_len, const char *hash);
 
 CryptoResult crypto_encrypt_field(const uint8_t *key,
                                   const uint8_t *plaintext,
