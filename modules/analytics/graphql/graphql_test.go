@@ -542,9 +542,15 @@ func TestServerRegisterRoutesServeMux(t *testing.T) {
 	require.NoError(t, server.RegisterRoutes(mux, "/graphql"))
 
 	playgroundReq := httptest.NewRequest(http.MethodGet, "/graphql/playground", nil)
+	playgroundReq.Header.Set("Authorization", "Bearer user-1:session-token")
 	playgroundResp := httptest.NewRecorder()
 	mux.ServeHTTP(playgroundResp, playgroundReq)
 	assert.Equal(t, http.StatusOK, playgroundResp.Code)
+
+	unauthorizedReq := httptest.NewRequest(http.MethodGet, "/graphql/playground", nil)
+	unauthorizedResp := httptest.NewRecorder()
+	mux.ServeHTTP(unauthorizedResp, unauthorizedReq)
+	assert.Equal(t, http.StatusUnauthorized, unauthorizedResp.Code)
 
 	healthReq := httptest.NewRequest(http.MethodGet, "/graphql/health", nil)
 	healthResp := httptest.NewRecorder()
@@ -562,6 +568,7 @@ func TestServerRegisterRoutesChiRouter(t *testing.T) {
 	require.NoError(t, server.RegisterRoutes(router, "/graphql"))
 
 	req := httptest.NewRequest(http.MethodGet, "/graphql/introspection", nil)
+	req.Header.Set("Authorization", "Bearer user-1:session-token")
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	assert.Equal(t, http.StatusOK, resp.Code)
