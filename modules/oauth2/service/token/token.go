@@ -340,6 +340,9 @@ func (s *TokenService) IntrospectToken(ctx context.Context, req *IntrospectionRe
 	if err != nil {
 		return nil, ErrInvalidClient
 	}
+	if strings.TrimSpace(client.TokenEndpointAuthMethod) == "" || client.TokenEndpointAuthMethod == "none" {
+		return nil, ErrUnauthorizedClient
+	}
 	if err := authenticateClient(client, req.ClientSecret); err != nil {
 		return nil, err
 	}
