@@ -97,16 +97,16 @@ func TestClaimsMarshalJSON(t *testing.T) {
 			},
 		},
 		{
-			name: "custom claims override standard field names",
+			name: "custom claims cannot override standard field names",
 			claims: Claims{
 				Issuer: "aegion",
 				Custom: map[string]interface{}{
-					"iss":    "custom-issuer", // Should override standard issuer
+					"iss":    "custom-issuer", // Should be ignored as reserved
 					"custom": "value",
 				},
 			},
 			expected: map[string]interface{}{
-				"iss":    "custom-issuer", // Custom claims should override standard claims
+				"iss":    "aegion",
 				"custom": "value",
 			},
 		},
@@ -129,12 +129,10 @@ func TestClaimsMarshalJSON(t *testing.T) {
 				}
 			}
 
-			// For the custom override test, verify that custom claims come after standard
-			if tt.name == "custom claims override standard field names" {
-				if result["iss"] != "custom-issuer" {
-					// Standard claims are set first, then custom claims override them
-					// So the final value should be from custom claims
-					t.Errorf("Custom claim should override standard claim")
+			// Reserved claim names must never be overridden by custom claims.
+			if tt.name == "custom claims cannot override standard field names" {
+				if result["iss"] != "aegion" {
+					t.Errorf("Reserved custom claim should not override standard claim")
 				}
 			}
 		})
