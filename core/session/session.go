@@ -216,11 +216,17 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 		return nil, err
 	}
 
+	methodAAL := methodToAAL(method)
+	initialAAL := methodAAL
+	if methodAAL == AAL2 {
+		initialAAL = AAL1
+	}
+
 	session := &Session{
 		ID:              uuid.New(),
 		Token:           token,
 		IdentityID:      identityID,
-		AAL:             methodToAAL(method),
+		AAL:             initialAAL,
 		IssuedAt:        now,
 		ExpiresAt:       now.Add(m.lifespan),
 		AuthenticatedAt: now,
@@ -230,7 +236,7 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 		AuthMethods: []SessionAuthMethod{
 			{
 				Method:      method,
-				AALContrib:  methodToAAL(method),
+				AALContrib:  methodAAL,
 				CompletedAt: now,
 			},
 		},
@@ -265,7 +271,7 @@ func (m *Manager) Create(ctx context.Context, identityID uuid.UUID, method AuthM
 	_, err = m.execStmt(ctx, `
 		INSERT INTO core_session_auth_methods (session_id, method, aal_contributed, completed_at)
 		VALUES ($1, $2, $3, $4)
-	`, session.ID, method, methodToAAL(method), now)
+	`, session.ID, method, methodAAL, now)
 	if err != nil {
 		return nil, err
 	}

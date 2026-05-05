@@ -230,7 +230,7 @@ func TestManager_Create_WithSeams(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create returned error: %v", err)
 		}
-		if s.IdentityID != identityID || s.AAL != AAL2 {
+		if s.IdentityID != identityID || s.AAL != AAL1 {
 			t.Fatalf("unexpected created session fields")
 		}
 		if !s.ExpiresAt.Equal(m.now().Add(m.lifespan)) {
