@@ -668,21 +668,23 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		return
 	}
 
-	if expectedType == flows.TypeSettings {
-		if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
-			s.writeSettingsSessionError(w, err)
-			return
-		}
-	}
+  if expectedType == flows.TypeSettings {
+      if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
+          s.writeSettingsSessionError(w, err)
+          return
+      }
+  }
 
-	var result *flowExecutionResult
-	if s.selfServiceAuthEnabled() {
-		result, err = s.executeFlowSubmission(r.Context(), w, r, flow, input)
-		if err != nil {
-			s.writeFlowExecutionError(w, err)
-			return
-		}
-	}
+  result, err := s.executeFlowSubmission(r.Context(), w, r, flow, input)
+  if err != nil {
+      s.writeFlowExecutionError(w, err)
+      return
+  }
+
+  if result == nil {
+      writeError(w, http.StatusBadRequest, "unsupported flow submission method", nil)
+      return
+  }
 
 	if result != nil && result.KeepFlowActive {
 		response := map[string]any{
@@ -2051,6 +2053,10 @@ func (s *Server) handleAdminRestartModule(w http.ResponseWriter, r *http.Request
 	moduleID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if moduleID == "" {
 		writeError(w, http.StatusBadRequest, "module id is required", nil)
+		return
+	}
+	if _, err := s.registry.GetModule(moduleID); err != nil {
+		writeError(w, http.StatusNotFound, "module not found", err)
 		return
 	}
 	if s.orchestrator == nil {

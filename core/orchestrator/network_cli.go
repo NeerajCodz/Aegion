@@ -31,7 +31,7 @@ func (n *NetworkManager) EnsureNetwork(ctx context.Context) (string, error) {
 	if networkID != "" {
 		return networkID, nil
 	}
-	args := []string{"network", "create", "--driver", "bridge", "--label", "aegion.network=true"}
+	args := []string{"network", "create", "--driver", "bridge", "--internal", "--label", "aegion.network=true"}
 	if strings.TrimSpace(n.subnet) != "" {
 		args = append(args, "--subnet", n.subnet)
 	}

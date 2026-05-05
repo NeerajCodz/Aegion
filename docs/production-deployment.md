@@ -48,7 +48,7 @@ mkdir -p /opt/aegion
 cd /opt/aegion
 
 # Clone repository (or copy release)
-git clone https://github.com/NeerajCodz/Aegion.git
+git clone https://github.com/Astraive/Aegion.git
 cd Aegion
 git checkout <version-tag>  # e.g., v1.0.0
 ```

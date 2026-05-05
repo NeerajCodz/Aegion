@@ -432,7 +432,7 @@ analytics:
 
   grpc:
     # Enable gRPC API for analytics
-    enabled: true
+    enabled: false
     # gRPC server port
     port: 50051
     # Maximum concurrent streams per connection

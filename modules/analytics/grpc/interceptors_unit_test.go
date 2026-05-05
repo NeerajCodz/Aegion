@@ -59,6 +59,22 @@ func TestAuthInterceptor_DelegatesToAuthFunc(t *testing.T) {
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 }
 
+func TestStreamAuthInterceptor_RequiresServiceID(t *testing.T) {
+	interceptor := StreamAuthInterceptor(nil)
+
+	err := interceptor(struct{}{}, &mockGRPCServerStream{ctx: context.Background()}, &grpc.StreamServerInfo{FullMethod: "/m", IsServerStream: true}, func(interface{}, grpc.ServerStream) error {
+		return nil
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+
+	ctxWithMD := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-service-id", "svc-1"))
+	err = interceptor(struct{}{}, &mockGRPCServerStream{ctx: ctxWithMD}, &grpc.StreamServerInfo{FullMethod: "/m", IsServerStream: true}, func(interface{}, grpc.ServerStream) error {
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 func TestLoggingInterceptor_EmitsLine(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))

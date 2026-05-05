@@ -23,7 +23,7 @@ func TestMiddlewareFailsClosedWhenGeneratorMissing(t *testing.T) {
 	}
 }
 
-func TestMiddlewareSkipPathNormalization(t *testing.T) {
+func TestMiddlewareSkipPathRequiresExactMatch(t *testing.T) {
 	mw := Middleware(MiddlewareConfig{
 		SkipPaths: []string{"/internal/health"},
 	})
@@ -35,8 +35,8 @@ func TestMiddlewareSkipPathNormalization(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
 	}
 }
 

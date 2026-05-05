@@ -8,8 +8,10 @@ import (
 
 var (
 	ErrCredentialNotFound = errors.New("credential not found")
+	ErrCredentialExists   = errors.New("credential already exists")
 	ErrChallengeNotFound  = errors.New("challenge not found")
 	ErrChallengeExpired   = errors.New("challenge expired")
+	ErrSignCountReplay    = errors.New("credential sign count must increase")
 )
 
 type Credential struct {
@@ -62,10 +64,14 @@ func (s *Store) ConsumeChallenge(challengeID string) (Challenge, error) {
 	return challenge, nil
 }
 
-func (s *Store) UpsertCredential(credential Credential) {
+func (s *Store) CreateCredential(credential Credential) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.credentials[credential.ID]; exists {
+		return ErrCredentialExists
+	}
 	s.credentials[credential.ID] = credential
+	return nil
 }
 
 func (s *Store) GetCredential(credentialID string) (Credential, error) {
@@ -84,6 +90,9 @@ func (s *Store) UpdateCredentialSignCount(credentialID string, signCount uint32)
 	credential, ok := s.credentials[credentialID]
 	if !ok {
 		return ErrCredentialNotFound
+	}
+	if signCount <= credential.SignCount {
+		return ErrSignCountReplay
 	}
 	credential.SignCount = signCount
 	s.credentials[credentialID] = credential

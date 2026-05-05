@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -117,18 +118,19 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 			args = append(args, "--network-alias", alias)
 		}
 	}
-	for key, value := range cfg.Env {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", key, value))
+	envFile, err := buildDockerEnvFile(cfg.Env, authToken, cfg.ID)
+	if err != nil {
+		return "", fmt.Errorf("building env file: %w", err)
 	}
-	args = append(args, "-e", "AEGION_AUTH_TOKEN")
-	args = append(args, "-e", fmt.Sprintf("AEGION_MODULE_ID=%s", cfg.ID))
+	defer os.Remove(envFile)
+	args = append(args, "--env-file", envFile)
 
 	for _, p := range cfg.Ports {
 		protocol := strings.TrimSpace(p.Protocol)
 		if protocol == "" {
 			protocol = "tcp"
 		}
-		args = append(args, "-p", fmt.Sprintf("%s:%s/%s", p.HostPort, p.ContainerPort, protocol))
+		args = append(args, "-p", fmt.Sprintf("127.0.0.1:%s:%s/%s", p.HostPort, p.ContainerPort, protocol))
 	}
 	for _, v := range cfg.Volumes {
 		mountSpec := fmt.Sprintf("%s:%s", v.HostPath, v.ContainerPath)
@@ -170,7 +172,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 	}
 	args = append(args, imageRef)
 
-	stdout, err := d.runWithEnv(ctx, []string{fmt.Sprintf("AEGION_AUTH_TOKEN=%s", authToken)}, args...)
+	stdout, err := d.run(ctx, args...)
 	if err != nil {
 		return "", fmt.Errorf("creating container: %w", err)
 	}
@@ -179,6 +181,48 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 	return id, nil
 }
 
+
+func buildDockerEnvFile(env map[string]string, authToken, moduleID string) (string, error) {
+	entries := make(map[string]string, len(env)+2)
+	for key, value := range env {
+		entries[key] = value
+	}
+	entries["AEGION_AUTH_TOKEN"] = authToken
+	entries["AEGION_MODULE_ID"] = moduleID
+
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteString("=")
+		b.WriteString(entries[key])
+		b.WriteString("\n")
+	}
+
+	f, err := os.CreateTemp("", "aegion-docker-env-*.env")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(b.String()); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := os.Chmod(f.Name(), 0o600); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
 func (d *DockerClient) StartContainer(ctx context.Context, containerID string) error {
 	if _, err := d.run(ctx, "start", containerID); err != nil {
 		return fmt.Errorf("starting container: %w", err)

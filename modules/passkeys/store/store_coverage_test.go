@@ -31,8 +31,8 @@ func TestAdditionalChallengeAndCredentialBranches(t *testing.T) {
 		t.Fatalf("UpdateCredentialSignCount(missing) error = %v, want %v", err, ErrCredentialNotFound)
 	}
 
-	s.UpsertCredential(Credential{ID: "cred-1", IdentityID: "identity-1", PublicKey: "pk1", CreatedAt: now})
-	s.UpsertCredential(Credential{ID: "cred-2", IdentityID: "identity-2", PublicKey: "pk2", CreatedAt: now})
+	s.CreateCredential(Credential{ID: "cred-1", IdentityID: "identity-1", PublicKey: "pk1", CreatedAt: now})
+	s.CreateCredential(Credential{ID: "cred-2", IdentityID: "identity-2", PublicKey: "pk2", CreatedAt: now})
 	list := s.ListCredentialsByIdentity("identity-1")
 	if len(list) != 1 || list[0].ID != "cred-1" {
 		t.Fatalf("ListCredentialsByIdentity(identity-1) = %#v, want only cred-1", list)

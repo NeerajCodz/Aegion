@@ -382,7 +382,7 @@ func (s *PostgresStore) ResolveIdentity(ctx context.Context, provider Provider, 
 }
 
 func (s *PostgresStore) lookupOrCreateIdentity(ctx context.Context, tx pgx.Tx, provider Provider, profile SocialProfile) (uuid.UUID, bool, error) {
-	if email := strings.ToLower(strings.TrimSpace(profile.Email)); email != "" {
+	if email := strings.ToLower(strings.TrimSpace(profile.Email)); email != "" && s.shouldTrustEmail(provider, profile) {
 		var identityID uuid.UUID
 		err := tx.QueryRow(ctx, `
 			SELECT i.id
@@ -396,10 +396,8 @@ func (s *PostgresStore) lookupOrCreateIdentity(ctx context.Context, tx pgx.Tx, p
 		`, email).Scan(&identityID)
 		switch {
 		case err == nil:
-			if s.shouldTrustEmail(provider, profile) {
-				if err := s.upsertPrimaryEmail(ctx, tx, identityID, email, true); err != nil {
-					return uuid.Nil, false, err
-				}
+			if err := s.upsertPrimaryEmail(ctx, tx, identityID, email, true); err != nil {
+				return uuid.Nil, false, err
 			}
 			return identityID, false, nil
 		case err != nil && !errors.Is(err, pgx.ErrNoRows):

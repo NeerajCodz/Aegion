@@ -77,18 +77,6 @@ func (s *Server) Check(ctx context.Context, req *policypb.CheckRequest) (*policy
 		return nil, fmt.Errorf("unsupported model %q", req.GetModel())
 	}
 
-	if model == "rbac" {
-		return s.evaluateRBAC(ctx, req)
-	}
-
-	if model == "abac" {
-		rules, err := s.store.ListABACRules(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return s.evaluateABACOnly(ctx, req, rules)
-	}
-
 	if model == "rebac" {
 		return s.evaluateReBAC(ctx, req)
 	}
@@ -97,6 +85,11 @@ func (s *Server) Check(ctx context.Context, req *policypb.CheckRequest) (*policy
 	if err != nil {
 		return nil, err
 	}
+
+	if model == "abac" {
+		return s.evaluateABACOnly(ctx, req, rules)
+	}
+
 
 	if denied, ruleName, err := s.firstMatchedABACRule(ctx, req, rules, "deny"); err != nil {
 		return nil, err
@@ -107,6 +100,10 @@ func (s *Server) Check(ctx context.Context, req *policypb.CheckRequest) (*policy
 			DenyReason: "abac_deny_rule_matched",
 			EvalPath:   []string{"abac:deny:" + ruleName},
 		}, nil
+	}
+
+	if model == "rbac" {
+		return s.evaluateRBAC(ctx, req)
 	}
 
 	rbacRes, err := s.evaluateRBAC(ctx, req)
@@ -329,8 +326,6 @@ func buildABACActivation(ctx context.Context, req *policypb.CheckRequest) (map[s
 		}
 	}
 
-	rolesRaw, _ := contextExtra["subject_roles"].(string)
-	subjectRoles := splitCSV(rolesRaw)
 	clientIP := ""
 	tenantID := ""
 	if requestContext != nil {
@@ -344,7 +339,7 @@ func buildABACActivation(ctx context.Context, req *policypb.CheckRequest) (map[s
 	activation := map[string]any{
 		"subject": map[string]any{
 			"id":    normalizeSubject(req.GetSubject()),
-			"roles": subjectRoles,
+			"roles": []string{},
 		},
 		"resource": map[string]any{
 			"id":   strings.TrimSpace(req.GetResource()),

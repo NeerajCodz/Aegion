@@ -248,7 +248,7 @@ type SCIMToken struct {
 	ID          uuid.UUID  `db:"id"`
 	Name        string     `db:"name"`
 	Description string     `db:"description"`
-	TokenHash   string     `db:"token_hash"`
+	TokenHash   string     `db:"token_hash" json:"-"`
 	Prefix      string     `db:"prefix"`
 	Permissions []string   `db:"permissions"` // e.g., ["users:read", "users:write", "groups:read"]
 	CreatedBy   uuid.UUID  `db:"created_by"`

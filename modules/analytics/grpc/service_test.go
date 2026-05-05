@@ -304,6 +304,26 @@ func TestExecuteQuery_RejectsMutatingSQL(t *testing.T) {
 	assert.Nil(t, resp)
 }
 
+func TestExecuteQuery_RejectsStackedStatements(t *testing.T) {
+	logger := zerolog.New(nil)
+	store := NewMockStore()
+	syncManager := &MockSyncManager{}
+	config := Config{}
+
+	store.queryRows["SELECT sql FROM queries WHERE id = 'query-stacked' LIMIT 1"] = []map[string]interface{}{
+		{"sql": "SELECT 1;DROP TABLE analytics_events"},
+	}
+
+	service := NewService(logger, store, syncManager, config)
+
+	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
+		QueryId:  "query-stacked",
+		PageSize: 0,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, resp)
+}
+
 // TestStreamEvents tests server streaming
 func TestStreamEvents(t *testing.T) {
 	lgr := logger.TestLoggerDebug()

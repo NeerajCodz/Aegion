@@ -1,6 +1,6 @@
 # Aegion - Identity and Access Platform
 
-[![CI](https://github.com/NeerajCodz/Aegion/actions/workflows/ci.yml/badge.svg)](https://github.com/NeerajCodz/Aegion/actions/workflows/ci.yml)
+[![CI](https://github.com/Astraive/Aegion/actions/workflows/ci.yml/badge.svg)](https://github.com/Astraive/Aegion/actions/workflows/ci.yml)
 
 > One container. One port. One config file. Complete auth.
 
@@ -10,7 +10,7 @@ Aegion is a self-hosted identity and access platform. It replaces Auth0, the Ory
 
 ```bash
 # Clone and start
-git clone https://github.com/NeerajCodz/Aegion
+git clone https://github.com/Astraive/Aegion
 cd Aegion
 docker-compose up -d
 

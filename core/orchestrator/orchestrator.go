@@ -130,6 +130,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		registry:       cfg.Registry,
 		configLoader:   configLoader,
 		tokenGenerator: tokenGen,
+		logger:         logger.New(logger.Config{}),
 		modules:        make(map[string]*moduleInstance),
 	}
 

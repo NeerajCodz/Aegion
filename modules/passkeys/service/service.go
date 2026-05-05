@@ -35,7 +35,7 @@ type Config struct {
 type ChallengeStore interface {
 	SaveChallenge(challenge store.Challenge)
 	ConsumeChallenge(challengeID string) (store.Challenge, error)
-	UpsertCredential(credential store.Credential)
+	CreateCredential(credential store.Credential) error
 	GetCredential(credentialID string) (store.Credential, error)
 	ListCredentialsByIdentity(identityID string) []store.Credential
 	UpdateCredentialSignCount(credentialID string, signCount uint32) error
@@ -133,13 +133,15 @@ func (s *Service) FinishRegistration(req *RegistrationFinishRequest) error {
 	if challenge.Purpose != "registration" || challenge.IdentityID != req.IdentityID {
 		return ErrInvalidChallenge
 	}
-	s.store.UpsertCredential(store.Credential{
+	if err := s.store.CreateCredential(store.Credential{
 		ID:         req.CredentialID,
 		IdentityID: req.IdentityID,
 		PublicKey:  req.PublicKey,
 		SignCount:  0,
 		CreatedAt:  time.Now().UTC(),
-	})
+	}); err != nil {
+		return ErrInvalidCredential
+	}
 	return nil
 }
 
@@ -191,7 +193,7 @@ func (s *Service) FinishAuthentication(req *AuthenticationFinishRequest) error {
 	if credential.IdentityID != req.IdentityID {
 		return ErrInvalidCredential
 	}
-	if req.SignCount <= credential.SignCount {
+	if req.SignCount != credential.SignCount+1 {
 		return ErrSignCountReplay
 	}
 
