@@ -631,13 +631,14 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		return
 	}
 
-	var result *flowExecutionResult
-	if s.selfServiceAuthEnabled() {
-		result, err = s.executeFlowSubmission(r.Context(), w, r, flow, input)
-		if err != nil {
-			s.writeFlowExecutionError(w, err)
-			return
-		}
+	result, err := s.executeFlowSubmission(r.Context(), w, r, flow, input)
+	if err != nil {
+		s.writeFlowExecutionError(w, err)
+		return
+	}
+	if result == nil {
+		writeError(w, http.StatusBadRequest, "unsupported flow submission method", nil)
+		return
 	}
 
 	if result != nil && result.KeepFlowActive {
