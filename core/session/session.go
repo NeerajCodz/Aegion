@@ -308,6 +308,9 @@ func (m *Manager) Get(ctx context.Context, token string) (*Session, error) {
 	if m.now().After(session.ExpiresAt) {
 		return nil, ErrSessionExpired
 	}
+	if m.idleTimeout > 0 && m.now().After(session.UpdatedAt.Add(m.idleTimeout)) {
+		return nil, ErrSessionExpired
+	}
 
 	// Load auth methods
 	rows, err := m.queryRows(ctx, `
