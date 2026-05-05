@@ -308,6 +308,55 @@ func TestIntrospectToken(t *testing.T) {
 		assert.Equal(t, "openid profile", resp.Scope)
 	})
 
+
+	t.Run("public client cannot introspect", func(t *testing.T) {
+		mockStore := &mockTokenStore{
+			client: &store.Client{
+				ID:                      "public-client",
+				TokenEndpointAuthMethod: "none",
+			},
+			accessTokenByJTI: map[string]*store.AccessToken{
+				"at-jti-1": {
+					JTI:       "at-jti-1",
+					ClientID:  "public-client",
+					ExpiresAt: time.Now().UTC().Add(time.Minute),
+				},
+			},
+		}
+		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://issuer.example.com")
+
+		_, err := svc.IntrospectToken(ctx, &IntrospectionRequest{
+			Token:    "at-jti-1",
+			ClientID: "public-client",
+		})
+		assert.ErrorIs(t, err, ErrUnauthorizedClient)
+	})
+
+	t.Run("client cannot introspect another client token", func(t *testing.T) {
+		mockStore := &mockTokenStore{
+			client: &store.Client{
+				ID:                      "client-1",
+				TokenEndpointAuthMethod: "client_secret_post",
+				SecretHash:              ptrString(string(hash)),
+			},
+			accessTokenByJTI: map[string]*store.AccessToken{
+				"at-jti-1": {
+					JTI:       "at-jti-1",
+					ClientID:  "client-2",
+					ExpiresAt: time.Now().UTC().Add(time.Minute),
+				},
+			},
+		}
+		svc := NewTokenService(mockStore, &MockJWTSigner{}, "https://issuer.example.com")
+
+		_, err := svc.IntrospectToken(ctx, &IntrospectionRequest{
+			Token:        "at-jti-1",
+			ClientID:     "client-1",
+			ClientSecret: "secret",
+		})
+		assert.ErrorIs(t, err, ErrUnauthorizedClient)
+	})
+
 	t.Run("inactive token by signature fingerprint", func(t *testing.T) {
 		token := "signed.jwt.token"
 		mockStore := &mockTokenStore{
