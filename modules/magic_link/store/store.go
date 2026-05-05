@@ -202,13 +202,11 @@ func (s *Store) GetByToken(ctx context.Context, token string) (*Code, error) {
 		SELECT id, identity_id, recipient, type, COALESCE(code, ''), COALESCE(token, ''), used, used_at, expires_at, created_at
 		FROM ml_codes
 		WHERE used = FALSE
-		  AND (
-			(token_hash = $1 AND token_prefix = $2)
-			OR token = $3
-		  )
+		  AND token_hash = $1
+		  AND token_prefix = $2
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, tokenHash, tokenPrefix, token).Scan(
+	`, tokenHash, tokenPrefix).Scan(
 			&code.ID, &code.IdentityID, &code.Recipient, &code.Type,
 			&code.Code, &code.Token, &code.Used, &code.UsedAt,
 			&code.ExpiresAt, &code.CreatedAt,
