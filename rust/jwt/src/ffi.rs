@@ -142,6 +142,13 @@ pub unsafe extern "C" fn jwt_sign(
         }
     };
 
+    if claims.exp.is_none() {
+        return JwtResult {
+            error_code: -3,
+            result: ptr::null_mut(),
+        };
+    }
+
     let alg_str = match CStr::from_ptr(algorithm).to_str() {
         Ok(s) => s,
         Err(_) => {
