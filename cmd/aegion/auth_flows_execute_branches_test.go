@@ -87,7 +87,7 @@ func TestExecuteSettingsAndVerificationFlowBranches(t *testing.T) {
 	t.Run("settings", func(t *testing.T) {
 		s, _ := newFlowServer(t)
 		identityID := uuid.New()
-		flow, err := s.flowService.CreateSettingsFlow(context.Background(), "http://example.com/settings", identityID)
+		flow, err := s.flowService.CreateSettingsFlow(context.Background(), "http://example.com/settings", identityID, uuid.New())
 		if err != nil {
 			t.Fatalf("create settings flow: %v", err)
 		}

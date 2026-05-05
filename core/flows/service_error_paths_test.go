@@ -60,7 +60,7 @@ func TestService_CreateFlowErrorPaths(t *testing.T) {
 		if _, err := svc.CreateRecoveryFlow(ctx, "/recovery"); !errors.Is(err, wantErr) {
 			t.Fatalf("expected CreateRecoveryFlow to return store error, got %v", err)
 		}
-		if _, err := svc.CreateSettingsFlow(ctx, "/settings", identityID); !errors.Is(err, wantErr) {
+		if _, err := svc.CreateSettingsFlow(ctx, "/settings", identityID, uuid.New()); !errors.Is(err, wantErr) {
 			t.Fatalf("expected CreateSettingsFlow to return store error, got %v", err)
 		}
 		if _, err := svc.CreateVerificationFlow(ctx, "/verification", &identityID); !errors.Is(err, wantErr) {

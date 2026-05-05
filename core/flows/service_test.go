@@ -165,7 +165,7 @@ func TestService_CreateSettingsFlow(t *testing.T) {
 
 	ctx := context.Background()
 	identityID := uuid.New()
-	flow, err := service.CreateSettingsFlow(ctx, "/settings", identityID)
+	flow, err := service.CreateSettingsFlow(ctx, "/settings", identityID, uuid.New())
 
 	require.NoError(t, err)
 	assert.NotNil(t, flow)
@@ -542,7 +542,7 @@ func TestService_CreateFlowUI_Settings(t *testing.T) {
 
 	ctx := context.Background()
 	identityID := uuid.New()
-	flow, _ := service.CreateSettingsFlow(ctx, "/settings", identityID)
+	flow, _ := service.CreateSettingsFlow(ctx, "/settings", identityID, uuid.New())
 
 	assert.Equal(t, "/settings", flow.UI.Action)
 	assert.Equal(t, "POST", flow.UI.Method)
