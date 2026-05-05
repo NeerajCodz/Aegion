@@ -860,7 +860,9 @@ func TestTokenStoreBranches(t *testing.T) {
 
 	t.Run("MarkRefreshTokenUsed handles grace period and inactive tokens", func(t *testing.T) {
 		var capturedGrace any
+		var query string
 		s := NewWithDB(&mockDB{execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+			query = sql
 			capturedGrace = args[3]
 			return pgconn.NewCommandTag("UPDATE 1"), nil
 		}})
@@ -871,6 +873,9 @@ func TestTokenStoreBranches(t *testing.T) {
 		}
 		if capturedGrace == nil {
 			t.Fatal("expected grace period expiration to be passed as non-nil value")
+		}
+		if !strings.Contains(query, "used = false") {
+			t.Fatal("expected refresh token update query to enforce single-use token rotation")
 		}
 
 		s = NewWithDB(&mockDB{execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -1010,6 +1015,9 @@ func TestTokenStoreBranches(t *testing.T) {
 		}
 		if !errors.Is((&RefreshToken{Active: true, ExpiresAt: time.Now().UTC().Add(-time.Second)}).IsValid(), ErrTokenExpired) {
 			t.Fatal("expired refresh token should return ErrTokenExpired")
+		}
+		if !errors.Is((&RefreshToken{Active: true, Used: true, ExpiresAt: time.Now().UTC().Add(time.Minute)}).IsValid(), ErrTokenInactive) {
+			t.Fatal("used refresh token should return ErrTokenInactive")
 		}
 		if err := (&RefreshToken{Active: true, ExpiresAt: time.Now().UTC().Add(time.Minute)}).IsValid(); err != nil {
 			t.Fatalf("valid refresh token should not fail, got %v", err)
