@@ -739,14 +739,17 @@ func (c *Config) Validate() error {
 	if len(cookieSecrets) == 0 {
 		return fmt.Errorf("secrets.cookie is required")
 	}
+	c.Secrets.Cookie = cookieSecrets
 	cipherSecrets := normalizeSecrets(c.Secrets.Cipher)
 	if len(cipherSecrets) == 0 {
 		return fmt.Errorf("secrets.cipher is required")
 	}
+	c.Secrets.Cipher = cipherSecrets
 	internalSecrets := normalizeSecrets(c.Secrets.Internal)
 	if len(internalSecrets) == 0 {
 		return fmt.Errorf("secrets.internal is required")
 	}
+	c.Secrets.Internal = internalSecrets
 	for _, s := range cookieSecrets {
 		if len(s) < 32 {
 			return fmt.Errorf("cookie secret must be at least 32 characters")
