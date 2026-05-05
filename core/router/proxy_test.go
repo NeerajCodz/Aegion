@@ -65,7 +65,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
-	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrModuleUnavailable) {
+	if _, err := proxy.getModuleEndpoint(context.Background(), ""); !errors.Is(err, ErrModuleUnavailable) {
 		t.Fatalf("expected ErrModuleUnavailable for missing module, got %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		HealthURL: "http://127.0.0.1:18081/health",
 	})
 
-	endpoint, err := proxy.getModuleEndpoint(context.Background())
+	endpoint, err := proxy.getModuleEndpoint(context.Background(), "")
 	if err != nil {
 		t.Fatalf("getModuleEndpoint returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 	if err := reg.UpdateStatus("password", registry.StatusUnhealthy); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
-	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrModuleUnavailable) {
+	if _, err := proxy.getModuleEndpoint(context.Background(), ""); !errors.Is(err, ErrModuleUnavailable) {
 		t.Fatalf("expected ErrModuleUnavailable for unhealthy module, got %v", err)
 	}
 
@@ -108,8 +108,33 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		},
 		HealthURL: "http://127.0.0.1:18081/health",
 	})
-	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrNoHealthyEndpoint) {
+	if _, err := proxy.getModuleEndpoint(context.Background(), ""); !errors.Is(err, ErrNoHealthyEndpoint) {
 		t.Fatalf("expected ErrNoHealthyEndpoint, got %v", err)
+	}
+}
+
+func TestModuleProxyRejectsSelfProxyEndpoint(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer reg.Stop()
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "admin",
+		Name:    "admin",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: "http://core.local:8080"},
+		},
+		HealthURL: "http://core.local:8080/health",
+	})
+
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry: reg,
+		ModuleID: "admin",
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
+	})
+
+	if _, err := proxy.getModuleEndpoint(context.Background(), "core.local:8080"); err == nil {
+		t.Fatal("expected self-proxy endpoint to be rejected")
 	}
 }
 
