@@ -17,22 +17,22 @@ import (
 // AuthInterceptor verifies internal service identity via headers.
 func AuthInterceptor(authFunc func(context.Context) error) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		// Check for service-to-service auth headers
+		// Check for internal auth token header
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
-			return nil, status.Error(codes.Unauthenticated, "missing service identity")
+			return nil, status.Error(codes.Unauthenticated, "missing internal auth token")
 		}
-		// Check for internal auth token or service ID
-		tokens := md.Get("x-service-id")
+		tokens := md.Get("x-aegion-internal-token")
 		if len(tokens) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "missing service identity")
+			return nil, status.Error(codes.Unauthenticated, "missing internal auth token")
 		}
 
-		// Call auth verifier if provided
-		if authFunc != nil {
-			if err := authFunc(ctx); err != nil {
-				return nil, status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
-			}
+		if authFunc == nil {
+			return nil, status.Error(codes.Unauthenticated, "auth verifier not configured")
+		}
+
+		if err := authFunc(ctx); err != nil {
+			return nil, status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
 		}
 
 		return handler(ctx, req)
@@ -46,17 +46,18 @@ func StreamAuthInterceptor(authFunc func(context.Context) error) grpc.StreamServ
 
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
-			return status.Error(codes.Unauthenticated, "missing service identity")
+			return status.Error(codes.Unauthenticated, "missing internal auth token")
 		}
-		tokens := md.Get("x-service-id")
+		tokens := md.Get("x-aegion-internal-token")
 		if len(tokens) == 0 {
-			return status.Error(codes.Unauthenticated, "missing service identity")
+			return status.Error(codes.Unauthenticated, "missing internal auth token")
+		}
+		if authFunc == nil {
+			return status.Error(codes.Unauthenticated, "auth verifier not configured")
 		}
 
-		if authFunc != nil {
-			if err := authFunc(ctx); err != nil {
-				return status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
-			}
+		if err := authFunc(ctx); err != nil {
+			return status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
 		}
 
 		return handler(srv, ss)
