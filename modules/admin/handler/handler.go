@@ -145,7 +145,7 @@ func New(svc Service, cfgOverride ...HandlerConfig) *Handler {
 	if cfg.APIKeyPrefix == "" {
 		cfg.APIKeyPrefix = "aegion_"
 	}
-	if cfg.APIKeyPrefixLen == 0 {
+	if cfg.APIKeyPrefixLen <= 0 {
 		cfg.APIKeyPrefixLen = 12
 	}
 	if cfg.APIKeyEntropyBytes == 0 {

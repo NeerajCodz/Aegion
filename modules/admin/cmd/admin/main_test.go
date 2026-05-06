@@ -393,6 +393,31 @@ log:
 	}
 }
 
+
+func TestLoadConfig_InvalidAPIKeyLookupPrefixLenDefaults(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "aegion.yaml")
+
+	configYAML := strings.TrimSpace(`
+admin:
+  enabled: true
+  api_key_lookup_prefix_len: -5
+`)
+
+	if err := os.WriteFile(cfgPath, []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("loadConfig failed: %v", err)
+	}
+
+	if cfg.Admin.APIKeyPrefixLen != 12 {
+		t.Fatalf("expected invalid api key prefix len to default to 12, got %d", cfg.Admin.APIKeyPrefixLen)
+	}
+}
+
 func TestSetupLogger(t *testing.T) {
 	prevPretty := os.Getenv("AEGION_LOG_PRETTY")
 	defer func() { _ = os.Setenv("AEGION_LOG_PRETTY", prevPretty) }()
