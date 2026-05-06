@@ -213,6 +213,7 @@ function Scan-ContainerBestPractices {
         $runtimeStart = $fromIndices[-1]
         $runtimeFrom = $lines[$runtimeStart]
         $runtimeContent = ($lines[$runtimeStart..($lines.Count - 1)] -join "`n")
+        $dockerfileContent = ($lines -join "`n")
 
         $issues = @()
 
@@ -230,7 +231,7 @@ function Scan-ContainerBestPractices {
             $issues += "Exposes SSH port (security risk)"
         }
         
-        if ($runtimeContent -match "(?m)^\s*ADD\s+https?://") {
+        if ($dockerfileContent -match "(?m)^\s*ADD\s+https?://") {
             $issues += "Uses ADD with URL (prefer curl/wget in RUN)"
         }
         
