@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -211,12 +212,21 @@ func (hc *HealthChecker) performCheck() {
 	}
 
 	if hc.config.ExpectedBody != "" {
-		body, err := io.ReadAll(resp.Body)
+		expected := []byte(hc.config.ExpectedBody)
+		maxBodySize := int64(len(expected) + 1)
+
+		if resp.ContentLength > maxBodySize {
+			hc.recordFailure(fmt.Errorf("unexpected health response body"))
+			return
+		}
+
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize))
 		if err != nil {
 			hc.recordFailure(fmt.Errorf("read health response body: %w", err))
 			return
 		}
-		if string(body) != hc.config.ExpectedBody {
+
+		if int64(len(body)) > int64(len(expected)) || !bytes.Equal(body, expected) {
 			hc.recordFailure(fmt.Errorf("unexpected health response body"))
 			return
 		}
