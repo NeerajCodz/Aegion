@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/jwt"
 	"github.com/aegion/aegion/internal/platform/logger"
 )
 
@@ -205,7 +206,7 @@ func validateToken(token string) (string, error) {
 		return "", fmt.Errorf("invalid jwt verification key: %w", err)
 	}
 
-	verified, err := platformjwt.Verify(token, publicKey, "ES256", platformjwt.VerifyOptions{})
+	verified, err := jwt.Verify(token, publicKey, "ES256", jwt.VerifyOptions{})
 	if err != nil {
 		return "", fmt.Errorf("token verification failed: %w", err)
 	}
