@@ -2,8 +2,13 @@ package analytics
 
 import (
 	"errors"
+	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
+
+var sqlIdentifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // StorageType defines the type of storage backend.
 type StorageType string
@@ -475,6 +480,18 @@ func (c *Config) Validate() error {
 		}
 	default:
 		return errors.New("invalid storage type")
+	}
+
+	if c.Sync.Batch.Enabled {
+		for i, table := range c.Sync.Batch.Tables {
+			trimmed := strings.TrimSpace(table)
+			if trimmed == "" {
+				return fmt.Errorf("batch sync table at index %d must not be empty", i)
+			}
+			if !sqlIdentifierPattern.MatchString(trimmed) {
+				return fmt.Errorf("batch sync table %q is not a valid SQL identifier", table)
+			}
+		}
 	}
 
 	return nil
