@@ -508,12 +508,20 @@ func (c *Courier) renderSMSPayload(to, body string) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]string{
-		"To":   to,
-		"Body": body,
+		"To":   escapeJSONStringForTemplate(to),
+		"Body": escapeJSONStringForTemplate(body),
 	}); err != nil {
 		return nil, fmt.Errorf("invalid sms payload rendering: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func escapeJSONStringForTemplate(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) < 2 {
+		return value
+	}
+	return string(encoded[1 : len(encoded)-1])
 }
 
 // renderTemplate renders a message template.
