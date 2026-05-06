@@ -255,6 +255,7 @@ function Scan-Configuration {
     $configTargets = @(
         "configs/aegion.production.yaml",
         "configs/aegion.staging.yaml",
+        "deploy/docker-compose.yml",
         "deploy/docker-compose.prod.yml"
     )
     
