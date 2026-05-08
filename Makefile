@@ -23,7 +23,8 @@ build-images:
 # Build a single module image
 build-module:
 	@if [ -z "$(MODULE)" ]; then echo "Usage: make build-module MODULE=password"; exit 1; fi
-	./scripts/build-module.sh $(MODULE)
+	@if ! printf %s "$(MODULE)" | grep -Eq "^[A-Za-z0-9_-]+$$"; then echo "Invalid MODULE: use only letters, numbers, _, -"; exit 1; fi
+	./scripts/build-module.sh "$(MODULE)"
 
 # ============================================================================
 # DEVELOPMENT
@@ -129,7 +130,8 @@ migrate:
 # Create a new migration
 migrate-create:
 	@if [ -z "$(NAME)" ]; then echo "Usage: make migrate-create NAME=create_users"; exit 1; fi
-	migrate create -ext sql -dir core/migrations -seq $(NAME)
+	@if ! printf %s "$(NAME)" | grep -Eq "^[A-Za-z0-9_-]+$$"; then echo "Invalid NAME: use only letters, numbers, _, -"; exit 1; fi
+	migrate create -ext sql -dir core/migrations -seq "$(NAME)"
 
 # Rollback last migration
 migrate-down:
