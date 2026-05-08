@@ -383,7 +383,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		passkeyAuth = passkeysservice.New(passkeyStore.(interface {
 			SaveChallenge(challenge passkeysstore.Challenge)
 			ConsumeChallenge(challengeID string) (passkeysstore.Challenge, error)
-			UpsertCredential(credential passkeysstore.Credential)
+			CreateCredential(credential passkeysstore.Credential) error
 			GetCredential(credentialID string) (passkeysstore.Credential, error)
 			ListCredentialsByIdentity(identityID string) []passkeysstore.Credential
 			UpdateCredentialSignCount(credentialID string, signCount uint32) error
