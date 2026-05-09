@@ -77,6 +77,11 @@ type eventRows interface {
 
 var errDatabaseUnavailable = errors.New("event bus database is not configured")
 
+const (
+	defaultBatchSize = 100
+	maxBatchSize     = 1000
+)
+
 // Config holds event bus configuration.
 type Config struct {
 	DB         *pgxpool.Pool
@@ -93,8 +98,10 @@ func New(cfg Config) *Bus {
 	if cfg.RetryDelay == 0 {
 		cfg.RetryDelay = time.Second
 	}
-	if cfg.BatchSize == 0 {
-		cfg.BatchSize = 100
+	if cfg.BatchSize <= 0 {
+		cfg.BatchSize = defaultBatchSize
+	} else if cfg.BatchSize > maxBatchSize {
+		cfg.BatchSize = maxBatchSize
 	}
 
 	b := &Bus{
