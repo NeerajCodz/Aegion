@@ -143,6 +143,29 @@ func TestParseFlagsWithArgs(t *testing.T) {
 	if _, err := parseFlagsWithArgs([]string{"-unknown"}); err == nil {
 		t.Fatalf("expected unknown flag error")
 	}
+
+	t.Run("rejects non-positive shutdown timeout", func(t *testing.T) {
+		tests := [][]string{
+			{"-shutdown-timeout=0s"},
+			{"-shutdown-timeout=-1s"},
+		}
+
+		for _, args := range tests {
+			if _, err := parseFlagsWithArgs(args); err == nil {
+				t.Fatalf("expected error for args %v", args)
+			}
+		}
+	})
+
+	t.Run("accepts positive shutdown timeout", func(t *testing.T) {
+		f, err := parseFlagsWithArgs([]string{"-shutdown-timeout=45s"})
+		if err != nil {
+			t.Fatalf("parseFlagsWithArgs returned error: %v", err)
+		}
+		if f.shutdownTimeout != 45*time.Second {
+			t.Fatalf("expected shutdown timeout 45s, got %s", f.shutdownTimeout)
+		}
+	})
 }
 
 func TestRunLegacySubcommands(t *testing.T) {
