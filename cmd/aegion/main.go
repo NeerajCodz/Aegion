@@ -254,16 +254,15 @@ func run(args []string, deps mainDeps) int {
 	if deps.newObservability != nil {
 		telemetry, err = deps.newObservability(ctx, cfg)
 		if err != nil {
-			_, _ = fmt.Fprintf(deps.stderr, "Failed to initialize observability: %v\n", err)
-			return 1
+			_, _ = fmt.Fprintf(deps.stderr, "Warning: observability disabled: %v\n", err)
+		} else {
+			defer func() {
+				if telemetry != nil {
+					_ = telemetry.Shutdown(context.Background())
+				}
+			}()
 		}
-		defer func() {
-			if telemetry != nil {
-				_ = telemetry.Shutdown(context.Background())
-			}
-		}()
 	}
-
 	maxOpenConns, err := safeInt32(cfg.Database.MaxOpenConns, "database.max_open_connections")
 	if err != nil {
 		_, _ = fmt.Fprintf(deps.stderr, "Invalid configuration: %v\n", err)
