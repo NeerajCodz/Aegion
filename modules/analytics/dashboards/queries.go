@@ -3,9 +3,12 @@ package dashboards
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+var identifierSegmentPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // QueryBuilder helps construct SQL queries with parameter substitution.
 type QueryBuilder struct {
@@ -463,7 +466,12 @@ func applyFilterExpressions(sql string, filters map[string]interface{}) string {
 
 	clauses := make([]string, 0, len(keys))
 	for _, key := range keys {
-		clauses = append(clauses, fmt.Sprintf("%s = %s", sanitizeIdentifierExpression(key), formatSQLValue(filters[key])))
+		if identifier := sanitizeIdentifierExpression(key); identifier != "" {
+			clauses = append(clauses, fmt.Sprintf("%s = %s", identifier, formatSQLValue(filters[key])))
+		}
+	}
+	if len(clauses) == 0 {
+		return sql
 	}
 
 	return wrapWithWhere(sql, strings.Join(clauses, " AND "))
@@ -513,13 +521,20 @@ func sortedKeys(values map[string]interface{}) []string {
 }
 
 func sanitizeIdentifierExpression(value string) string {
-	replacer := strings.NewReplacer(
-		";", "",
-		"'", "",
-		"\"", "",
-		"--", "",
-		"/*", "",
-		"*/", "",
-	)
-	return replacer.Replace(strings.TrimSpace(value))
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	segments := strings.Split(trimmed, ".")
+	quoted := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		if !identifierSegmentPattern.MatchString(segment) {
+			return ""
+		}
+		quoted = append(quoted, fmt.Sprintf(`"%s"`, segment))
+	}
+
+	return strings.Join(quoted, ".")
 }
