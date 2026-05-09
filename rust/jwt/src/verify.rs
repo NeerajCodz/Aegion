@@ -133,10 +133,11 @@ fn validate_claims(claims: &Claims, options: &VerifyOptions) -> Result<(), JwtEr
 
     // Check expiration
     if !options.ignore_exp {
-        if let Some(exp) = claims.exp {
-            if now > exp.saturating_add(options.leeway) {
-                return Err(JwtError::TokenExpired);
-            }
+        let exp = claims
+            .exp
+            .ok_or_else(|| JwtError::VerificationFailed("missing required exp claim".into()))?;
+        if now > exp.saturating_add(options.leeway) {
+            return Err(JwtError::TokenExpired);
         }
     }
 
@@ -265,6 +266,28 @@ mod tests {
         assert!(matches!(result, Err(JwtError::TokenExpired)));
 
         // With ignore_exp
+        let options = VerifyOptions {
+            ignore_exp: true,
+            ..Default::default()
+        };
+        assert!(verify_jwt(&token, "ES256", &keypair.public_key_der, &options).is_ok());
+    }
+
+    #[test]
+    fn test_token_without_exp_is_rejected_by_default() {
+        let keypair = generate_ec_keypair("test").unwrap();
+
+        let claims = Claims {
+            exp: None,
+            ..Claims::default()
+        };
+
+        let token = sign_jwt(&claims, "ES256", &keypair.private_key_der, None).unwrap();
+
+        let options = VerifyOptions::default();
+        let result = verify_jwt(&token, "ES256", &keypair.public_key_der, &options);
+        assert!(matches!(result, Err(JwtError::VerificationFailed(_))));
+
         let options = VerifyOptions {
             ignore_exp: true,
             ..Default::default()

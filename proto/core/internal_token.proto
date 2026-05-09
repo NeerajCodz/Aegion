@@ -56,6 +56,18 @@ message GetCurrentRequest {
   
   // Instance ID from registration
   string instance_id = 2;
+
+  // Proof of bootstrap identity; core must reject requests without valid proof.
+  oneof bootstrap_proof {
+    // One-time secret injected by core during provisioning.
+    string bootstrap_secret = 3;
+
+    // Signed challenge produced from a per-instance private key.
+    bytes signed_challenge = 4;
+  }
+
+  // Caller certificate identity presented over mTLS (for binding checks).
+  string mtls_identity = 5;
 }
 
 message GetCurrentResponse {
@@ -72,6 +84,18 @@ message SubscribeRotationRequest {
   
   // Instance ID
   string instance_id = 2;
+
+  // Proof of bootstrap identity; core must reject requests without valid proof.
+  oneof bootstrap_proof {
+    // One-time secret injected by core during provisioning.
+    string bootstrap_secret = 3;
+
+    // Signed challenge produced from a per-instance private key.
+    bytes signed_challenge = 4;
+  }
+
+  // Caller certificate identity presented over mTLS (for binding checks).
+  string mtls_identity = 5;
 }
 
 message TokenRotationEvent {

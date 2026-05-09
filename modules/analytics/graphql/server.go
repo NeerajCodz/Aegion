@@ -361,6 +361,28 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+
+func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token, hasToken, err := extractAuthToken(r)
+		if err != nil {
+			s.logger.WarnContext(r.Context(), "invalid authorization header format", "error", err)
+			http.Error(w, "invalid authorization header", http.StatusUnauthorized)
+			return
+		}
+		if !hasToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if _, err := validateGraphQLToken(token); err != nil {
+			s.logger.WarnContext(r.Context(), "invalid graphql auth token", "error", err)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // RegisterRoutes registers GraphQL routes on the given HTTP router.
 func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 	if strings.TrimSpace(basePath) == "" {
@@ -372,24 +394,24 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 
 	switch router := mux.(type) {
 	case chi.Router:
-		router.MethodFunc(http.MethodPost, basePath, s.HandleQuery)
-		router.MethodFunc(http.MethodGet, basePath, s.HandlePlayground)
-		router.MethodFunc(http.MethodGet, playgroundPath, s.HandlePlayground)
-		router.MethodFunc(http.MethodGet, introspectionPath, s.HandleIntrospection)
+		router.MethodFunc(http.MethodPost, basePath, s.requireAuth(s.HandleQuery))
+		router.MethodFunc(http.MethodGet, basePath, s.requireAuth(s.HandlePlayground))
+		router.MethodFunc(http.MethodGet, playgroundPath, s.requireAuth(s.HandlePlayground))
+		router.MethodFunc(http.MethodGet, introspectionPath, s.requireAuth(s.HandleIntrospection))
 		router.MethodFunc(http.MethodGet, healthPath, s.HandleHealth)
 	case *http.ServeMux:
 		router.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodPost:
-				s.HandleQuery(w, r)
+				s.requireAuth(s.HandleQuery)(w, r)
 			case http.MethodGet:
-				s.HandlePlayground(w, r)
+				s.requireAuth(s.HandlePlayground)(w, r)
 			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
 		})
-		router.HandleFunc(playgroundPath, s.HandlePlayground)
-		router.HandleFunc(introspectionPath, s.HandleIntrospection)
+		router.HandleFunc(playgroundPath, s.requireAuth(s.HandlePlayground))
+		router.HandleFunc(introspectionPath, s.requireAuth(s.HandleIntrospection))
 		router.HandleFunc(healthPath, s.HandleHealth)
 	case interface {
 		HandleFunc(string, http.HandlerFunc)
@@ -397,15 +419,15 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 		router.HandleFunc(basePath, func(w http.ResponseWriter, r *http.Request) {
 			switch r.Method {
 			case http.MethodPost:
-				s.HandleQuery(w, r)
+				s.requireAuth(s.HandleQuery)(w, r)
 			case http.MethodGet:
-				s.HandlePlayground(w, r)
+				s.requireAuth(s.HandlePlayground)(w, r)
 			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
 		})
-		router.HandleFunc(playgroundPath, s.HandlePlayground)
-		router.HandleFunc(introspectionPath, s.HandleIntrospection)
+		router.HandleFunc(playgroundPath, s.requireAuth(s.HandlePlayground))
+		router.HandleFunc(introspectionPath, s.requireAuth(s.HandleIntrospection))
 		router.HandleFunc(healthPath, s.HandleHealth)
 	default:
 		return fmt.Errorf("unsupported router type %T", mux)

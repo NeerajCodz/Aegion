@@ -47,6 +47,9 @@ message RegisterRequest {
   
   // Events this module subscribes to
   repeated string event_subscriptions = 9;
+
+  // Bootstrap credential issued out-of-band by core; required for registration.
+  string bootstrap_secret = 10;
 }
 
 message RegisterResponse {

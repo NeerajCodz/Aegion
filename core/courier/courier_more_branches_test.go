@@ -2,6 +2,7 @@ package courier
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -91,6 +92,22 @@ func TestRenderSMSPayloadAdditionalBranches(t *testing.T) {
 	c.sms.BodyTemplate = `{"message":"{{.Missing}}"}`
 	if _, err := c.renderSMSPayload("+123", "hello"); err == nil || !strings.Contains(err.Error(), "invalid sms payload rendering") {
 		t.Fatalf("renderSMSPayload(execute error) = %v", err)
+	}
+
+	c.sms.BodyTemplate = `{"to":"{{.To}}","body":"{{.Body}}"}`
+	payload, err := c.renderSMSPayload(`+15551234567","body":"ignored","to":"+19998887777`, `code "\ 123`)
+	if err != nil {
+		t.Fatalf("renderSMSPayload(escaped values) error = %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("renderSMSPayload output invalid json: %v payload=%s", err, string(payload))
+	}
+	if got["to"] != `+15551234567","body":"ignored","to":"+19998887777` {
+		t.Fatalf("unexpected to field: %q", got["to"])
+	}
+	if got["body"] != `code "\ 123` {
+		t.Fatalf("unexpected body field: %q", got["body"])
 	}
 }
 

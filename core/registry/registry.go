@@ -3,6 +3,9 @@ package registry
 import (
 	"errors"
 	"log/slog"
+	"net"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -94,6 +97,10 @@ func (r *Registry) Register(req RegistrationRequest) (*RegistrationResponse, err
 		return nil, ErrInvalidModule
 	}
 
+	if req.HealthURL != "" && !isValidHealthURL(req.HealthURL, req.Endpoints) {
+		return nil, ErrInvalidModule
+	}
+
 	if _, exists := r.modules[req.ID]; exists {
 		return nil, ErrModuleAlreadyExists
 	}
@@ -127,6 +134,50 @@ func (r *Registry) Register(req RegistrationRequest) (*RegistrationResponse, err
 		Message:      "module registered successfully",
 	}, nil
 }
+
+func isValidHealthURL(healthURL string, endpoints []Endpoint) bool {
+	healthParsed, err := url.Parse(healthURL)
+	if err != nil || healthParsed.Host == "" {
+		return false
+	}
+	if !strings.EqualFold(healthParsed.Scheme, "http") && !strings.EqualFold(healthParsed.Scheme, "https") {
+		return false
+	}
+
+	healthHost := strings.ToLower(healthParsed.Hostname())
+	for _, endpoint := range endpoints {
+		epParsed, err := url.Parse(endpoint.URL)
+		if err != nil || epParsed.Host == "" {
+			continue
+		}
+		if !strings.EqualFold(epParsed.Scheme, "http") && !strings.EqualFold(epParsed.Scheme, "https") {
+			continue
+		}
+		if hostsMatch(epParsed.Hostname(), healthHost) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hostsMatch(endpointHost, healthHost string) bool {
+	endpointHost = strings.ToLower(endpointHost)
+	healthHost = strings.ToLower(healthHost)
+	if endpointHost == healthHost {
+		return true
+	}
+
+	endpointIP := net.ParseIP(endpointHost)
+	healthIP := net.ParseIP(healthHost)
+	if endpointIP != nil && healthIP != nil {
+		return endpointIP.Equal(healthIP)
+	}
+
+	return (endpointHost == "localhost" && healthIP != nil && healthIP.IsLoopback()) ||
+		(healthHost == "localhost" && endpointIP != nil && endpointIP.IsLoopback())
+}
+
 
 // Deregister removes a module from the registry.
 func (r *Registry) Deregister(moduleID string) (*DeregistrationResponse, error) {

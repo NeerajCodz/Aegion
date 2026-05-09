@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -252,7 +253,7 @@ func (b *BatchSync) syncTable(ctx context.Context, table string) (int, error) {
 	}
 
 	// Query data from PostgreSQL starting from last synced ID
-	query := fmt.Sprintf(`SELECT * FROM %s WHERE id > $1 ORDER BY id LIMIT $2`, table)
+	query := fmt.Sprintf(`SELECT * FROM %s WHERE id > $1 ORDER BY id LIMIT $2`, quoteSQLIdentifier(table))
 	rows, err := b.db.Query(ctx, query, pos.LastSyncedID, b.batchSize)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query table %s: %w", table, err)
@@ -264,7 +265,7 @@ func (b *BatchSync) syncTable(ctx context.Context, table string) (int, error) {
 
 	// Insert into DuckDB
 	for _, row := range rows {
-		insertSQL := fmt.Sprintf(`INSERT INTO %s_sync VALUES ($1, $2, $3, $4)`, table)
+		insertSQL := fmt.Sprintf(`INSERT INTO %s VALUES ($1, $2, $3, $4)`, quoteSQLIdentifier(table+"_sync"))
 		if err := b.duckdb.Exec(ctx, insertSQL,
 			row["id"],
 			row["data"],
@@ -286,6 +287,10 @@ func (b *BatchSync) syncTable(ctx context.Context, table string) (int, error) {
 	}
 
 	return len(rows), nil
+}
+
+func quoteSQLIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
 // getOrCreatePosition retrieves or creates a sync position for a table.

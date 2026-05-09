@@ -664,7 +664,7 @@ func getEnv(key, fallback string) string {
 }
 
 func isProductionEnvironment() bool {
-	for _, key := range []string{"AEGION_ENV", "APP_ENV", "ENV"} {
+	for _, key := range []string{"AEGION_ENV", "AEGION_ENVIRONMENT", "APP_ENV", "ENV"} {
 		value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
 		switch value {
 		case "prod", "production":

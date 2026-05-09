@@ -109,6 +109,18 @@ func TestSecurityHandlerAdditionalBranches(t *testing.T) {
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("query row error expected %d got %d", http.StatusInternalServerError, rec.Code)
 		}
+
+		h.db = &fakeDB{queryRowFn: func(context.Context, string, ...any) pgx.Row {
+			return fakeRow{err: pgx.ErrNoRows}
+		}}
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/admin/security/ip-bans", strings.NewReader(`{"cidr":"10.0.0.1/32","reason":"abuse"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, operator))
+		h.UpsertIPBan(rec, req)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("duplicate cidr expected %d got %d", http.StatusConflict, rec.Code)
+		}
 	})
 
 	t.Run("delete ip ban error branches", func(t *testing.T) {

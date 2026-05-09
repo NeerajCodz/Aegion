@@ -80,7 +80,7 @@ func createSessionTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 		// Update session expiry
 		newExpiry := time.Now().Add(24 * time.Hour)
 		_, err := suite.Pool.Exec(context.Background(),
-			`UPDATE sessions SET expires_at = $1, updated_at = NOW() WHERE id = $2`,
+			`UPDATE sessions SET expires_at = $1 WHERE id = $2`,
 			newExpiry, sessionID)
 
 		if err != nil {
@@ -101,7 +101,7 @@ func createSessionTestServer(t *testing.T, suite *TestSuite) *httptest.Server {
 		sessionID := chi.URLParam(r, "id")
 
 		_, err := suite.Pool.Exec(context.Background(),
-			`UPDATE sessions SET active = false, updated_at = NOW() WHERE id = $1`,
+			`UPDATE sessions SET active = false WHERE id = $1`,
 			sessionID)
 
 		if err != nil {

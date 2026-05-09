@@ -39,8 +39,8 @@ func NewManager(
 			KeepaliveTime:        keepaliveTime,
 			KeepaliveTimeout:     keepaliveTimeout,
 			Logger:               logger,
-			UnaryInterceptor:     nil,
-			StreamInterceptor:    nil,
+			UnaryInterceptor:     BuildInterceptorChain(logger, false, true, false),
+			StreamInterceptor:    BuildStreamInterceptorChain(logger, false, true, false),
 		},
 	}
 }
@@ -142,13 +142,24 @@ func BuildInterceptorChain(
 func BuildStreamInterceptorChain(
 	logger *slog.Logger,
 	enableLogging bool,
+	enableAuth bool,
 	enableTracing bool,
 ) grpc.StreamServerInterceptor {
-	if !enableLogging {
+	var interceptors []grpc.StreamServerInterceptor
+
+	if enableAuth {
+		interceptors = append(interceptors, StreamAuthInterceptor(nil))
+	}
+
+	if enableLogging {
+		interceptors = append(interceptors, StreamLoggingInterceptor(logger))
+	}
+
+	if len(interceptors) == 0 {
 		return nil
 	}
 
-	return StreamLoggingInterceptor(logger)
+	return ChainStreamInterceptors(interceptors...)
 }
 
 // Register registers the gRPC analytics service with a gRPC server.

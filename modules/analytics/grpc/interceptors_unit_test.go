@@ -30,33 +30,38 @@ func (m *mockGRPCServerStream) Context() context.Context        { return m.ctx }
 func (m *mockGRPCServerStream) SendMsg(interface{}) error       { return nil }
 func (m *mockGRPCServerStream) RecvMsg(interface{}) error       { return nil }
 
-func TestAuthInterceptor_RequiresServiceID(t *testing.T) {
+func TestAuthInterceptor_RequiresVerifier(t *testing.T) {
 	interceptor := AuthInterceptor(nil)
 
-	_, err := interceptor(context.Background(), struct{}{}, &grpc.UnaryServerInfo{FullMethod: "/aegion.analytics.v1.AnalyticsService/QueryEvents"}, func(context.Context, interface{}) (interface{}, error) {
+	ctxWithMD := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-aegion-internal-token", "token"))
+	_, err := interceptor(ctxWithMD, struct{}{}, &grpc.UnaryServerInfo{FullMethod: "/m"}, func(context.Context, interface{}) (interface{}, error) {
 		return "ok", nil
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.Unauthenticated, status.Code(err))
-
-	ctxWithMD := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-service-id", "svc-1"))
-	resp, err := interceptor(ctxWithMD, struct{}{}, &grpc.UnaryServerInfo{FullMethod: "/m"}, func(context.Context, interface{}) (interface{}, error) {
-		return "ok", nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, "ok", resp)
 }
 
 func TestAuthInterceptor_DelegatesToAuthFunc(t *testing.T) {
 	authErr := errors.New("nope")
 	interceptor := AuthInterceptor(func(context.Context) error { return authErr })
 
-	ctxWithMD := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-service-id", "svc-1"))
+	ctxWithMD := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-aegion-internal-token", "token"))
 	_, err := interceptor(ctxWithMD, struct{}{}, &grpc.UnaryServerInfo{FullMethod: "/m"}, func(context.Context, interface{}) (interface{}, error) {
 		return "ok", nil
 	})
 	require.Error(t, err)
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+func TestStreamAuthInterceptor_RequiresVerifier(t *testing.T) {
+	interceptor := StreamAuthInterceptor(nil)
+
+	ctxWithMD := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-aegion-internal-token", "token"))
+	err := interceptor(struct{}{}, &mockGRPCServerStream{ctx: ctxWithMD}, &grpc.StreamServerInfo{FullMethod: "/m", IsServerStream: true}, func(interface{}, grpc.ServerStream) error {
+		return nil
+	})
+	require.Error(t, err)
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
 }
 
 func TestLoggingInterceptor_EmitsLine(t *testing.T) {

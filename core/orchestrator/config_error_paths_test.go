@@ -250,6 +250,64 @@ server:
 	}
 }
 
+
+func TestLoadModuleConfig_RejectsExperimentalModuleInProductionWhenOmittedFromMainConfig(t *testing.T) {
+	t.Setenv("AEGION_ENV", "production")
+	t.Setenv("AEGION_ALLOW_EXPERIMENTAL_MODULES", "false")
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "aegion.yaml")
+	content := `
+module_versions:
+  password: "v1.0.0"
+module_registry:
+  base_url: ""
+server:
+  internal_network:
+    name: aegion_modules
+    subnet: 10.10.0.0/16
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	loader := NewConfigLoader(configPath)
+	_, err := loader.LoadModuleConfig("mfa")
+	if !errors.Is(err, ErrExperimentalModule) {
+		t.Fatalf("expected ErrExperimentalModule, got %v", err)
+	}
+}
+
+func TestLoadModuleConfig_AllowsExperimentalModuleInProductionWithOverride(t *testing.T) {
+	t.Setenv("AEGION_ENV", "production")
+	t.Setenv("AEGION_ALLOW_EXPERIMENTAL_MODULES", "true")
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "aegion.yaml")
+	content := `
+module_versions:
+  password: "v1.0.0"
+module_registry:
+  base_url: ""
+server:
+  internal_network:
+    name: aegion_modules
+    subnet: 10.10.0.0/16
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	loader := NewConfigLoader(configPath)
+	cfg, err := loader.LoadModuleConfig("mfa")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if cfg.ID != "mfa" {
+		t.Fatalf("expected module id mfa, got %q", cfg.ID)
+	}
+}
+
 func TestEnabledModuleOrder(t *testing.T) {
 	t.Run("orders enabled modules by dependency", func(t *testing.T) {
 		order, err := EnabledModuleOrder(map[string]string{

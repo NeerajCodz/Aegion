@@ -9,6 +9,34 @@ import (
 	"time"
 )
 
+func (l *LocalStorage) resolveNamespacePath(namespace string) (string, error) {
+	if namespace == "" {
+		return "", fmt.Errorf("namespace cannot be empty: %w", ErrInvalidArg)
+	}
+
+	namespacePath := filepath.Join(l.basePath, namespace)
+	absNamespacePath, err := filepath.Abs(namespacePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve namespace path: %w", err)
+	}
+
+	absBase, err := filepath.Abs(l.basePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base path: %w", err)
+	}
+
+	relPath, err := filepath.Rel(absBase, absNamespacePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve namespace path: %w", err)
+	}
+
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("namespace escapes base directory: %w", ErrInvalidArg)
+	}
+
+	return namespacePath, nil
+}
+
 // LocalStorage implements StorageBackend for local filesystem storage.
 type LocalStorage struct {
 	basePath string
@@ -44,12 +72,12 @@ func (l *LocalStorage) Write(ctx context.Context, namespace string, data []byte)
 	default:
 	}
 
-	if namespace == "" {
-		return "", fmt.Errorf("namespace cannot be empty: %w", ErrInvalidArg)
+	namespacePath, err := l.resolveNamespacePath(namespace)
+	if err != nil {
+		return "", err
 	}
 
 	// Create namespace directory
-	namespacePath := filepath.Join(l.basePath, namespace)
 	if err := os.MkdirAll(namespacePath, 0750); err != nil {
 		return "", fmt.Errorf("failed to create namespace directory: %w", err)
 	}
@@ -168,11 +196,10 @@ func (l *LocalStorage) List(ctx context.Context, namespace string) ([]string, er
 	default:
 	}
 
-	if namespace == "" {
-		return nil, fmt.Errorf("namespace cannot be empty: %w", ErrInvalidArg)
+	namespacePath, err := l.resolveNamespacePath(namespace)
+	if err != nil {
+		return nil, err
 	}
-
-	namespacePath := filepath.Join(l.basePath, namespace)
 
 	entries, err := os.ReadDir(namespacePath)
 	if err != nil {

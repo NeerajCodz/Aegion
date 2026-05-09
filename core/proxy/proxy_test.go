@@ -253,6 +253,34 @@ func TestProxy_Forward_StripsInboundIdentityHeaders(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+
+func TestProxy_Forward_StripsAllTrustedIdentityHeadersWhenSignedSubsetConfigured(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("X-Aegion-Impersonation"))
+		assert.Empty(t, r.Header.Get("X-Aegion-Impersonator-ID"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	targetURL, err := url.Parse(upstream.URL)
+	require.NoError(t, err)
+
+	config := DefaultConfig()
+	config.StripInboundIdentityHeaders = true
+	config.SignedIdentityHeaders = []string{"X-Aegion-Session-ID", "X-Aegion-Identity-ID", "X-Aegion-AAL"}
+	proxy := newProxyForTest(t, config, nil, slog.Default())
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Aegion-Impersonation", "true")
+	req.Header.Set("X-Aegion-Impersonator-ID", "attacker-impersonator")
+	req = req.WithContext(withRequestID(req.Context(), "test-123"))
+	w := httptest.NewRecorder()
+
+	err = proxy.Forward(targetURL, w, req, &Rule{ID: "strip-subset-test"}, Upstream{})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestProxy_Forward_SignsIdentityHeaders(t *testing.T) {
 	signingSecret := "proxy-signing-secret"
 	signedHeaders := []string{"X-Aegion-Session-ID", "X-Aegion-Identity-ID", "X-Aegion-AAL"}

@@ -214,22 +214,22 @@ func InputValidationMiddleware(log *logger.Logger) func(http.Handler) http.Handl
 
 // EndpointRateLimitMiddleware enforces per-endpoint rate limits
 func EndpointRateLimitMiddleware(log *logger.Logger, endpointLimits map[string]int) func(http.Handler) http.Handler {
-	limiters := make(map[string]*RateLimiter)
+	limiters := make(map[string]*RateLimiter, len(endpointLimits))
+	for endpoint, limit := range endpointLimits {
+		if limit <= 0 {
+			limit = 1000
+		}
+		limiters[endpoint] = NewRateLimiter(limit)
+	}
+
+	defaultLimiter := NewRateLimiter(1000)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			endpoint := r.Method + " " + r.URL.Path
-
-			// Get or create limiter for this endpoint
 			limiter, exists := limiters[endpoint]
 			if !exists {
-				// Use default limit if not specified
-				limit := endpointLimits[endpoint]
-				if limit == 0 {
-					limit = 1000 // Default high limit
-				}
-				limiter = NewRateLimiter(limit)
-				limiters[endpoint] = limiter
+				limiter = defaultLimiter
 			}
 
 			userID, _ := userIDFromContext(r.Context())

@@ -115,17 +115,21 @@ func TestMergeClaimsHTTP(t *testing.T) {
 				Claims: map[string]interface{}{
 					"tenant_id": "tenant-1",
 					"sub":       "override-not-allowed",
+					"scope":     "admin",
+					"client_id": "attacker-client",
 				},
 			})
 		}))
 		defer srv.Close()
 
 		hook := NewClaimsHookClient(srv.URL, "", time.Second)
-		baseClaims := map[string]interface{}{"sub": "identity-1", "iss": "issuer"}
+		baseClaims := map[string]interface{}{"sub": "identity-1", "iss": "issuer", "scope": "read", "client_id": "client-1"}
 		got, err := MergeClaimsHTTP("identity-1", "client-1", "access", []string{"openid"}, baseClaims, hook)
 		require.NoError(t, err)
 		assert.Equal(t, "identity-1", got["sub"])
 		assert.Equal(t, "issuer", got["iss"])
+		assert.Equal(t, "read", got["scope"])
+		assert.Equal(t, "client-1", got["client_id"])
 		assert.Equal(t, "tenant-1", got["tenant_id"])
 	})
 
@@ -146,5 +150,7 @@ func TestMergeClaimsHTTP(t *testing.T) {
 func TestIsReservedClaim(t *testing.T) {
 	assert.True(t, isReservedClaim("sub"))
 	assert.True(t, isReservedClaim("at_hash"))
+	assert.True(t, isReservedClaim("scope"))
+	assert.True(t, isReservedClaim("client_id"))
 	assert.False(t, isReservedClaim("tenant_id"))
 }

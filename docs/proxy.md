@@ -103,17 +103,28 @@ To prevent header spoofing when upstreams are not on fully isolated networks, th
 X-User-ID: id_alice_xyz789
 X-User-Email: alice@example.com
 X-User-Roles: admin,editor
-X-Aegion-Signature: t=1742912521,v1=<hmac_sha256_signature>
+X-Aegion-Signature: t=1742912521,n=req_01HT...,v1=<hmac_sha256_signature>
 ```
 
 The signature is computed as:
 ```
-signature = HMAC-SHA256(upstream_signing_secret, timestamp + "." + headers_canonical_string)
+signature = HMAC-SHA256(
+  upstream_signing_secret,
+  timestamp + "." +
+  nonce + "." +
+  method + "." +
+  host + "." +
+  path + "." +
+  canonical_query + "." +
+  body_sha256 + "." +
+  upstream_audience + "." +
+  headers_canonical_string,
+)
 ```
 
 Upstream services verify the signature before trusting identity headers. This prevents:
 - Header injection attacks from compromised intermediate proxies
-- Lateral movement where an attacker on the network impersonates users
+- Cross-request replay of captured signed headers
 - Trust-the-network assumptions in zero-trust architectures
 
 **Configuration per upstream:**
@@ -136,20 +147,32 @@ Upstream verification example (Go):
 ```go
 func verifyAegionHeaders(r *http.Request, secret string) error {
     sigHeader := r.Header.Get("X-Aegion-Signature")
-    parts := parseSignature(sigHeader) // extract t= and v1=
+    parts := parseSignature(sigHeader) // extract t=, n= and v1=
     
-    if time.Since(parts.Timestamp) > 5*time.Minute {
-        return errors.New("signature expired")
+    now := time.Now()
+    if now.Sub(parts.Timestamp) > 5*time.Minute || parts.Timestamp.Sub(now) > 30*time.Second {
+        return errors.New("signature timestamp out of range")
+    }
+    if replayCacheSeen(parts.Nonce) {
+        return errors.New("replayed signature")
     }
     
     canonical := canonicalizeHeaders(r.Header, []string{
         "X-User-ID", "X-User-Email", "X-User-Roles",
     })
+    bodyHash := sha256Body(r.Body)
+    aud := "backend.internal.example.com"
     
-    expected := hmacSHA256(secret, parts.Timestamp + "." + canonical)
+    expected := hmacSHA256(secret, strings.Join([]string{
+        parts.TimestampUnix, parts.Nonce,
+        r.Method, r.Host, r.URL.EscapedPath(),
+        canonicalizeQuery(r.URL.Query()),
+        bodyHash, aud, canonical,
+    }, "."))
     if !hmac.Equal([]byte(expected), []byte(parts.Signature)) {
         return errors.New("invalid signature")
     }
+    replayCacheStore(parts.Nonce, 5*time.Minute)
     return nil
 }
 ```

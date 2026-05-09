@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -59,5 +60,39 @@ func TestIcebergStorageRejectsTraversal(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidArg)
 
 	err = storage.Delete(ctx, "../escape")
+	assert.ErrorIs(t, err, ErrInvalidArg)
+}
+
+func TestIcebergStorageRejectsSymlinkReadEscape(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	warehouse := filepath.Join(base, "warehouse")
+	storage, err := NewIcebergStorage("rest", warehouse, "catalog", "")
+	require.NoError(t, err)
+	require.NoError(t, storage.Initialize(ctx))
+
+	outside := filepath.Join(base, "outside.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("secret"), 0o600))
+
+	symlinkPath := filepath.Join(warehouse, "catalog", "events")
+	require.NoError(t, os.Symlink(outside, symlinkPath))
+
+	_, err = storage.Read(ctx, "events")
+	assert.ErrorIs(t, err, ErrInvalidArg)
+}
+
+func TestIcebergStorageRejectsSymlinkNamespaceWriteEscape(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	warehouse := filepath.Join(base, "warehouse")
+	storage, err := NewIcebergStorage("rest", warehouse, "catalog", "")
+	require.NoError(t, err)
+	require.NoError(t, storage.Initialize(ctx))
+
+	outsideDir := filepath.Join(base, "outside")
+	require.NoError(t, os.MkdirAll(outsideDir, 0o700))
+	require.NoError(t, os.Symlink(outsideDir, filepath.Join(warehouse, "catalog", "events")))
+
+	_, err = storage.Write(ctx, "events", []byte("payload"))
 	assert.ErrorIs(t, err, ErrInvalidArg)
 }

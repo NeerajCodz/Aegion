@@ -225,23 +225,29 @@ func ValidateModuleDependencies(cfg *AegionConfig) error {
 }
 
 func validateProductionModuleMaturity(cfg *AegionConfig) error {
-	if cfg == nil || !isProductionEnvironment() || allowExperimentalModules() {
+	if cfg == nil {
 		return nil
 	}
 	for moduleID, version := range cfg.ModuleVersions {
-		if !isEnabledByVersion(version) {
-			continue
+		if err := validateProductionModuleAccess(moduleID, version); err != nil {
+			return err
 		}
-		if _, ready := productionReadyModules[moduleID]; ready {
-			continue
-		}
-		return fmt.Errorf(
-			"%w: module %q is not production-ready; disable it or set AEGION_ALLOW_EXPERIMENTAL_MODULES=true",
-			ErrExperimentalModule,
-			moduleID,
-		)
 	}
 	return nil
+}
+
+func validateProductionModuleAccess(moduleID, version string) error {
+	if !isProductionEnvironment() || allowExperimentalModules() || !isEnabledByVersion(version) {
+		return nil
+	}
+	if _, ready := productionReadyModules[moduleID]; ready {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: module %q is not production-ready; disable it or set AEGION_ALLOW_EXPERIMENTAL_MODULES=true",
+		ErrExperimentalModule,
+		moduleID,
+	)
 }
 
 func isProductionEnvironment() bool {
@@ -370,6 +376,9 @@ func (l *ConfigLoader) LoadModuleConfig(moduleID string) (*ModuleConfig, error) 
 	if err := ValidateModuleConfig(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateProductionModuleAccess(moduleID, cfg.Version); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
 }
@@ -421,6 +430,9 @@ func (l *ConfigLoader) buildModuleConfig(moduleID string) (*ModuleConfig, error)
 	applyModuleDefaults(cfg, l.config)
 
 	if err := ValidateModuleConfig(cfg); err != nil {
+		return nil, err
+	}
+	if err := validateProductionModuleAccess(moduleID, cfg.Version); err != nil {
 		return nil, err
 	}
 

@@ -428,16 +428,16 @@ func TestRunDBAndMigrationErrors(t *testing.T) {
 	})
 }
 
-func TestRunObservabilityInitializationError(t *testing.T) {
+func TestRunObservabilityInitializationErrorIsNonFatal(t *testing.T) {
 	deps, _, stderr, _, _, _ := buildRunDeps(validMainConfig())
 	deps.newObservability = func(ctx context.Context, cfg *config.Config) (telemetryProvider, error) {
 		return nil, errors.New("otel init failed")
 	}
 
-	if code := run(nil, deps); code != 1 {
-		t.Fatalf("expected exit code 1, got %d", code)
+	if code := run(nil, deps); code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
 	}
-	if got := stderr.String(); !strings.Contains(got, "Failed to initialize observability") {
+	if got := stderr.String(); !strings.Contains(got, "Warning: observability disabled") {
 		t.Fatalf("expected observability initialization error output, got %q", got)
 	}
 }

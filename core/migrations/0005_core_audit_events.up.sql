@@ -28,10 +28,14 @@ CREATE TABLE core_audit_events (
 
 -- Row Level Security for append-only
 ALTER TABLE core_audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE core_audit_events FORCE ROW LEVEL SECURITY;
 
 -- Allow insert only (no update, no delete)
 CREATE POLICY audit_insert_only ON core_audit_events 
     FOR INSERT WITH CHECK (TRUE);
+
+-- Harden table privileges to align with append-only intent
+REVOKE UPDATE, DELETE, TRUNCATE ON core_audit_events FROM PUBLIC;
 
 CREATE INDEX idx_core_audit_actor ON core_audit_events(actor_id, occurred_at DESC) WHERE actor_id IS NOT NULL;
 CREATE INDEX idx_core_audit_target ON core_audit_events(target_type, target_id, occurred_at DESC);

@@ -14,7 +14,7 @@ This quickstart is a beta-branch bootstrap guide. It is intentionally limited to
 ### Step 1: Clone the repository
 
 ```bash
-git clone https://github.com/NeerajCodz/Aegion.git
+git clone https://github.com/Astraive/Aegion.git
 cd Aegion
 ```
 

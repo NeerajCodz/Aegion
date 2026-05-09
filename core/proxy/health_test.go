@@ -136,6 +136,52 @@ func TestHealthChecker_ExpectedBodyMatch(t *testing.T) {
 	assert.Nil(t, metrics.LastError)
 }
 
+
+func TestHealthChecker_ExpectedBodyTooLargeByContentLength(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	hc := NewHealthChecker(HealthCheckerConfig{
+		URL:            server.URL + "/health",
+		Timeout:        time.Second,
+		ExpectedStatus: http.StatusOK,
+		ExpectedBody:   "OK",
+		Logger:         slog.Default(),
+	})
+
+	hc.performCheck()
+
+	metrics := hc.GetMetrics()
+	assert.Equal(t, HealthStatusUnhealthy, metrics.Status)
+	assert.EqualError(t, metrics.LastError, "unexpected health response body")
+}
+
+func TestHealthChecker_ExpectedBodyTooLargeByReadLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK!"))
+	}))
+	defer server.Close()
+
+	hc := NewHealthChecker(HealthCheckerConfig{
+		URL:            server.URL + "/health",
+		Timeout:        time.Second,
+		ExpectedStatus: http.StatusOK,
+		ExpectedBody:   "OK",
+		Logger:         slog.Default(),
+	})
+
+	hc.performCheck()
+
+	metrics := hc.GetMetrics()
+	assert.Equal(t, HealthStatusUnhealthy, metrics.Status)
+	assert.EqualError(t, metrics.LastError, "unexpected health response body")
+}
+
 func TestHealthChecker_NetworkError(t *testing.T) {
 	// Use a URL that will cause connection refused
 	config := HealthCheckerConfig{

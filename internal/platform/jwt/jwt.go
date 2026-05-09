@@ -65,6 +65,17 @@ var (
 	ErrTokenNotYetValid = errors.New("token not yet valid")
 )
 
+var reservedClaimNames = map[string]struct{}{
+	"iss": {},
+	"sub": {},
+	"aud": {},
+	"exp": {},
+	"nbf": {},
+	"iat": {},
+	"jti": {},
+	"sid": {},
+}
+
 // KeyPair represents an asymmetric key pair for JWT signing.
 type KeyPair struct {
 	Algorithm  string
@@ -118,6 +129,9 @@ func (c Claims) MarshalJSON() ([]byte, error) {
 
 	// Add custom claims
 	for k, v := range c.Custom {
+		if _, isReserved := reservedClaimNames[k]; isReserved {
+			continue
+		}
 		m[k] = v
 	}
 

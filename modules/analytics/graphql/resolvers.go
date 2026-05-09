@@ -551,32 +551,11 @@ func (r *Resolver) CreateWebhook(ctx context.Context, input *CreateWebhookInput)
 
 // ExecuteQuery resolves the executeQuery mutation.
 func (r *Resolver) ExecuteQuery(ctx context.Context, sql string, timeout *int) (*ExecuteQueryPayload, error) {
-	if _, err := requireGraphQLPermission(ctx, rbac.PermModifyQueries); err != nil {
-		return &ExecuteQueryPayload{
-			Errors: []*ErrorNode{{Message: err.Error()}},
-		}, nil
-	}
-
-	timeoutDuration := 30 * time.Second
-	if timeout != nil {
-		timeoutDuration = time.Duration(*timeout) * time.Second
-	}
-
-	start := time.Now()
-	rows, err := r.store.ExecuteSQL(ctx, sql, timeoutDuration)
-	executionTimeMs := int(time.Since(start).Milliseconds())
-
-	if err != nil {
-		r.logger.ErrorContext(ctx, "failed to execute query", "error", err)
-		return &ExecuteQueryPayload{
-			Errors: []*ErrorNode{{Message: fmt.Sprintf("failed to execute query: %v", err)}},
-		}, nil
-	}
+	_ = sql
+	_ = timeout
 
 	return &ExecuteQueryPayload{
-		Rows:            rows,
-		RowCount:        len(rows),
-		ExecutionTimeMs: executionTimeMs,
+		Errors: []*ErrorNode{{Message: "executeQuery is disabled for security reasons"}},
 	}, nil
 }
 

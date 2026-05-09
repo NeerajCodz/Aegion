@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
@@ -119,7 +120,7 @@ func (p *ModuleProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Get module endpoint
-	targetURL, err := p.getModuleEndpoint(ctx)
+	targetURL, err := p.getModuleEndpoint(ctx, r.Host)
 	if err != nil {
 		p.handleError(w, r, err, requestID)
 		return
@@ -344,14 +345,21 @@ func (p *ModuleProxy) injectSessionHeaders(req *http.Request) {
 }
 
 func (p *ModuleProxy) stripIdentityHeaders(req *http.Request) {
-	for _, header := range []string{
+	headers := []string{
 		"X-User-ID",
 		"X-User-Email",
 		"X-User-Roles",
 		"X-User-Session-ID",
 		"X-User-AAL",
 		p.config.IdentitySignatureHeader,
-	} {
+	}
+	headers = append(headers, p.config.SignedIdentityHeaders...)
+
+	for _, header := range headers {
+		header = strings.TrimSpace(header)
+		if header == "" {
+			continue
+		}
 		req.Header.Del(header)
 	}
 }
@@ -415,7 +423,7 @@ func remoteIPFromAddr(remoteAddr string) string {
 }
 
 // getModuleEndpoint retrieves the HTTP endpoint for a module.
-func (p *ModuleProxy) getModuleEndpoint(ctx context.Context) (*url.URL, error) {
+func (p *ModuleProxy) getModuleEndpoint(ctx context.Context, inboundHost string) (*url.URL, error) {
 	if p.config.Registry == nil {
 		return nil, ErrModuleUnavailable
 	}
@@ -437,11 +445,37 @@ func (p *ModuleProxy) getModuleEndpoint(ctx context.Context) (*url.URL, error) {
 			if parseErr != nil {
 				return nil, parseErr
 			}
+			if target.Scheme != "http" && target.Scheme != "https" {
+				return nil, &url.Error{Op: "parse", URL: ep.URL, Err: errors.New("unsupported endpoint scheme")}
+			}
+			if target.Host == "" {
+				return nil, &url.Error{Op: "parse", URL: ep.URL, Err: errors.New("missing endpoint host")}
+			}
+			if isSameAuthority(inboundHost, target.Host) {
+				return nil, &url.Error{Op: "parse", URL: ep.URL, Err: errors.New("endpoint points back to core")}
+			}
 			return target, nil
 		}
 	}
 
 	return nil, ErrNoHealthyEndpoint
+}
+
+func isSameAuthority(left, right string) bool {
+	leftHost := normalizeHost(left)
+	rightHost := normalizeHost(right)
+	return leftHost != "" && rightHost != "" && strings.EqualFold(leftHost, rightHost)
+}
+
+func normalizeHost(hostport string) string {
+	hostport = strings.TrimSpace(hostport)
+	if hostport == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		return strings.Trim(strings.ToLower(host), "[]")
+	}
+	return strings.Trim(strings.ToLower(hostport), "[]")
 }
 
 // handleError handles proxy setup errors.

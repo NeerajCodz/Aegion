@@ -28,7 +28,7 @@ DROP INDEX IF EXISTS idx_am_category_created_at;
 DROP INDEX IF EXISTS idx_ad_owner_id;
 DROP INDEX IF EXISTS idx_ad_public;
 DROP INDEX IF EXISTS idx_ad_is_default;
-DROP INDEX IF EXISTS idx_ad_owner_is_default;
+DROP INDEX IF EXISTS idx_ad_owner_pinned;
 DROP INDEX IF EXISTS idx_ad_name;
 DROP INDEX IF EXISTS idx_ad_updated_at;
 

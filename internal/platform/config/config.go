@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -413,8 +414,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// Expand environment variables
-	expanded := os.ExpandEnv(string(data))
+	// Expand environment variables, including ${VAR:-default} syntax used by templates.
+	expanded := expandEnvWithDefaults(string(data))
 
 	var cfg Config
 	decoder := yaml.NewDecoder(bytes.NewReader([]byte(expanded)))
@@ -432,6 +433,25 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+var shellDefaultExpr = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):-(.*?)\}`)
+
+func expandEnvWithDefaults(input string) string {
+	expandedDefaults := shellDefaultExpr.ReplaceAllStringFunc(input, func(expr string) string {
+		matches := shellDefaultExpr.FindStringSubmatch(expr)
+		if len(matches) != 3 {
+			return expr
+		}
+		key := matches[1]
+		defaultValue := matches[2]
+		if value, ok := os.LookupEnv(key); ok && value != "" {
+			return value
+		}
+		return defaultValue
+	})
+
+	return os.ExpandEnv(expandedDefaults)
 }
 
 // applyDefaults sets default values for unset fields.
@@ -719,14 +739,17 @@ func (c *Config) Validate() error {
 	if len(cookieSecrets) == 0 {
 		return fmt.Errorf("secrets.cookie is required")
 	}
+	c.Secrets.Cookie = cookieSecrets
 	cipherSecrets := normalizeSecrets(c.Secrets.Cipher)
 	if len(cipherSecrets) == 0 {
 		return fmt.Errorf("secrets.cipher is required")
 	}
+	c.Secrets.Cipher = cipherSecrets
 	internalSecrets := normalizeSecrets(c.Secrets.Internal)
 	if len(internalSecrets) == 0 {
 		return fmt.Errorf("secrets.internal is required")
 	}
+	c.Secrets.Internal = internalSecrets
 	for _, s := range cookieSecrets {
 		if len(s) < 32 {
 			return fmt.Errorf("cookie secret must be at least 32 characters")

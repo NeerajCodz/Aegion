@@ -17,25 +17,50 @@ import (
 // AuthInterceptor verifies internal service identity via headers.
 func AuthInterceptor(authFunc func(context.Context) error) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		// Check for service-to-service auth headers
+		// Check for internal auth token header
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
-			return nil, status.Error(codes.Unauthenticated, "missing service identity")
+			return nil, status.Error(codes.Unauthenticated, "missing internal auth token")
 		}
-		// Check for internal auth token or service ID
-		tokens := md.Get("x-service-id")
+		tokens := md.Get("x-aegion-internal-token")
 		if len(tokens) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "missing service identity")
+			return nil, status.Error(codes.Unauthenticated, "missing internal auth token")
 		}
 
-		// Call auth verifier if provided
-		if authFunc != nil {
-			if err := authFunc(ctx); err != nil {
-				return nil, status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
-			}
+		if authFunc == nil {
+			return nil, status.Error(codes.Unauthenticated, "auth verifier not configured")
+		}
+
+		if err := authFunc(ctx); err != nil {
+			return nil, status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
 		}
 
 		return handler(ctx, req)
+	}
+}
+
+// StreamAuthInterceptor verifies internal service identity via headers for stream RPCs.
+func StreamAuthInterceptor(authFunc func(context.Context) error) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		ctx := ss.Context()
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return status.Error(codes.Unauthenticated, "missing internal auth token")
+		}
+		tokens := md.Get("x-aegion-internal-token")
+		if len(tokens) == 0 {
+			return status.Error(codes.Unauthenticated, "missing internal auth token")
+		}
+		if authFunc == nil {
+			return status.Error(codes.Unauthenticated, "auth verifier not configured")
+		}
+
+		if err := authFunc(ctx); err != nil {
+			return status.Error(codes.PermissionDenied, fmt.Sprintf("auth failed: %v", err))
+		}
+
+		return handler(srv, ss)
 	}
 }
 
@@ -208,6 +233,26 @@ func ChainUnaryInterceptors(interceptors ...grpc.UnaryServerInterceptor) grpc.Un
 		}
 
 		return chainedHandler(ctx, req)
+	}
+}
+
+// ChainStreamInterceptors chains multiple stream interceptors.
+func ChainStreamInterceptors(interceptors ...grpc.StreamServerInterceptor) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if len(interceptors) == 0 {
+			return handler(srv, ss)
+		}
+
+		chainedHandler := handler
+		for i := len(interceptors) - 1; i >= 0; i-- {
+			interceptor := interceptors[i]
+			currentHandler := chainedHandler
+			chainedHandler = func(currentSrv interface{}, currentStream grpc.ServerStream) error {
+				return interceptor(currentSrv, currentStream, info, currentHandler)
+			}
+		}
+
+		return chainedHandler(srv, ss)
 	}
 }
 

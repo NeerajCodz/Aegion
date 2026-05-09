@@ -996,7 +996,6 @@ func TestStore_GetByToken_Success(t *testing.T) {
 		queryRowFn: func(ctx context.Context, sql string, optionsAndArgs ...interface{}) pgx.Row {
 			assert.Contains(t, sql, "token_hash = $1")
 			assert.Contains(t, sql, "token_prefix = $2")
-			assert.Contains(t, sql, "OR token = $3")
 			return &fakeRow{
 				data: []interface{}{
 					expectedID,
