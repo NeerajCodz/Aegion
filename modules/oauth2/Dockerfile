@@ -29,6 +29,7 @@ WORKDIR /app
 
 # Copy binary
 COPY --from=builder /out/aegion-oauth2 /app/aegion-oauth2
+COPY modules/oauth2/oauth2.yaml /app/oauth2.yaml
 
 # Environment defaults
 ENV MODULE_PORT=9005
