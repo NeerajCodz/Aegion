@@ -150,11 +150,11 @@ type ManagerConfig struct {
 // NewManager creates a new session manager.
 func NewManager(cfg ManagerConfig) *Manager {
 	expiredAfter := cfg.CleanupExpiredAfter
-	if expiredAfter == 0 {
+	if expiredAfter <= 0 {
 		expiredAfter = 7 * 24 * time.Hour
 	}
 	inactiveAfter := cfg.CleanupInactiveAfter
-	if inactiveAfter == 0 {
+	if inactiveAfter <= 0 {
 		inactiveAfter = 24 * time.Hour
 	}
 
@@ -483,16 +483,16 @@ func (m *Manager) ClearCookie(w http.ResponseWriter) {
 
 // Cleanup removes expired sessions.
 func (m *Manager) Cleanup(ctx context.Context) (int64, error) {
-	expiredDays := int(m.cleanupExpiredAfter.Hours() / 24)
-	inactiveHours := int(m.cleanupInactiveAfter.Hours())
+	expiredSeconds := m.cleanupExpiredAfter.Seconds()
+	inactiveSeconds := m.cleanupInactiveAfter.Seconds()
 
 	sql := `
 		DELETE FROM core_sessions
-		WHERE expires_at < NOW() - (INTERVAL '1 day' * $1)
-		   OR (active = FALSE AND updated_at < NOW() - (INTERVAL '1 hour' * $2))
+		WHERE expires_at < NOW() - (INTERVAL '1 second' * $1)
+		   OR (active = FALSE AND updated_at < NOW() - (INTERVAL '1 second' * $2))
 	`
 
-	result, err := m.execStmt(ctx, sql, expiredDays, inactiveHours)
+	result, err := m.execStmt(ctx, sql, expiredSeconds, inactiveSeconds)
 	if err != nil {
 		return 0, err
 	}

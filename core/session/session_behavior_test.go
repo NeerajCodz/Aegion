@@ -419,7 +419,9 @@ func TestManager_WriteOps_WithSeams(t *testing.T) {
 			t.Fatalf("expected cleanup error")
 		}
 
-		m.execStmt = func(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
+		var args []interface{}
+		m.execStmt = func(_ context.Context, _ string, in ...interface{}) (pgconn.CommandTag, error) {
+			args = in
 			return pgconn.NewCommandTag("DELETE 5"), nil
 		}
 		deleted, err := m.Cleanup(context.Background())
@@ -428,6 +430,15 @@ func TestManager_WriteOps_WithSeams(t *testing.T) {
 		}
 		if deleted != 5 {
 			t.Fatalf("expected 5 rows deleted, got %d", deleted)
+		}
+		if len(args) != 2 {
+			t.Fatalf("expected 2 cleanup args, got %d", len(args))
+		}
+		if args[0].(float64) != m.cleanupExpiredAfter.Seconds() {
+			t.Fatalf("expected cleanup expired seconds arg")
+		}
+		if args[1].(float64) != m.cleanupInactiveAfter.Seconds() {
+			t.Fatalf("expected cleanup inactive seconds arg")
 		}
 	})
 }

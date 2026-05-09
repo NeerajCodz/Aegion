@@ -214,6 +214,12 @@ func TestNewManager(t *testing.T) {
 	assert.Equal(t, cfg.CookieConfig, manager.cookieConfig)
 	assert.Equal(t, cfg.Lifespan, manager.lifespan)
 	assert.Equal(t, cfg.IdleTimeout, manager.idleTimeout)
+	assert.Equal(t, 7*24*time.Hour, manager.cleanupExpiredAfter)
+	assert.Equal(t, 24*time.Hour, manager.cleanupInactiveAfter)
+
+	manager = NewManager(ManagerConfig{CleanupExpiredAfter: -12 * time.Hour, CleanupInactiveAfter: -30 * time.Minute})
+	assert.Equal(t, 7*24*time.Hour, manager.cleanupExpiredAfter)
+	assert.Equal(t, 24*time.Hour, manager.cleanupInactiveAfter)
 }
 
 func TestMethodToAAL(t *testing.T) {
@@ -1114,6 +1120,12 @@ func TestManager_Config_Preservation(t *testing.T) {
 	assert.Equal(t, cfg.CookieConfig, manager.cookieConfig)
 	assert.Equal(t, cfg.Lifespan, manager.lifespan)
 	assert.Equal(t, cfg.IdleTimeout, manager.idleTimeout)
+	assert.Equal(t, 7*24*time.Hour, manager.cleanupExpiredAfter)
+	assert.Equal(t, 24*time.Hour, manager.cleanupInactiveAfter)
+
+	manager = NewManager(ManagerConfig{CleanupExpiredAfter: -12 * time.Hour, CleanupInactiveAfter: -30 * time.Minute})
+	assert.Equal(t, 7*24*time.Hour, manager.cleanupExpiredAfter)
+	assert.Equal(t, 24*time.Hour, manager.cleanupInactiveAfter)
 }
 
 func TestManager_TokenFormat(t *testing.T) {
