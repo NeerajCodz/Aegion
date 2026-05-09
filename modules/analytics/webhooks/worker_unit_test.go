@@ -32,7 +32,7 @@ func TestDeliveryWorker_processJob_Success(t *testing.T) {
 	)
 
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			require.True(t, strings.Contains(query, "FROM webhooks"))
 			return fakeRow{scanFn: func(dest ...interface{}) error {
 				now := time.Now().UTC()
@@ -50,7 +50,7 @@ func TestDeliveryWorker_processJob_Success(t *testing.T) {
 				return nil
 			}}
 		},
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -61,7 +61,7 @@ func TestDeliveryWorker_processJob_Success(t *testing.T) {
 			}
 			return fakeResult{affected: 1}, nil
 		},
-		queryFn: func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+		queryFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			return &fakeRows{data: [][]interface{}{}}, nil
 		},
 	}
@@ -103,7 +103,7 @@ func TestDeliveryWorker_processJob_RetryPath_Requeues(t *testing.T) {
 	)
 
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			return fakeRow{scanFn: func(dest ...interface{}) error {
 				now := time.Now().UTC()
 				*(dest[0].(*string)) = "wh_1"
@@ -120,7 +120,7 @@ func TestDeliveryWorker_processJob_RetryPath_Requeues(t *testing.T) {
 				return nil
 			}}
 		},
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if strings.Contains(query, "INSERT INTO webhook_deliveries") {
@@ -128,7 +128,7 @@ func TestDeliveryWorker_processJob_RetryPath_Requeues(t *testing.T) {
 			}
 			return fakeResult{affected: 1}, nil
 		},
-		queryFn: func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+		queryFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			return &fakeRows{data: [][]interface{}{}}, nil
 		},
 	}
@@ -168,7 +168,7 @@ func TestDeliveryWorker_processJob_DisabledMovesToDLQ(t *testing.T) {
 	)
 
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			return fakeRow{scanFn: func(dest ...interface{}) error {
 				now := time.Now().UTC()
 				*(dest[0].(*string)) = "wh_1"
@@ -185,7 +185,7 @@ func TestDeliveryWorker_processJob_DisabledMovesToDLQ(t *testing.T) {
 				return nil
 			}}
 		},
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if strings.Contains(query, "INSERT INTO webhook_dlq") {
@@ -193,7 +193,7 @@ func TestDeliveryWorker_processJob_DisabledMovesToDLQ(t *testing.T) {
 			}
 			return fakeResult{affected: 1}, nil
 		},
-		queryFn: func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+		queryFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			return &fakeRows{data: [][]interface{}{}}, nil
 		},
 	}
@@ -235,7 +235,7 @@ func TestDeliveryWorker_processJob_CircuitBreakFinalFailureMovesToDLQ(t *testing
 	)
 
 	db := &fakeDB{
-		queryRowFn: func(ctx context.Context, query string, args ...interface{}) RowScanner {
+		queryRowFn: func(ctx context.Context, query string, args ...interface{}) interface{} {
 			return fakeRow{scanFn: func(dest ...interface{}) error {
 				now := time.Now().UTC()
 				*(dest[0].(*string)) = "wh_1"
@@ -252,7 +252,7 @@ func TestDeliveryWorker_processJob_CircuitBreakFinalFailureMovesToDLQ(t *testing
 				return nil
 			}}
 		},
-		execFn: func(ctx context.Context, query string, args ...interface{}) (ExecResult, error) {
+		execFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -263,7 +263,7 @@ func TestDeliveryWorker_processJob_CircuitBreakFinalFailureMovesToDLQ(t *testing
 			}
 			return fakeResult{affected: 1}, nil
 		},
-		queryFn: func(ctx context.Context, query string, args ...interface{}) (RowsScanner, error) {
+		queryFn: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 			return &fakeRows{data: [][]interface{}{}}, nil
 		},
 	}
