@@ -218,11 +218,14 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
-	}
+	_, _ = w.Write(append(payload, '\n'))
 }
 
 // HandleChangePassword handles password change.
@@ -245,13 +248,16 @@ func (h *Handler) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	payload, err := json.Marshal(map[string]interface{}{
+		"success": true,
+	})
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-	}); err != nil {
-		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
-	}
+	_, _ = w.Write(append(payload, '\n'))
 }
 
 // handleServiceError converts service errors to HTTP responses.
@@ -283,12 +289,15 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, message st
 	resp.Error.Status = code
 	resp.Error.Message = message
 
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, message, status)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		// Fallback to simple text error if JSON encoding fails
-		http.Error(w, message, status)
-	}
+	_, _ = w.Write(append(payload, '\n'))
 }
 
 func (h *Handler) resolveRegistrationIdentityID(ctx context.Context, email string) (uuid.UUID, error) {

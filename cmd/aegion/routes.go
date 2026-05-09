@@ -2547,22 +2547,30 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 // Helper functions
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	payload, err := json.Marshal(data)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-	}
+	_, _ = w.Write(append(payload, '\n'))
 }
 
 func writeError(w http.ResponseWriter, status int, message string, err error) {
 	_ = err // Avoid leaking internal error details in API responses.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
 	resp := map[string]interface{}{
 		"error": message,
 		"code":  status,
 	}
-	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+	payload, encErr := json.Marshal(resp)
+	if encErr != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(append(payload, '\n'))
 }
