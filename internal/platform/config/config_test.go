@@ -271,6 +271,38 @@ secrets:
 	assert.Equal(t, "example-app-secret-for-tests", cfg.Secrets.Cookie[0])
 }
 
+func TestLoad_EnvironmentVariableExpansionWithDefaults(t *testing.T) {
+	t.Setenv("TEST_DB_URL_DEFAULT", "")
+	t.Setenv("TEST_COOKIE_SECRET_DEFAULT", "cookie-secret-from-env-32-characters")
+
+	configContent := `
+server:
+  port: ${TEST_SERVER_PORT_DEFAULT:-9090}
+database:
+  url: ${TEST_DB_URL_DEFAULT:-sqlite://file::memory:?cache=shared}
+secrets:
+  cookie:
+    - ${TEST_COOKIE_SECRET_DEFAULT:-cookie-secret-from-default-32-chars}
+  cipher:
+    - ${TEST_CIPHER_SECRET_DEFAULT:-cipher-secret-from-default-32-chars}
+  internal:
+    - ${TEST_INTERNAL_SECRET_DEFAULT:-internal-secret-from-default-32-chars}
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config-defaults.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, 9090, cfg.Server.Port)
+	assert.Equal(t, "sqlite://file::memory:?cache=shared", cfg.Database.URL)
+	assert.Equal(t, "cookie-secret-from-env-32-characters", cfg.Secrets.Cookie[0])
+	assert.Equal(t, "cipher-secret-from-default-32-chars", cfg.Secrets.Cipher[0])
+	assert.Equal(t, "internal-secret-from-default-32-chars", cfg.Secrets.Internal[0])
+}
+
 func TestLoad_FileNotFound(t *testing.T) {
 	_, err := Load("/nonexistent/path/config.yaml")
 	assert.Error(t, err)
@@ -878,6 +910,27 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+}
+
+func TestConfig_Validate_NormalizesSecretsInConfig(t *testing.T) {
+	t.Setenv("AEGION_ENV", "")
+	t.Setenv("AEGION_ENVIRONMENT", "")
+
+	cfg := &Config{
+		Database: DatabaseConfig{
+			URL: "postgres://user:pass@localhost/db",
+		},
+		Secrets: SecretsConfig{
+			Cookie:   []string{"", " cookie-secret-32-characters-long!! "},
+			Cipher:   []string{"\t", " cipher-secret-32-characters-long!! "},
+			Internal: []string{"   ", " internal-secret-32-characters-long "},
+		},
+	}
+
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, []string{"cookie-secret-32-characters-long!!"}, cfg.Secrets.Cookie)
+	assert.Equal(t, []string{"cipher-secret-32-characters-long!!"}, cfg.Secrets.Cipher)
+	assert.Equal(t, []string{"internal-secret-32-characters-long"}, cfg.Secrets.Internal)
 }
 
 func TestConfig_Validate_ProductionTLSAndProxyTrustRequirements(t *testing.T) {

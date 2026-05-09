@@ -261,7 +261,7 @@ func (s *Store) MarkRefreshTokenUsed(ctx context.Context, id, successorID string
 			successor_id = $3,
 			grace_period_expires_at = $4,
 			first_used_at = COALESCE(first_used_at, $2)
-		WHERE id = $1 AND active = true
+		WHERE id = $1 AND active = true AND used = false
 	`, id, now, successorID, gracePeriodExpires)
 
 	if err != nil {
@@ -366,6 +366,9 @@ func (t *AccessToken) IsValid() error {
 // IsValid checks if a refresh token is valid.
 func (t *RefreshToken) IsValid() error {
 	if !t.Active {
+		return ErrTokenInactive
+	}
+	if t.Used {
 		return ErrTokenInactive
 	}
 	if nowUTC().After(t.ExpiresAt) {

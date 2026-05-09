@@ -415,6 +415,13 @@ func (v *Validator) validateSQL(sql string) error {
 		return fmt.Errorf("only SELECT queries are allowed")
 	}
 
+	// Restrict saved queries to analytics events data only.
+	// This prevents cross-table reads of saved queries/dashboards owned by other users.
+	fromEventsRe := regexp.MustCompile(`(?i)\bFROM\s+analytics_events\b`)
+	if !fromEventsRe.MatchString(sql) {
+		return fmt.Errorf("saved queries must select from analytics_events")
+	}
+
 	return nil
 }
 

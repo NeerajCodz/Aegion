@@ -187,13 +187,15 @@ services:
     environment:
       MODULE_PORT: 9005
       MODULE_LOG_LEVEL: ${AEGION_LOG_LEVEL:-info}
+      AEGION_OAUTH2_CONFIG: /app/oauth2.yaml
       AEGION_CORE_URL: http://aegion:8080
       AEGION_INTERNAL_SECRET: ${AEGION_SECRETS_INTERNAL:-}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aegion}:${POSTGRES_PASSWORD:-aegion}@postgres:5432/${POSTGRES_DB:-aegion}?sslmode=disable
     depends_on:
       aegion:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9005/health"]
+      test: ["CMD", "/app/aegion-oauth2", "-version"]
       interval: 30s
       timeout: 10s
       retries: 3

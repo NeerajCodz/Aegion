@@ -172,6 +172,26 @@ func TestConfigValidate_SyncStrategies(t *testing.T) {
 	})
 }
 
+func TestConfigValidate_BatchTablesIdentifiers(t *testing.T) {
+	t.Run("valid_identifiers", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Sync.Batch.Enabled = true
+		cfg.Sync.Batch.Tables = []string{"events", "user_events_2026"}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("expected valid batch table identifiers, got: %v", err)
+		}
+	})
+
+	t.Run("invalid_identifier_rejected", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Sync.Batch.Enabled = true
+		cfg.Sync.Batch.Tables = []string{"events; DROP TABLE users; --"}
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("expected invalid batch table identifier to be rejected")
+		}
+	})
+}
+
 func TestConfigValidate_RetentionTiers(t *testing.T) {
 	t.Run("default_tiers_valid", func(t *testing.T) {
 		cfg := DefaultConfig()

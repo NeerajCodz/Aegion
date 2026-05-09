@@ -1,0 +1,10 @@
+server:
+  address: 0.0.0.0
+  port: 9005
+
+database:
+  url: ${DATABASE_URL}
+
+oauth2:
+  issuer: http://localhost:9005
+  base_url: http://localhost:9005

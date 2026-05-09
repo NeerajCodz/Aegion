@@ -99,7 +99,7 @@ func moduleRootCandidates(configPath string) ([]string, error) {
 	}
 
 	seen := map[string]struct{}{}
-	candidates := make([]string, 0, 3)
+	candidates := make([]string, 0, 2)
 	add := func(candidate string) {
 		if candidate == "" {
 			return
@@ -111,8 +111,6 @@ func moduleRootCandidates(configPath string) ([]string, error) {
 		candidates = append(candidates, candidate)
 	}
 
-	add(cwd)
-
 	if configPath != "" {
 		absConfigPath := configPath
 		if !filepath.IsAbs(absConfigPath) {
@@ -122,6 +120,10 @@ func moduleRootCandidates(configPath string) ([]string, error) {
 		configDir := filepath.Dir(absConfigPath)
 		add(configDir)
 		add(filepath.Dir(configDir))
+	}
+
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("config path is required to resolve module migration root")
 	}
 
 	return candidates, nil

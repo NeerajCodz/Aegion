@@ -163,6 +163,7 @@ func isReservedClaim(claim string) bool {
 		"iat": true, "auth_time": true, "nonce": true,
 		"acr": true, "amr": true, "azp": true,
 		"at_hash": true, "c_hash": true, "jti": true,
+		"scope": true, "client_id": true,
 	}
 	return reserved[claim]
 }

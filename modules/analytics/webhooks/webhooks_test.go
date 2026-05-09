@@ -230,3 +230,34 @@ func TestRateLimiter(t *testing.T) {
 		t.Fatal("Request after reset should be allowed")
 	}
 }
+
+func TestValidateWebhookRequestURLValidation(t *testing.T) {
+	testCases := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{name: "valid https", url: "https://example.com/webhook", wantErr: false},
+		{name: "valid localhost http", url: "http://localhost:8080/webhook", wantErr: false},
+		{name: "reject non-localhost http", url: "http://example.com/webhook", wantErr: true},
+		{name: "reject userinfo bypass", url: "http://localhost:pass@169.254.169.254/latest/meta-data", wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateWebhookRequest(&WebhookRequest{
+				URL: tc.url,
+				EventFilter: EventFilter{
+					EventTypes: []string{"auth.login"},
+				},
+			}, 10)
+
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected error for URL %q", tc.url)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("did not expect error for URL %q: %v", tc.url, err)
+			}
+		})
+	}
+}

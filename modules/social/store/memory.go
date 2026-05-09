@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const maxInMemoryAuthStates = 1024
+
 type MemoryStore struct {
 	mu             sync.Mutex
 	providers      map[string]Provider
@@ -94,6 +96,28 @@ func (s *MemoryStore) DeleteProvider(_ context.Context, slug string) error {
 func (s *MemoryStore) SaveState(_ context.Context, state AuthState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	for id, existing := range s.states {
+		if !now.Before(existing.ExpiresAt) {
+			delete(s.states, id)
+		}
+	}
+
+	if len(s.states) >= maxInMemoryAuthStates {
+		var oldestID string
+		var oldestExpiry time.Time
+		for id, existing := range s.states {
+			if oldestID == "" || existing.ExpiresAt.Before(oldestExpiry) {
+				oldestID = id
+				oldestExpiry = existing.ExpiresAt
+			}
+		}
+		if oldestID != "" {
+			delete(s.states, oldestID)
+		}
+	}
+
 	s.states[state.ID] = state
 	return nil
 }

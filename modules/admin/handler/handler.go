@@ -145,7 +145,7 @@ func New(svc Service, cfgOverride ...HandlerConfig) *Handler {
 	if cfg.APIKeyPrefix == "" {
 		cfg.APIKeyPrefix = "aegion_"
 	}
-	if cfg.APIKeyPrefixLen == 0 {
+	if cfg.APIKeyPrefixLen <= 0 {
 		cfg.APIKeyPrefixLen = 12
 	}
 	if cfg.APIKeyEntropyBytes == 0 {
@@ -248,10 +248,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/sso/connections", h.ListSSOConnections)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Post("/integrations/sso/connections", h.UpsertSSOConnection)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Delete("/integrations/sso/connections/{slug}", h.DeleteSSOConnection)
-		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/proxy/upstreams", h.ListProxyUpstreams)
+		r.With(RequirePermission(h, service.PermConfigUpdate)).Get("/integrations/proxy/upstreams", h.ListProxyUpstreams)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Post("/integrations/proxy/upstreams", h.UpsertProxyUpstream)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Delete("/integrations/proxy/upstreams/{name}", h.DeleteProxyUpstream)
-		r.With(RequirePermission(h, service.PermConfigRead)).Get("/integrations/proxy/routes", h.ListProxyRoutes)
+		r.With(RequirePermission(h, service.PermConfigUpdate)).Get("/integrations/proxy/routes", h.ListProxyRoutes)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Post("/integrations/proxy/routes", h.UpsertProxyRoute)
 		r.With(RequirePermission(h, service.PermConfigUpdate)).Delete("/integrations/proxy/routes/{id}", h.DeleteProxyRoute)
 		r.With(RequirePermission(h, service.PermConfigRead)).Post("/integrations/proxy/simulate", h.SimulateProxyRoute)

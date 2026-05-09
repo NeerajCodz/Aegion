@@ -19,7 +19,7 @@ The fastest way to get Aegion running:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/NeerajCodz/Aegion
+git clone https://github.com/Astraive/Aegion
 cd Aegion
 ```
 
@@ -195,4 +195,4 @@ go run ./cmd/aegion -admin-bootstrap -config configs/aegion.yaml
 
 Ensure `operator.password` is set to a non-placeholder value before running bootstrap.
 
-For more help, check the [GitHub Issues](https://github.com/NeerajCodz/Aegion/issues) or create a new one.
+For more help, check the [GitHub Issues](https://github.com/Astraive/Aegion/issues) or create a new one.

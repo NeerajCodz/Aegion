@@ -117,13 +117,14 @@ func (s *Service) CreateRecoveryFlow(ctx context.Context, requestURL string) (*F
 }
 
 // CreateSettingsFlow creates a new settings flow for an authenticated user
-func (s *Service) CreateSettingsFlow(ctx context.Context, requestURL string, identityID uuid.UUID) (*Flow, error) {
+func (s *Service) CreateSettingsFlow(ctx context.Context, requestURL string, identityID, sessionID uuid.UUID) (*Flow, error) {
 	flow, err := NewFlow(TypeSettings, requestURL, s.config.SettingsTTL)
 	if err != nil {
 		return nil, err
 	}
 
 	flow.SetIdentity(identityID)
+	flow.SetSession(sessionID)
 	flow.UI = s.generateSettingsUI(flow)
 
 	if err := s.store.Create(ctx, flow); err != nil {

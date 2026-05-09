@@ -309,9 +309,9 @@ Run it with:
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
 ```
 
-Default local endpoints:
+Default localhost-only endpoints (bound to `127.0.0.1`):
 
-- Grafana: `http://localhost:3000` (`admin` / `admin`)
+- Grafana: `http://localhost:3000` (`${GRAFANA_ADMIN_USER}` / `${GRAFANA_ADMIN_PASSWORD}`; defaults to `aegion-admin` / `change-me-now`)
 - Prometheus: `http://localhost:9090`
 - Tempo: `http://localhost:3200`
 - Loki: `http://localhost:3100`

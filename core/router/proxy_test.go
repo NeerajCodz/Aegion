@@ -65,7 +65,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		Logger:        logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
-	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrModuleUnavailable) {
+	if _, err := proxy.getModuleEndpoint(context.Background(), ""); !errors.Is(err, ErrModuleUnavailable) {
 		t.Fatalf("expected ErrModuleUnavailable for missing module, got %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		HealthURL: "http://127.0.0.1:18081/health",
 	})
 
-	endpoint, err := proxy.getModuleEndpoint(context.Background())
+	endpoint, err := proxy.getModuleEndpoint(context.Background(), "")
 	if err != nil {
 		t.Fatalf("getModuleEndpoint returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 	if err := reg.UpdateStatus("password", registry.StatusUnhealthy); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
-	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrModuleUnavailable) {
+	if _, err := proxy.getModuleEndpoint(context.Background(), ""); !errors.Is(err, ErrModuleUnavailable) {
 		t.Fatalf("expected ErrModuleUnavailable for unhealthy module, got %v", err)
 	}
 
@@ -108,8 +108,33 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		},
 		HealthURL: "http://127.0.0.1:18081/health",
 	})
-	if _, err := proxy.getModuleEndpoint(context.Background()); !errors.Is(err, ErrNoHealthyEndpoint) {
+	if _, err := proxy.getModuleEndpoint(context.Background(), ""); !errors.Is(err, ErrNoHealthyEndpoint) {
 		t.Fatalf("expected ErrNoHealthyEndpoint, got %v", err)
+	}
+}
+
+func TestModuleProxyRejectsSelfProxyEndpoint(t *testing.T) {
+	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer reg.Stop()
+
+	mustRegisterModule(t, reg, registry.RegistrationRequest{
+		ID:      "admin",
+		Name:    "admin",
+		Version: "v1",
+		Endpoints: []registry.Endpoint{
+			{Type: registry.EndpointHTTP, URL: "http://core.local:8080"},
+		},
+		HealthURL: "http://core.local:8080/health",
+	})
+
+	proxy := NewModuleProxy(ModuleProxyConfig{
+		Registry: reg,
+		ModuleID: "admin",
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
+	})
+
+	if _, err := proxy.getModuleEndpoint(context.Background(), "core.local:8080"); err == nil {
+		t.Fatal("expected self-proxy endpoint to be rejected")
 	}
 }
 
@@ -118,6 +143,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 		InternalToken:               "module-token",
 		SessionSecret:               []byte("module-secret"),
 		IdentitySigningSecret:       []byte("identity-signing-secret"),
+		SignedIdentityHeaders:       []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL", "X-User-Is-Admin"},
 		TrustForwardedHeaders:       false,
 		StripInboundIdentityHeaders: true,
 		ModuleID:                    "admin",
@@ -145,6 +171,7 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	original = original.WithContext(session.WithSession(original.Context(), sess))
 
 	req := httptest.NewRequest(http.MethodPost, "http://placeholder/module/path?drop=true", strings.NewReader("payload"))
+	req.Header.Set("X-User-Is-Admin", "true")
 	req = req.WithContext(original.Context())
 
 	proxy.director(target, original)(req)
@@ -187,6 +214,9 @@ func TestModuleProxyDirectorAndHeaders(t *testing.T) {
 	}
 	if req.Header.Get("X-User-AAL") != string(sess.AAL) {
 		t.Fatalf("expected canonical AAL header to be injected")
+	}
+	if req.Header.Get("X-User-Is-Admin") != "" {
+		t.Fatalf("expected non-canonical signed identity header to be stripped before signing")
 	}
 	if sig := req.Header.Get("X-Aegion-Signature"); sig == "" {
 		t.Fatalf("expected signed identity header")
@@ -281,7 +311,7 @@ func TestModuleProxyDirectorPreserveHost(t *testing.T) {
 func TestBuildPolicyCheckRequestUsesAuthenticatedModuleSubject(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "admin",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "http://gateway.local/resource", nil)
@@ -298,7 +328,7 @@ func TestBuildPolicyCheckRequestUsesAuthenticatedModuleSubject(t *testing.T) {
 func TestBuildPolicyCheckRequestDoesNotTrustInboundTenantHeader(t *testing.T) {
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "admin",
-		Logger:   zerolog.Nop(),
+		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "http://gateway.local/resource", nil)

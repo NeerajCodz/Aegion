@@ -329,7 +329,7 @@ func (s *Service) checkHIBP(ctx context.Context, password string) error {
 	suffix := hashStr[5:]
 
 	// Query HIBP API
-	url := fmt.Sprintf("%s%s", s.config.HIBPBaseURL, prefix)
+	url := fmt.Sprintf("%s/%s", strings.TrimRight(s.config.HIBPBaseURL, "/"), prefix)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

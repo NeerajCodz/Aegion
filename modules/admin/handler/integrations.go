@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"net/http"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/modules/admin/service"
 	adminstore "github.com/aegion/aegion/modules/admin/store"
+	proxystore "github.com/aegion/aegion/modules/proxy/store"
 	"github.com/aegion/aegion/modules/social/providers/catalog"
 	socialservice "github.com/aegion/aegion/modules/social/service"
 	socialstore "github.com/aegion/aegion/modules/social/store"
@@ -184,7 +186,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 			) tokens
 		`, &resp.OAuth2Tokens},
 		{`SELECT COUNT(*) FROM adm_ip_bans WHERE expires_at IS NULL OR expires_at > NOW()`, &resp.IPBans},
-		{`SELECT COUNT(*) FROM adm_audit_logs WHERE created_at >= NOW() - INTERVAL '24 hours'`, &resp.AuditEvents24h},
+		{`SELECT COUNT(*) FROM adm_audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`, &resp.AuditEvents24h},
 	}
 	for _, query := range queries {
 		if err := h.countValue(r, query.sql, query.target); err != nil {
@@ -622,7 +624,7 @@ type ProxyUpstreamRequest struct {
 	Timeout                 string                 `json:"timeout"`
 	MaxConnections          int                    `json:"max_connections"`
 	Headers                 map[string]string      `json:"headers"`
-	CircuitBreaker          map[string]interface{} `json:"circuit_breaker"`
+	CircuitBreaker          *proxystore.CircuitBreaker `json:"circuit_breaker"`
 	Enabled                 bool                   `json:"enabled"`
 }
 
@@ -644,6 +646,36 @@ func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" || req.URL == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "name and url are required")
 		return
+	}
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid upstream url")
+		return
+	}
+	req.URL = strings.TrimRight(req.URL, "/")
+	if req.HealthCheck == "" {
+		req.HealthCheck = "/health"
+	}
+	if !strings.HasPrefix(req.HealthCheck, "/") {
+		req.HealthCheck = "/" + req.HealthCheck
+	}
+	if req.Timeout != "" {
+		if _, err := time.ParseDuration(req.Timeout); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid timeout")
+			return
+		}
+	}
+	if req.CircuitBreaker != nil {
+		req.CircuitBreaker.Timeout = strings.TrimSpace(req.CircuitBreaker.Timeout)
+		if req.CircuitBreaker.Timeout != "" {
+			if _, err := time.ParseDuration(req.CircuitBreaker.Timeout); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_request", "Invalid circuit breaker")
+				return
+			}
+		}
+		if req.CircuitBreaker.FailureThreshold == 0 && req.CircuitBreaker.Timeout == "" && req.CircuitBreaker.SuccessThreshold == 0 {
+			req.CircuitBreaker = nil
+		}
 	}
 	headersRaw, err := integrationJSONMarshal(req.Headers)
 	if err != nil {
@@ -698,6 +730,15 @@ func (h *Handler) DeleteProxyUpstream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "name is required")
 		return
 	}
+	var routeCount int
+	if err := h.dbConn().QueryRow(r.Context(), `SELECT COUNT(*) FROM proxy_routes WHERE target = $1`, name).Scan(&routeCount); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete proxy upstream")
+		return
+	}
+	if routeCount > 0 {
+		writeError(w, http.StatusConflict, "conflict", "Proxy upstream is in use")
+		return
+	}
 	result, err := h.dbConn().Exec(r.Context(), `DELETE FROM proxy_upstreams WHERE name = $1`, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete proxy upstream")
@@ -725,11 +766,11 @@ type ProxyRouteRequest struct {
 	RequireAuth  bool                   `json:"require_auth"`
 	RequiredAAL  string                 `json:"required_aal"`
 	Capabilities []string               `json:"capabilities"`
-	RateLimit    map[string]interface{} `json:"rate_limit"`
+	RateLimit    *proxystore.RateLimit  `json:"rate_limit"`
 	Target       string                 `json:"target"`
 	Priority     int                    `json:"priority"`
 	Headers      map[string]string      `json:"headers"`
-	Rewrite      map[string]interface{} `json:"rewrite"`
+	Rewrite      *proxystore.Rewrite    `json:"rewrite"`
 	Enabled      bool                   `json:"enabled"`
 	Description  string                 `json:"description"`
 }
@@ -759,6 +800,40 @@ func (h *Handler) UpsertProxyRoute(w http.ResponseWriter, r *http.Request) {
 	req.Description = strings.TrimSpace(req.Description)
 	if req.Path == "" || req.Target == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "path and target are required")
+		return
+	}
+	if !strings.HasPrefix(req.Path, "/") {
+		req.Path = "/" + req.Path
+	}
+	req.RequiredAAL = strings.ToLower(req.RequiredAAL)
+	switch req.RequiredAAL {
+	case "", string(session.AAL0), string(session.AAL1), string(session.AAL2):
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid required_aal")
+		return
+	}
+	if req.RateLimit != nil {
+		if req.RateLimit.RequestsPerSecond <= 0 && req.RateLimit.BurstSize <= 0 {
+			req.RateLimit = nil
+		} else if req.RateLimit.RequestsPerSecond <= 0 || req.RateLimit.BurstSize <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid rate limit")
+			return
+		}
+	}
+	if req.Rewrite != nil {
+		req.Rewrite.StripPrefix = strings.TrimSpace(req.Rewrite.StripPrefix)
+		req.Rewrite.AddPrefix = strings.TrimSpace(req.Rewrite.AddPrefix)
+		if req.Rewrite.StripPrefix == "" && req.Rewrite.AddPrefix == "" {
+			req.Rewrite = nil
+		}
+	}
+	var upstreamExists bool
+	if err := h.dbConn().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM proxy_upstreams WHERE name = $1)`, req.Target).Scan(&upstreamExists); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate proxy route target")
+		return
+	}
+	if !upstreamExists {
+		writeError(w, http.StatusBadRequest, "invalid_request", "target upstream does not exist")
 		return
 	}
 	if req.ID == "" {

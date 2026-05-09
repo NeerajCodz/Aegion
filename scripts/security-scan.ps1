@@ -142,7 +142,7 @@ function Scan-Secrets {
         return
     }
     
-    # Remove generated scanner artifacts so gitleaks doesn't flag prior scan output as secrets.
+    # Remove only untracked scanner artifacts so committed files are still scanned by gitleaks.
     @(
         "security-govulncheck.json",
         "security-gosec.json",
@@ -150,7 +150,17 @@ function Scan-Secrets {
         "security-trivy-fs.json",
         "security-trivy-image.json"
     ) | ForEach-Object {
-        if (Test-Path $_) {
+        if (-not (Test-Path $_)) {
+            return
+        }
+
+        $isTracked = $false
+        if (Test-Command "git") {
+            git ls-files --error-unmatch -- $_ *> $null
+            $isTracked = ($LASTEXITCODE -eq 0)
+        }
+
+        if (-not $isTracked) {
             Remove-Item $_ -Force -ErrorAction SilentlyContinue
         }
     }
@@ -213,6 +223,7 @@ function Scan-ContainerBestPractices {
         $runtimeStart = $fromIndices[-1]
         $runtimeFrom = $lines[$runtimeStart]
         $runtimeContent = ($lines[$runtimeStart..($lines.Count - 1)] -join "`n")
+        $dockerfileContent = ($lines -join "`n")
 
         $issues = @()
 
@@ -230,7 +241,7 @@ function Scan-ContainerBestPractices {
             $issues += "Exposes SSH port (security risk)"
         }
         
-        if ($runtimeContent -match "(?m)^\s*ADD\s+https?://") {
+        if ($dockerfileContent -match "(?m)^\s*ADD\s+https?://") {
             $issues += "Uses ADD with URL (prefer curl/wget in RUN)"
         }
         
@@ -254,6 +265,7 @@ function Scan-Configuration {
     $configTargets = @(
         "configs/aegion.production.yaml",
         "configs/aegion.staging.yaml",
+        "deploy/docker-compose.yml",
         "deploy/docker-compose.prod.yml"
     )
     

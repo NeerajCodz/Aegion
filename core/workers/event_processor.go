@@ -70,17 +70,16 @@ func (w *EventProcessorWorker) Start(ctx context.Context) error {
 func (w *EventProcessorWorker) process(ctx context.Context) error {
 	w.Log().Debug("processing pending events")
 
-	// Use event bus's ProcessPending if available
-	if w.eventBus != nil {
-		err := w.eventBus.ProcessPending(ctx, w.subscriber)
-		if err != nil {
-			return err
-		}
+	if w.eventBus == nil {
+		w.Log().Error("event processor requires event bus; refusing to process deliveries", "subscriber", w.subscriber)
 		return nil
 	}
 
-	// Fallback: direct database processing
-	return w.processDirectly(ctx)
+	err := w.eventBus.ProcessPending(ctx, w.subscriber)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // processDirectly processes events without an EventBus instance.

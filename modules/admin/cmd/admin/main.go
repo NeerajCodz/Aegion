@@ -440,7 +440,7 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Admin.APIKeyPrefix == "" {
 		cfg.Admin.APIKeyPrefix = "aegion_"
 	}
-	if cfg.Admin.APIKeyPrefixLen == 0 {
+	if cfg.Admin.APIKeyPrefixLen <= 0 {
 		cfg.Admin.APIKeyPrefixLen = 12
 	}
 	if cfg.Admin.APIKeyEntropy == 0 {

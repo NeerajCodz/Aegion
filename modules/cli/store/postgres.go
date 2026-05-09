@@ -100,10 +100,20 @@ func (s *PostgresStore) StatusSummary(ctx context.Context) (map[string]any, erro
 }
 
 func (s *PostgresStore) RuntimeConfig(ctx context.Context) (map[string]any, error) {
+	proxyConfig := s.systemConfig(ctx, "proxy.settings")
+	if identitySigningSecret, ok := proxyConfig["identity_signing_secret"]; ok {
+		if secret, ok := identitySigningSecret.(string); ok {
+			proxyConfig["identity_signing_secret_set"] = strings.TrimSpace(secret) != ""
+		} else {
+			proxyConfig["identity_signing_secret_set"] = true
+		}
+		delete(proxyConfig, "identity_signing_secret")
+	}
+
 	return map[string]any{
 		"database": "connected",
 		"policy":   s.systemConfig(ctx, "policy.settings"),
-		"proxy":    s.systemConfig(ctx, "proxy.settings"),
+		"proxy":    proxyConfig,
 	}, nil
 }
 

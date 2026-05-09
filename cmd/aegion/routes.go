@@ -142,6 +142,8 @@ func SetupRoutes(s *Server) chi.Router {
 	r.Get("/health/live", s.handleLive)
 	r.Get("/.well-known/openid-configuration", s.handleOIDCDiscovery)
 	r.Get("/.well-known/jwks.json", s.handleJWKS)
+	r.Get("/oidc/userinfo", s.handleOAuth2UserInfo)
+	r.Post("/oidc/userinfo", s.handleOAuth2UserInfo)
 	r.Get("/oauth2/userinfo", s.handleOAuth2UserInfo)
 	r.Post("/oauth2/userinfo", s.handleOAuth2UserInfo)
 	r.Get("/self-service/login/methods/link/verify", s.handleMagicLinkLoginVerify)
@@ -384,6 +386,7 @@ func (s *Server) handleGetLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+
 	writeJSON(w, http.StatusOK, flow)
 }
 
@@ -500,7 +503,7 @@ func (s *Server) handleInitSettingsBrowser(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID)
+	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID, currentSession.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create settings flow", err)
 		return
@@ -528,12 +531,43 @@ func (s *Server) handleInitSettingsAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID)
+	flow, err := s.flowService.CreateSettingsFlow(r.Context(), r.URL.String(), currentSession.IdentityID, currentSession.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create settings flow", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, flow)
+}
+
+
+func (s *Server) requireSettingsFlowAccess(ctx context.Context, r *http.Request, flow *flows.Flow) error {
+	if s.sessionManager == nil {
+		return errors.New("session manager unavailable")
+	}
+
+	currentSession, err := s.sessionManager.GetFromRequest(ctx, r)
+	if err != nil {
+		return err
+	}
+	if flow.IdentityID == nil || *flow.IdentityID != currentSession.IdentityID {
+		return coresession.ErrSessionInvalid
+	}
+	if flow.SessionID != nil && *flow.SessionID != currentSession.ID {
+		return coresession.ErrSessionInvalid
+	}
+
+	return nil
+}
+
+func (s *Server) writeSettingsSessionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, coresession.ErrSessionNotFound),
+		errors.Is(err, coresession.ErrSessionExpired),
+		errors.Is(err, coresession.ErrSessionInvalid):
+		writeError(w, http.StatusUnauthorized, "active session required", nil)
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to resolve session", err)
+	}
 }
 
 func (s *Server) handleGetSettingsFlow(w http.ResponseWriter, r *http.Request) {
@@ -552,6 +586,11 @@ func (s *Server) handleGetSettingsFlow(w http.ResponseWriter, r *http.Request) {
 	flow, err := s.flowService.GetFlow(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "flow not found", err)
+		return
+	}
+
+	if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
+		s.writeSettingsSessionError(w, err)
 		return
 	}
 
@@ -631,14 +670,23 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		return
 	}
 
-	var result *flowExecutionResult
-	if s.selfServiceAuthEnabled() {
-		result, err = s.executeFlowSubmission(r.Context(), w, r, flow, input)
-		if err != nil {
-			s.writeFlowExecutionError(w, err)
-			return
-		}
-	}
+  if expectedType == flows.TypeSettings {
+      if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
+          s.writeSettingsSessionError(w, err)
+          return
+      }
+  }
+
+  result, err := s.executeFlowSubmission(r.Context(), w, r, flow, input)
+  if err != nil {
+      s.writeFlowExecutionError(w, err)
+      return
+  }
+
+  if result == nil {
+      writeError(w, http.StatusBadRequest, "unsupported flow submission method", nil)
+      return
+  }
 
 	if result != nil && result.KeepFlowActive {
 		response := map[string]any{
@@ -2501,22 +2549,30 @@ func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 // Helper functions
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	payload, err := json.Marshal(data)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-	}
+	_, _ = w.Write(append(payload, '\n'))
 }
 
 func writeError(w http.ResponseWriter, status int, message string, err error) {
 	_ = err // Avoid leaking internal error details in API responses.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
 	resp := map[string]interface{}{
 		"error": message,
 		"code":  status,
 	}
-	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+	payload, encErr := json.Marshal(resp)
+	if encErr != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(append(payload, '\n'))
 }

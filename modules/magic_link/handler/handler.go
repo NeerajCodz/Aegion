@@ -2,6 +2,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -272,7 +273,7 @@ func (h *Handler) HandleSendRecoveryCode(w http.ResponseWriter, r *http.Request)
 	if h.identityStore != nil {
 		resolved, err := h.identityStore.GetIdentityByEmail(r.Context(), req.Email)
 		if err != nil {
-			h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 		identityID = resolved
@@ -301,7 +302,7 @@ func (h *Handler) codeTypeFromRequest(r *http.Request) store.CodeType {
 func (h *Handler) handleSessionVerificationSuccess(w http.ResponseWriter, r *http.Request, recipient string, directIdentityID *uuid.UUID) {
 	identityID, err := h.resolveIdentityID(r.Context(), recipient, directIdentityID)
 	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -326,7 +327,7 @@ func (h *Handler) handleSessionVerificationSuccess(w http.ResponseWriter, r *htt
 			},
 		)
 		if createErr != nil {
-			h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 
@@ -349,7 +350,7 @@ func (h *Handler) handleVerificationSuccess(ctx context.Context, w http.Response
 
 	if h.identityStore != nil {
 		if err := h.identityStore.MarkEmailVerified(ctx, *identityID, email); err != nil {
-			h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -454,7 +455,7 @@ func (h *Handler) handleServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrRecipientEmpty):
 		h.writeError(w, http.StatusBadRequest, "missing_recipient", "Email or phone number is required")
 	default:
-		h.writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
@@ -465,20 +466,28 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, message st
 	resp.Error.Status = code
 	resp.Error.Message = message
 
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(resp); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, message, status)
-	}
+	_, _ = w.Write(buf.Bytes())
 }
 
 // writeSuccess writes a success response with a message.
 func (h *Handler) writeSuccess(w http.ResponseWriter, status int, message string) {
 	resp := SuccessResponse{Message: message}
 
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(resp); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-	}
+	_, _ = w.Write(buf.Bytes())
 }

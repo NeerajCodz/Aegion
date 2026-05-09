@@ -60,9 +60,12 @@ type ReBACTuple struct {
 // ListRoleIDsByIdentity returns role IDs assigned to an identity.
 func (s *Store) ListRoleIDsByIdentity(ctx context.Context, identityID string) ([]string, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT role_id::text
-		FROM pol_role_assignments
-		WHERE identity_id = $1
+		SELECT pra.role_id::text
+		FROM pol_role_assignments pra
+		INNER JOIN core_identities ci ON ci.id = pra.identity_id
+		WHERE pra.identity_id = $1
+		  AND ci.state = 'active'
+		  AND ci.deleted_at IS NULL
 	`, identityID)
 	if err != nil {
 		return nil, err

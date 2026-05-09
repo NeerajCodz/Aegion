@@ -340,8 +340,14 @@ func (s *TokenService) IntrospectToken(ctx context.Context, req *IntrospectionRe
 	if err != nil {
 		return nil, ErrInvalidClient
 	}
+	if strings.TrimSpace(client.TokenEndpointAuthMethod) == "" || client.TokenEndpointAuthMethod == "none" {
+		return nil, ErrUnauthorizedClient
+	}
 	if err := authenticateClient(client, req.ClientSecret); err != nil {
 		return nil, err
+	}
+	if client.TokenEndpointAuthMethod == "" || client.TokenEndpointAuthMethod == "none" {
+		return nil, ErrUnauthorizedClient
 	}
 
 	accessToken, err := s.resolveAccessTokenForIntrospection(ctx, req.Token)
@@ -354,6 +360,9 @@ func (s *TokenService) IntrospectToken(ctx context.Context, req *IntrospectionRe
 
 	if accessToken.Revoked || time.Now().UTC().After(accessToken.ExpiresAt) {
 		return &IntrospectionResponse{Active: false}, nil
+	}
+	if accessToken.ClientID != client.ID {
+		return nil, ErrUnauthorizedClient
 	}
 
 	return &IntrospectionResponse{

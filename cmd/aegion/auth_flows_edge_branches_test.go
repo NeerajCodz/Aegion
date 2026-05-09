@@ -704,3 +704,35 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 		}
 	})
 }
+
+func TestLookupIdentityByEmailStateFiltering(t *testing.T) {
+	s := newHookedServer(t)
+	var capturedQuery string
+	s.dbQueryRowFn = func(_ context.Context, query string, _ ...any) pgx.Row {
+		capturedQuery = query
+		return adminTestRow{scanFn: func(dest ...any) error {
+			if len(dest) != 1 {
+				return errors.New("unexpected destination length")
+			}
+			if v, ok := dest[0].(*uuid.UUID); ok {
+				*v = uuid.New()
+				return nil
+			}
+			return errors.New("expected uuid destination")
+		}}
+	}
+
+	if _, err := s.lookupIdentityByEmail(context.Background(), "person@example.com"); err != nil {
+		t.Fatalf("lookupIdentityByEmail returned error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "AND i.state = 'active'") {
+		t.Fatalf("expected active state filter in lookupIdentityByEmail query, got %q", capturedQuery)
+	}
+
+	if _, err := s.lookupAnyIdentityByEmail(context.Background(), "person@example.com"); err != nil {
+		t.Fatalf("lookupAnyIdentityByEmail returned error: %v", err)
+	}
+	if strings.Contains(capturedQuery, "AND i.state = 'active'") {
+		t.Fatalf("expected no active state filter in lookupAnyIdentityByEmail query, got %q", capturedQuery)
+	}
+}
