@@ -1,6 +1,10 @@
 package webhooks
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+	"strings"
+)
 
 // WebhookError represents a webhook system error.
 type WebhookError struct {
@@ -34,11 +38,18 @@ func ValidateWebhookRequest(req *WebhookRequest, maxFiltersDepth int) error {
 		return fmt.Errorf("URL is required")
 	}
 
-	// URL must be HTTPS except for localhost
-	isLocalhost := req.URL == "http://localhost" ||
-		(len(req.URL) > 17 && req.URL[:17] == "http://localhost:")
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil {
+		return ErrInvalidURL
+	}
 
-	if !isLocalhost && len(req.URL) > 7 && req.URL[:7] != "https://" {
+	if parsedURL.Host == "" || parsedURL.User != nil {
+		return ErrInvalidURL
+	}
+
+	hostname := strings.ToLower(parsedURL.Hostname())
+	isLocalhost := parsedURL.Scheme == "http" && hostname == "localhost"
+	if !isLocalhost && parsedURL.Scheme != "https" {
 		return ErrInvalidURL
 	}
 
