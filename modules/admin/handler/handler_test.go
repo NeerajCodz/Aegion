@@ -4898,7 +4898,7 @@ func TestIntegrationHandlers(t *testing.T) {
 					return fakeRow{vals: []any{int64(13)}}
 				case strings.Contains(sql, "FROM adm_ip_bans"):
 					return fakeRow{vals: []any{int64(2)}}
-				case strings.Contains(sql, "FROM adm_audit_logs"):
+				case strings.Contains(sql, "FROM adm_audit_log"):
 					return fakeRow{vals: []any{int64(11)}}
 				default:
 					return fakeRow{err: errors.New("unexpected query")}

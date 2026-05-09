@@ -186,7 +186,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 			) tokens
 		`, &resp.OAuth2Tokens},
 		{`SELECT COUNT(*) FROM adm_ip_bans WHERE expires_at IS NULL OR expires_at > NOW()`, &resp.IPBans},
-		{`SELECT COUNT(*) FROM adm_audit_logs WHERE created_at >= NOW() - INTERVAL '24 hours'`, &resp.AuditEvents24h},
+		{`SELECT COUNT(*) FROM adm_audit_log WHERE created_at >= NOW() - INTERVAL '24 hours'`, &resp.AuditEvents24h},
 	}
 	for _, query := range queries {
 		if err := h.countValue(r, query.sql, query.target); err != nil {
