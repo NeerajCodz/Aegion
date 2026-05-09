@@ -10,61 +10,38 @@
 
 -- Single column indexes for basic filtering
 CREATE INDEX IF NOT EXISTS idx_ae_event_type 
-    ON analytics_events(event_type)
-    WHERE archived_at IS NULL;
+    ON analytics_events(event_type);
 
 CREATE INDEX IF NOT EXISTS idx_ae_category 
-    ON analytics_events(category)
-    WHERE archived_at IS NULL;
-
-CREATE INDEX IF NOT EXISTS idx_ae_source_system 
-    ON analytics_events(source_system)
-    WHERE archived_at IS NULL;
+    ON analytics_events(category);
 
 -- Time-range query optimization (descending for recent events)
 CREATE INDEX IF NOT EXISTS idx_ae_created_at_desc 
-    ON analytics_events(created_at DESC)
-    WHERE archived_at IS NULL;
+    ON analytics_events(created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_ae_created_at_asc 
-    ON analytics_events(created_at ASC)
-    WHERE archived_at IS NULL;
+    ON analytics_events(created_at ASC);
 
 -- User and session based queries
 CREATE INDEX IF NOT EXISTS idx_ae_user_id 
     ON analytics_events(user_id)
-    WHERE user_id IS NOT NULL AND archived_at IS NULL;
+    WHERE user_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_ae_session_id 
     ON analytics_events(session_id)
-    WHERE session_id IS NOT NULL AND archived_at IS NULL;
+    WHERE session_id IS NOT NULL;
 
 -- Composite indexes for common filter combinations
 CREATE INDEX IF NOT EXISTS idx_ae_category_created_at 
-    ON analytics_events(category, created_at DESC)
-    WHERE archived_at IS NULL;
+    ON analytics_events(category, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_ae_event_type_created_at 
-    ON analytics_events(event_type, created_at DESC)
-    WHERE archived_at IS NULL;
+    ON analytics_events(event_type, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_ae_user_id_created_at 
     ON analytics_events(user_id, created_at DESC)
-    WHERE user_id IS NOT NULL AND archived_at IS NULL;
+    WHERE user_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_ae_source_system_created_at 
-    ON analytics_events(source_system, created_at DESC)
-    WHERE archived_at IS NULL;
-
--- Partial index for active events only
-CREATE INDEX IF NOT EXISTS idx_ae_archived_at_null 
-    ON analytics_events(created_at DESC)
-    WHERE archived_at IS NULL;
-
--- Index for soft delete queries
-CREATE INDEX IF NOT EXISTS idx_ae_archived_at 
-    ON analytics_events(archived_at)
-    WHERE archived_at IS NOT NULL;
 
 -- JSON data searching
 CREATE INDEX IF NOT EXISTS idx_ae_data_gin 
@@ -99,12 +76,8 @@ CREATE INDEX IF NOT EXISTS idx_ad_public
     ON analytics_dashboards(public)
     WHERE public = TRUE;
 
-CREATE INDEX IF NOT EXISTS idx_ad_is_default 
-    ON analytics_dashboards(is_default)
-    WHERE is_default = TRUE;
-
-CREATE INDEX IF NOT EXISTS idx_ad_owner_is_default 
-    ON analytics_dashboards(owner_id, is_default);
+CREATE INDEX IF NOT EXISTS idx_ad_owner_pinned 
+    ON analytics_dashboards(owner_id, pinned);
 
 CREATE INDEX IF NOT EXISTS idx_ad_name 
     ON analytics_dashboards(name);
