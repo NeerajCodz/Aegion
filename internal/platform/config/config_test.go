@@ -80,6 +80,56 @@ func TestDuration_Duration(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, d.Duration())
 }
 
+func TestExpandEnvWithDefaults(t *testing.T) {
+	t.Setenv("AEGION_SET_VALUE", "configured")
+	t.Setenv("AEGION_EMPTY_VALUE", "")
+
+	expanded := expandEnvWithDefaults("" +
+		"value1=${AEGION_SET_VALUE:-fallback}\n" +
+		"value2=${AEGION_UNSET_VALUE:-fallback}\n" +
+		"value3=${AEGION_EMPTY_VALUE:-fallback}\n" +
+		"value4=$AEGION_SET_VALUE\n")
+
+	assert.Contains(t, expanded, "value1=configured")
+	assert.Contains(t, expanded, "value2=fallback")
+	assert.Contains(t, expanded, "value3=fallback")
+	assert.Contains(t, expanded, "value4=configured")
+}
+
+func TestLoad_ShellStyleDefaultsForDuration(t *testing.T) {
+	configContent := `
+database:
+  url: postgres://user:pass@localhost/db
+secrets:
+  cookie:
+    - "test-cookie-secret-32-characters-long"
+  cipher:
+    - "test-cipher-secret-32-characters-long"
+  internal:
+    - "test-internal-secret-32-characters-long"
+password:
+  hibp_timeout: ${AEGION_PASSWORD_HIBP_TIMEOUT:-5s}
+magic_link:
+  rate_window: ${AEGION_MAGIC_LINK_RATE_WINDOW:-1h}
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "aegion.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o600))
+
+	cfg, err := Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, Duration(5*time.Second), cfg.Password.HIBPTimeout)
+	assert.Equal(t, Duration(time.Hour), cfg.MagicLink.RateWindow)
+
+	t.Setenv("AEGION_PASSWORD_HIBP_TIMEOUT", "8s")
+	t.Setenv("AEGION_MAGIC_LINK_RATE_WINDOW", "20m")
+	cfg, err = Load(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, Duration(8*time.Second), cfg.Password.HIBPTimeout)
+	assert.Equal(t, Duration(20*time.Minute), cfg.MagicLink.RateWindow)
+}
+
 func TestLoad(t *testing.T) {
 	// Create a temporary config file for testing
 	configContent := `
