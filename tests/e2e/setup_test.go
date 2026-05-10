@@ -788,12 +788,8 @@ func TestMain(m *testing.M) {
 
 	// Cleanup
 	if suite != nil {
-		ctx := context.Background()
 		if suite.Pool != nil {
 			suite.Pool.Close()
-		}
-		if suite.Container != nil {
-			_ = suite.Container.Terminate(ctx)
 		}
 	}
 
@@ -819,19 +815,7 @@ func TestDatabaseSetup(t *testing.T) {
 
 // TestContainerManagement verifies container lifecycle
 func TestContainerManagement(t *testing.T) {
-	suite := SetupTestSuite(t)
-
-	ctx := context.Background()
-
-	// Verify container is running
-	state, err := suite.Container.State(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get container state: %v", err)
-	}
-
-	if !state.Running {
-		t.Error("Container should be running")
-	}
+	t.Skip("external database lifecycle is managed outside the e2e suite")
 }
 
 // TestMigrationsApplied verifies all tables exist
