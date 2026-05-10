@@ -148,29 +148,29 @@ func (s *liveRuntimeServer) shutdown(ctx context.Context) error {
 }
 
 type mainDeps struct {
-	stdout         io.Writer
-	loadConfig     func(path string) (*Config, error)
-	rustSelfCheck  func() error
-	setupLogger    func(logConfig LogConfig)
-	parseDBConfig  func(connString string) (*pgxpool.Config, error)
-	newDBPool      func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error)
-	pingDB         func(ctx context.Context, db *pgxpool.Pool) error
-	closeDB        func(db *pgxpool.Pool)
-	runMigrations  func(ctx context.Context, db *pgxpool.Pool) error
-	startServer    func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error)
-	newSignalChan  func() chan os.Signal
-	notifySignals  func(c chan<- os.Signal, sig ...os.Signal)
-	stopSignalChan func(c chan<- os.Signal)
+	stdout          io.Writer
+	loadConfig      func(path string) (*Config, error)
+	cryptoSelfCheck func() error
+	setupLogger     func(logConfig LogConfig)
+	parseDBConfig   func(connString string) (*pgxpool.Config, error)
+	newDBPool       func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error)
+	pingDB          func(ctx context.Context, db *pgxpool.Pool) error
+	closeDB         func(db *pgxpool.Pool)
+	runMigrations   func(ctx context.Context, db *pgxpool.Pool) error
+	startServer     func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error)
+	newSignalChan   func() chan os.Signal
+	notifySignals   func(c chan<- os.Signal, sig ...os.Signal)
+	stopSignalChan  func(c chan<- os.Signal)
 }
 
 func defaultMainDeps() mainDeps {
 	return mainDeps{
-		stdout:        os.Stdout,
-		loadConfig:    loadConfig,
-		rustSelfCheck: platformcrypto.RuntimeSelfCheck,
-		setupLogger:   setupLogger,
-		parseDBConfig: pgxpool.ParseConfig,
-		newDBPool:     pgxpool.NewWithConfig,
+		stdout:          os.Stdout,
+		loadConfig:      loadConfig,
+		cryptoSelfCheck: platformcrypto.RuntimeSelfCheck,
+		setupLogger:     setupLogger,
+		parseDBConfig:   pgxpool.ParseConfig,
+		newDBPool:       pgxpool.NewWithConfig,
 		pingDB: func(ctx context.Context, db *pgxpool.Pool) error {
 			return db.Ping(ctx)
 		},
@@ -212,8 +212,8 @@ func parseMainFlags(args []string, envLookup func(string, string) string) (*main
 }
 
 func run(args []string, deps mainDeps) error {
-	if deps.rustSelfCheck == nil {
-		deps.rustSelfCheck = platformcrypto.RuntimeSelfCheck
+	if deps.cryptoSelfCheck == nil {
+		deps.cryptoSelfCheck = platformcrypto.RuntimeSelfCheck
 	}
 
 	flags, err := parseMainFlags(args, getEnv)
@@ -225,8 +225,8 @@ func run(args []string, deps mainDeps) error {
 		_, _ = fmt.Fprintln(deps.stdout, "Aegion Admin Module v1.0.0")
 		return nil
 	}
-	if err := deps.rustSelfCheck(); err != nil {
-		return fmt.Errorf("failed rust runtime self-check: %w", err)
+	if err := deps.cryptoSelfCheck(); err != nil {
+		return fmt.Errorf("failed crypto runtime self-check: %w", err)
 	}
 
 	cfg, err := deps.loadConfig(flags.configPath)

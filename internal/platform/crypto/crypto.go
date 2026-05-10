@@ -1,71 +1,39 @@
-// Package crypto provides Go bindings for the Aegion Rust crypto engine.
-//
-// This package wraps the Rust implementations of:
-// - Argon2id password hashing
-// - XChaCha20-Poly1305 field encryption
-// - Constant-time comparison
-//
-// The Rust code is compiled as a static library and linked via CGo.
+// Package crypto provides Go-native cryptographic primitives for Aegion.
 package crypto
 
-/*
-#cgo linux LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_crypto -ldl -lm
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_crypto -lm
-#cgo windows LDFLAGS: -L${SRCDIR}/../../../rust/target/x86_64-pc-windows-gnu/release -Wl,-Bstatic -l:libaegion_crypto.a -Wl,-Bdynamic -lws2_32 -lbcrypt -luserenv -lntdll
-#cgo CFLAGS: -I${SRCDIR}/../../../rust/crypto/include
-
-#include <stdlib.h>
-#include <stdint.h>
-
-typedef struct {
-    int error_code;
-    char* result;
-} CryptoResult;
-
-typedef struct {
-    int error_code;
-    uint8_t* data;
-    size_t len;
-} BytesResult;
-
-typedef struct {
-    int error_code;
-    char* module_id;
-    int64_t timestamp;
-    char* signature_hex;
-} ParsedTokenResult;
-
-extern CryptoResult crypto_hash_password(const char* password);
-extern int crypto_verify_password(const char* password, const char* hash);
-extern CryptoResult crypto_encrypt_field(const uint8_t* key, const uint8_t* plaintext, size_t plaintext_len, const uint8_t* aad, size_t aad_len);
-extern BytesResult crypto_decrypt_field(const uint8_t* key, const char* ciphertext, const uint8_t* aad, size_t aad_len);
-extern int crypto_generate_key(uint8_t* out);
-extern int crypto_constant_time_compare(const uint8_t* a, const uint8_t* b, size_t len);
-extern CryptoResult crypto_opaque_hash(const char* token);
-extern int crypto_opaque_validate(const char* token, const char* expected_hash);
-extern CryptoResult crypto_opaque_prefix(const char* token, size_t length);
-extern CryptoResult crypto_hmac_sha256_hex(const uint8_t* secret, size_t secret_len, const uint8_t* message, size_t message_len);
-extern CryptoResult crypto_sign_envelope(const char* kind, const uint8_t* secret, size_t secret_len, int64_t timestamp, const uint8_t* payload, size_t payload_len);
-extern int crypto_verify_envelope(const char* kind, const uint8_t* secret, size_t secret_len, const uint8_t* payload, size_t payload_len, const char* envelope, uint64_t max_age_seconds, int64_t now_unix);
-extern CryptoResult crypto_sign_session_cookie(const uint8_t* secret, size_t secret_len, const char* token, int64_t timestamp);
-extern CryptoResult crypto_verify_session_cookie(const uint8_t* secret, size_t secret_len, const char* signed_value, uint64_t max_age_seconds, int64_t now_unix);
-extern CryptoResult crypto_generate_internal_token(const uint8_t* secret, size_t secret_len, const char* module_id, int64_t timestamp);
-extern ParsedTokenResult crypto_verify_internal_token(const uint8_t* secret, size_t secret_len, const char* token, uint64_t ttl_seconds, int64_t now_unix);
-extern CryptoResult crypto_pkce_challenge(const char* verifier, const char* method);
-extern int crypto_pkce_verify(const char* verifier, const char* challenge, const char* method);
-extern void crypto_free_string(char* s);
-extern void crypto_free_bytes(uint8_t* data, size_t len);
-extern void crypto_free_parsed_token(ParsedTokenResult result);
-*/
-import "C"
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
-	"math"
-	"unsafe"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 // KeySize is the required size for encryption keys (32 bytes / 256 bits).
 const KeySize = 32
+
+const (
+	argonMemoryKiB   = 65536
+	argonIterations  = 3
+	argonParallelism = 4
+	argonSaltSize    = 16
+	argonOutputLen   = 32
+
+	envelopeVersion     = "v1"
+	sessionCookieVer    = "v1"
+	internalTokenKind   = "internal_token"
+	internalTokenVer    = "v1"
+	encryptedNonceBytes = chacha20poly1305.NonceSizeX
+	encryptedTagBytes   = 16
+)
 
 var (
 	ErrHashFailed       = errors.New("password hashing failed")
@@ -85,22 +53,10 @@ var (
 )
 
 var generateKeyFn = func(key []byte) int {
-	return int(C.crypto_generate_key((*C.uint8_t)(unsafe.Pointer(&key[0]))))
-}
-
-func byteSlicePtr(data []byte) *C.uint8_t {
-	if len(data) == 0 {
-		return nil
+	if _, err := rand.Read(key); err != nil {
+		return -1
 	}
-	return (*C.uint8_t)(unsafe.Pointer(&data[0]))
-}
-
-func goStringResult(result C.CryptoResult, fallback error) (string, error) {
-	if result.error_code != 0 {
-		return "", errorFromCode(int(result.error_code), fallback)
-	}
-	defer C.crypto_free_string(result.result)
-	return C.GoString(result.result), nil
+	return 0
 }
 
 type parsedTokenResult struct {
@@ -109,61 +65,34 @@ type parsedTokenResult struct {
 	SignatureHex  string
 }
 
-func goParsedTokenResult(result C.ParsedTokenResult, fallback error) (*parsedTokenResult, error) {
-	if result.error_code != 0 {
-		return nil, errorFromCode(int(result.error_code), fallback)
-	}
-	defer C.crypto_free_parsed_token(result)
-	return &parsedTokenResult{
-		ModuleID:      C.GoString(result.module_id),
-		TimestampUnix: int64(result.timestamp),
-		SignatureHex:  C.GoString(result.signature_hex),
-	}, nil
-}
-
-func errorFromCode(code int, fallback error) error {
-	switch code {
-	case -9:
-		return ErrInvalidSignature
-	case -10:
-		return ErrExpired
-	default:
-		return fallback
-	}
-}
-
 // HashPassword hashes a password using Argon2id with secure defaults.
 // Returns the PHC-encoded hash string.
 func HashPassword(password string) (string, error) {
-	cPassword := C.CString(password)
-	defer C.free(unsafe.Pointer(cPassword))
-
-	result := C.crypto_hash_password(cPassword)
-	if result.error_code != 0 {
+	salt := make([]byte, argonSaltSize)
+	if _, err := rand.Read(salt); err != nil {
 		return "", ErrHashFailed
 	}
-	defer C.crypto_free_string(result.result)
 
-	return C.GoString(result.result), nil
+	hash := argon2.IDKey([]byte(password), salt, argonIterations, argonMemoryKiB, argonParallelism, argonOutputLen)
+	return fmt.Sprintf(
+		"$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
+		argonMemoryKiB,
+		argonIterations,
+		argonParallelism,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(hash),
+	), nil
 }
 
 // VerifyPassword verifies a password against an Argon2id hash.
 // Returns true if the password matches, false otherwise.
 func VerifyPassword(password, hash string) (bool, error) {
-	cPassword := C.CString(password)
-	cHash := C.CString(hash)
-	defer C.free(unsafe.Pointer(cPassword))
-	defer C.free(unsafe.Pointer(cHash))
-
-	result := C.crypto_verify_password(cPassword, cHash)
-	switch result {
-	case 1:
-		return true, nil
-	case 0:
-		return false, nil
-	default:
+	params, salt, expected, err := parsePHC(hash)
+	if err != nil {
 		return false, ErrVerifyFailed
 	}
+	actual := argon2.IDKey([]byte(password), salt, params.iterations, params.memoryKiB, params.parallelism, uint32(len(expected)))
+	return subtle.ConstantTimeCompare(actual, expected) == 1, nil
 }
 
 // EncryptField encrypts plaintext using XChaCha20-Poly1305.
@@ -176,19 +105,19 @@ func EncryptField(key, plaintext, aad []byte) (string, error) {
 		return "", ErrInvalidKeyLength
 	}
 
-	result := C.crypto_encrypt_field(
-		(*C.uint8_t)(unsafe.Pointer(&key[0])),
-		byteSlicePtr(plaintext),
-		C.size_t(len(plaintext)),
-		byteSlicePtr(aad),
-		C.size_t(len(aad)),
-	)
-	if result.error_code != 0 {
+	aead, err := chacha20poly1305.NewX(key)
+	if err != nil {
 		return "", ErrEncryptFailed
 	}
-	defer C.crypto_free_string(result.result)
+	nonce := make([]byte, encryptedNonceBytes)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", ErrEncryptFailed
+	}
 
-	return C.GoString(result.result), nil
+	out := make([]byte, 0, len(nonce)+len(plaintext)+encryptedTagBytes)
+	out = append(out, nonce...)
+	out = aead.Seal(out, nonce, plaintext, aad)
+	return base64.StdEncoding.EncodeToString(out), nil
 }
 
 // DecryptField decrypts ciphertext encrypted with EncryptField.
@@ -198,35 +127,27 @@ func DecryptField(key []byte, ciphertext string, aad []byte) ([]byte, error) {
 		return nil, ErrInvalidKeyLength
 	}
 
-	cCiphertext := C.CString(ciphertext)
-	defer C.free(unsafe.Pointer(cCiphertext))
-
-	result := C.crypto_decrypt_field(
-		(*C.uint8_t)(unsafe.Pointer(&key[0])),
-		cCiphertext,
-		byteSlicePtr(aad),
-		C.size_t(len(aad)),
-	)
-	if result.error_code != 0 {
-		return nil, ErrDecryptFailed
-	}
-	defer C.crypto_free_bytes(result.data, result.len)
-
-	if result.data == nil && result.len > 0 {
-		return nil, ErrDecryptFailed
-	}
-	if result.len > C.size_t(math.MaxInt32) {
+	data, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil || len(data) < encryptedNonceBytes+encryptedTagBytes {
 		return nil, ErrDecryptFailed
 	}
 
-	return C.GoBytes(unsafe.Pointer(result.data), C.int(result.len)), nil
+	aead, err := chacha20poly1305.NewX(key)
+	if err != nil {
+		return nil, ErrDecryptFailed
+	}
+	nonce, encrypted := data[:encryptedNonceBytes], data[encryptedNonceBytes:]
+	plaintext, err := aead.Open(nil, nonce, encrypted, aad)
+	if err != nil {
+		return nil, ErrDecryptFailed
+	}
+	return plaintext, nil
 }
 
 // GenerateKey generates a cryptographically secure random 32-byte key.
 func GenerateKey() ([]byte, error) {
 	key := make([]byte, KeySize)
-	result := generateKeyFn(key)
-	if result != 0 {
+	if generateKeyFn(key) != 0 {
 		return nil, ErrRngFailed
 	}
 	return key, nil
@@ -238,150 +159,292 @@ func ConstantTimeCompare(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	if len(a) == 0 {
-		return true
+	return subtle.ConstantTimeCompare(a, b) == 1
+}
+
+type phcParams struct {
+	memoryKiB   uint32
+	iterations  uint32
+	parallelism uint8
+}
+
+func parsePHC(hash string) (phcParams, []byte, []byte, error) {
+	parts := strings.Split(hash, "$")
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" || parts[2] != "v=19" {
+		return phcParams{}, nil, nil, ErrVerifyFailed
 	}
-	result := C.crypto_constant_time_compare(
-		(*C.uint8_t)(unsafe.Pointer(&a[0])),
-		(*C.uint8_t)(unsafe.Pointer(&b[0])),
-		C.size_t(len(a)),
-	)
-	return result == 1
+
+	params := phcParams{}
+	for _, part := range strings.Split(parts[3], ",") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			return phcParams{}, nil, nil, ErrVerifyFailed
+		}
+		parsed, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || parsed == 0 {
+			return phcParams{}, nil, nil, ErrVerifyFailed
+		}
+		switch key {
+		case "m":
+			params.memoryKiB = uint32(parsed)
+		case "t":
+			params.iterations = uint32(parsed)
+		case "p":
+			if parsed > 255 {
+				return phcParams{}, nil, nil, ErrVerifyFailed
+			}
+			params.parallelism = uint8(parsed)
+		default:
+			return phcParams{}, nil, nil, ErrVerifyFailed
+		}
+	}
+	if params.memoryKiB == 0 || params.iterations == 0 || params.parallelism == 0 {
+		return phcParams{}, nil, nil, ErrVerifyFailed
+	}
+
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil || len(salt) == 0 {
+		return phcParams{}, nil, nil, ErrVerifyFailed
+	}
+	digest, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil || len(digest) == 0 {
+		return phcParams{}, nil, nil, ErrVerifyFailed
+	}
+	return params, salt, digest, nil
 }
 
 func cOpaqueHash(token string) (string, error) {
-	cToken := C.CString(token)
-	defer C.free(unsafe.Pointer(cToken))
-	return goStringResult(C.crypto_opaque_hash(cToken), ErrOpaqueFailed)
+	sum := sha256.Sum256([]byte(token))
+	return base64.StdEncoding.EncodeToString(sum[:]), nil
 }
 
 func cOpaqueValidate(token, expectedHash string) bool {
-	cToken := C.CString(token)
-	cHash := C.CString(expectedHash)
-	defer C.free(unsafe.Pointer(cToken))
-	defer C.free(unsafe.Pointer(cHash))
-	return C.crypto_opaque_validate(cToken, cHash) == 1
+	actual, err := cOpaqueHash(token)
+	if err != nil {
+		return false
+	}
+	return ConstantTimeCompare([]byte(actual), []byte(expectedHash))
 }
 
 func cOpaquePrefix(token string, length int) (string, error) {
-	cToken := C.CString(token)
-	defer C.free(unsafe.Pointer(cToken))
-	return goStringResult(C.crypto_opaque_prefix(cToken, C.size_t(length)), ErrOpaqueFailed)
+	if length <= 0 {
+		return "", nil
+	}
+	for i := range token {
+		if length == 0 {
+			return token[:i], nil
+		}
+		length--
+	}
+	return token, nil
 }
 
 func cHMACSHA256Hex(secret, message []byte) (string, error) {
-	result := C.crypto_hmac_sha256_hex(
-		byteSlicePtr(secret),
-		C.size_t(len(secret)),
-		byteSlicePtr(message),
-		C.size_t(len(message)),
-	)
-	return goStringResult(result, ErrSignatureFailed)
+	if len(secret) == 0 {
+		return "", ErrSignatureFailed
+	}
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write(message)
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
 func cSignEnvelope(kind string, secret, payload []byte, timestampUnix int64) (string, error) {
-	cKind := C.CString(kind)
-	defer C.free(unsafe.Pointer(cKind))
-	result := C.crypto_sign_envelope(
-		cKind,
-		byteSlicePtr(secret),
-		C.size_t(len(secret)),
-		C.int64_t(timestampUnix),
-		byteSlicePtr(payload),
-		C.size_t(len(payload)),
-	)
-	return goStringResult(result, ErrEnvelopeFailed)
+	signature, err := cHMACSHA256Hex(secret, envelopeMessage(kind, timestampUnix, payload))
+	if err != nil {
+		return "", ErrEnvelopeFailed
+	}
+	return fmt.Sprintf("%s;t=%d;s=%s", envelopeVersion, timestampUnix, signature), nil
 }
 
 func cVerifyEnvelope(kind string, secret, payload []byte, envelope string, maxAgeSeconds uint64, nowUnix int64) bool {
-	cKind := C.CString(kind)
-	cEnvelope := C.CString(envelope)
-	defer C.free(unsafe.Pointer(cKind))
-	defer C.free(unsafe.Pointer(cEnvelope))
-	return C.crypto_verify_envelope(
-		cKind,
-		byteSlicePtr(secret),
-		C.size_t(len(secret)),
-		byteSlicePtr(payload),
-		C.size_t(len(payload)),
-		cEnvelope,
-		C.uint64_t(maxAgeSeconds),
-		C.int64_t(nowUnix),
-	) == 1
+	timestamp, signature, err := parseEnvelope(envelope)
+	if err != nil {
+		return false
+	}
+	if maxAgeSeconds > 0 {
+		if timestamp > nowUnix || nowUnix-timestamp > int64(maxAgeSeconds) {
+			return false
+		}
+	}
+	return verifyHMACHex(secret, envelopeMessage(kind, timestamp, payload), signature)
+}
+
+func envelopeMessage(kind string, timestamp int64, payload []byte) []byte {
+	out := make([]byte, 0, len(kind)+len(payload)+32)
+	out = append(out, envelopeVersion...)
+	out = append(out, '\n')
+	out = append(out, kind...)
+	out = append(out, '\n')
+	out = strconv.AppendInt(out, timestamp, 10)
+	out = append(out, '\n')
+	out = append(out, payload...)
+	return out
+}
+
+func parseEnvelope(envelope string) (int64, string, error) {
+	parts := strings.Split(envelope, ";")
+	if len(parts) != 3 || parts[0] != envelopeVersion {
+		return 0, "", ErrInvalidSignature
+	}
+	timestampText, ok := strings.CutPrefix(parts[1], "t=")
+	if !ok {
+		return 0, "", ErrInvalidSignature
+	}
+	timestamp, err := strconv.ParseInt(timestampText, 10, 64)
+	if err != nil {
+		return 0, "", ErrInvalidSignature
+	}
+	signature, ok := strings.CutPrefix(parts[2], "s=")
+	if !ok || signature == "" {
+		return 0, "", ErrInvalidSignature
+	}
+	return timestamp, signature, nil
 }
 
 func cSignSessionCookie(secret []byte, token string, timestampUnix int64) (string, error) {
-	cToken := C.CString(token)
-	defer C.free(unsafe.Pointer(cToken))
-	result := C.crypto_sign_session_cookie(
-		byteSlicePtr(secret),
-		C.size_t(len(secret)),
-		cToken,
-		C.int64_t(timestampUnix),
-	)
-	return goStringResult(result, ErrSessionCookie)
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(token))
+	signature, err := cHMACSHA256Hex(secret, sessionCookieMessage(encoded, timestampUnix))
+	if err != nil {
+		return "", ErrSessionCookie
+	}
+	return fmt.Sprintf("%s.%s.%d.%s", sessionCookieVer, encoded, timestampUnix, signature), nil
 }
 
 func cVerifySessionCookie(secret []byte, signed string, maxAgeSeconds uint64, nowUnix int64) (string, error) {
-	cSigned := C.CString(signed)
-	defer C.free(unsafe.Pointer(cSigned))
-	result := C.crypto_verify_session_cookie(
-		byteSlicePtr(secret),
-		C.size_t(len(secret)),
-		cSigned,
-		C.uint64_t(maxAgeSeconds),
-		C.int64_t(nowUnix),
-	)
-	return goStringResult(result, ErrSessionCookie)
+	parts := strings.Split(signed, ".")
+	if len(parts) != 4 || parts[0] != sessionCookieVer {
+		return "", ErrInvalidSignature
+	}
+	timestamp, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return "", ErrInvalidSignature
+	}
+	if maxAgeSeconds > 0 {
+		if timestamp > nowUnix {
+			return "", ErrInvalidSignature
+		}
+		if nowUnix-timestamp > int64(maxAgeSeconds) {
+			return "", ErrExpired
+		}
+	}
+	if !verifyHMACHex(secret, sessionCookieMessage(parts[1], timestamp), parts[3]) {
+		return "", ErrInvalidSignature
+	}
+	token, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", ErrSessionCookie
+	}
+	return string(token), nil
+}
+
+func sessionCookieMessage(encodedToken string, timestamp int64) []byte {
+	out := make([]byte, 0, len(encodedToken)+48)
+	out = append(out, sessionCookieKind...)
+	out = append(out, '\n')
+	out = append(out, sessionCookieVer...)
+	out = append(out, '\n')
+	out = strconv.AppendInt(out, timestamp, 10)
+	out = append(out, '\n')
+	out = append(out, encodedToken...)
+	return out
 }
 
 func cGenerateInternalToken(secret []byte, moduleID string, timestampUnix int64) (string, error) {
-	cModuleID := C.CString(moduleID)
-	defer C.free(unsafe.Pointer(cModuleID))
-	result := C.crypto_generate_internal_token(
-		byteSlicePtr(secret),
-		C.size_t(len(secret)),
-		cModuleID,
-		C.int64_t(timestampUnix),
-	)
-	return goStringResult(result, ErrInternalToken)
+	if strings.TrimSpace(moduleID) == "" {
+		return "", ErrInternalToken
+	}
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(moduleID))
+	signature, err := cHMACSHA256Hex(secret, internalTokenMessage(encoded, timestampUnix))
+	if err != nil {
+		return "", ErrInternalToken
+	}
+	return fmt.Sprintf("%s.%s.%d.%s", internalTokenVer, encoded, timestampUnix, signature), nil
 }
 
-func cVerifyInternalToken(secret []byte, token string, ttlSeconds uint64, nowUnix int64) (*parsedTokenResult, error) {
-	cToken := C.CString(token)
-	defer C.free(unsafe.Pointer(cToken))
-	result := C.crypto_verify_internal_token(
-		byteSlicePtr(secret),
-		C.size_t(len(secret)),
-		cToken,
-		C.uint64_t(ttlSeconds),
-		C.int64_t(nowUnix),
-	)
-	return goParsedTokenResult(result, ErrInternalToken)
+func cVerifyInternalToken(secret []byte, token string, ttlMillis uint64, nowUnix int64) (*parsedTokenResult, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 4 || parts[0] != internalTokenVer {
+		return nil, ErrInvalidSignature
+	}
+	timestamp, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return nil, ErrInvalidSignature
+	}
+	if timestamp > nowUnix {
+		return nil, ErrInvalidSignature
+	}
+	if ttlMillis > 0 && nowUnix-timestamp > int64(ttlMillis) {
+		return nil, ErrExpired
+	}
+	if !verifyHMACHex(secret, internalTokenMessage(parts[1], timestamp), parts[3]) {
+		return nil, ErrInvalidSignature
+	}
+	moduleID, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, ErrInternalToken
+	}
+	return &parsedTokenResult{
+		ModuleID:      string(moduleID),
+		TimestampUnix: timestamp,
+		SignatureHex:  parts[3],
+	}, nil
+}
+
+func internalTokenMessage(encodedModuleID string, timestamp int64) []byte {
+	out := make([]byte, 0, len(encodedModuleID)+48)
+	out = append(out, internalTokenKind...)
+	out = append(out, '\n')
+	out = append(out, internalTokenVer...)
+	out = append(out, '\n')
+	out = strconv.AppendInt(out, timestamp, 10)
+	out = append(out, '\n')
+	out = append(out, encodedModuleID...)
+	return out
 }
 
 func cPKCEChallenge(verifier, method string) (string, error) {
-	cVerifier := C.CString(verifier)
-	cMethod := C.CString(method)
-	defer C.free(unsafe.Pointer(cVerifier))
-	defer C.free(unsafe.Pointer(cMethod))
-	return goStringResult(C.crypto_pkce_challenge(cVerifier, cMethod), ErrPKCEFailed)
+	normalized := normalizePKCEMethod(method)
+	switch normalized {
+	case "plain":
+		return verifier, nil
+	case "S256":
+		sum := sha256.Sum256([]byte(verifier))
+		return base64.RawURLEncoding.EncodeToString(sum[:]), nil
+	default:
+		return "", ErrPKCEFailed
+	}
 }
 
 func cPKCEVerify(verifier, challenge, method string) (bool, error) {
-	cVerifier := C.CString(verifier)
-	cChallenge := C.CString(challenge)
-	cMethod := C.CString(method)
-	defer C.free(unsafe.Pointer(cVerifier))
-	defer C.free(unsafe.Pointer(cChallenge))
-	defer C.free(unsafe.Pointer(cMethod))
-	result := C.crypto_pkce_verify(cVerifier, cChallenge, cMethod)
-	switch result {
-	case 1:
-		return true, nil
-	case 0:
-		return false, nil
-	default:
-		return false, ErrPKCEFailed
+	computed, err := cPKCEChallenge(verifier, method)
+	if err != nil {
+		return false, err
 	}
+	return ConstantTimeCompare([]byte(computed), []byte(challenge)), nil
+}
+
+func normalizePKCEMethod(method string) string {
+	if strings.TrimSpace(method) == "" || strings.EqualFold(method, "plain") {
+		return "plain"
+	}
+	if strings.EqualFold(method, "s256") {
+		return "S256"
+	}
+	return method
+}
+
+func verifyHMACHex(secret, message []byte, signatureHex string) bool {
+	provided, err := hex.DecodeString(signatureHex)
+	if err != nil {
+		return false
+	}
+	expectedHex, err := cHMACSHA256Hex(secret, message)
+	if err != nil {
+		return false
+	}
+	expected, err := hex.DecodeString(expectedHex)
+	if err != nil {
+		return false
+	}
+	return hmac.Equal(expected, provided)
 }

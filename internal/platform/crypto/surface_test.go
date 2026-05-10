@@ -87,6 +87,64 @@ func TestEnvelopeAndPKCEHelpers(t *testing.T) {
 	}
 }
 
+func TestGoNativeCompatibilityGoldenVectors(t *testing.T) {
+	secret := []byte("secret")
+	payload := []byte("payload")
+	fixedUnix := time.Unix(1700000000, 0).UTC()
+	fixedMillis := time.UnixMilli(1700000000000).UTC()
+
+	hmacHex, err := HMACSHA256Hex(secret, payload)
+	if err != nil {
+		t.Fatalf("HMACSHA256Hex() error = %v", err)
+	}
+	if hmacHex != "b82fcb791acec57859b989b430a826488ce2e479fdf92326bd0a2e8375a42ba4" {
+		t.Fatalf("HMACSHA256Hex() = %q", hmacHex)
+	}
+
+	envelope, err := SignEnvelope("identity", secret, payload, fixedUnix)
+	if err != nil {
+		t.Fatalf("SignEnvelope() error = %v", err)
+	}
+	if envelope != "v1;t=1700000000;s=ddee276d8ae867e7da775ca48e4097426709cd7cc875c8f8c57f41bfa16f6210" {
+		t.Fatalf("SignEnvelope() = %q", envelope)
+	}
+	if !VerifyEnvelope("identity", secret, payload, envelope, time.Minute, fixedUnix.Add(30*time.Second)) {
+		t.Fatalf("VerifyEnvelope() expected true for golden vector")
+	}
+
+	signedCookie, err := SignSessionCookieValue(secret, "token", fixedUnix)
+	if err != nil {
+		t.Fatalf("SignSessionCookieValue() error = %v", err)
+	}
+	if signedCookie != "v1.dG9rZW4.1700000000.476bb9ee9d68bc2405a3e8b979b770d8f638222b7b1ad82dfefb2d07858c92f3" {
+		t.Fatalf("SignSessionCookieValue() = %q", signedCookie)
+	}
+
+	internalToken, err := GenerateInternalToken(secret, "admin", fixedMillis)
+	if err != nil {
+		t.Fatalf("GenerateInternalToken() error = %v", err)
+	}
+	if internalToken != "v1.YWRtaW4.1700000000000.223cef548aea2647bff609d3b21677da3bb2926494ad7b5b2f8cf580b257ac8a" {
+		t.Fatalf("GenerateInternalToken() = %q", internalToken)
+	}
+
+	opaqueHash, err := HashOpaqueToken("opaque-token")
+	if err != nil {
+		t.Fatalf("HashOpaqueToken() error = %v", err)
+	}
+	if opaqueHash != "hNPyPam19RsyaVZu/wXT+yNgfu74lWf5zSgLkMoNvFw=" {
+		t.Fatalf("HashOpaqueToken() = %q", opaqueHash)
+	}
+
+	pkceChallenge, err := PKCEChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "S256")
+	if err != nil {
+		t.Fatalf("PKCEChallenge() error = %v", err)
+	}
+	if pkceChallenge != "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" {
+		t.Fatalf("PKCEChallenge() = %q", pkceChallenge)
+	}
+}
+
 func TestSessionAndIdentitySigningHelpers(t *testing.T) {
 	secret := []byte("session-secret")
 	now := time.Now().UTC()

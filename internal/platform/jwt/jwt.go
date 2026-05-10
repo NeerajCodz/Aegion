@@ -1,56 +1,22 @@
-// Package jwt provides Go bindings for the Aegion Rust JWT engine.
-//
-// This package wraps the Rust implementations of:
-// - EC key pair generation (ES256)
-// - JWT signing and verification
-// - JWKS serialization
+// Package jwt provides Go-native JWT signing, verification, and JWK helpers.
 package jwt
 
-/*
-#cgo linux LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_jwt -ldl -lm
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../../rust/target/release -laegion_jwt -lm
-#cgo windows LDFLAGS: -L${SRCDIR}/../../../rust/target/x86_64-pc-windows-gnu/release -Wl,-Bstatic -l:libaegion_jwt.a -Wl,-Bdynamic -lws2_32 -lbcrypt -luserenv -lntdll
-#cgo CFLAGS: -I${SRCDIR}/../../../rust/jwt/include
-
-#include <stdlib.h>
-#include <stdint.h>
-
-typedef struct {
-    int error_code;
-    char* result;
-} JwtResult;
-
-typedef struct {
-    int error_code;
-    char* algorithm;
-    char* key_id;
-    uint8_t* private_key;
-    size_t private_key_len;
-    uint8_t* public_key;
-    size_t public_key_len;
-} KeyPairResult;
-
-typedef struct {
-    int error_code;
-    char* claims_json;
-    char* key_id;
-} ClaimsResult;
-
-extern KeyPairResult jwt_generate_ec_keypair(const char* key_id);
-extern JwtResult jwt_sign(const char* claims_json, const char* algorithm, const uint8_t* private_key, size_t private_key_len, const char* key_id);
-extern ClaimsResult jwt_verify(const char* token, const char* algorithm, const uint8_t* public_key, size_t public_key_len, const char* issuer, const char* audience, uint64_t leeway);
-extern JwtResult jwt_to_jwk(const char* algorithm, const char* key_id, const uint8_t* public_key, size_t public_key_len);
-extern void jwt_free_string(char* s);
-extern void jwt_free_bytes(uint8_t* data, size_t len);
-extern void jwt_free_keypair(KeyPairResult result);
-extern void jwt_free_claims(ClaimsResult result);
-*/
-import "C"
 import (
+	"bytes"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math/big"
+	"strings"
 	"time"
-	"unsafe"
 )
 
 var (
@@ -101,7 +67,6 @@ type Claims struct {
 func (c Claims) MarshalJSON() ([]byte, error) {
 	m := make(map[string]interface{})
 
-	// Add standard claims
 	if c.Issuer != "" {
 		m["iss"] = c.Issuer
 	}
@@ -127,7 +92,6 @@ func (c Claims) MarshalJSON() ([]byte, error) {
 		m["sid"] = c.SessionID
 	}
 
-	// Add custom claims
 	for k, v := range c.Custom {
 		if _, isReserved := reservedClaimNames[k]; isReserved {
 			continue
@@ -136,6 +100,61 @@ func (c Claims) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(m)
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for flattened custom claims.
+func (c *Claims) UnmarshalJSON(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	var m map[string]interface{}
+	if err := decoder.Decode(&m); err != nil {
+		return err
+	}
+
+	*c = Claims{}
+	for k, v := range m {
+		switch k {
+		case "iss":
+			c.Issuer, _ = v.(string)
+		case "sub":
+			c.Subject, _ = v.(string)
+		case "aud":
+			c.Audience, _ = v.(string)
+		case "exp":
+			c.ExpiresAt = numberToInt64(v)
+		case "nbf":
+			c.NotBefore = numberToInt64(v)
+		case "iat":
+			c.IssuedAt = numberToInt64(v)
+		case "jti":
+			c.JWTID, _ = v.(string)
+		case "sid":
+			c.SessionID, _ = v.(string)
+		default:
+			if c.Custom == nil {
+				c.Custom = make(map[string]interface{})
+			}
+			c.Custom[k] = v
+		}
+	}
+	return nil
+}
+
+func numberToInt64(value interface{}) int64 {
+	switch v := value.(type) {
+	case json.Number:
+		n, _ := v.Int64()
+		return n
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	default:
+		return 0
+	}
 }
 
 // VerifyOptions configures JWT verification.
@@ -151,28 +170,30 @@ type VerifyResult struct {
 	KeyID  string
 }
 
+type jwtHeader struct {
+	Alg string `json:"alg"`
+	Typ string `json:"typ"`
+	KID string `json:"kid,omitempty"`
+}
+
 // GenerateECKeyPair generates an ES256 (ECDSA P-256) key pair.
 func GenerateECKeyPair(keyID string) (*KeyPair, error) {
-	var cKeyID *C.char
-	if keyID != "" {
-		cKeyID = C.CString(keyID)
-		defer C.free(unsafe.Pointer(cKeyID))
-	}
-
-	result := C.jwt_generate_ec_keypair(cKeyID)
-	if result.error_code != 0 {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
 		return nil, ErrKeyGenFailed
 	}
-	defer C.jwt_free_keypair(result)
-
-	kp := &KeyPair{
-		Algorithm:  C.GoString(result.algorithm),
-		KeyID:      C.GoString(result.key_id),
-		PrivateKey: C.GoBytes(unsafe.Pointer(result.private_key), C.int(result.private_key_len)),
-		PublicKey:  C.GoBytes(unsafe.Pointer(result.public_key), C.int(result.public_key_len)),
+	privateKey, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, ErrKeyGenFailed
 	}
+	publicKey := elliptic.Marshal(elliptic.P256(), key.X, key.Y)
 
-	return kp, nil
+	return &KeyPair{
+		Algorithm:  "ES256",
+		KeyID:      keyID,
+		PrivateKey: privateKey,
+		PublicKey:  publicKey,
+	}, nil
 }
 
 // Sign creates a signed JWT from the given claims.
@@ -181,35 +202,30 @@ func Sign(claims Claims, privateKey []byte, algorithm, keyID string) (string, er
 		return "", ErrInvalidKey
 	}
 
+	headerJSON, err := json.Marshal(jwtHeader{Alg: algorithm, Typ: "JWT", KID: keyID})
+	if err != nil {
+		return "", ErrSigningFailed
+	}
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
 		return "", err
 	}
 
-	cClaims := C.CString(string(claimsJSON))
-	cAlgorithm := C.CString(algorithm)
-	defer C.free(unsafe.Pointer(cClaims))
-	defer C.free(unsafe.Pointer(cAlgorithm))
+	header := base64.RawURLEncoding.EncodeToString(headerJSON)
+	payload := base64.RawURLEncoding.EncodeToString(claimsJSON)
+	signingInput := header + "." + payload
 
-	var cKeyID *C.char
-	if keyID != "" {
-		cKeyID = C.CString(keyID)
-		defer C.free(unsafe.Pointer(cKeyID))
-	}
-
-	result := C.jwt_sign(
-		cClaims,
-		cAlgorithm,
-		(*C.uint8_t)(unsafe.Pointer(&privateKey[0])),
-		C.size_t(len(privateKey)),
-		cKeyID,
-	)
-	if result.error_code != 0 {
+	signature, err := signBytes([]byte(signingInput), privateKey, algorithm)
+	if err != nil {
+		if errors.Is(err, ErrInvalidAlg) {
+			return "", ErrInvalidAlg
+		}
+		if errors.Is(err, ErrInvalidKey) {
+			return "", ErrInvalidKey
+		}
 		return "", ErrSigningFailed
 	}
-	defer C.jwt_free_string(result.result)
-
-	return C.GoString(result.result), nil
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
 // Verify verifies a JWT and returns the claims.
@@ -221,62 +237,47 @@ func Verify(token string, publicKey []byte, algorithm string, opts VerifyOptions
 		return nil, ErrInvalidLeeway
 	}
 
-	cToken := C.CString(token)
-	cAlgorithm := C.CString(algorithm)
-	defer C.free(unsafe.Pointer(cToken))
-	defer C.free(unsafe.Pointer(cAlgorithm))
-
-	var cIssuer, cAudience *C.char
-	if opts.Issuer != "" {
-		cIssuer = C.CString(opts.Issuer)
-		defer C.free(unsafe.Pointer(cIssuer))
-	}
-	if opts.Audience != "" {
-		cAudience = C.CString(opts.Audience)
-		defer C.free(unsafe.Pointer(cAudience))
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, ErrInvalidToken
 	}
 
-	leeway := C.uint64_t(opts.Leeway / time.Second)
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, ErrVerifyFailed
+	}
+	var header jwtHeader
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		return nil, ErrVerifyFailed
+	}
+	if header.Alg != algorithm {
+		return nil, ErrInvalidAlg
+	}
 
-	result := C.jwt_verify(
-		cToken,
-		cAlgorithm,
-		(*C.uint8_t)(unsafe.Pointer(&publicKey[0])),
-		C.size_t(len(publicKey)),
-		cIssuer,
-		cAudience,
-		leeway,
-	)
-
-	if result.error_code != 0 {
-		switch result.error_code {
-		case -7:
-			return nil, ErrTokenExpired
-		case -8:
-			return nil, ErrTokenNotYetValid
-		case -4:
-			return nil, ErrInvalidToken
-		case -5:
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return nil, ErrVerifyFailed
+	}
+	if err := verifyBytes([]byte(parts[0]+"."+parts[1]), signature, publicKey, algorithm); err != nil {
+		if errors.Is(err, ErrInvalidAlg) {
 			return nil, ErrInvalidAlg
-		default:
-			return nil, ErrVerifyFailed
 		}
+		return nil, ErrVerifyFailed
 	}
-	defer C.jwt_free_claims(result)
 
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, ErrVerifyFailed
+	}
 	var claims Claims
-	if err := json.Unmarshal([]byte(C.GoString(result.claims_json)), &claims); err != nil {
+	if err := json.Unmarshal(payloadJSON, &claims); err != nil {
+		return nil, ErrVerifyFailed
+	}
+	if err := validateClaims(claims, opts); err != nil {
 		return nil, err
 	}
 
-	vr := &VerifyResult{
-		Claims: claims,
-	}
-	if result.key_id != nil {
-		vr.KeyID = C.GoString(result.key_id)
-	}
-
-	return vr, nil
+	return &VerifyResult{Claims: claims, KeyID: header.KID}, nil
 }
 
 // ToJWK converts a public key to JWK JSON format.
@@ -285,21 +286,171 @@ func ToJWK(algorithm, keyID string, publicKey []byte) (string, error) {
 		return "", ErrInvalidKey
 	}
 
-	cAlgorithm := C.CString(algorithm)
-	cKeyID := C.CString(keyID)
-	defer C.free(unsafe.Pointer(cAlgorithm))
-	defer C.free(unsafe.Pointer(cKeyID))
-
-	result := C.jwt_to_jwk(
-		cAlgorithm,
-		cKeyID,
-		(*C.uint8_t)(unsafe.Pointer(&publicKey[0])),
-		C.size_t(len(publicKey)),
-	)
-	if result.error_code != 0 {
+	var jwk interface{}
+	switch algorithm {
+	case "ES256":
+		x, y := elliptic.Unmarshal(elliptic.P256(), publicKey)
+		if x == nil || y == nil {
+			return "", errors.New("failed to convert to JWK")
+		}
+		jwk = struct {
+			KTY string `json:"kty"`
+			KID string `json:"kid,omitempty"`
+			Use string `json:"use,omitempty"`
+			Alg string `json:"alg,omitempty"`
+			Crv string `json:"crv,omitempty"`
+			X   string `json:"x,omitempty"`
+			Y   string `json:"y,omitempty"`
+		}{
+			KTY: "EC",
+			KID: keyID,
+			Use: "sig",
+			Alg: "ES256",
+			Crv: "P-256",
+			X:   base64.RawURLEncoding.EncodeToString(padBytes(x.Bytes(), 32)),
+			Y:   base64.RawURLEncoding.EncodeToString(padBytes(y.Bytes(), 32)),
+		}
+	case "EdDSA":
+		if len(publicKey) != ed25519.PublicKeySize {
+			return "", errors.New("failed to convert to JWK")
+		}
+		jwk = struct {
+			KTY string `json:"kty"`
+			KID string `json:"kid,omitempty"`
+			Use string `json:"use,omitempty"`
+			Alg string `json:"alg,omitempty"`
+			Crv string `json:"crv,omitempty"`
+			X   string `json:"x,omitempty"`
+		}{
+			KTY: "OKP",
+			KID: keyID,
+			Use: "sig",
+			Alg: "EdDSA",
+			Crv: "Ed25519",
+			X:   base64.RawURLEncoding.EncodeToString(publicKey),
+		}
+	default:
 		return "", errors.New("failed to convert to JWK")
 	}
-	defer C.jwt_free_string(result.result)
 
-	return C.GoString(result.result), nil
+	out, err := json.Marshal(jwk)
+	if err != nil {
+		return "", errors.New("failed to convert to JWK")
+	}
+	return string(out), nil
+}
+
+func signBytes(message, privateKey []byte, algorithm string) ([]byte, error) {
+	parsed, err := x509.ParsePKCS8PrivateKey(privateKey)
+	if err != nil {
+		return nil, ErrInvalidKey
+	}
+
+	switch algorithm {
+	case "ES256":
+		key, ok := parsed.(*ecdsa.PrivateKey)
+		if !ok || key.Curve != elliptic.P256() {
+			return nil, ErrInvalidKey
+		}
+		digest := sha256.Sum256(message)
+		r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
+		if err != nil {
+			return nil, err
+		}
+		return append(padBytes(r.Bytes(), 32), padBytes(s.Bytes(), 32)...), nil
+	case "EdDSA":
+		key, ok := parsed.(ed25519.PrivateKey)
+		if !ok {
+			return nil, ErrInvalidKey
+		}
+		return ed25519.Sign(key, message), nil
+	default:
+		return nil, ErrInvalidAlg
+	}
+}
+
+func verifyBytes(message, signature, publicKey []byte, algorithm string) error {
+	switch algorithm {
+	case "ES256":
+		if len(signature) != 64 {
+			return ErrVerifyFailed
+		}
+		x, y := elliptic.Unmarshal(elliptic.P256(), publicKey)
+		if x == nil || y == nil {
+			return ErrVerifyFailed
+		}
+		digest := sha256.Sum256(message)
+		r := new(big.Int).SetBytes(signature[:32])
+		s := new(big.Int).SetBytes(signature[32:])
+		if !ecdsa.Verify(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, digest[:], r, s) {
+			return ErrVerifyFailed
+		}
+		return nil
+	case "EdDSA":
+		if len(publicKey) != ed25519.PublicKeySize || !ed25519.Verify(publicKey, message, signature) {
+			return ErrVerifyFailed
+		}
+		return nil
+	case "RS256":
+		key, err := parseRSAPublicKey(publicKey)
+		if err != nil {
+			return ErrVerifyFailed
+		}
+		digest := sha256.Sum256(message)
+		if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature); err != nil {
+			return ErrVerifyFailed
+		}
+		return nil
+	default:
+		return ErrInvalidAlg
+	}
+}
+
+func parseRSAPublicKey(publicKey []byte) (*rsa.PublicKey, error) {
+	if key, err := x509.ParsePKCS1PublicKey(publicKey); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKIXPublicKey(publicKey)
+	if err != nil {
+		return nil, err
+	}
+	key, ok := parsed.(*rsa.PublicKey)
+	if !ok {
+		return nil, ErrInvalidKey
+	}
+	return key, nil
+}
+
+func validateClaims(claims Claims, opts VerifyOptions) error {
+	now := time.Now().UTC().Unix()
+	leeway := int64(opts.Leeway / time.Second)
+	if leeway < 0 {
+		return ErrInvalidLeeway
+	}
+
+	if claims.ExpiresAt == 0 {
+		return ErrVerifyFailed
+	}
+	if now > claims.ExpiresAt+leeway {
+		return ErrTokenExpired
+	}
+	if claims.NotBefore != 0 && now+leeway < claims.NotBefore {
+		return ErrTokenNotYetValid
+	}
+	if opts.Issuer != "" && claims.Issuer != opts.Issuer {
+		return ErrVerifyFailed
+	}
+	if opts.Audience != "" && claims.Audience != opts.Audience {
+		return ErrVerifyFailed
+	}
+	return nil
+}
+
+func padBytes(in []byte, size int) []byte {
+	if len(in) >= size {
+		return in
+	}
+	out := make([]byte, size)
+	copy(out[size-len(in):], in)
+	return out
 }

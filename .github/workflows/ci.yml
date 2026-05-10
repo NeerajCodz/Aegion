@@ -1,6 +1,6 @@
 # =============================================================================
 # Aegion CI Pipeline
-# Runs linting, testing, and coverage for Go and Rust code
+# Runs linting, testing, and coverage for Go code
 # =============================================================================
 
 name: CI
@@ -13,9 +13,7 @@ on:
 
 env:
   GO_VERSION: '1.25.10'
-  RUST_VERSION: 'stable'
   NODE_VERSION: '22'
-  CARGO_TERM_COLOR: always
 
 permissions:
   contents: read
@@ -42,20 +40,6 @@ jobs:
       - name: Verify Go modules
         run: go mod verify
 
-      - name: Set up Rust (for CGO)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
-
       - name: Check formatting
         run: |
           unformatted=$(find . -type f -name '*.go' -not -path '*/node_modules/*' -print0 | xargs -0 gofmt -l)
@@ -66,10 +50,6 @@ jobs:
           fi
 
       - name: Run go vet
-        env:
-          CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
         run: |
           packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
           if [ -z "$packages" ]; then
@@ -83,38 +63,6 @@ jobs:
         with:
           version: v2.5.0
           args: --timeout=5m --tests=false --disable=unused --disable=errcheck --disable=staticcheck --disable=ineffassign
-
-  # ---------------------------------------------------------------------------
-  # Rust Linting
-  # ---------------------------------------------------------------------------
-  rust-lint:
-    name: Rust Lint
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: rust
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt, clippy
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   # ---------------------------------------------------------------------------
   # Go Vulnerability Scanning
@@ -133,20 +81,6 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-
-      - name: Set up Rust (for CGO)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -178,55 +112,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Rust (for CGO)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
-
       - name: Run gosec
         uses: securego/gosec@v2.26.1
         with:
           args: -severity high -confidence high -exclude-generated ./...
-
-  # ---------------------------------------------------------------------------
-  # Rust Dependency Security Gates
-  # ---------------------------------------------------------------------------
-  cargo-security:
-    name: Rust Audit and Deny
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: rust
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Install cargo-audit and cargo-deny
-        run: |
-          cargo install --locked cargo-audit
-          cargo install --locked cargo-deny
-
-      - name: Run cargo audit
-        run: cargo audit --deny warnings
-
-      - name: Run cargo deny
-        run: cargo deny check advisories
 
   # ---------------------------------------------------------------------------
   # Secret Scanning
@@ -346,35 +235,13 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Rust (for CGO)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
-
       - name: Check module boundaries
         run: bash ./scripts/check-module-boundaries.sh "${{ matrix.module }}"
 
       - name: Vet module
-        env:
-          CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
         run: go vet ./modules/${{ matrix.module }}/...
 
       - name: Test module
-        env:
-          CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
         run: go test -count=1 ./modules/${{ matrix.module }}/...
 
       - name: Build module image
@@ -464,10 +331,10 @@ jobs:
         run: bash ./scripts/check-release-checklist.sh
 
   # ---------------------------------------------------------------------------
-  # Rust FFI Usage Discipline
+  # Go Crypto Usage Discipline
   # ---------------------------------------------------------------------------
-  rust-ffi-usage:
-    name: Rust FFI Usage Check
+  go-crypto-usage:
+    name: Go Crypto Usage Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -475,12 +342,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate Rust-backed crypto/JWT usage
-        run: bash ./scripts/check-rust-ffi-usage.sh
-
-  # ---------------------------------------------------------------------------
-  # Admin SPA Build and Test
-  # ---------------------------------------------------------------------------
+      - name: Validate Go-native crypto/JWT usage
+        run: bash ./scripts/check-go-crypto-usage.sh
   admin-spa:
     name: Admin SPA Build/Test
     runs-on: ubuntu-latest
@@ -531,25 +394,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Rust (for CGO)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Build Rust libraries
-        working-directory: rust
-        run: cargo build --release --workspace
-
       - name: Run tests with coverage
-        env:
-          CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
         run: |
           packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
           if [ -z "$packages" ]; then
@@ -608,25 +453,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Set up Rust (for CGO)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Build Rust libraries
-        working-directory: rust
-        run: cargo build --release --workspace
-
       - name: Run full race tests
-        env:
-          CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
         run: |
           packages=$(go list ./cmd/... ./core/... ./internal/... ./modules/... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
           if [ -z "$packages" ]; then
@@ -658,51 +485,6 @@ jobs:
         run: bash ./scripts/run-integration-smoke.sh
 
   # ---------------------------------------------------------------------------
-  # Rust Tests with Coverage
-  # ---------------------------------------------------------------------------
-  rust-test:
-    name: Rust Test
-    runs-on: ubuntu-latest
-    needs: rust-lint
-    defaults:
-      run:
-        working-directory: rust
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Run workspace tests
-        run: cargo test --workspace
-
-      - name: Run tests with coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
-
-      - name: Upload Rust coverage
-        uses: codecov/codecov-action@v6
-        with:
-          files: rust/lcov.info
-          flags: rust
-          name: rust-coverage
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-  # ---------------------------------------------------------------------------
   # CI Summary
   # ---------------------------------------------------------------------------
   ci-success:
@@ -710,10 +492,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - go-lint
-      - rust-lint
       - govulncheck
       - gosec
-      - cargo-security
       - gitleaks
       - detect-modules
       - module-check
@@ -721,12 +501,11 @@ jobs:
       - release-manifest
       - release-maturity
       - release-checklist
-      - rust-ffi-usage
+      - go-crypto-usage
       - admin-spa
       - go-test
       - go-test-full
       - integration-smoke
-      - rust-test
     if: always()
     steps:
       - name: Check all jobs passed
@@ -743,10 +522,8 @@ jobs:
           }
 
           check_result "go-lint" "${{ needs.go-lint.result }}"
-          check_result "rust-lint" "${{ needs.rust-lint.result }}"
           check_result "govulncheck" "${{ needs.govulncheck.result }}"
           check_result "gosec" "${{ needs.gosec.result }}"
-          check_result "cargo-security" "${{ needs.cargo-security.result }}"
           check_result "gitleaks" "${{ needs.gitleaks.result }}"
           check_result "detect-modules" "${{ needs.detect-modules.result }}"
           check_result "module-check" "${{ needs.module-check.result }}"
@@ -754,11 +531,10 @@ jobs:
           check_result "release-manifest" "${{ needs.release-manifest.result }}"
           check_result "release-maturity" "${{ needs.release-maturity.result }}"
           check_result "release-checklist" "${{ needs.release-checklist.result }}"
-          check_result "rust-ffi-usage" "${{ needs.rust-ffi-usage.result }}"
+          check_result "go-crypto-usage" "${{ needs.go-crypto-usage.result }}"
           check_result "admin-spa" "${{ needs.admin-spa.result }}"
           check_result "go-test" "${{ needs.go-test.result }}"
           check_result "go-test-full" "${{ needs.go-test-full.result }}"
           check_result "integration-smoke" "${{ needs.integration-smoke.result }}"
-          check_result "rust-test" "${{ needs.rust-test.result }}"
 
           echo "All CI checks passed!"

@@ -47,7 +47,7 @@ var (
 	connectDBHook         = connectDB
 	buildHandlerHook      = buildHandler
 	newHTTPServerHook     = newHTTPServer
-	rustSelfCheckHook     = platformcrypto.RuntimeSelfCheck
+	cryptoSelfCheckHook   = platformcrypto.RuntimeSelfCheck
 	notifySignalsHook     = signal.Notify
 	stopSignalsHook       = signal.Stop
 	fatalHook             = func(err error, message string) { log.Fatal().Err(err).Msg(message) }
@@ -98,8 +98,8 @@ func main() {
 		_, _ = fmt.Printf("Aegion OAuth2 Module v%s\n", version)
 		return
 	}
-	if err := rustSelfCheckHook(); err != nil {
-		fatalHook(err, "Rust crypto runtime check failed")
+	if err := cryptoSelfCheckHook(); err != nil {
+		fatalHook(err, "Go crypto runtime check failed")
 		return
 	}
 

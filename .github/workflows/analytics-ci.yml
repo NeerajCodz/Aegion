@@ -46,12 +46,7 @@ jobs:
           go-version: '1.25.10'
           cache: true
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
 
       - name: Check formatting
         run: |
@@ -65,8 +60,6 @@ jobs:
       - name: Run go vet
         env:
           CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
         run: go vet ./modules/analytics/...
 
       - name: Install golangci-lint
@@ -131,12 +124,7 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
 
       - name: Wait for postgres
         run: |
@@ -153,8 +141,6 @@ jobs:
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
 
       - name: Run tests
         working-directory: ./modules/analytics
@@ -165,8 +151,6 @@ jobs:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           DUCKDB_DATABASE: ':memory:'
           CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
 
       - name: Check coverage
         working-directory: ./modules/analytics
@@ -224,12 +208,7 @@ jobs:
           go-version: '1.25.10'
           cache: true
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
 
       - name: Wait for postgres
         run: |
@@ -246,8 +225,6 @@ jobs:
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
 
       - name: Verify schema
         run: |
@@ -260,8 +237,6 @@ jobs:
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
 
       - name: Test re-migration
         working-directory: ./modules/analytics
@@ -270,8 +245,6 @@ jobs:
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
 
   # ---------------------------------------------------------------------------
   # Analytics Docker Build
@@ -361,12 +334,7 @@ jobs:
           go-version: '1.25.10'
           cache: true
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Rust FFI libraries
-        working-directory: rust
-        run: cargo build --release --workspace
 
       - name: Wait for postgres
         run: |
@@ -384,8 +352,6 @@ jobs:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           ANALYTICS_API_URL: http://localhost:8080
           CGO_ENABLED: 1
-          CGO_LDFLAGS: "-L${{ github.workspace }}/rust/target/release"
-          LD_LIBRARY_PATH: "${{ github.workspace }}/rust/target/release"
 
   # ---------------------------------------------------------------------------
   # Summary

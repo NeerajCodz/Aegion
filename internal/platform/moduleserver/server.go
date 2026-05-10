@@ -17,9 +17,9 @@ import (
 )
 
 var (
-	signalNotify         = signal.Notify
-	signalStop           = signal.Stop
-	rustRuntimeSelfCheck = platformcrypto.RuntimeSelfCheck
+	signalNotify           = signal.Notify
+	signalStop             = signal.Stop
+	cryptoRuntimeSelfCheck = platformcrypto.RuntimeSelfCheck
 )
 
 // Config defines a standard HTTP module process contract.
@@ -97,8 +97,8 @@ func Run(cfg Config) error {
 		Version:          cfg.Version,
 	})
 
-	if err := rustRuntimeSelfCheck(); err != nil {
-		return fmt.Errorf("[%s] rust runtime self-check failed: %w", cfg.Module, err)
+	if err := cryptoRuntimeSelfCheck(); err != nil {
+		return fmt.Errorf("[%s] crypto runtime self-check failed: %w", cfg.Module, err)
 	}
 	if cfg.Version == "" {
 		cfg.Version = "0.1.0"

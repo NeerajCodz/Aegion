@@ -33,7 +33,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	origFatal := fatalHook
-	origRust := rustSelfCheckHook
+	origCrypto := cryptoSelfCheckHook
 	origLoad := loadConfigHook
 	origConnect := connectDBHook
 	origBuild := buildHandlerHook
@@ -46,7 +46,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 		fatalHook = origFatal
-		rustSelfCheckHook = origRust
+		cryptoSelfCheckHook = origCrypto
 		loadConfigHook = origLoad
 		connectDBHook = origConnect
 		buildHandlerHook = origBuild
@@ -73,17 +73,17 @@ func TestMainFatalHookBranches(t *testing.T) {
 		main()
 	}
 
-	t.Run("rust self-check error", func(t *testing.T) {
+	t.Run("crypto self-check error", func(t *testing.T) {
 		fatalHook = func(err error, message string) { panic(err) }
-		rustSelfCheckHook = func() error { return errors.New("rust failed") }
+		cryptoSelfCheckHook = func() error { return errors.New("crypto failed") }
 		os.Args = []string{"oauth2-server"}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-		expectFatal(func() {}, "rust failed")
+		expectFatal(func() {}, "crypto failed")
 	})
 
 	t.Run("load config error", func(t *testing.T) {
 		fatalHook = func(err error, message string) { panic(err) }
-		rustSelfCheckHook = func() error { return nil }
+		cryptoSelfCheckHook = func() error { return nil }
 		loadConfigHook = func(string) (*Config, error) { return nil, errors.New("load failed") }
 		os.Args = []string{"oauth2-server"}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -92,7 +92,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 
 	t.Run("connect db error", func(t *testing.T) {
 		fatalHook = func(err error, message string) { panic(err) }
-		rustSelfCheckHook = func() error { return nil }
+		cryptoSelfCheckHook = func() error { return nil }
 		loadConfigHook = func(string) (*Config, error) {
 			cfg := &Config{}
 			applyDefaults(cfg)
@@ -113,7 +113,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 
 		var fatalCalls int32
 		fatalHook = func(err error, message string) { atomic.AddInt32(&fatalCalls, 1) }
-		rustSelfCheckHook = func() error { return nil }
+		cryptoSelfCheckHook = func() error { return nil }
 		loadConfigHook = func(string) (*Config, error) {
 			cfg := &Config{}
 			applyDefaults(cfg)
