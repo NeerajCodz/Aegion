@@ -259,6 +259,7 @@ func TestSendMagicLinkEmailIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
@@ -300,6 +301,7 @@ func TestCancelMessageIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
@@ -344,6 +346,7 @@ func TestCleanupIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
@@ -405,6 +408,7 @@ func TestProcessQueueBatchIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
@@ -444,6 +448,7 @@ func TestIdempotencyKeyIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
@@ -489,6 +494,7 @@ func TestTemplateDataPersistenceIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
@@ -541,6 +547,7 @@ func TestDelayedSendIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
@@ -627,6 +634,7 @@ func TestMultipleMessageTypesIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	pool := setupTestDB(t, ctx)
+	var err error
 	defer pool.Close()
 
 	cfg := Config{
