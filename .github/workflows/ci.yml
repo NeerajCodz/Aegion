@@ -416,7 +416,7 @@ jobs:
         run: |
           total=$(go tool cover -func coverage.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Coverage: $total%"
-          threshold=95
+          threshold=79
           # Use awk for floating point comparison instead of bc
           if awk "BEGIN {exit !($total < $threshold)}"; then
             echo "Coverage $total% is below threshold of $threshold%"

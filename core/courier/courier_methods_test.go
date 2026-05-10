@@ -413,10 +413,11 @@ func TestAllMessageTypes(t *testing.T) {
 
 func TestTimestampManagement(t *testing.T) {
 	beforeCreation := time.Now()
+	now := time.Now().UTC()
 	msg := &Message{
 		ID:        uuid.New(),
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	afterCreation := time.Now()
 
