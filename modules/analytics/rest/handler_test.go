@@ -355,7 +355,7 @@ func TestValidatorQuerySaveRequest_Valid(t *testing.T) {
 
 	req := QuerySaveRequest{
 		Name: "Test Query",
-		SQL:  "SELECT * FROM events",
+		SQL:  "SELECT * FROM analytics_events",
 	}
 
 	err := v.ValidateQuerySaveRequest(req)

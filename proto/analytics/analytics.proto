@@ -4,10 +4,8 @@ package aegion.analytics;
 
 option go_package = "github.com/aegion/aegion/internal/proto/analytics";
 
-import "google/protobuf/timestamp.proto";
-import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "proto/analytics/types.proto";
+import "analytics/types.proto";
 
 // QueryEventsRequest represents a request to query analytics events.
 message QueryEventsRequest {

@@ -595,7 +595,13 @@ func TestHandleCompleteExternalLoginVerifiesSAMLCallbackAndIssuesSession(t *test
 	verifiedEmail := ""
 	s.db = &database.DB{}
 	s.dbQueryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
-		if strings.Contains(sql, "JOIN core_identity_addresses") {
+		switch {
+		case strings.Contains(sql, "SELECT EXISTS") && strings.Contains(sql, "FROM core_identities"):
+			return adminTestRow{scanFn: func(dest ...any) error {
+				*(dest[0].(*bool)) = true
+				return nil
+			}}
+		case strings.Contains(sql, "JOIN core_identity_addresses"):
 			return adminTestRow{scanFn: func(dest ...any) error {
 				*(dest[0].(*uuid.UUID)) = expectedIdentity
 				return nil

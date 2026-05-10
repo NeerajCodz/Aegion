@@ -277,7 +277,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 			"status": "not ready",
 			"error":  "database not configured",
 		}); err != nil {
-			log.Error().Err(err).Msg("Failed to encode health response")
+			slog.Default().Error("failed to encode health response", "error", err)
 		}
 		return
 	}
@@ -289,7 +289,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 			"status": "not ready",
 			"error":  "database unavailable",
 		}); encErr != nil {
-			log.Error().Err(encErr).Msg("Failed to encode health response")
+			slog.Default().Error("failed to encode health response", "error", encErr)
 		}
 		return
 	}
@@ -302,7 +302,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"database":  "connected",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode health response")
+		slog.Default().Error("failed to encode health response", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -314,7 +314,7 @@ func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]string{
 		"base_path": s.adminPath,
 	}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode config response")
+		slog.Default().Error("failed to encode config response", "error", err)
 	}
 }
 
@@ -324,7 +324,7 @@ func (s *Server) handleDashboardObservability(w http.ResponseWriter, r *http.Req
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Error().Err(err).Msg("Failed to encode observability response")
+		slog.Default().Error("failed to encode observability response", "error", err)
 	}
 }
 
@@ -661,7 +661,7 @@ func (s *Server) handleListSCIMTokens(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]any{"tokens": tokens}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM tokens response")
+		slog.Default().Error("failed to encode SCIM tokens response", "error", err)
 	}
 }
 
@@ -703,7 +703,7 @@ func (s *Server) handleCreateSCIMToken(w http.ResponseWriter, r *http.Request) {
 		"token":       token,
 		"plain_token": plainToken,
 	}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM token creation response")
+		slog.Default().Error("failed to encode SCIM token creation response", "error", err)
 	}
 }
 
@@ -729,7 +729,7 @@ func (s *Server) handleListSCIMMappings(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]any{"mappings": mappings}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM mappings response")
+		slog.Default().Error("failed to encode SCIM mappings response", "error", err)
 	}
 }
 
@@ -756,7 +756,7 @@ func (s *Server) handleCreateSCIMMapping(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(map[string]any{"mapping": mapping}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM mapping creation response")
+		slog.Default().Error("failed to encode SCIM mapping creation response", "error", err)
 	}
 }
 
@@ -790,7 +790,7 @@ func (s *Server) handleUpdateSCIMMapping(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]any{"mapping": mapping}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM mapping update response")
+		slog.Default().Error("failed to encode SCIM mapping update response", "error", err)
 	}
 }
 

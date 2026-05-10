@@ -5,6 +5,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+case "$(uname -s)" in
+MINGW*|MSYS*|CYGWIN*)
+	if [ -d /c/msys64/ucrt64/bin ]; then
+		export PATH="/c/msys64/ucrt64/bin:${PATH}"
+	fi
+	;;
+esac
+
+if ! command -v cargo >/dev/null 2>&1 && command -v cargo.exe >/dev/null 2>&1; then
+	cargo() { cargo.exe "$@"; }
+fi
+
 echo "==> Validating release metadata and checklists"
 bash ./scripts/check-release-manifest.sh
 bash ./scripts/check-release-maturity.sh

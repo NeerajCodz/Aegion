@@ -162,6 +162,9 @@ func TestSSOIntegrationAdditionalBranches(t *testing.T) {
 		}
 
 		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{0}}
+			},
 			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
 				return pgconn.CommandTag{}, errors.New("delete failed")
 			},
@@ -174,6 +177,9 @@ func TestSSOIntegrationAdditionalBranches(t *testing.T) {
 		}
 
 		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{0}}
+			},
 			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
 				return pgconn.NewCommandTag("DELETE 0"), nil
 			},
@@ -222,6 +228,9 @@ func TestProxyIntegrationAdditionalBranches(t *testing.T) {
 		}
 
 		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{0}}
+			},
 			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
 				return pgconn.CommandTag{}, errors.New("delete failed")
 			},
@@ -234,6 +243,9 @@ func TestProxyIntegrationAdditionalBranches(t *testing.T) {
 		}
 
 		h.db = &fakeDB{
+			queryRowFn: func(context.Context, string, ...any) pgx.Row {
+				return fakeRow{vals: []any{0}}
+			},
 			execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
 				return pgconn.NewCommandTag("DELETE 0"), nil
 			},

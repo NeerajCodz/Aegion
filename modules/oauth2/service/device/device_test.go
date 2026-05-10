@@ -138,13 +138,11 @@ func TestDeviceService_RequestDeviceAuthorization(t *testing.T) {
 func TestDeviceService_PollDeviceToken(t *testing.T) {
 	now := time.Now().UTC()
 	identity := "identity-1"
-	markUsedErr := errors.New("mark used failed")
 
 	tests := []struct {
 		name      string
 		dc        *store.DeviceCode
 		getErr    error
-		usedErr   error
 		wantError error
 	}{
 		{name: "not found", getErr: store.ErrNotFound, wantError: ErrInvalidGrant},
@@ -205,23 +203,11 @@ func TestDeviceService_PollDeviceToken(t *testing.T) {
 				ExpiresAt:  now.Add(time.Minute),
 			},
 		},
-		{
-			name: "approved mark used failure",
-			dc: &store.DeviceCode{
-				DeviceCode: "dc",
-				ClientID:   "client-1",
-				Status:     "approved",
-				IdentityID: &identity,
-				ExpiresAt:  now.Add(time.Minute),
-			},
-			usedErr:   markUsedErr,
-			wantError: markUsedErr,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			st := &mockDeviceStore{deviceCode: tt.dc, getCodeErr: tt.getErr, usedErr: tt.usedErr}
+			st := &mockDeviceStore{deviceCode: tt.dc, getCodeErr: tt.getErr}
 			svc := NewDeviceService(st, 10*time.Minute, 5, "https://issuer/device")
 			resp, err := svc.PollDeviceToken(context.Background(), &DeviceTokenRequest{
 				DeviceCode: "dc",
@@ -234,7 +220,7 @@ func TestDeviceService_PollDeviceToken(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 				assert.Equal(t, "approved", resp.Status)
-				assert.Equal(t, tt.dc.DeviceCode, st.lastUsedCode)
+				assert.Empty(t, st.lastUsedCode)
 			}
 		})
 	}

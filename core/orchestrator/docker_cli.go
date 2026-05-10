@@ -181,7 +181,6 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 	return id, nil
 }
 
-
 func buildDockerEnvFile(env map[string]string, authToken, moduleID string) (string, error) {
 	entries := make(map[string]string, len(env)+2)
 	for key, value := range env {

@@ -80,11 +80,13 @@ func TestFlowSubmitAndInternalUIAdditionalBranches(t *testing.T) {
 			t.Fatalf("create login flow: %v", err)
 		}
 		store.updateErr = errors.New("store update failed")
+		s.magicLinkAuth = &stubMagicLinkFlowService{}
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/self-service/login", mustJSONBody(t, map[string]any{
 			"flow_id":    created.ID.String(),
 			"csrf_token": created.CSRFToken,
+			"identifier": "person@example.com",
 		}))
 		req.Header.Set("Content-Type", "application/json")
 		s.handleFlowSubmit(rec, req, flows.TypeLogin)

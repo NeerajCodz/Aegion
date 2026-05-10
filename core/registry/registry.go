@@ -178,7 +178,6 @@ func hostsMatch(endpointHost, healthHost string) bool {
 		(healthHost == "localhost" && endpointIP != nil && endpointIP.IsLoopback())
 }
 
-
 // Deregister removes a module from the registry.
 func (r *Registry) Deregister(moduleID string) (*DeregistrationResponse, error) {
 	r.mu.Lock()

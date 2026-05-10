@@ -1,11 +1,11 @@
 package webhooks
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"time"
+
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 )
 
 // Signature handles HMAC-SHA256 signing for webhooks.
@@ -27,11 +27,12 @@ func (s *Signature) Sign(secret string, payload interface{}) (string, error) {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	h := hmac.New(sha256.New, []byte(secret))
-	h.Write(data)
-	signature := h.Sum(nil)
+	signature, err := platformcrypto.HMACSHA256Hex([]byte(secret), data)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign payload: %w", err)
+	}
 
-	return fmt.Sprintf("sha256=%s", fmt.Sprintf("%x", signature)), nil
+	return fmt.Sprintf("sha256=%s", signature), nil
 }
 
 // Verify checks if the signature is valid for the payload.
@@ -41,7 +42,7 @@ func (s *Signature) Verify(secret string, payload interface{}, signature string)
 		return false
 	}
 
-	return hmac.Equal([]byte(expected), []byte(signature))
+	return platformcrypto.ConstantTimeCompare([]byte(expected), []byte(signature))
 }
 
 // WebhookPayloadWithSignature wraps a payload with signing headers.

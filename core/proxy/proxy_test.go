@@ -253,7 +253,6 @@ func TestProxy_Forward_StripsInboundIdentityHeaders(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-
 func TestProxy_Forward_StripsAllTrustedIdentityHeadersWhenSignedSubsetConfigured(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Empty(t, r.Header.Get("X-Aegion-Impersonation"))

@@ -305,7 +305,7 @@ func TestExecuteQuery_RejectsMutatingSQL(t *testing.T) {
 }
 
 func TestExecuteQuery_RejectsStackedStatements(t *testing.T) {
-	logger := zerolog.New(nil)
+	lgr := logger.TestLoggerDebug()
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -314,7 +314,7 @@ func TestExecuteQuery_RejectsStackedStatements(t *testing.T) {
 		{"sql": "SELECT 1;DROP TABLE analytics_events"},
 	}
 
-	service := NewService(logger, store, syncManager, config)
+	service := NewService(lgr, store, syncManager, config)
 
 	resp, err := service.ExecuteQuery(context.Background(), &pb.ExecuteQueryRequest{
 		QueryId:  "query-stacked",
@@ -339,10 +339,10 @@ func TestStreamEvents(t *testing.T) {
 	}
 
 	// Create a mock stream
-	stream := &mockServerStream{
+	stream := &mockEventStream{mockServerStream: mockServerStream{
 		ctx:      context.Background(),
 		messages: make([]interface{}, 0),
-	}
+	}}
 
 	err := service.StreamEvents(req, stream)
 	require.NoError(t, err)
@@ -363,10 +363,10 @@ func TestExportData(t *testing.T) {
 		MaxRecords: 100,
 	}
 
-	stream := &mockServerStream{
+	stream := &mockDataStream{mockServerStream: mockServerStream{
 		ctx:      context.Background(),
 		messages: make([]interface{}, 0),
-	}
+	}}
 
 	err := service.ExportData(req, stream)
 	require.NoError(t, err)
@@ -388,6 +388,24 @@ func (s *mockServerStream) SendMsg(m interface{}) error {
 	return nil
 }
 func (s *mockServerStream) RecvMsg(m interface{}) error {
+	return nil
+}
+
+type mockEventStream struct {
+	mockServerStream
+}
+
+func (s *mockEventStream) Send(event *pb.Event) error {
+	s.messages = append(s.messages, event)
+	return nil
+}
+
+type mockDataStream struct {
+	mockServerStream
+}
+
+func (s *mockDataStream) Send(chunk *pb.DataChunk) error {
+	s.messages = append(s.messages, chunk)
 	return nil
 }
 

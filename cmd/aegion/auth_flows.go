@@ -691,7 +691,6 @@ func (s *Server) writeMFATrustedDeviceCookie(w http.ResponseWriter, token string
 	})
 }
 
-
 func (s *Server) identityIsActive(ctx context.Context, identityID uuid.UUID) (bool, error) {
 	if identityID == uuid.Nil || !s.hasDatabaseAccess() {
 		return false, nil

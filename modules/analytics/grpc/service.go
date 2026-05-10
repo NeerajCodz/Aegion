@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
 	"strings"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -233,7 +233,7 @@ func (s *Service) UpdateDashboard(ctx context.Context, req *pb.UpdateDashboardRe
 }
 
 // StreamEvents implements the StreamEvents RPC for server-side streaming.
-func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerStream) error {
+func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream pb.AnalyticsService_StreamEventsServer) error {
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
@@ -266,7 +266,7 @@ func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream grpc.ServerSt
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				if err := stream.SendMsg(pbEvent); err != nil {
+				if err := stream.Send(pbEvent); err != nil {
 					s.logger.ErrorContext(ctx, "Failed to send event", "error", err)
 					return err
 				}
@@ -321,7 +321,7 @@ func applyQueryLimit(query string, pageSize int) string {
 }
 
 // ExportData implements the ExportData RPC for streaming exports.
-func (s *Service) ExportData(req *pb.ExportDataRequest, stream grpc.ServerStream) error {
+func (s *Service) ExportData(req *pb.ExportDataRequest, stream pb.AnalyticsService_ExportDataServer) error {
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
@@ -369,7 +369,7 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream grpc.ServerStream
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			if err := stream.SendMsg(chunk); err != nil {
+			if err := stream.Send(chunk); err != nil {
 				s.logger.ErrorContext(ctx, "Failed to send data chunk", "error", err)
 				return err
 			}
@@ -381,7 +381,7 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream grpc.ServerStream
 }
 
 // BatchQuery implements the BatchQuery RPC for bidirectional streaming.
-func (s *Service) BatchQuery(stream grpc.ServerStream) error {
+func (s *Service) BatchQuery(stream pb.AnalyticsService_BatchQueryServer) error {
 	ctx := stream.Context()
 	s.logger.DebugContext(ctx, "Starting batch query processing")
 
@@ -390,8 +390,7 @@ func (s *Service) BatchQuery(stream grpc.ServerStream) error {
 
 	go func() {
 		for {
-			req := &pb.QueryBatch{}
-			err := stream.RecvMsg(req)
+			req, err := stream.Recv()
 			if err == io.EOF {
 				close(results)
 				close(errors)
@@ -426,7 +425,7 @@ func (s *Service) BatchQuery(stream grpc.ServerStream) error {
 			if !ok {
 				return nil
 			}
-			if err := stream.SendMsg(result); err != nil {
+			if err := stream.Send(result); err != nil {
 				s.logger.ErrorContext(ctx, "Failed to send query result", "error", err)
 				return err
 			}

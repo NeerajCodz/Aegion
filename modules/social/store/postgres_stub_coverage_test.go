@@ -553,7 +553,7 @@ func TestPostgresStoreSocialStubCoverage(t *testing.T) {
 			},
 		}, nil
 	}}
-	if _, err := s.ResolveIdentity(context.Background(), Provider{Slug: "google"}, SocialProfile{ProviderUser: "sub-lookup", Email: "lookup@example.com", RawClaims: map[string]interface{}{"sub": "sub-lookup"}}); err == nil || err.Error() != "identity lookup failed" {
+	if _, err := s.ResolveIdentity(context.Background(), Provider{Slug: "google", TrustEmailVerified: true}, SocialProfile{ProviderUser: "sub-lookup", Email: "lookup@example.com", EmailVerified: true, RawClaims: map[string]interface{}{"sub": "sub-lookup"}}); err == nil || err.Error() != "identity lookup failed" {
 		t.Fatalf("ResolveIdentity(lookup error) = %v", err)
 	}
 

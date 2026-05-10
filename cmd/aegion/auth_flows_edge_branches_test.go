@@ -525,8 +525,7 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 		identityID := uuid.New()
 		s.dbQueryRowFn = func(context.Context, string, ...any) pgx.Row {
 			return adminTestRow{scanFn: func(dest ...any) error {
-				*(dest[0].(*uuid.UUID)) = identityID
-				return nil
+				return scanIdentityOrActive(identityID, dest...)
 			}}
 		}
 		s.passkeyAuth = &stubPasskeyFlowService{beginAuthenticationErr: errors.New("begin-auth-failed")}
@@ -564,8 +563,7 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 		s.passkeyAuth = &stubPasskeyFlowService{}
 		s.dbQueryRowFn = func(context.Context, string, ...any) pgx.Row {
 			return adminTestRow{scanFn: func(dest ...any) error {
-				*(dest[0].(*uuid.UUID)) = identityID
-				return nil
+				return scanIdentityOrActive(identityID, dest...)
 			}}
 		}
 
@@ -622,8 +620,7 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 
 		s.dbQueryRowFn = func(context.Context, string, ...any) pgx.Row {
 			return adminTestRow{scanFn: func(dest ...any) error {
-				*(dest[0].(*uuid.UUID)) = identityID
-				return nil
+				return scanIdentityOrActive(identityID, dest...)
 			}}
 		}
 		s.sessionManager = &stubRouteSessionManager{createErr: errors.New("create-session-failed")}
@@ -649,8 +646,7 @@ func TestSettingsAndPasskeyErrorBranches(t *testing.T) {
 		s2.sessionManager = nilCreateSessionManager{}
 		s2.dbQueryRowFn = func(context.Context, string, ...any) pgx.Row {
 			return adminTestRow{scanFn: func(dest ...any) error {
-				*(dest[0].(*uuid.UUID)) = identityID
-				return nil
+				return scanIdentityOrActive(identityID, dest...)
 			}}
 		}
 		flow2, _ := s2.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")

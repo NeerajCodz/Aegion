@@ -127,7 +127,6 @@ func validateShutdownTimeout(timeout time.Duration) error {
 	return nil
 }
 
-
 func defaultMainDeps() mainDeps {
 	return mainDeps{
 		stdout: os.Stdout,

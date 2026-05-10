@@ -308,7 +308,6 @@ func TestIntrospectToken(t *testing.T) {
 		assert.Equal(t, "openid profile", resp.Scope)
 	})
 
-
 	t.Run("public client cannot introspect", func(t *testing.T) {
 		mockStore := &mockTokenStore{
 			client: &store.Client{

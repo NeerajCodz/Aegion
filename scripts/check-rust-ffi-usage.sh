@@ -55,6 +55,7 @@ allowlisted_non_test_imports = {
         "modules/sso/cmd/server/main.go",        # Deterministic local key derivation.
         "modules/oauth2/service/token/token.go", # OIDC/token spec hash claims.
         "modules/passkeys/service/service.go",   # WebAuthn signature digest.
+        "modules/analytics/retention/archival.go", # Streaming archival data-integrity checksum.
     },
 }
 

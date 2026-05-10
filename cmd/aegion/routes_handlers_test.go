@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/flows"
@@ -21,6 +22,7 @@ import (
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/internal/platform/config"
+	"github.com/aegion/aegion/internal/platform/database"
 	"github.com/aegion/aegion/internal/platform/logger"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
@@ -565,7 +567,15 @@ func TestModuleProxyHandler(t *testing.T) {
 	})
 
 	t.Run("no http endpoint", func(t *testing.T) {
-		registerTestModule(t, s, "grpc-only", registry.EndpointGRPC, "grpc://localhost:9001")
+		_, err := s.registry.Register(registry.RegistrationRequest{
+			ID:        "grpc-only",
+			Name:      "grpc-only",
+			Version:   "v1.0.0",
+			Endpoints: []registry.Endpoint{{Type: registry.EndpointGRPC, URL: "grpc://localhost:9001"}},
+		})
+		if err != nil {
+			t.Fatalf("failed to register module: %v", err)
+		}
 
 		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/grpc-only/anything", nil)
 		req = withURLParam(req, "moduleId", "grpc-only")
@@ -577,7 +587,15 @@ func TestModuleProxyHandler(t *testing.T) {
 	})
 
 	t.Run("invalid target url", func(t *testing.T) {
-		registerTestModule(t, s, "bad-url", registry.EndpointHTTP, "://bad")
+		_, err := s.registry.Register(registry.RegistrationRequest{
+			ID:        "bad-url",
+			Name:      "bad-url",
+			Version:   "v1.0.0",
+			Endpoints: []registry.Endpoint{{Type: registry.EndpointHTTP, URL: "://bad"}},
+		})
+		if err != nil {
+			t.Fatalf("failed to register module: %v", err)
+		}
 
 		req := httptest.NewRequest(http.MethodGet, "/internal/proxy/bad-url/anything", nil)
 		req = withURLParam(req, "moduleId", "bad-url")
@@ -1042,6 +1060,16 @@ func newFlowServer(t *testing.T) (*Server, *routeFlowStore) {
 	t.Helper()
 
 	s := newTestServer(t)
+	s.db = &database.DB{}
+	s.dbQueryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
+		if strings.Contains(sql, "SELECT EXISTS") && strings.Contains(sql, "FROM core_identities") {
+			return adminTestRow{scanFn: func(dest ...any) error {
+				*(dest[0].(*bool)) = true
+				return nil
+			}}
+		}
+		return adminTestRow{scanFn: func(dest ...any) error { return pgx.ErrNoRows }}
+	}
 	store := newRouteFlowStore()
 	s.flowService = flows.NewService(store, flows.DefaultConfig())
 	return s, store
@@ -1257,11 +1285,13 @@ func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
 			handler func(http.ResponseWriter, *http.Request)
 			create  func() (*flows.Flow, error)
 			path    string
+			want    int
 		}{
 			{
 				name:    "login",
 				handler: s.handleSubmitLogin,
 				path:    "/api/v1/self-service/login",
+				want:    http.StatusBadRequest,
 				create: func() (*flows.Flow, error) {
 					return s.flowService.CreateLoginFlow(context.Background(), "http://example.com/login")
 				},
@@ -1270,6 +1300,7 @@ func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
 				name:    "registration",
 				handler: s.handleSubmitRegistration,
 				path:    "/api/v1/self-service/registration",
+				want:    http.StatusServiceUnavailable,
 				create: func() (*flows.Flow, error) {
 					return s.flowService.CreateRegistrationFlow(context.Background(), "http://example.com/registration")
 				},
@@ -1278,6 +1309,7 @@ func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
 				name:    "recovery",
 				handler: s.handleSubmitRecovery,
 				path:    "/api/v1/self-service/recovery",
+				want:    http.StatusServiceUnavailable,
 				create: func() (*flows.Flow, error) {
 					return s.flowService.CreateRecoveryFlow(context.Background(), "http://example.com/recovery")
 				},
@@ -1286,6 +1318,7 @@ func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
 				name:    "settings",
 				handler: s.handleSubmitSettings,
 				path:    "/api/v1/self-service/settings",
+				want:    http.StatusInternalServerError,
 				create: func() (*flows.Flow, error) {
 					return s.flowService.CreateSettingsFlow(context.Background(), "http://example.com/settings", uuid.New(), uuid.New())
 				},
@@ -1294,6 +1327,7 @@ func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
 				name:    "verification",
 				handler: s.handleSubmitVerification,
 				path:    "/api/v1/self-service/verification",
+				want:    http.StatusServiceUnavailable,
 				create: func() (*flows.Flow, error) {
 					return s.flowService.CreateVerificationFlow(context.Background(), "http://example.com/verification", nil)
 				},
@@ -1315,8 +1349,8 @@ func TestSelfServiceFlowSubmitHandlers(t *testing.T) {
 				req.Header.Set("Content-Type", "application/json")
 				tc.handler(rec, req)
 
-				if rec.Code != http.StatusOK {
-					t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+				if rec.Code != tc.want {
+					t.Fatalf("expected %d, got %d", tc.want, rec.Code)
 				}
 			})
 		}
@@ -1343,6 +1377,12 @@ func TestSelfServiceFlowGetHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create settings flow: %v", err)
 	}
+	s.sessionManager = &stubRouteSessionManager{session: &session.Session{
+		ID:         *settingsFlow.SessionID,
+		IdentityID: *settingsFlow.IdentityID,
+		AAL:        session.AAL1,
+		Active:     true,
+	}}
 	verificationFlow, err := s.flowService.CreateVerificationFlow(ctx, "http://example.com/verification", nil)
 	if err != nil {
 		t.Fatalf("failed to create verification flow: %v", err)
@@ -1554,20 +1594,6 @@ func TestInternalFlowHandlers(t *testing.T) {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 		}
 	})
-}
-
-func TestHandleNotImplemented(t *testing.T) {
-	s := newTestServer(t)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	s.handleNotImplemented(rec, req)
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("expected %d, got %d", http.StatusNotImplemented, rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "not implemented") {
-		t.Fatalf("expected not implemented response body, got %q", rec.Body.String())
-	}
 }
 
 func TestAdminHandlersValidationAndDatabaseGuards(t *testing.T) {

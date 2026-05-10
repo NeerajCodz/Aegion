@@ -209,16 +209,6 @@ func (s *TokenService) RefreshAccessToken(ctx context.Context, req *TokenRequest
 		return nil, ErrInvalidGrant
 	}
 
-	// Validate token
-	if err := refreshToken.IsValid(); err != nil {
-		return nil, ErrInvalidGrant
-	}
-
-	// Check if token belongs to client
-	if refreshToken.ClientID != client.ID {
-		return nil, ErrInvalidGrant
-	}
-
 	// Detect replay attack
 	if refreshToken.Used {
 		// Check if within grace period
@@ -241,6 +231,16 @@ func (s *TokenService) RefreshAccessToken(ctx context.Context, req *TokenRequest
 				RefreshToken: *refreshToken.SuccessorID,
 			})
 		}
+	}
+
+	// Validate token
+	if err := refreshToken.IsValid(); err != nil {
+		return nil, ErrInvalidGrant
+	}
+
+	// Check if token belongs to client
+	if refreshToken.ClientID != client.ID {
+		return nil, ErrInvalidGrant
 	}
 
 	// Parse requested scopes

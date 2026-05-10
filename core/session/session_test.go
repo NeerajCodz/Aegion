@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1648,15 +1648,15 @@ func (r pgxRowStub) Scan(dest ...interface{}) error { return r.scanFn(dest...) }
 
 type pgxRowsStub struct{}
 
-func (r *pgxRowsStub) Close()                                        {}
-func (r *pgxRowsStub) Err() error                                    { return nil }
-func (r *pgxRowsStub) CommandTag() pgconn.CommandTag                 { return pgconn.CommandTag{} }
-func (r *pgxRowsStub) FieldDescriptions() []pgconn.FieldDescription  { return nil }
-func (r *pgxRowsStub) Next() bool                                    { return false }
-func (r *pgxRowsStub) Scan(dest ...interface{}) error                { return nil }
-func (r *pgxRowsStub) Values() ([]interface{}, error)                { return nil, nil }
-func (r *pgxRowsStub) RawValues() [][]byte                           { return nil }
-func (r *pgxRowsStub) Conn() *pgx.Conn                               { return nil }
+func (r *pgxRowsStub) Close()                                       {}
+func (r *pgxRowsStub) Err() error                                   { return nil }
+func (r *pgxRowsStub) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (r *pgxRowsStub) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *pgxRowsStub) Next() bool                                   { return false }
+func (r *pgxRowsStub) Scan(dest ...interface{}) error               { return nil }
+func (r *pgxRowsStub) Values() ([]interface{}, error)               { return nil, nil }
+func (r *pgxRowsStub) RawValues() [][]byte                          { return nil }
+func (r *pgxRowsStub) Conn() *pgx.Conn                              { return nil }
 
 func TestManagerGet_RejectsIdleExpiredSession(t *testing.T) {
 	now := time.Now().UTC()

@@ -136,7 +136,6 @@ func TestHealthChecker_ExpectedBodyMatch(t *testing.T) {
 	assert.Nil(t, metrics.LastError)
 }
 
-
 func TestHealthChecker_ExpectedBodyTooLargeByContentLength(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "10")

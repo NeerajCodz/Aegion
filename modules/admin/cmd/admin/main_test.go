@@ -393,7 +393,6 @@ log:
 	}
 }
 
-
 func TestLoadConfig_InvalidAPIKeyLookupPrefixLenDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	cfgPath := filepath.Join(tempDir, "aegion.yaml")

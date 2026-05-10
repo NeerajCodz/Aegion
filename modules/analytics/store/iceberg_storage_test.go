@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,7 +77,7 @@ func TestIcebergStorageRejectsSymlinkReadEscape(t *testing.T) {
 	require.NoError(t, os.WriteFile(outside, []byte("secret"), 0o600))
 
 	symlinkPath := filepath.Join(warehouse, "catalog", "events")
-	require.NoError(t, os.Symlink(outside, symlinkPath))
+	requireSymlink(t, outside, symlinkPath)
 
 	_, err = storage.Read(ctx, "events")
 	assert.ErrorIs(t, err, ErrInvalidArg)
@@ -91,8 +93,18 @@ func TestIcebergStorageRejectsSymlinkNamespaceWriteEscape(t *testing.T) {
 
 	outsideDir := filepath.Join(base, "outside")
 	require.NoError(t, os.MkdirAll(outsideDir, 0o700))
-	require.NoError(t, os.Symlink(outsideDir, filepath.Join(warehouse, "catalog", "events")))
+	requireSymlink(t, outsideDir, filepath.Join(warehouse, "catalog", "events"))
 
 	_, err = storage.Write(ctx, "events", []byte("payload"))
 	assert.ErrorIs(t, err, ErrInvalidArg)
+}
+
+func requireSymlink(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Symlink(oldname, newname); err != nil {
+		if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(err.Error()), "privilege") {
+			t.Skipf("skipping symlink escape assertion without Windows symlink privilege: %v", err)
+		}
+		require.NoError(t, err)
+	}
 }

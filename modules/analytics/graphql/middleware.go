@@ -48,15 +48,25 @@ func AuthMiddleware(logger *slog.Logger, requiredForFields map[string]bool) Midd
 				return
 			}
 
-			userID, err := validateGraphQLToken(token)
+			claims, err := validateGraphQLTokenClaims(token)
 			if err != nil {
 				logger.WarnContext(r.Context(), "invalid graphql auth token", "error", err)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), "userID", userID)
+			ctx := context.WithValue(r.Context(), "userID", claims.Subject)
 			ctx = context.WithValue(ctx, "token", token)
+			if claims.Role != "" {
+				ctx = context.WithValue(ctx, "role", claims.Role)
+				manager := rbac.NewManager()
+				if err := manager.SetUserRole(claims.Subject, rbac.Role(claims.Role)); err != nil {
+					logger.WarnContext(r.Context(), "invalid graphql role claim", "error", err)
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				ctx = rbac.WithManager(ctx, manager)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -279,35 +289,51 @@ func queryRequiresAuthentication(query string, requiredForFields map[string]bool
 	return false
 }
 
+type graphQLTokenClaims struct {
+	Subject string
+	Role    string
+}
+
 func validateGraphQLToken(token string) (string, error) {
+	claims, err := validateGraphQLTokenClaims(token)
+	if err != nil {
+		return "", err
+	}
+	return claims.Subject, nil
+}
+
+func validateGraphQLTokenClaims(token string) (graphQLTokenClaims, error) {
 	if token == "" {
-		return "", fmt.Errorf("empty token")
+		return graphQLTokenClaims{}, fmt.Errorf("empty token")
 	}
 
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid token format")
+		return graphQLTokenClaims{}, fmt.Errorf("invalid token format")
 	}
 
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid token payload")
+		return graphQLTokenClaims{}, fmt.Errorf("invalid token payload")
 	}
 
 	var claims struct {
 		Subject string `json:"sub"`
+		Role    string `json:"role"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", fmt.Errorf("invalid token claims")
+		return graphQLTokenClaims{}, fmt.Errorf("invalid token claims")
 	}
 
 	userID := strings.TrimSpace(claims.Subject)
 	if userID == "" {
-		return "", fmt.Errorf("invalid token: missing subject")
+		return graphQLTokenClaims{}, fmt.Errorf("invalid token: missing subject")
 	}
-	return userID, nil
+	return graphQLTokenClaims{
+		Subject: userID,
+		Role:    strings.TrimSpace(claims.Role),
+	}, nil
 }
-
 
 func generateTraceID() string {
 	return fmt.Sprintf("trace-%d", time.Now().UnixNano())

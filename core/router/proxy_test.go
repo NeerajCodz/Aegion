@@ -106,7 +106,7 @@ func TestModuleProxyHelpersAndEndpointSelection(t *testing.T) {
 		Endpoints: []registry.Endpoint{
 			{Type: registry.EndpointGRPC, URL: "grpc://127.0.0.1:19090"},
 		},
-		HealthURL: "http://127.0.0.1:18081/health",
+		HealthURL: "",
 	})
 	if _, err := proxy.getModuleEndpoint(context.Background(), ""); !errors.Is(err, ErrNoHealthyEndpoint) {
 		t.Fatalf("expected ErrNoHealthyEndpoint, got %v", err)

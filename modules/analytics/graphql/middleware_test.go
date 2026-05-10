@@ -118,7 +118,7 @@ func TestAuthMiddleware_SetsRoleFromTokenClaim(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(`{"query":"query { events { totalCount } }"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testJWT("admin-1"))
+	req.Header.Set("Authorization", "Bearer "+testJWTWithRole("admin-1", "admin"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -149,7 +149,16 @@ func TestValidateGraphQLToken(t *testing.T) {
 }
 
 func testJWT(sub string) string {
+	return testJWTWithRole(sub, "")
+}
+
+func testJWTWithRole(sub string, role string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sub":%q}`, sub)))
+	claims := fmt.Sprintf(`{"sub":%q`, sub)
+	if role != "" {
+		claims += fmt.Sprintf(`,"role":%q`, role)
+	}
+	claims += `}`
+	payload := base64.RawURLEncoding.EncodeToString([]byte(claims))
 	return header + "." + payload + ".sig"
 }

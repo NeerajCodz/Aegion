@@ -2,7 +2,7 @@
 # Aegion Base Build Image
 # Contains Go + Rust toolchains for building all components
 # =============================================================================
-FROM golang:1.25.8-bookworm AS base
+FROM golang:1.25.10-bookworm AS base
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y

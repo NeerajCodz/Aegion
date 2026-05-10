@@ -273,7 +273,7 @@ func (h *Handler) HandleSendRecoveryCode(w http.ResponseWriter, r *http.Request)
 	if h.identityStore != nil {
 		resolved, err := h.identityStore.GetIdentityByEmail(r.Context(), req.Email)
 		if err != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			h.writeError(w, http.StatusInternalServerError, "internal_error", "Internal server error")
 			return
 		}
 		identityID = resolved
@@ -302,7 +302,7 @@ func (h *Handler) codeTypeFromRequest(r *http.Request) store.CodeType {
 func (h *Handler) handleSessionVerificationSuccess(w http.ResponseWriter, r *http.Request, recipient string, directIdentityID *uuid.UUID) {
 	identityID, err := h.resolveIdentityID(r.Context(), recipient, directIdentityID)
 	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "Internal server error")
 		return
 	}
 
@@ -327,7 +327,7 @@ func (h *Handler) handleSessionVerificationSuccess(w http.ResponseWriter, r *htt
 			},
 		)
 		if createErr != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			h.writeError(w, http.StatusInternalServerError, "internal_error", "Internal server error")
 			return
 		}
 
@@ -350,7 +350,7 @@ func (h *Handler) handleVerificationSuccess(ctx context.Context, w http.Response
 
 	if h.identityStore != nil {
 		if err := h.identityStore.MarkEmailVerified(ctx, *identityID, email); err != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			h.writeError(w, http.StatusInternalServerError, "internal_error", "Internal server error")
 			return
 		}
 	}
@@ -455,7 +455,7 @@ func (h *Handler) handleServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrRecipientEmpty):
 		h.writeError(w, http.StatusBadRequest, "missing_recipient", "Email or phone number is required")
 	default:
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		h.writeError(w, http.StatusInternalServerError, "internal_error", "Internal server error")
 	}
 }
 

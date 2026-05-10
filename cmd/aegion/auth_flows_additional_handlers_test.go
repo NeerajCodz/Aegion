@@ -348,8 +348,7 @@ func TestHandlePasskeyLoginEndpoints(t *testing.T) {
 		identityID := uuid.New()
 		s.dbQueryRowFn = func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return adminTestRow{scanFn: func(dest ...any) error {
-				*(dest[0].(*uuid.UUID)) = identityID
-				return nil
+				return scanIdentityOrActive(identityID, dest...)
 			}}
 		}
 		passkeys.finishAuthenticationErr = errors.New("invalid signature")

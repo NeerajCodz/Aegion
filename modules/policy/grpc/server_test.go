@@ -380,7 +380,6 @@ func TestServer_Check_RBACAnonymousSubjectDeniedWithoutStoreLookup(t *testing.T)
 	assert.Empty(t, st.lastIdentity)
 }
 
-
 func TestServer_Check_RBACModelStillHonorsABACDeny(t *testing.T) {
 	st := &mockRBACStore{
 		roleIDs: []string{"role-1"},

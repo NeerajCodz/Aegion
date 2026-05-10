@@ -97,9 +97,7 @@ func TestDockerCLI_CreateContainerPreservesExpectedFlags(t *testing.T) {
 		"--network aegion_modules",
 		"--network-alias password",
 		"--label aegion.module=true",
-		"-e FEATURE=on",
-		"-e AEGION_AUTH_TOKEN",
-		"-e AEGION_MODULE_ID=password",
+		"--env-file",
 		"-p 127.0.0.1:18080:8080/tcp",
 		"-v C:\\data:/data:ro",
 		"--memory 512m",
@@ -115,6 +113,9 @@ func TestDockerCLI_CreateContainerPreservesExpectedFlags(t *testing.T) {
 
 	if strings.Contains(got, "auth-token") {
 		t.Fatalf("expected auth token to be omitted from cli args, got %q", got)
+	}
+	if strings.Contains(got, "-e FEATURE=on") || strings.Contains(got, "-e AEGION_AUTH_TOKEN") {
+		t.Fatalf("expected environment values to be passed via env-file, got %q", got)
 	}
 
 }

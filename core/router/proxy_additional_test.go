@@ -182,7 +182,7 @@ func TestModuleProxyErrorAndEndpoint_AdditionalBranches(t *testing.T) {
 		Endpoints: []registry.Endpoint{
 			{Type: registry.EndpointHTTP, URL: "http://[::1"},
 		},
-		HealthURL: "http://127.0.0.1/health",
+		HealthURL: "",
 	})
 
 	badProxy := NewModuleProxy(ModuleProxyConfig{
@@ -191,7 +191,7 @@ func TestModuleProxyErrorAndEndpoint_AdditionalBranches(t *testing.T) {
 		Logger:   logger.New(logger.Config{Level: "error"}).Logger,
 	})
 
-	if _, err := badProxy.getModuleEndpoint(context.Background()); err == nil {
+	if _, err := badProxy.getModuleEndpoint(context.Background(), "http"); err == nil {
 		t.Fatalf("expected endpoint URL parse error")
 	}
 }
