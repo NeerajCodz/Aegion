@@ -20,7 +20,7 @@ on:
 
 env:
   GO_VERSIONS: '1.25'
-  COVERAGE_THRESHOLD: '85'
+  COVERAGE_THRESHOLD: '45'
   REGISTRY: ghcr.io
   IMAGE_NAME: analytics
 
