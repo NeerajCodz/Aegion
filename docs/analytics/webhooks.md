@@ -25,7 +25,7 @@ Webhooks enable real-time event notifications to external systems. When events m
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer ${AEGION_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://your-api.example.com/webhooks/events",
@@ -61,7 +61,7 @@ Response:
   },
   "isActive": true,
   "createdAt": "2026-04-24T10:30:00Z",
-  "secret": "wh_secret_xyz789"
+  "secret": "example-webhook-secret"
 }
 ```
 
@@ -311,7 +311,7 @@ import hashlib
 import json
 from flask import request
 
-WEBHOOK_SECRET = "wh_secret_xyz789"
+WEBHOOK_SECRET = "example-webhook-secret"
 
 @app.route('/webhooks/events', methods=['POST'])
 def handle_webhook():
@@ -344,7 +344,7 @@ def handle_webhook():
 ```javascript
 const crypto = require('crypto');
 
-const WEBHOOK_SECRET = 'wh_secret_xyz789';
+const WEBHOOK_SECRET = 'example-webhook-secret';
 
 app.post('/webhooks/events', (req, res) => {
   // 1. Get signature
@@ -381,7 +381,7 @@ import (
   "net/http"
 )
 
-const WEBHOOK_SECRET = "wh_secret_xyz789"
+const WEBHOOK_SECRET = "example-webhook-secret"
 
 func HandleWebhook(w http.ResponseWriter, r *http.Request) {
   // 1. Get signature

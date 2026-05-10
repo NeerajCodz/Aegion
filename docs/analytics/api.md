@@ -95,7 +95,7 @@ GET /api/v1/analytics/export-formats
 
 ### Example: List Events
 ```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" \
+curl -H "Authorization: Bearer ${AEGION_TOKEN}" \
   "http://localhost:8080/api/v1/analytics/events?limit=10&offset=0"
 ```
 
@@ -126,7 +126,7 @@ Response:
 ### Example: Create Dashboard
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer ${AEGION_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "User Engagement",
