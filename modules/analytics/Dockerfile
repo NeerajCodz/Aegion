@@ -3,7 +3,7 @@
 # Builds analytics service with DuckDB, Iceberg, and S3 support
 # =============================================================================
 
-ARG BASE_IMAGE=golang:1.25.9-bookworm
+ARG BASE_IMAGE=golang:1.25.10-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 # Stage 1: Build analytics binary
