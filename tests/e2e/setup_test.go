@@ -83,9 +83,6 @@ func TeardownTestSuite(t *testing.T) {
 	if suite == nil {
 		return
 	}
-
-	ctx := context.Background()
-
 	if suite.Server != nil {
 		suite.Server.Close()
 	}

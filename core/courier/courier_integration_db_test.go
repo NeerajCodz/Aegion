@@ -218,12 +218,9 @@ func TestSendPasswordResetEmailIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -263,12 +260,9 @@ func TestSendMagicLinkEmailIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -308,12 +302,9 @@ func TestCancelMessageIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -356,12 +347,9 @@ func TestCleanupIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -421,12 +409,9 @@ func TestProcessQueueBatchIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -464,12 +449,9 @@ func TestIdempotencyKeyIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -513,12 +495,9 @@ func TestTemplateDataPersistenceIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -569,12 +548,9 @@ func TestDelayedSendIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -616,12 +592,9 @@ func TestSourceModuleTrackingIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -663,12 +636,9 @@ func TestMultipleMessageTypesIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	cfg := Config{
 		DB: pool,
@@ -705,12 +675,9 @@ func TestCourierInitializationIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, container, err := setupTestDB(ctx)
+	pool, err := setupTestDB(ctx)
 	require.NoError(t, err)
-	defer func() {
-		pool.Close()
-		container.Terminate(ctx)
-	}()
+	defer pool.Close()
 
 	tests := []struct {
 		name            string
