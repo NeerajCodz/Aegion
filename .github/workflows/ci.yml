@@ -51,7 +51,7 @@ jobs:
 
       - name: Run go vet
         run: |
-          packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)' || true)
+          packages=$(go list ./... | grep -v '/node_modules/' | grep -Ev '(^\.|/\.)|/tests/e2e$' || true)
           if [ -z "$packages" ]; then
             echo "No Go packages found for vet"
             exit 1

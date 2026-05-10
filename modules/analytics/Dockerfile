@@ -81,8 +81,8 @@ COPY --from=builder /build/analytics /app/analytics
 COPY --chown=analytics:analytics modules/analytics/migrations /app/migrations
 
 # Copy default configuration
-COPY --chown=analytics:analytics modules/analytics/config.yaml /app/config/analytics.yaml || true
-COPY --chown=analytics:analytics configs/aegion.yaml /app/config/aegion.yaml || true
+COPY --chown=analytics:analytics modules/analytics/config.yaml /app/config/analytics.yaml
+COPY --chown=analytics:analytics configs/aegion.yaml /app/config/aegion.yaml
 
 # Switch to non-root user
 USER analytics

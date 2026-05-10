@@ -28,8 +28,6 @@ test_output.txt
 
 # Node artifacts
 **/node_modules
-modules/admin/spa/dist
-modules/admin/ui/dist
 
 # IDE/editor
 .idea

@@ -137,7 +137,11 @@ jobs:
       - name: Run migrations
         working-directory: ./modules/analytics
         run: |
-          go run -tags migration ./... up
+          PGPASSWORD=analytics psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+          for migration in migrations/*.up.sql; do
+            echo "Applying $migration"
+            PGPASSWORD=analytics psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
@@ -221,7 +225,11 @@ jobs:
       - name: Test migration up
         working-directory: ./modules/analytics
         run: |
-          go run ./cmd/migrate up
+          PGPASSWORD=analytics psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+          for migration in migrations/*.up.sql; do
+            echo "Applying $migration"
+            PGPASSWORD=analytics psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
@@ -233,7 +241,10 @@ jobs:
       - name: Test migration rollback
         working-directory: ./modules/analytics
         run: |
-          go run ./cmd/migrate down
+          for migration in $(ls migrations/*.down.sql | sort -r); do
+            echo "Rolling back $migration"
+            PGPASSWORD=analytics psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
@@ -241,7 +252,11 @@ jobs:
       - name: Test re-migration
         working-directory: ./modules/analytics
         run: |
-          go run ./cmd/migrate up
+          PGPASSWORD=analytics psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+          for migration in migrations/*.up.sql; do
+            echo "Re-applying $migration"
+            PGPASSWORD=analytics psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
         env:
           DATABASE_URL: postgres://analytics:analytics@localhost:5432/analytics_test?sslmode=disable
           CGO_ENABLED: 1
