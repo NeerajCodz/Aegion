@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -13,11 +14,73 @@ import (
 func writeFakeDockerCLI(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
+	if runtime.GOOS != "windows" {
+		path := filepath.Join(dir, "fake-docker")
+		if err := os.WriteFile(path, []byte(cmdFakeToShell(script)), 0o755); err != nil {
+			t.Fatalf("write fake docker cli: %v", err)
+		}
+		return path
+	}
 	path := filepath.Join(dir, "fake-docker.cmd")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker cli: %v", err)
 	}
 	return path
+}
+
+func cmdFakeToShell(script string) string {
+	var out []string
+	out = append(out, "#!/bin/sh")
+	ifBlock := regexp.MustCompile(`^if "%([0-9]+)"=="([^"]*)" \($`)
+	ifInline := regexp.MustCompile(`^if "%([0-9]+)"=="([^"]*)" exit /b ([0-9]+)$`)
+	ifNestedBlock := regexp.MustCompile(`^if "%([0-9]+)"=="([^"]*)" if "%([0-9]+)"=="([^"]*)" \($`)
+	for _, raw := range strings.Split(strings.ReplaceAll(script, "\r\n", "\n"), "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case line == "", strings.EqualFold(line, "@echo off"), strings.HasPrefix(strings.ToLower(line), "setlocal "):
+			continue
+		case line == ")":
+			out = append(out, "fi")
+		case strings.HasPrefix(strings.ToLower(line), "exit /b "):
+			out = append(out, "exit "+strings.TrimSpace(strings.TrimPrefix(strings.ToLower(line), "exit /b ")))
+		case strings.HasPrefix(line, "echo %*>>"):
+			target := strings.TrimSpace(strings.TrimPrefix(line, "echo %*>>"))
+			out = append(out, `printf '%s\n' "$*" >> `+target)
+		case strings.HasPrefix(line, "echo %* >"):
+			target := strings.TrimSpace(strings.TrimPrefix(line, "echo %* >"))
+			out = append(out, `printf '%s\n' "$*" > `+target)
+		case strings.EqualFold(line, "echo."):
+			out = append(out, "echo")
+		case strings.HasPrefix(strings.ToLower(line), "echo "):
+			msg := strings.TrimSpace(line[5:])
+			stderr := false
+			if strings.HasSuffix(msg, "1>&2") {
+				stderr = true
+				msg = strings.TrimSpace(strings.TrimSuffix(msg, "1>&2"))
+			}
+			cmd := "printf '%s\\n' " + shellQuote(msg)
+			if stderr {
+				cmd += " >&2"
+			}
+			out = append(out, cmd)
+		case ifNestedBlock.MatchString(line):
+			parts := ifNestedBlock.FindStringSubmatch(line)
+			out = append(out, `if [ "$`+parts[1]+`" = `+shellQuote(parts[2])+` ] && [ "$`+parts[3]+`" = `+shellQuote(parts[4])+` ]; then`)
+		case ifBlock.MatchString(line):
+			parts := ifBlock.FindStringSubmatch(line)
+			out = append(out, `if [ "$`+parts[1]+`" = `+shellQuote(parts[2])+` ]; then`)
+		case ifInline.MatchString(line):
+			parts := ifInline.FindStringSubmatch(line)
+			out = append(out, `if [ "$`+parts[1]+`" = `+shellQuote(parts[2])+` ]; then exit `+parts[3]+`; fi`)
+		default:
+			out = append(out, ":")
+		}
+	}
+	return strings.Join(out, "\n") + "\n"
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func TestDockerCLI_CreateContainerPreservesExpectedFlags(t *testing.T) {

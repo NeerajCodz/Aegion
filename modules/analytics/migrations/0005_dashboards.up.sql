@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS analytics_dashboards (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE analytics_dashboards
+    ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Index for dashboard ownership and filtering
 CREATE INDEX IF NOT EXISTS idx_analytics_dashboards_owner 
     ON analytics_dashboards(owner_id);
@@ -103,7 +106,7 @@ CREATE TABLE IF NOT EXISTS analytics_dashboard_query_cache (
 
 -- Index for cache expiration cleanup
 CREATE INDEX IF NOT EXISTS idx_analytics_dashboard_query_cache_expires 
-    ON analytics_dashboard_query_cache(expires_at) WHERE expires_at > NOW();
+    ON analytics_dashboard_query_cache(expires_at);
 
 -- Dashboard Access Logs Table (for auditing)
 CREATE TABLE IF NOT EXISTS analytics_dashboard_access_logs (

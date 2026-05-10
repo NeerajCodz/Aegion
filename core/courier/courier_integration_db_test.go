@@ -24,26 +24,27 @@ const courierIntegrationDatabaseURLEnv = "AEGION_COURIER_TEST_DATABASE_URL"
 // ============================================================================
 
 // setupTestDB uses an operator-provided PostgreSQL instance for integration tests.
-func setupTestDB(ctx context.Context) (*pgxpool.Pool, error) {
+func setupTestDB(t *testing.T, ctx context.Context) *pgxpool.Pool {
+	t.Helper()
 	connStr := os.Getenv(courierIntegrationDatabaseURLEnv)
 	if connStr == "" {
-		return nil, fmt.Errorf("%s is not set", courierIntegrationDatabaseURLEnv)
+		t.Skipf("%s is not set", courierIntegrationDatabaseURLEnv)
 	}
 
 	// Create connection pool
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create connection pool: %w", err)
+		t.Fatalf("failed to create connection pool: %v", err)
 	}
 
 	// Create tables
 	err = createTestTables(ctx, pool)
 	if err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("failed to create tables: %w", err)
+		t.Fatalf("failed to create tables: %v", err)
 	}
 
-	return pool, nil
+	return pool
 }
 
 // createTestTables creates the courier message table for testing
@@ -92,8 +93,7 @@ func TestQueueEmailIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -175,8 +175,7 @@ func TestSendVerificationEmailIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -218,8 +217,7 @@ func TestSendPasswordResetEmailIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -260,8 +258,7 @@ func TestSendMagicLinkEmailIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -302,8 +299,7 @@ func TestCancelMessageIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -347,8 +343,7 @@ func TestCleanupIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -409,8 +404,7 @@ func TestProcessQueueBatchIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -449,8 +443,7 @@ func TestIdempotencyKeyIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -495,8 +488,7 @@ func TestTemplateDataPersistenceIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -548,8 +540,7 @@ func TestDelayedSendIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -592,8 +583,7 @@ func TestSourceModuleTrackingIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -636,8 +626,7 @@ func TestMultipleMessageTypesIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	cfg := Config{
@@ -675,8 +664,7 @@ func TestCourierInitializationIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := setupTestDB(ctx)
-	require.NoError(t, err)
+	pool := setupTestDB(t, ctx)
 	defer pool.Close()
 
 	tests := []struct {

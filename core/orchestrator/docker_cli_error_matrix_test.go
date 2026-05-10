@@ -12,9 +12,15 @@ import (
 func writeDockerOnPath(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "docker.cmd")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write docker.cmd: %v", err)
+	name := "docker.cmd"
+	content := script
+	if os.PathListSeparator == ':' {
+		name = "docker"
+		content = cmdFakeToShell(script)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake docker binary: %v", err)
 	}
 	return dir
 }
@@ -25,7 +31,7 @@ func TestDockerClientAdditionalErrorMatrix(t *testing.T) {
 	t.Run("new client uses default docker binary from PATH", func(t *testing.T) {
 		pathDir := writeDockerOnPath(t, "@echo off\r\nexit /b 0\r\n")
 		prevPath := os.Getenv("PATH")
-		t.Setenv("PATH", pathDir+";"+prevPath)
+		t.Setenv("PATH", pathDir+string(os.PathListSeparator)+prevPath)
 		t.Setenv("AEGION_DOCKER_BIN", "")
 		t.Setenv("DOCKER_HOST", "")
 

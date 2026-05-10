@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	stdsync "sync"
 	"testing"
 	"time"
 
@@ -11,41 +12,57 @@ import (
 
 // MockLogger implements the Logger interface for testing.
 type MockLogger struct {
+	mu       stdsync.Mutex
 	messages []string
 }
 
 func (ml *MockLogger) Debug(msg string, keysAndValues ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.messages = append(ml.messages, msg)
 }
 
 func (ml *MockLogger) Info(msg string, keysAndValues ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.messages = append(ml.messages, msg)
 }
 
 func (ml *MockLogger) Warn(msg string, keysAndValues ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.messages = append(ml.messages, msg)
 }
 
 func (ml *MockLogger) Error(msg string, keysAndValues ...interface{}) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
 	ml.messages = append(ml.messages, msg)
 }
 
 // MockDB implements the DB interface for testing.
 type MockDB struct {
+	mu          stdsync.Mutex
 	lastExecSQL string
 	queryResult []map[string]interface{}
 }
 
 func (md *MockDB) Exec(ctx context.Context, sql string, args ...interface{}) error {
+	md.mu.Lock()
+	defer md.mu.Unlock()
 	md.lastExecSQL = sql
 	return nil
 }
 
 func (md *MockDB) Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
+	md.mu.Lock()
+	defer md.mu.Unlock()
 	return md.queryResult, nil
 }
 
 func (md *MockDB) QueryRow(ctx context.Context, sql string, args ...interface{}) (map[string]interface{}, error) {
+	md.mu.Lock()
+	defer md.mu.Unlock()
 	if len(md.queryResult) > 0 {
 		return md.queryResult[0], nil
 	}
@@ -54,19 +71,26 @@ func (md *MockDB) QueryRow(ctx context.Context, sql string, args ...interface{})
 
 // MockDuckDB implements the DuckDB interface for testing.
 type MockDuckDB struct {
+	mu          stdsync.Mutex
 	lastExecSQL string
 }
 
 func (mddb *MockDuckDB) Exec(ctx context.Context, sql string, args ...interface{}) error {
+	mddb.mu.Lock()
+	defer mddb.mu.Unlock()
 	mddb.lastExecSQL = sql
 	return nil
 }
 
 func (mddb *MockDuckDB) Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
+	mddb.mu.Lock()
+	defer mddb.mu.Unlock()
 	return []map[string]interface{}{}, nil
 }
 
 func (mddb *MockDuckDB) QueryRow(ctx context.Context, sql string, args ...interface{}) (map[string]interface{}, error) {
+	mddb.mu.Lock()
+	defer mddb.mu.Unlock()
 	return make(map[string]interface{}), nil
 }
 
