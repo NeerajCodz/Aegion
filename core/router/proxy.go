@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -19,6 +18,7 @@ import (
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 var (
@@ -52,13 +52,13 @@ type ModuleProxyConfig struct {
 	PolicyChecker PolicyChecker
 	RequirePolicy bool
 	PolicyModel   string
-	Logger        *slog.Logger
+	Logger        any
 }
 
 // ModuleProxy forwards requests to module containers.
 type ModuleProxy struct {
 	config    ModuleProxyConfig
-	logger    *slog.Logger
+	logger    *xlog.Logger
 	transport *http.Transport
 	now       func() time.Time
 }
@@ -89,6 +89,7 @@ func NewModuleProxy(cfg ModuleProxyConfig) *ModuleProxy {
 	if len(cfg.SignedIdentityHeaders) == 0 {
 		cfg.SignedIdentityHeaders = []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
 	}
+	log := xlog.Adapt(cfg.Logger)
 
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -105,7 +106,7 @@ func NewModuleProxy(cfg ModuleProxyConfig) *ModuleProxy {
 
 	return &ModuleProxy{
 		config:    cfg,
-		logger:    cfg.Logger.With("module", cfg.ModuleID),
+		logger:    log.With("module.id", cfg.ModuleID),
 		transport: transport,
 		now: func() time.Time {
 			return time.Now().UTC()

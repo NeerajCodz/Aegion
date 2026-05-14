@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/google/uuid"
 )
 
@@ -82,12 +82,12 @@ func (rr *responseRecorder) Write(b []byte) (int, error) {
 }
 
 // Logger middleware provides structured request logging.
-func Logger(log *slog.Logger) func(http.Handler) http.Handler {
+func Logger(log *xlog.Logger) func(http.Handler) http.Handler {
 	return LoggerWithTrustProxy(log, false)
 }
 
 // LoggerWithTrustProxy controls whether forwarded client-IP headers are trusted.
-func LoggerWithTrustProxy(log *slog.Logger, trustProxy bool) func(http.Handler) http.Handler {
+func LoggerWithTrustProxy(log *xlog.Logger, trustProxy bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := GetRequestID(r.Context())
@@ -128,7 +128,7 @@ func LoggerWithTrustProxy(log *slog.Logger, trustProxy bool) func(http.Handler) 
 }
 
 // Recoverer middleware recovers from panics and logs them.
-func Recoverer(log *slog.Logger) func(http.Handler) http.Handler {
+func Recoverer(log *xlog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {

@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 )
 
@@ -38,17 +39,9 @@ type Config struct {
 	Enabled        bool
 	MaxRetries     int
 	RetryBackoffMs int
-	Logger         Logger
+	Logger         *xlog.Logger
 	DB             DB
 	DuckDB         DuckDB
-}
-
-// Logger defines a minimal logging interface.
-type Logger interface {
-	Debug(msg string, keysAndValues ...interface{})
-	Info(msg string, keysAndValues ...interface{})
-	Warn(msg string, keysAndValues ...interface{})
-	Error(msg string, keysAndValues ...interface{})
 }
 
 // DB defines the PostgreSQL database interface.

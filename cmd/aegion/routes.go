@@ -1031,7 +1031,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		PolicyChecker:               checker,
 		RequirePolicy:               requirePolicy,
 		PolicyModel:                 policySettings.DefaultModel,
-		Logger:                      s.log.Logger.With("component", "module_proxy"),
+		Logger:                      s.log.WithComponent("module_proxy"),
 	})
 
 	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContextWithTrust(r.Context(), r, proxySettings.TrustForwardedHeaders)))

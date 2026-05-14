@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,7 +28,7 @@ type Worker interface {
 // Manager coordinates multiple workers.
 type Manager struct {
 	db          *pgxpool.Pool
-	log         *logger.Logger
+	log         *xlog.Logger
 	workers     []Worker
 	wg          sync.WaitGroup
 	cancel      context.CancelFunc
@@ -39,15 +39,16 @@ type Manager struct {
 // ManagerConfig configures the worker manager.
 type ManagerConfig struct {
 	DB          *pgxpool.Pool
-	Log         *logger.Logger
+	Log         any
 	StopTimeout time.Duration // Timeout for graceful shutdown (default: 30 seconds)
 }
 
 // NewManager creates a new worker manager.
 func NewManager(cfg ManagerConfig) *Manager {
 	log := cfg.Log
-	if log == nil {
-		log = logger.New(logger.Config{Level: "info", Format: "json"})
+	adaptedLog := xlog.Adapt(log)
+	if adaptedLog == nil {
+		adaptedLog = xlog.New(xlog.Config{Level: "info", Format: "json"})
 	}
 
 	stopTimeout := cfg.StopTimeout
@@ -57,7 +58,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 
 	return &Manager{
 		db:          cfg.DB,
-		log:         log.WithComponent("worker_manager"),
+		log:         adaptedLog.WithComponent("worker_manager"),
 		workers:     make([]Worker, 0),
 		stopTimeout: stopTimeout,
 	}
@@ -130,7 +131,7 @@ func (m *Manager) Stop() {
 type BaseWorker struct {
 	name     string
 	db       *pgxpool.Pool
-	log      *logger.Logger
+	log      *xlog.Logger
 	interval time.Duration
 	done     chan struct{}
 	mu       sync.Mutex
@@ -150,15 +151,16 @@ func (r workerErrorRow) Scan(dest ...interface{}) error {
 }
 
 // NewBaseWorker creates a new base worker.
-func NewBaseWorker(name string, db *pgxpool.Pool, log *logger.Logger, interval time.Duration) *BaseWorker {
-	if log == nil {
-		log = logger.New(logger.Config{Level: "info", Format: "json"})
+func NewBaseWorker(name string, db *pgxpool.Pool, log any, interval time.Duration) *BaseWorker {
+	adaptedLog := xlog.Adapt(log)
+	if adaptedLog == nil {
+		adaptedLog = xlog.New(xlog.Config{Level: "info", Format: "json"})
 	}
 
 	w := &BaseWorker{
 		name:     name,
 		db:       db,
-		log:      log.WithComponent(name),
+		log:      adaptedLog.WithComponent(name),
 		interval: interval,
 		done:     make(chan struct{}),
 	}
@@ -218,7 +220,7 @@ func (w *BaseWorker) DB() *pgxpool.Pool {
 }
 
 // Log returns the logger.
-func (w *BaseWorker) Log() *logger.Logger {
+func (w *BaseWorker) Log() *xlog.Logger {
 	return w.log
 }
 

@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // Manager handles dashboard operations including CRUD, metrics computation, and real-time updates.
@@ -21,14 +21,14 @@ type Manager struct {
 	cacheMu  sync.RWMutex
 	cacheTTL map[string]time.Time
 	cacheAt  map[string]time.Time
-	logger   *slog.Logger
+	logger   *xlog.Logger
 	config   DashboardConfig
 }
 
 // NewManager creates a new dashboard manager.
-func NewManager(db *sql.DB, logger *slog.Logger, config DashboardConfig) *Manager {
+func NewManager(db *sql.DB, logger *xlog.Logger, config DashboardConfig) *Manager {
 	if logger == nil {
-		logger = slog.Default()
+		logger = xlog.Default()
 	}
 	return &Manager{
 		db:       db,

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,7 +13,11 @@ import (
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
-	"github.com/aegion/aegion/internal/platform/logger"
+	corepb "github.com/aegion/aegion/internal/proto/core"
+	"github.com/aegion/aegion/internal/xlog"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -32,6 +36,10 @@ type Config struct {
 	GRPCServices       []string
 	EventSubscriptions []string
 	RegisterHTTPRoutes func(mux *http.ServeMux)
+	GRPCListenAddr     string
+	CoreGRPCAddr       string
+	InternalToken      string
+	RegisterGRPC       func(*grpc.Server)
 }
 
 type metaResponse struct {
@@ -85,8 +93,7 @@ func Run(cfg Config) error {
 		return errors.New("module name is required")
 	}
 
-	// Initialize standardized logger
-	logger.New(logger.Config{
+	log := xlog.New(xlog.Config{
 		Level:            os.Getenv("AEGION_LOG_LEVEL"),
 		Format:           os.Getenv("AEGION_LOG_FORMAT"),
 		ServiceName:      cfg.Module,
@@ -94,7 +101,7 @@ func Run(cfg Config) error {
 		Environment:      os.Getenv("AEGION_ENV"),
 		CloudRegion:      os.Getenv("AEGION_CLOUD_REGION"),
 		Developer:        os.Getenv("DEV_NAME"),
-		Version:          cfg.Version,
+		ServiceVersion:   cfg.Version,
 	})
 
 	if err := cryptoRuntimeSelfCheck(); err != nil {
@@ -114,10 +121,25 @@ func Run(cfg Config) error {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+	var grpcServer *grpc.Server
+	var grpcErrCh <-chan error
+	if cfg.RegisterGRPC != nil || cfg.CoreGRPCAddr != "" || len(cfg.GRPCServices) > 0 {
+		if cfg.GRPCListenAddr == "" {
+			cfg.GRPCListenAddr = "0.0.0.0:9100"
+		}
+		var err error
+		grpcServer, grpcErrCh, err = startGRPCServer(cfg)
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.CoreGRPCAddr != "" {
+		go registerWithCore(context.Background(), cfg, log)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("module server listening",
+		log.Info("module server listening",
 			"module", cfg.Module,
 			"listen_addr", cfg.ListenAddr,
 			"version", cfg.Version,
@@ -137,12 +159,79 @@ func Run(cfg Config) error {
 	select {
 	case err := <-errCh:
 		return err
+	case err := <-grpcErrCh:
+		return err
 	case <-stop:
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if grpcServer != nil {
+		grpcServer.GracefulStop()
+	}
 	return srv.Shutdown(ctx)
+}
+
+func startGRPCServer(cfg Config) (*grpc.Server, <-chan error, error) {
+	errCh := make(chan error, 1)
+	log := xlog.Default().WithComponent("moduleserver.grpc")
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(log.UnaryServerInterceptor()),
+		grpc.StreamInterceptor(log.StreamServerInterceptor()),
+	)
+	if cfg.RegisterGRPC != nil {
+		cfg.RegisterGRPC(server)
+	}
+	listener, err := net.Listen("tcp", cfg.GRPCListenAddr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("[%s] gRPC listen failed: %w", cfg.Module, err)
+	}
+	go func() {
+		log.Info("module gRPC server listening",
+			"module", cfg.Module,
+			"listen_addr", cfg.GRPCListenAddr,
+			"version", cfg.Version,
+		)
+		if err := server.Serve(listener); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+	return server, errCh, nil
+}
+
+func registerWithCore(ctx context.Context, cfg Config, log *xlog.Logger) {
+	conn, err := grpc.NewClient(cfg.CoreGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.ErrorContext(ctx, "core gRPC dial failed", "error", err, "core_addr", cfg.CoreGRPCAddr)
+		return
+	}
+	defer conn.Close()
+	client := corepb.NewModuleRegistryClient(conn)
+	callCtx, callCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer callCancel()
+	if cfg.InternalToken != "" {
+		callCtx = metadata.AppendToOutgoingContext(callCtx, "x-aegion-internal-token", cfg.InternalToken)
+	}
+	resp, err := client.Register(callCtx, &corepb.RegisterRequest{
+		Module:             cfg.Module,
+		Version:            cfg.Version,
+		Address:            cfg.GRPCListenAddr,
+		Routes:             cfg.Routes,
+		Capabilities:       cfg.Capabilities,
+		GrpcServices:       cfg.GRPCServices,
+		EventSubscriptions: cfg.EventSubscriptions,
+	})
+	if err != nil {
+		log.ErrorContext(ctx, "core gRPC registration failed", "error", err, "module", cfg.Module)
+		return
+	}
+	if !resp.GetSuccess() {
+		log.ErrorContext(ctx, "core gRPC registration rejected", "error", resp.GetError(), "module", cfg.Module)
+		return
+	}
+	log.InfoContext(ctx, "core gRPC registration completed", "module", cfg.Module, "instance_id", resp.GetInstanceId())
 }
 
 // EnvOrDefault returns env value if set, otherwise fallback.

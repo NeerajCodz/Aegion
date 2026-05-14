@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 const (
@@ -177,7 +177,7 @@ func (d *DockerClient) CreateContainer(ctx context.Context, cfg *ModuleConfig, a
 		return "", fmt.Errorf("creating container: %w", err)
 	}
 	id := strings.TrimSpace(stdout)
-	slog.InfoContext(ctx, "container created", "module_id", cfg.ID, "container_id", shortID(id), "container_name", containerName)
+	xlog.Default().InfoContext(ctx, "container created", "module_id", cfg.ID, "container_id", shortID(id), "container_name", containerName)
 	return id, nil
 }
 

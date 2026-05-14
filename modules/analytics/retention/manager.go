@@ -79,7 +79,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	m.scheduler = NewJobScheduler(scheduleConfig, m.executor, m.tieringEngine, m.cleanupManager, m.auditLog)
 
 	m.initialized = true
-	m.auditLog.LogMessage(ctx, "Manager", "Retention manager initialized successfully")
+	_ = m.auditLog.LogMessage(ctx, "Manager", "Retention manager initialized successfully")
 
 	return nil
 }

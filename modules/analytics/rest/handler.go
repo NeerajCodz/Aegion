@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/webhooks"
 )
 
 // Handler handles REST API requests for analytics
 type Handler struct {
-	logger         *slog.Logger
+	logger         *xlog.Logger
 	config         Config
 	queries        QueryBuilder
 	exports        ExportBuilder
@@ -36,7 +36,7 @@ type Config struct {
 
 // HandlerDeps holds dependencies for the handler
 type HandlerDeps struct {
-	Logger         *slog.Logger
+	Logger         *xlog.Logger
 	Config         Config
 	Queries        QueryBuilder
 	Exports        ExportBuilder
@@ -468,7 +468,7 @@ func (h *Handler) writeResponse(w http.ResponseWriter, status int, data interfac
 		Meta:       meta,
 	}
 
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // writeError writes an error response
@@ -487,7 +487,7 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, message, d
 		},
 	}
 
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // Helper functions

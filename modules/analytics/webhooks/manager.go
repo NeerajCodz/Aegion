@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/google/uuid"
 )
@@ -18,7 +19,7 @@ type Manager struct {
 	matcher     *Matcher
 	retry       *RetryPolicy
 	signer      *Signature
-	logger      Logger
+	logger      *xlog.Logger
 	config      ManagerConfig
 	mu          sync.RWMutex
 	workers     []*DeliveryWorker
@@ -42,7 +43,7 @@ type ManagerConfig struct {
 }
 
 // NewManager creates a new webhook manager.
-func NewManager(store *Store, logger Logger, config ManagerConfig) *Manager {
+func NewManager(store *Store, logger *xlog.Logger, config ManagerConfig) *Manager {
 	if config.MaxPerUser <= 0 {
 		config.MaxPerUser = 50
 	}
@@ -346,7 +347,9 @@ func (m *Manager) TestWebhook(ctx context.Context, webhookID string) (string, er
 		delivery.Status = "failed"
 	}
 
-	m.store.SaveDelivery(ctx, delivery)
+	if err := m.store.SaveDelivery(ctx, delivery); err != nil {
+		m.logger.Error("failed to save delivery", "delivery_id", deliveryID, "error", err)
+	}
 
 	return deliveryID, nil
 }

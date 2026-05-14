@@ -73,7 +73,7 @@ func (js *JobScheduler) Start(ctx context.Context) error {
 
 	go js.runScheduler(ctx)
 
-	js.auditLog.LogMessage(ctx, "JobScheduler", "Retention job scheduler started")
+	_ = js.auditLog.LogMessage(ctx, "JobScheduler", "Retention job scheduler started")
 
 	return nil
 }
@@ -140,7 +140,7 @@ func (js *JobScheduler) runArchivalJobs(ctx context.Context) {
 		}
 
 		if err := js.executor.ArchiveData(ctx, job); err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler",
+			_ = js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Archival failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("archival", job)
@@ -155,7 +155,7 @@ func (js *JobScheduler) runArchivalJobs(ctx context.Context) {
 		}
 
 		if err := js.executor.ArchiveData(ctx, job2); err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler",
+			_ = js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Warm->Cold archival failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("archival", job2)
@@ -175,7 +175,7 @@ func (js *JobScheduler) runTieringJobs(ctx context.Context) {
 	for _, category := range categories {
 		transition, err := js.tieringEngine.TransitionStaleData(ctx, category)
 		if err != nil {
-			js.auditLog.LogMessage(ctx, "JobScheduler",
+			_ = js.auditLog.LogMessage(ctx, "JobScheduler",
 				fmt.Sprintf("Tiering failed for category %s: %v", category, err))
 		} else {
 			js.recordJobHistory("tiering", transition)

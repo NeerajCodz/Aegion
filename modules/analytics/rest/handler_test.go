@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	analytics "github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/webhooks"
 	"github.com/stretchr/testify/assert"
@@ -51,7 +51,7 @@ func (m *MockDatabase) Count(ctx context.Context, sql string) (int, error) {
 
 func newTestHandler(db Database) *Handler {
 	return NewHandler(HandlerDeps{
-		Logger:  logger.TestLogger(),
+		Logger:  xlog.New(xlog.Config{}),
 		Config:  Config{DefaultPageSize: 100, MaxPageSize: 10000, QueryTimeoutSeconds: 300},
 		Queries: NewQueryBuilder(db),
 		Exports: NewExportBuilder(db),
@@ -109,7 +109,7 @@ func (m *mockWebhookManager) ReplayEvent(ctx context.Context, deliveryID string)
 
 func newWebhookTestHandler(manager WebhookManager) *Handler {
 	return NewHandler(HandlerDeps{
-		Logger:         logger.TestLogger(),
+		Logger:         xlog.New(xlog.Config{}),
 		Config:         Config{DefaultPageSize: 100, MaxPageSize: 10000, QueryTimeoutSeconds: 300},
 		Queries:        NewQueryBuilder(&MockDatabase{}),
 		Exports:        NewExportBuilder(&MockDatabase{}),
@@ -501,7 +501,7 @@ func TestInitialize_Success(t *testing.T) {
 			MaxPageSize:           10000,
 			DefaultPageSize:       100,
 		},
-		Logger: logger.TestLogger(),
+		Logger: xlog.New(xlog.Config{}),
 		DB:     db,
 	})
 
@@ -512,7 +512,7 @@ func TestInitialize_Success(t *testing.T) {
 func TestInitialize_MissingDatabase(t *testing.T) {
 	handler, err := Initialize(InitParams{
 		Config: Config{},
-		Logger: logger.TestLogger(),
+		Logger: xlog.New(xlog.Config{}),
 		DB:     nil,
 	})
 

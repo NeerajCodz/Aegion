@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -98,7 +98,7 @@ func (m *MockSyncManager) GetSyncLag(ctx context.Context) (int64, error) {
 
 // TestQueryEvents tests the QueryEvents RPC
 func TestQueryEvents(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -119,7 +119,7 @@ func TestQueryEvents(t *testing.T) {
 
 // TestQueryEventsNilRequest tests QueryEvents with nil request
 func TestQueryEventsNilRequest(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -133,7 +133,7 @@ func TestQueryEventsNilRequest(t *testing.T) {
 
 // TestGetDashboard tests the GetDashboard RPC
 func TestGetDashboard(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -162,7 +162,7 @@ func TestGetDashboard(t *testing.T) {
 
 // TestGetHealthStatus tests the GetHealthStatus RPC
 func TestGetHealthStatus(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -181,7 +181,7 @@ func TestGetHealthStatus(t *testing.T) {
 
 // TestCreateDashboard tests the CreateDashboard RPC
 func TestCreateDashboard(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -210,7 +210,7 @@ func TestCreateDashboard(t *testing.T) {
 
 // TestUpdateDashboard tests the UpdateDashboard RPC
 func TestUpdateDashboard(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -245,7 +245,7 @@ func TestUpdateDashboard(t *testing.T) {
 }
 
 func TestExecuteQuery(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -271,7 +271,7 @@ func TestExecuteQuery(t *testing.T) {
 }
 
 func TestExecuteQuery_NotFound(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -286,7 +286,7 @@ func TestExecuteQuery_NotFound(t *testing.T) {
 }
 
 func TestExecuteQuery_RejectsMutatingSQL(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -305,7 +305,7 @@ func TestExecuteQuery_RejectsMutatingSQL(t *testing.T) {
 }
 
 func TestExecuteQuery_RejectsStackedStatements(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -326,7 +326,7 @@ func TestExecuteQuery_RejectsStackedStatements(t *testing.T) {
 
 // TestStreamEvents tests server streaming
 func TestStreamEvents(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -351,7 +351,7 @@ func TestStreamEvents(t *testing.T) {
 
 // TestExportData tests server streaming export
 func TestExportData(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}
@@ -411,7 +411,7 @@ func (s *mockDataStream) Send(chunk *pb.DataChunk) error {
 
 // TestServer tests the gRPC server startup
 func TestServer(t *testing.T) {
-	lgr := logger.TestLoggerDebug()
+	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 	syncManager := &MockSyncManager{}
 	config := Config{}

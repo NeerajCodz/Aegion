@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/go-chi/chi/v5"
-	"log/slog"
 )
 
 // Server handles GraphQL HTTP and WebSocket requests.
 type Server struct {
-	logger              *slog.Logger
+	logger              *xlog.Logger
 	resolver            *Resolver
 	schemaBuilder       *SchemaBuilder
 	maxQueryDepth       int
@@ -76,7 +76,7 @@ type GraphQLRequest struct {
 
 // NewServer creates a new GraphQL HTTP server.
 func NewServer(
-	logger *slog.Logger,
+	logger *xlog.Logger,
 	resolver *Resolver,
 	schemaBuilder *SchemaBuilder,
 	executor QueryExecutor,
@@ -545,11 +545,14 @@ const playgroundHTML = `
 // SimpleQueryExecutor is a basic implementation of QueryExecutor.
 type SimpleQueryExecutor struct {
 	resolver *Resolver
-	logger   *slog.Logger
+	logger   *xlog.Logger
 }
 
 // NewSimpleQueryExecutor creates a new simple query executor.
-func NewSimpleQueryExecutor(resolver *Resolver, logger *slog.Logger) *SimpleQueryExecutor {
+func NewSimpleQueryExecutor(resolver *Resolver, logger *xlog.Logger) *SimpleQueryExecutor {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &SimpleQueryExecutor{
 		resolver: resolver,
 		logger:   logger,

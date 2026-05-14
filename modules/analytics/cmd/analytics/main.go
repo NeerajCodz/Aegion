@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 var version = "dev"
@@ -27,10 +27,10 @@ func main() {
 		},
 		GRPCServices: []string{"analytics.v1.AnalyticsService"},
 	}); err != nil {
+		msg := "analytics startup failed"
 		if *configPath != "" {
-			err = fmt.Errorf("analytics startup failed with config %s: %w", *configPath, err)
+			msg = fmt.Sprintf("analytics startup failed with config %s", *configPath)
 		}
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		xlog.Default().Fatal(msg, "error", err)
 	}
 }

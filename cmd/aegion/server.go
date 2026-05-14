@@ -25,8 +25,8 @@ import (
 	"github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/database"
-	"github.com/aegion/aegion/internal/platform/logger"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	"github.com/aegion/aegion/internal/xlog"
 	magiclinkservice "github.com/aegion/aegion/modules/magic_link/service"
 	magiclinkstore "github.com/aegion/aegion/modules/magic_link/store"
 	mfaservice "github.com/aegion/aegion/modules/mfa/service"
@@ -44,7 +44,7 @@ type ServerConfig struct {
 	Config         *config.Config
 	ConfigPath     string
 	DB             *database.DB
-	Log            *logger.Logger
+	Log            *xlog.Logger
 	WorkerManager  *workers.Manager
 	AdminBootstrap bool
 }
@@ -53,7 +53,7 @@ type ServerConfig struct {
 type Server struct {
 	cfg            *config.Config
 	db             *database.DB
-	log            *logger.Logger
+	log            *xlog.Logger
 	router         chi.Router
 	registry       *registry.Registry
 	orchestrator   moduleOrchestrator
@@ -243,7 +243,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	reg := registry.New(registry.Config{
 		HealthCheckInterval: cfg.Config.Server.InternalNet.HealthCheckInt.Duration(),
 		HealthCheckTimeout:  cfg.Config.Server.InternalNet.HealthCheckTimeout.Duration(),
-	}, cfg.Log.Logger)
+	}, cfg.Log)
 
 	// Initialize flow store and service
 	flowStore := flows.NewPostgresFlowStore(cfg.DB.Pool)

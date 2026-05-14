@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/introspection/handler"
 	introspectionservice "github.com/aegion/aegion/modules/introspection/service"
 	introspectionstore "github.com/aegion/aegion/modules/introspection/store"
@@ -33,13 +33,23 @@ const (
 var (
 	runModuleServer       = moduleserver.Run
 	buildRuntimeHook      = buildRuntime
-	logFatal              = log.Fatal
 	newPoolWithConfigHook = pgxpool.NewWithConfig
 	poolPingHook          = func(ctx context.Context, pool *pgxpool.Pool) error { return pool.Ping(ctx) }
 	poolCloseHook         = func(pool *pgxpool.Pool) {
 		if pool != nil {
 			pool.Close()
 		}
+	}
+	logFatal = func(v ...any) {
+		if len(v) == 0 {
+			xlog.Default().Fatal("introspection server failed")
+			return
+		}
+		if err, ok := v[0].(error); ok {
+			xlog.Default().Fatal(err.Error(), "error", err)
+			return
+		}
+		xlog.Default().Fatal(v[0].(string), v[1:]...)
 	}
 )
 

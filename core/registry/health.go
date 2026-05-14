@@ -2,10 +2,11 @@ package registry
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // HealthChecker performs periodic health checks on registered modules.
@@ -15,7 +16,7 @@ type HealthChecker struct {
 	timeout      time.Duration
 	initialDelay time.Duration
 	client       *http.Client
-	logger       *slog.Logger
+	logger       *xlog.Logger
 
 	stopCh  chan struct{}
 	wg      sync.WaitGroup
@@ -24,14 +25,12 @@ type HealthChecker struct {
 }
 
 // NewHealthChecker creates a new health checker.
-func NewHealthChecker(registry *Registry, interval, timeout time.Duration, logger *slog.Logger) *HealthChecker {
+func NewHealthChecker(registry *Registry, interval, timeout time.Duration, logger any) *HealthChecker {
 	initialDelay := 5 * time.Second
 	if interval > 0 && interval < 10*time.Second {
 		initialDelay = interval / 2
 	}
-	if logger == nil {
-		logger = slog.Default()
-	}
+	log := xlog.Adapt(logger)
 	return &HealthChecker{
 		registry:     registry,
 		interval:     interval,
@@ -40,7 +39,7 @@ func NewHealthChecker(registry *Registry, interval, timeout time.Duration, logge
 		client: &http.Client{
 			Timeout: timeout,
 		},
-		logger: logger,
+		logger: log,
 		stopCh: make(chan struct{}),
 	}
 }

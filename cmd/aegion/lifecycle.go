@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/core/workers"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // LifecycleConfig holds the lifecycle manager configuration.
 type LifecycleConfig struct {
-	Log           *logger.Logger
+	Log           *xlog.Logger
 	Server        *Server
 	HTTPServer    *http.Server
 	WorkerManager *workers.Manager
@@ -21,7 +21,7 @@ type LifecycleConfig struct {
 
 // Lifecycle manages graceful startup and shutdown of server components.
 type Lifecycle struct {
-	log           *logger.Logger
+	log           *xlog.Logger
 	server        *Server
 	httpServer    *http.Server
 	workerManager *workers.Manager
@@ -234,7 +234,7 @@ func (h *ShutdownHooks) Register(name string, fn ShutdownHook) {
 }
 
 // Run executes all hooks in reverse order (LIFO).
-func (h *ShutdownHooks) Run(ctx context.Context, log *logger.Logger) error {
+func (h *ShutdownHooks) Run(ctx context.Context, log *xlog.Logger) error {
 	h.mu.Lock()
 	hooks := make([]namedHook, len(h.hooks))
 	copy(hooks, h.hooks)

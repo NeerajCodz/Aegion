@@ -1,8 +1,8 @@
 {
   "TestName": "Phase 16C: Complete E2E Workflow",
-  "StartTime": "2026-05-10T14:38:47.4491384+05:30",
-  "EndTime": "2026-05-10T14:38:47.4501957+05:30",
-  "Duration": 1057300,
+  "StartTime": "2026-05-15T13:18:45.6378359+05:30",
+  "EndTime": "2026-05-15T13:18:45.6389687+05:30",
+  "Duration": 1132800,
   "TotalEventsCreated": 100,
   "EventsFromRealTime": 50,
   "EventsFromBatch": 30,
@@ -20,10 +20,10 @@
     {
       "Name": "Environment Setup",
       "Status": "PASS",
-      "Duration": 510300,
+      "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4491384+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6378359+05:30"
     },
     {
       "Name": "Event Creation - Real-time Sync",
@@ -31,7 +31,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "Batch Sync Test",
@@ -39,7 +39,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "Async Sync Test (Queue-based)",
@@ -47,7 +47,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "REST API Query Test",
@@ -55,7 +55,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "GraphQL Query Test",
@@ -63,7 +63,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "gRPC Query Test",
@@ -71,7 +71,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "All APIs Consistency Check",
@@ -79,15 +79,15 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "Dashboard Creation",
       "Status": "PASS",
-      "Duration": 0,
+      "Duration": 612200,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6383565+05:30"
     },
     {
       "Name": "Webhook Trigger Test",
@@ -95,7 +95,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6389687+05:30"
     },
     {
       "Name": "Retention Policy Enforcement",
@@ -103,7 +103,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6389687+05:30"
     },
     {
       "Name": "Audit Log Verification",
@@ -111,7 +111,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6389687+05:30"
     },
     {
       "Name": "Error Handling \u0026 Recovery",
@@ -119,7 +119,7 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6389687+05:30"
     },
     {
       "Name": "Performance Metrics Verification",
@@ -127,15 +127,15 @@
       "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6389687+05:30"
     },
     {
       "Name": "Test Summary",
       "Status": "PASS",
-      "Duration": 547000,
+      "Duration": 0,
       "Details": "",
       "ErrorMsg": "",
-      "Timestamp": "2026-05-10T14:38:47.4496487+05:30"
+      "Timestamp": "2026-05-15T13:18:45.6389687+05:30"
     }
   ]
 }

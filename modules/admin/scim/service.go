@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/aegion/aegion/core/registry"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/secrettoken"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // Service provides SCIM 2.0 operations.
@@ -23,7 +23,7 @@ type Service struct {
 	store    Store
 	registry *registry.Registry
 	config   Config
-	log      *slog.Logger
+	log      *xlog.Logger
 }
 
 var (
@@ -49,7 +49,7 @@ type Config struct {
 	DefaultPageSize            int
 	MaxPageSize                int
 	TokenLastUsedUpdateTimeout time.Duration
-	Logger                     *slog.Logger
+	Logger                     *xlog.Logger
 }
 
 // DefaultConfig returns default SCIM service configuration.
@@ -130,14 +130,14 @@ func NewService(store Store, registry *registry.Registry, cfgOverride ...Config)
 	}
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.Default()
+		logger = xlog.Default()
 	}
 
 	return &Service{
 		store:    store,
 		registry: registry,
 		config:   cfg,
-		log:      logger.With("component", "admin.scim.service"),
+		log:      logger.WithComponent("admin.scim.service"),
 	}
 }
 

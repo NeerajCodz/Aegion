@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // Config holds logger configuration.
@@ -171,12 +172,24 @@ func (h *serviceInfoHandler) redactRecord(r slog.Record) slog.Record {
 // Logger wraps slog for structured logging with wide events support.
 type Logger struct {
 	*slog.Logger
-	cfg Config
+	cfg  Config
+	xlog *xlog.Logger
 }
 
 // New creates a new logger with the given configuration and sets it as the default slog logger.
 func New(cfg Config) *Logger {
-	handler := newServiceInfoHandler(os.Stdout, cfg)
+	xl := xlog.New(xlog.Config{
+		ServiceName:    cfg.ServiceName,
+		ServiceVersion: cfg.Version,
+		Environment:    cfg.Environment,
+		Region:         cfg.CloudRegion,
+		DeploymentID:   cfg.CommitHash,
+		InstanceID:     cfg.InstanceID,
+		Level:          cfg.Level,
+		Format:         cfg.Format,
+		RedactFields:   cfg.RedactFields,
+	})
+	handler := xlog.NewSlogHandler(xl)
 	sl := slog.New(handler)
 
 	// Set as global default so slog.InfoContext works
@@ -185,6 +198,7 @@ func New(cfg Config) *Logger {
 	return &Logger{
 		Logger: sl,
 		cfg:    cfg,
+		xlog:   xl,
 	}
 }
 
@@ -209,6 +223,7 @@ func (l *Logger) WithComponent(component string) *Logger {
 	return &Logger{
 		Logger: l.Logger.With("component", component),
 		cfg:    l.cfg,
+		xlog:   l.xlog,
 	}
 }
 
@@ -217,6 +232,7 @@ func (l *Logger) WithRequestID(requestID string) *Logger {
 	return &Logger{
 		Logger: l.Logger.With("request_id", requestID),
 		cfg:    l.cfg,
+		xlog:   l.xlog,
 	}
 }
 
@@ -225,7 +241,16 @@ func (l *Logger) With(args ...any) *Logger {
 	return &Logger{
 		Logger: l.Logger.With(args...),
 		cfg:    l.cfg,
+		xlog:   l.xlog,
 	}
+}
+
+// XLogger exposes the native xlog logger for migration callers and tests.
+func (l *Logger) XLogger() *xlog.Logger {
+	if l == nil || l.xlog == nil {
+		return xlog.Default()
+	}
+	return l.xlog
 }
 
 // WideEvent creates a wide event builder for emitting a single context-rich log.
@@ -299,20 +324,31 @@ func (b *WideEventBuilder) Emit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Calculate duration
-	b.attrs["latency_ms"] = time.Since(b.start).Milliseconds()
+	if b.logger.xlog != nil {
+		event := b.logger.xlog.Start(b.ctx, b.msg, xlog.WithKind(xlog.KindRequest))
+		for k, v := range b.attrs {
+			event.Set(k, v)
+		}
+		latencyMs := time.Since(b.start).Milliseconds()
+		event.Set("duration_ms", latencyMs)
+		event.Set("latency_ms", latencyMs)
+		if b.err != nil {
+			event.Error(b.err)
+		} else if outcome, ok := b.attrs["outcome"].(string); ok && outcome != "success" {
+			event.Rejected(nil)
+		} else {
+			event.Success()
+		}
+		_ = event.Emit()
+		return
+	}
 
-	// Convert attrs to slog args
+	b.attrs["latency_ms"] = time.Since(b.start).Milliseconds()
 	args := make([]any, 0, len(b.attrs)*2)
 	for k, v := range b.attrs {
 		args = append(args, k, v)
 	}
-
-	if b.err != nil {
-		b.logger.ErrorContext(b.ctx, b.msg, args...)
-	} else {
-		b.logger.InfoContext(b.ctx, b.msg, args...)
-	}
+	b.logger.InfoContext(b.ctx, b.msg, args...)
 }
 
 // ContextKey is the context key for the logger.
@@ -324,7 +360,7 @@ func FromContext(ctx context.Context) *Logger {
 		return l
 	}
 	// Return a default logger wrapper around the global slog
-	return &Logger{Logger: slog.Default(), cfg: Config{Level: "info", Format: "json"}}
+	return &Logger{Logger: slog.Default(), cfg: Config{Level: "info", Format: "json"}, xlog: xlog.Default()}
 }
 
 // WithContext adds the logger to the context.

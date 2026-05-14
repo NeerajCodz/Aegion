@@ -2,13 +2,13 @@ package main
 
 import (
 	"flag"
-	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/passkeys/handler"
 	"github.com/aegion/aegion/modules/passkeys/service"
 	"github.com/aegion/aegion/modules/passkeys/store"
@@ -58,6 +58,6 @@ func main() {
 	h := handler.New(passkeySvc)
 	err := runModuleServer(moduleConfig(*listenAddr, h.RegisterRoutes))
 	if err != nil {
-		log.Fatal(err)
+		xlog.Default().Fatal("passkeys server failed", "error", err)
 	}
 }

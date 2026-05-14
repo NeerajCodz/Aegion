@@ -2,28 +2,29 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	pb "github.com/aegion/aegion/internal/proto/analytics"
 )
 
-// Service implements the gRPC AnalyticsService.
+var uuidTextPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 type Service struct {
 	pb.UnimplementedAnalyticsServiceServer
-	logger      *slog.Logger
+	logger      *xlog.Logger
 	store       Store
 	syncManager SyncManager
 	config      Config
 }
 
-// Store interface provides analytics data operations.
 type Store interface {
 	QueryEvents(ctx context.Context, filters map[string]interface{}, pageSize int, pageToken string) ([]interface{}, int64, string, error)
 	GetDashboard(ctx context.Context, id string) (map[string]interface{}, error)
@@ -35,21 +36,18 @@ type Store interface {
 	ExportData(ctx context.Context, format string, filters map[string]interface{}, maxRecords int64) ([]byte, error)
 }
 
-// SyncManager interface provides sync operations.
 type SyncManager interface {
 	GetSyncStatus(ctx context.Context) (map[string]interface{}, error)
 	GetSyncLag(ctx context.Context) (int64, error)
 }
 
-// Config holds gRPC service configuration.
 type Config struct {
 	MaxConcurrentStreams int
 	KeepaliveTime        int
 	KeepaliveTimeout     int
 }
 
-// NewService creates a new gRPC analytics service.
-func NewService(log *slog.Logger, store Store, syncManager SyncManager, config Config) *Service {
+func NewService(log *xlog.Logger, store Store, syncManager SyncManager, config Config) *Service {
 	return &Service{
 		logger:      log,
 		store:       store,
@@ -58,18 +56,79 @@ func NewService(log *slog.Logger, store Store, syncManager SyncManager, config C
 	}
 }
 
-// QueryEvents implements the QueryEvents RPC.
+func (s *Service) IngestXLogEvents(ctx context.Context, req *pb.IngestXLogEventsRequest) (*pb.IngestXLogEventsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request cannot be nil")
+	}
+	event := s.logger.Start(ctx, "analytics.ingest_xlog", xlog.WithKind(xlog.KindSystem))
+
+	accepted := int32(0)
+	rejected := int32(0)
+	for _, evt := range req.Events {
+		if evt == nil || strings.TrimSpace(evt.EventName) == "" {
+			rejected++
+			continue
+		}
+		data := map[string]interface{}{}
+		if evt.Fields != nil {
+			data = evt.Fields.AsMap()
+		}
+		data["xlog.event_kind"] = evt.EventKind
+		data["xlog.event_outcome"] = evt.EventOutcome
+		data["xlog.service_name"] = evt.ServiceName
+		data["xlog.service_version"] = evt.ServiceVersion
+		data["xlog.environment"] = evt.Environment
+		data["xlog.request_id"] = evt.RequestId
+		data["xlog.trace_id"] = evt.TraceId
+		data["xlog.duration_ms"] = evt.DurationMs
+		payload, err := json.Marshal(data)
+		if err != nil {
+			rejected++
+			continue
+		}
+		createdAt := strings.TrimSpace(evt.Timestamp)
+		if createdAt == "" {
+			createdAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		userID := nullableUUID(evt.UserId)
+		sessionID := nullableUUID(evt.SessionId)
+		sql := fmt.Sprintf(
+			"INSERT INTO analytics_events (category, event_type, user_id, session_id, data, created_at, updated_at) VALUES ('xlog', '%s', %s, %s, '%s', '%s', '%s')",
+			sanitizeSQLLiteral(evt.EventName),
+			userID,
+			sessionID,
+			sanitizeSQLLiteral(string(payload)),
+			sanitizeSQLLiteral(createdAt),
+			sanitizeSQLLiteral(createdAt),
+		)
+		if _, err := s.store.ExecuteQuery(ctx, sql, nil); err != nil {
+			event.Set("error", err.Error()).Set("event_name", evt.EventName)
+			rejected++
+			continue
+		}
+		accepted++
+	}
+
+	event.Set("accepted", accepted).Set("rejected", rejected)
+	if rejected > 0 {
+		event.Rejected(fmt.Errorf("some events rejected"))
+	} else {
+		event.Success()
+	}
+	_ = event.Emit()
+
+	return &pb.IngestXLogEventsResponse{Accepted: accepted, Rejected: rejected}, nil
+}
+
 func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (*pb.QueryEventsResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
 
-	s.logger.DebugContext(ctx, "Querying events",
-		"category", req.Category,
-		"event_type", req.EventType,
-	)
+	event := s.logger.Start(ctx, "analytics.query_events", xlog.WithKind(xlog.KindRequest)).
+		Set("category", req.Category).
+		Set("event_type", req.EventType)
 
-	// Build filters map
 	filters := make(map[string]interface{})
 	if req.Category != "" {
 		filters["category"] = req.Category
@@ -78,29 +137,32 @@ func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (
 		filters["event_type"] = req.EventType
 	}
 
-	// Set default page size
 	pageSize := int(req.PageSize)
 	if pageSize <= 0 {
 		pageSize = 100
 	}
+	event.Set("page_size", pageSize)
 
-	// Query events
 	events, totalCount, nextToken, err := s.store.QueryEvents(ctx, filters, pageSize, req.PageToken)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to query events", "error", err)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.Internal, "failed to query events")
 	}
 
-	// Convert to protobuf events
-	pbEvents := make([]*pb.Event, len(events))
+	event.Set("total_count", totalCount)
+	pbEvents := make([]*pb.Event, 0, len(events))
 	for i, e := range events {
 		pbEvent, err := eventToProto(e)
 		if err != nil {
-			s.logger.WarnContext(ctx, "Failed to convert event", "error", err)
+			event.Set("event_index", i).Set("convert_error", err.Error())
 			continue
 		}
-		pbEvents[i] = pbEvent
+		pbEvents = append(pbEvents, pbEvent)
 	}
+
+	event.Success()
+	_ = event.Emit()
 
 	return &pb.QueryEventsResponse{
 		Events:        pbEvents,
@@ -109,21 +171,25 @@ func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (
 	}, nil
 }
 
-// GetDashboard implements the GetDashboard RPC.
 func (s *Service) GetDashboard(ctx context.Context, req *pb.GetDashboardRequest) (*pb.DashboardData, error) {
 	if req == nil || req.Id == "" {
 		return nil, status.Error(codes.InvalidArgument, "dashboard ID is required")
 	}
 
-	s.logger.DebugContext(ctx, "Getting dashboard", "dashboard_id", req.Id)
+	event := s.logger.Start(ctx, "analytics.get_dashboard", xlog.WithKind(xlog.KindRequest)).
+		Set("dashboard_id", req.Id)
 
 	dashboard, err := s.store.GetDashboard(ctx, req.Id)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to get dashboard", "error", err, "dashboard_id", req.Id)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.NotFound, "dashboard not found")
 	}
 
 	pbDashboard := dashboardToProto(dashboard)
+	event.Set("dashboard_name", dashboard["name"])
+	event.Success()
+	_ = event.Emit()
 
 	return &pb.DashboardData{
 		Dashboard: pbDashboard,
@@ -132,50 +198,64 @@ func (s *Service) GetDashboard(ctx context.Context, req *pb.GetDashboardRequest)
 	}, nil
 }
 
-// GetHealthStatus implements the GetHealthStatus RPC.
 func (s *Service) GetHealthStatus(ctx context.Context, _ *pb.Empty) (*pb.HealthStatus, error) {
-	s.logger.DebugContext(ctx, "Checking health status")
+	event := s.logger.Start(ctx, "analytics.health_check", xlog.WithKind(xlog.KindSystem))
 
 	health, err := s.store.GetHealthStatus(ctx)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to get health status", "error", err)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.Internal, "failed to check health")
 	}
 
 	syncLag, _ := s.syncManager.GetSyncLag(ctx)
+	event.Set("is_healthy", health["is_healthy"]).Set("sync_lag", syncLag)
+	event.Success()
+	_ = event.Emit()
 
 	return healthStatusToProto(health, syncLag), nil
 }
 
-// ExecuteQuery implements the ExecuteQuery RPC.
 func (s *Service) ExecuteQuery(ctx context.Context, req *pb.ExecuteQueryRequest) (*pb.QueryResult, error) {
 	if req == nil || req.QueryId == "" {
 		return nil, status.Error(codes.InvalidArgument, "query_id is required")
 	}
 
-	s.logger.DebugContext(ctx, "Executing query", "query_id", req.QueryId, "page_size", int(req.PageSize))
+	event := s.logger.Start(ctx, "analytics.execute_query", xlog.WithKind(xlog.KindRequest)).
+		Set("query_id", req.QueryId).
+		Set("page_size", int(req.PageSize))
 
 	lookupSQL := fmt.Sprintf("SELECT sql FROM queries WHERE id = '%s' LIMIT 1", sanitizeSQLLiteral(req.QueryId))
 	queryRows, err := s.store.ExecuteQuery(ctx, lookupSQL, nil)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to load saved query", "error", err, "query_id", req.QueryId)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.Internal, "failed to load saved query")
 	}
 	if len(queryRows) == 0 {
+		event.Rejected(fmt.Errorf("query not found"))
+		_ = event.Emit()
 		return nil, status.Error(codes.NotFound, "query not found")
 	}
 
 	rawSQL := fmt.Sprintf("%v", queryRows[0]["sql"])
 	if err := validateReadOnlySQL(rawSQL); err != nil {
+		event.Set("error", err.Error()).Rejected(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	execSQL := applyQueryLimit(rawSQL, int(req.PageSize))
 	rows, err := s.store.ExecuteQuery(ctx, execSQL, nil)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to execute saved query", "error", err, "query_id", req.QueryId)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.Internal, "failed to execute query")
 	}
+
+	event.Set("row_count", len(rows))
+	event.Success()
+	_ = event.Emit()
 
 	return &pb.QueryResult{
 		Id:       req.QueryId,
@@ -183,13 +263,13 @@ func (s *Service) ExecuteQuery(ctx context.Context, req *pb.ExecuteQueryRequest)
 	}, nil
 }
 
-// CreateDashboard implements the CreateDashboard RPC.
 func (s *Service) CreateDashboard(ctx context.Context, req *pb.CreateDashboardRequest) (*pb.Dashboard, error) {
 	if req == nil || req.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
-	s.logger.DebugContext(ctx, "Creating dashboard", "name", req.Name)
+	event := s.logger.Start(ctx, "analytics.create_dashboard", xlog.WithKind(xlog.KindRequest)).
+		Set("name", req.Name)
 
 	dashboardData := map[string]interface{}{
 		"name":        req.Name,
@@ -200,21 +280,26 @@ func (s *Service) CreateDashboard(ctx context.Context, req *pb.CreateDashboardRe
 
 	dashboardID, err := s.store.CreateDashboard(ctx, dashboardData)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to create dashboard", "error", err)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.Internal, "failed to create dashboard")
 	}
 
 	dashboardData["id"] = dashboardID
+	event.Set("dashboard_id", dashboardID)
+	event.Success()
+	_ = event.Emit()
+
 	return dashboardToProto(dashboardData), nil
 }
 
-// UpdateDashboard implements the UpdateDashboard RPC.
 func (s *Service) UpdateDashboard(ctx context.Context, req *pb.UpdateDashboardRequest) (*pb.Dashboard, error) {
 	if req == nil || req.Id == "" {
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
 
-	s.logger.DebugContext(ctx, "Updating dashboard", "id", req.Id)
+	event := s.logger.Start(ctx, "analytics.update_dashboard", xlog.WithKind(xlog.KindRequest)).
+		Set("id", req.Id)
 
 	dashboardData := map[string]interface{}{
 		"name":        req.Name,
@@ -224,65 +309,81 @@ func (s *Service) UpdateDashboard(ctx context.Context, req *pb.UpdateDashboardRe
 	}
 
 	if err := s.store.UpdateDashboard(ctx, req.Id, dashboardData); err != nil {
-		s.logger.ErrorContext(ctx, "Failed to update dashboard", "error", err, "id", req.Id)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, status.Error(codes.Internal, "failed to update dashboard")
 	}
 
 	dashboardData["id"] = req.Id
+	event.Success()
+	_ = event.Emit()
+
 	return dashboardToProto(dashboardData), nil
 }
 
-// StreamEvents implements the StreamEvents RPC for server-side streaming.
 func (s *Service) StreamEvents(req *pb.StreamEventsRequest, stream pb.AnalyticsService_StreamEventsServer) error {
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
 
 	ctx := stream.Context()
-	s.logger.DebugContext(ctx, "Streaming events", "category", req.Category, "include_historical", req.IncludeHistorical)
+	event := s.logger.Start(ctx, "analytics.stream_events", xlog.WithKind(xlog.KindRequest)).
+		Set("category", req.Category).
+		Set("include_historical", req.IncludeHistorical)
 
-	// Build filters
 	filters := make(map[string]interface{})
 	if req.Category != "" {
 		filters["category"] = req.Category
 	}
 
-	// Stream existing events if requested
+	sentCount := 0
 	if req.IncludeHistorical {
 		events, _, _, err := s.store.QueryEvents(ctx, filters, 1000, "")
 		if err != nil {
-			s.logger.ErrorContext(ctx, "Failed to query historical events", "error", err)
+			event.Set("error", err.Error()).Error(err)
+			_ = event.Emit()
 			return status.Error(codes.Internal, "failed to query historical events")
 		}
 
 		for _, e := range events {
 			pbEvent, err := eventToProto(e)
 			if err != nil {
-				s.logger.WarnContext(ctx, "Failed to convert event", "error", err)
+				event.Set("convert_error", err.Error())
 				continue
 			}
 
 			select {
 			case <-ctx.Done():
+				event.Set("sent_count", sentCount).Error(ctx.Err())
+				_ = event.Emit()
 				return ctx.Err()
 			default:
 				if err := stream.Send(pbEvent); err != nil {
-					s.logger.ErrorContext(ctx, "Failed to send event", "error", err)
+					event.Set("error", err.Error()).Error(err)
+					_ = event.Emit()
 					return err
 				}
+				sentCount++
 			}
 		}
 	}
 
-	// In a real implementation, subscribe to live events
-	// For now, we don't have a live subscription mechanism; end the stream once
-	// any historical events are sent.
-	s.logger.DebugContext(ctx, "Event streaming complete (no live subscription configured)")
+	event.Set("sent_count", sentCount)
+	event.Success()
+	_ = event.Emit()
 	return nil
 }
 
 func sanitizeSQLLiteral(value string) string {
 	return strings.ReplaceAll(value, "'", "''")
+}
+
+func nullableUUID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || !uuidTextPattern.MatchString(value) {
+		return "NULL"
+	}
+	return "'" + sanitizeSQLLiteral(value) + "'"
 }
 
 func validateReadOnlySQL(query string) error {
@@ -320,22 +421,21 @@ func applyQueryLimit(query string, pageSize int) string {
 	return fmt.Sprintf("%s LIMIT %d", strings.TrimSpace(query), pageSize)
 }
 
-// ExportData implements the ExportData RPC for streaming exports.
 func (s *Service) ExportData(req *pb.ExportDataRequest, stream pb.AnalyticsService_ExportDataServer) error {
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "request cannot be nil")
 	}
 
 	ctx := stream.Context()
-	s.logger.DebugContext(ctx, "Starting data export", "format", req.Format.String(), "max_records", req.MaxRecords)
+	event := s.logger.Start(ctx, "analytics.export_data", xlog.WithKind(xlog.KindRequest)).
+		Set("format", req.Format.String()).
+		Set("max_records", req.MaxRecords)
 
-	// Build filters
 	filters := make(map[string]interface{})
 	if req.Category != "" {
 		filters["category"] = req.Category
 	}
 
-	// Get format string
 	formatStr := "json"
 	switch req.Format {
 	case pb.ExportFormat_CSV:
@@ -344,15 +444,15 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream pb.AnalyticsServi
 		formatStr = "parquet"
 	}
 
-	// Export data
 	data, err := s.store.ExportData(ctx, formatStr, filters, req.MaxRecords)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "Failed to export data", "error", err)
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return status.Error(codes.Internal, "failed to export data")
 	}
 
-	// Stream data in chunks
-	chunkSize := 64 * 1024 // 64KB chunks
+	chunkSize := 64 * 1024
+	sentBytes := 0
 	for i := 0; i < len(data); i += chunkSize {
 		end := i + chunkSize
 		if end > len(data) {
@@ -367,23 +467,28 @@ func (s *Service) ExportData(req *pb.ExportDataRequest, stream pb.AnalyticsServi
 
 		select {
 		case <-ctx.Done():
+			event.Set("sent_bytes", sentBytes).Error(ctx.Err())
+			_ = event.Emit()
 			return ctx.Err()
 		default:
 			if err := stream.Send(chunk); err != nil {
-				s.logger.ErrorContext(ctx, "Failed to send data chunk", "error", err)
+				event.Set("error", err.Error()).Error(err)
+				_ = event.Emit()
 				return err
 			}
+			sentBytes += len(chunk.Data)
 		}
 	}
 
-	s.logger.DebugContext(ctx, "Data export complete", "bytes_sent", len(data))
+	event.Set("total_bytes", sentBytes)
+	event.Success()
+	_ = event.Emit()
 	return nil
 }
 
-// BatchQuery implements the BatchQuery RPC for bidirectional streaming.
 func (s *Service) BatchQuery(stream pb.AnalyticsService_BatchQueryServer) error {
 	ctx := stream.Context()
-	s.logger.DebugContext(ctx, "Starting batch query processing")
+	event := s.logger.Start(ctx, "analytics.batch_query", xlog.WithKind(xlog.KindRequest))
 
 	results := make(chan *pb.QueryResult)
 	errors := make(chan error)
@@ -391,20 +496,14 @@ func (s *Service) BatchQuery(stream pb.AnalyticsService_BatchQueryServer) error 
 	go func() {
 		for {
 			req, err := stream.Recv()
-			if err == io.EOF {
-				close(results)
-				close(errors)
-				return
-			}
 			if err != nil {
 				errors <- err
 				return
 			}
+			if req == nil {
+				continue
+			}
 
-			// Process query
-			s.logger.DebugContext(ctx, "Processing batch query", "request_id", req.RequestId, "query_id", req.QueryId)
-
-			// In a real implementation, fetch and execute saved query
 			result := &pb.QueryResult{
 				Id:       req.RequestId,
 				RowCount: 0,
@@ -418,27 +517,33 @@ func (s *Service) BatchQuery(stream pb.AnalyticsService_BatchQueryServer) error 
 		}
 	}()
 
-	// Send results back to client
+	sentCount := 0
 	for {
 		select {
 		case result, ok := <-results:
 			if !ok {
+				event.Set("sent_count", sentCount)
+				event.Success()
+				_ = event.Emit()
 				return nil
 			}
 			if err := stream.Send(result); err != nil {
-				s.logger.ErrorContext(ctx, "Failed to send query result", "error", err)
+				event.Set("error", err.Error()).Error(err)
+				_ = event.Emit()
 				return err
 			}
+			sentCount++
 		case err := <-errors:
-			s.logger.ErrorContext(ctx, "Error processing batch query", "error", err)
+			event.Set("error", err.Error()).Error(err)
+			_ = event.Emit()
 			return status.Error(codes.Internal, "error processing batch query")
 		case <-ctx.Done():
+			event.Set("sent_count", sentCount).Error(ctx.Err())
+			_ = event.Emit()
 			return ctx.Err()
 		}
 	}
 }
-
-// Helper functions to convert between Go and protobuf types
 
 func eventToProto(data interface{}) (*pb.Event, error) {
 	m, ok := data.(map[string]interface{})
@@ -446,7 +551,6 @@ func eventToProto(data interface{}) (*pb.Event, error) {
 		return nil, fmt.Errorf("invalid event data type")
 	}
 
-	// Convert timestamps if needed
 	return &pb.Event{
 		Id:        toString(m["id"]),
 		Category:  toString(m["category"]),

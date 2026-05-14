@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 const maxSCIMJSONBodyBytes int64 = 1 << 20
@@ -21,14 +21,14 @@ const maxSCIMJSONBodyBytes int64 = 1 << 20
 type Handler struct {
 	service *Service
 	config  HandlerConfig
-	log     *slog.Logger
+	log     *xlog.Logger
 }
 
 // HandlerConfig configures SCIM HTTP handler behavior.
 type HandlerConfig struct {
 	DefaultPageSize int
 	MaxPageSize     int
-	Logger          *slog.Logger
+	Logger          *xlog.Logger
 }
 
 // DefaultHandlerConfig returns default SCIM handler settings.
@@ -61,10 +61,10 @@ func NewHandler(service *Service, cfgOverride ...HandlerConfig) *Handler {
 	}
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.Default()
+		logger = xlog.Default()
 	}
 
-	return &Handler{service: service, config: cfg, log: logger.With("component", "admin.scim.handler")}
+	return &Handler{service: service, config: cfg, log: logger.WithComponent("admin.scim.handler")}
 }
 
 // RegisterRoutes registers SCIM 2.0 routes.

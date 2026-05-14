@@ -95,10 +95,10 @@ func (eb *DefaultExportBuilder) StreamExportJSON(ctx context.Context, sql string
 		return err
 	}
 
-	io.WriteString(w, "[\n")
+	_, _ = io.WriteString(w, "[\n")
 	for i, row := range rows {
 		if i > 0 {
-			io.WriteString(w, ",\n")
+			_, _ = io.WriteString(w, ",\n")
 		}
 
 		data, err := json.MarshalIndent(row, "  ", "  ")
@@ -111,7 +111,7 @@ func (eb *DefaultExportBuilder) StreamExportJSON(ctx context.Context, sql string
 			return err
 		}
 	}
-	io.WriteString(w, "\n]")
+	_, _ = io.WriteString(w, "\n]")
 
 	return nil
 }

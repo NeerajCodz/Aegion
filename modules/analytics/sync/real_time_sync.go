@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 )
 
@@ -16,7 +17,7 @@ type RealTimeSync struct {
 	flushInterval time.Duration
 	maxRetries    int
 	retryBackoff  time.Duration
-	logger        Logger
+	logger        *xlog.Logger
 	db            DB
 	duckdb        DuckDB
 	mu            sync.RWMutex
@@ -37,10 +38,13 @@ func NewRealTimeSync(
 	flushIntervalMs int,
 	maxRetries int,
 	retryBackoffMs int,
-	logger Logger,
+	logger *xlog.Logger,
 	db DB,
 	duckdb DuckDB,
 ) *RealTimeSync {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &RealTimeSync{
 		enabled:       enabled,
 		batchSize:     batchSize,

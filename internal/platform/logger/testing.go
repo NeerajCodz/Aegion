@@ -4,6 +4,8 @@ package logger
 import (
 	"io"
 	"log/slog"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // TestLogger creates a logger suitable for testing that discards all output.
@@ -16,4 +18,14 @@ func TestLogger() *slog.Logger {
 // This is useful as a replacement for zerolog.New(nil) in test fixtures.
 func TestLoggerDebug() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+// TestXLogger creates a native xlog logger suitable for test fixtures.
+func TestXLogger() *xlog.Logger {
+	return xlog.New(xlog.Config{
+		Level:          "debug",
+		Format:         "json",
+		ServiceName:    "test",
+		ServiceVersion: "test",
+	})
 }

@@ -2,9 +2,9 @@ package main
 
 import (
 	"flag"
-	"log"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 const (
@@ -14,7 +14,17 @@ const (
 )
 
 var runModuleServer = moduleserver.Run
-var logFatal = log.Fatal
+var logFatal = func(v ...any) {
+	if len(v) == 0 {
+		xlog.Default().Fatal("mfa server failed")
+		return
+	}
+	if err, ok := v[0].(error); ok {
+		xlog.Default().Fatal(err.Error(), "error", err)
+		return
+	}
+	xlog.Default().Fatal("mfa server failed", v...)
+}
 
 func defaultListenAddr() string {
 	return moduleserver.EnvOrDefault(listenAddrEnv, defaultListen)

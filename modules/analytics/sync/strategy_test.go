@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,7 +73,7 @@ func (m *managerTestStrategy) SetPosition(ctx context.Context, position *analyti
 func (m *managerTestStrategy) IsEnabled() bool { return m.enabled }
 
 func TestManagerRegistersUniqueStrategies(t *testing.T) {
-	manager := NewManager(&MockLogger{})
+	manager := NewManager(xlog.New(xlog.Config{}))
 	require.NoError(t, manager.RegisterStrategy(newManagerTestStrategy("real_time")))
 
 	err := manager.RegisterStrategy(newManagerTestStrategy("real_time"))
@@ -81,7 +82,7 @@ func TestManagerRegistersUniqueStrategies(t *testing.T) {
 }
 
 func TestManagerPublishesAndDeduplicatesEvents(t *testing.T) {
-	manager := NewManager(&MockLogger{})
+	manager := NewManager(xlog.New(xlog.Config{}))
 	realTime := newManagerTestStrategy("real_time")
 	batch := newManagerTestStrategy("batch")
 
@@ -103,7 +104,7 @@ func TestManagerPublishesAndDeduplicatesEvents(t *testing.T) {
 }
 
 func TestManagerAggregatesHealthAndPositions(t *testing.T) {
-	manager := NewManager(&MockLogger{})
+	manager := NewManager(xlog.New(xlog.Config{}))
 	realTime := newManagerTestStrategy("real_time")
 	batch := newManagerTestStrategy("batch")
 	batch.health = &analytics.StrategyHealthStatus{
@@ -123,7 +124,7 @@ func TestManagerAggregatesHealthAndPositions(t *testing.T) {
 }
 
 func TestManagerStartsAndStopsEnabledStrategies(t *testing.T) {
-	manager := NewManager(&MockLogger{})
+	manager := NewManager(xlog.New(xlog.Config{}))
 	strategy := newManagerTestStrategy("real_time")
 
 	require.NoError(t, manager.RegisterStrategy(strategy))

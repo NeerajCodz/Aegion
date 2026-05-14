@@ -6,39 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/stretchr/testify/assert"
 )
-
-// MockLogger implements the Logger interface for testing.
-type MockLogger struct {
-	mu       stdsync.Mutex
-	messages []string
-}
-
-func (ml *MockLogger) Debug(msg string, keysAndValues ...interface{}) {
-	ml.mu.Lock()
-	defer ml.mu.Unlock()
-	ml.messages = append(ml.messages, msg)
-}
-
-func (ml *MockLogger) Info(msg string, keysAndValues ...interface{}) {
-	ml.mu.Lock()
-	defer ml.mu.Unlock()
-	ml.messages = append(ml.messages, msg)
-}
-
-func (ml *MockLogger) Warn(msg string, keysAndValues ...interface{}) {
-	ml.mu.Lock()
-	defer ml.mu.Unlock()
-	ml.messages = append(ml.messages, msg)
-}
-
-func (ml *MockLogger) Error(msg string, keysAndValues ...interface{}) {
-	ml.mu.Lock()
-	defer ml.mu.Unlock()
-	ml.messages = append(ml.messages, msg)
-}
 
 // MockDB implements the DB interface for testing.
 type MockDB struct {
@@ -96,7 +67,7 @@ func (mddb *MockDuckDB) QueryRow(ctx context.Context, sql string, args ...interf
 
 // TestRealTimeSyncStrategy tests the real-time sync strategy.
 func TestRealTimeSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -152,7 +123,7 @@ func TestRealTimeSyncStrategy(t *testing.T) {
 
 // TestBatchSyncStrategy tests the batch sync strategy.
 func TestBatchSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -201,7 +172,7 @@ func TestBatchSyncStrategy(t *testing.T) {
 
 // TestAsyncSyncStrategy tests the async sync strategy.
 func TestAsyncSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -258,7 +229,7 @@ func TestAsyncSyncStrategy(t *testing.T) {
 
 // TestHybridSyncStrategy tests the hybrid sync strategy.
 func TestHybridSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -300,7 +271,7 @@ func TestHybridSyncStrategy(t *testing.T) {
 
 // TestSyncManager tests the sync manager orchestration.
 func TestSyncManager(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 

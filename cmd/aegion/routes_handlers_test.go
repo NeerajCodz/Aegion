@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,7 +22,7 @@ import (
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 )
 
@@ -167,8 +166,8 @@ func newTestServer(t *testing.T) *Server {
 
 	return &Server{
 		cfg:      cfg,
-		log:      logger.New(logger.Config{Level: "error", Format: "json"}),
-		registry: registry.New(registry.DefaultConfig(), slog.Default()),
+		log:      xlog.New(xlog.Config{Level: "error", Format: "json"}),
+		registry: registry.New(registry.DefaultConfig(), xlog.Default()),
 		tokenGen: tokenGen,
 	}
 }

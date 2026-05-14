@@ -90,9 +90,9 @@ func (s *Store) GetWebhook(ctx context.Context, webhookID string) (*analytics.We
 		return nil, err
 	}
 
-	json.Unmarshal([]byte(eventTypesJSON), &webhook.EventTypes)
-	json.Unmarshal([]byte(categoriesJSON), &webhook.Categories)
-	json.Unmarshal([]byte(customFilterJSON), &webhook.CustomFilter)
+	_ = json.Unmarshal([]byte(eventTypesJSON), &webhook.EventTypes)
+	_ = json.Unmarshal([]byte(categoriesJSON), &webhook.Categories)
+	_ = json.Unmarshal([]byte(customFilterJSON), &webhook.CustomFilter)
 
 	return webhook, nil
 }
@@ -112,7 +112,7 @@ func (s *Store) ListWebhooks(ctx context.Context, userID string) ([]*analytics.W
 	if !ok {
 		return nil, fmt.Errorf("webhooks: QueryContext returned %T, does not implement RowsScanner", rowsAny)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var webhooks []*analytics.Webhook
 	for rows.Next() {
@@ -126,9 +126,9 @@ func (s *Store) ListWebhooks(ctx context.Context, userID string) ([]*analytics.W
 			return nil, err
 		}
 
-		json.Unmarshal([]byte(eventTypesJSON), &webhook.EventTypes)
-		json.Unmarshal([]byte(categoriesJSON), &webhook.Categories)
-		json.Unmarshal([]byte(customFilterJSON), &webhook.CustomFilter)
+		_ = json.Unmarshal([]byte(eventTypesJSON), &webhook.EventTypes)
+		_ = json.Unmarshal([]byte(categoriesJSON), &webhook.Categories)
+		_ = json.Unmarshal([]byte(customFilterJSON), &webhook.CustomFilter)
 
 		webhooks = append(webhooks, webhook)
 	}
@@ -293,7 +293,7 @@ func (s *Store) ListDeliveries(ctx context.Context, webhookID string, limit int)
 	if !ok {
 		return nil, fmt.Errorf("webhooks: QueryContext returned %T, does not implement RowsScanner", rowsAny)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var deliveries []*analytics.WebhookDelivery
 	for rows.Next() {

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 )
 
@@ -19,7 +20,7 @@ type AsyncSync struct {
 	workerCount   int
 	maxRetries    int
 	retryBackoff  time.Duration
-	logger        Logger
+	logger        *xlog.Logger
 	db            DB
 	duckdb        DuckDB
 	mu            sync.RWMutex
@@ -42,10 +43,13 @@ func NewAsyncSync(
 	workerCount int,
 	maxRetries int,
 	retryBackoffMs int,
-	logger Logger,
+	logger *xlog.Logger,
 	db DB,
 	duckdb DuckDB,
 ) *AsyncSync {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &AsyncSync{
 		enabled:       enabled,
 		broker:        broker,
