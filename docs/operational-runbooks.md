@@ -28,7 +28,7 @@ This document provides step-by-step procedures for common operational tasks, inc
 - [ ] Team notified (deploy window scheduled)
 - [ ] Monitoring dashboards open
 - [ ] `build/release-checklist.json` validated (`bash ./scripts/check-release-checklist.sh`)
-- [ ] Rust FFI usage gate validated (`bash ./scripts/check-rust-ffi-usage.sh`)
+- [ ] Go-native crypto usage gate validated (`bash ./scripts/check-go-crypto-usage.sh`)
 
 **Procedure**:
 

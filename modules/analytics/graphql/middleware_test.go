@@ -3,18 +3,22 @@ package graphql
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics/rbac"
 )
 
+var graphQLTestKeyPair *platformjwt.KeyPair
+
 func TestAuthMiddleware_RequiresAuthForProtectedField(t *testing.T) {
-	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(xlog.New(xlog.Config{}), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -30,7 +34,7 @@ func TestAuthMiddleware_RequiresAuthForProtectedField(t *testing.T) {
 }
 
 func TestAuthMiddleware_AllowsPublicQueryWithoutAuth(t *testing.T) {
-	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(xlog.New(xlog.Config{}), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := r.Context().Value("userID").(string); ok {
 			t.Fatal("expected no user context for unauthenticated public query")
 		}
@@ -50,7 +54,7 @@ func TestAuthMiddleware_AllowsPublicQueryWithoutAuth(t *testing.T) {
 
 func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
 	expectedToken := testJWT("user-1")
-	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(xlog.New(xlog.Config{}), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, _ := r.Context().Value("userID").(string)
 		token, _ := r.Context().Value("token").(string)
 		role, _ := r.Context().Value("role").(string)
@@ -79,7 +83,7 @@ func TestAuthMiddleware_SetsUserContextFromBearerToken(t *testing.T) {
 }
 
 func TestAuthMiddleware_RejectsSessionTokenHeader(t *testing.T) {
-	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(xlog.New(xlog.Config{}), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -96,7 +100,7 @@ func TestAuthMiddleware_RejectsSessionTokenHeader(t *testing.T) {
 }
 
 func TestAuthMiddleware_SetsRoleFromTokenClaim(t *testing.T) {
-	handler := AuthMiddleware(logger.TestLogger(), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := AuthMiddleware(xlog.New(xlog.Config{}), map[string]bool{"events": true})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, _ := r.Context().Value("userID").(string)
 		role, _ := r.Context().Value("role").(string)
 		manager := rbac.FromContext(r.Context())
@@ -118,7 +122,7 @@ func TestAuthMiddleware_SetsRoleFromTokenClaim(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/graphql", strings.NewReader(`{"query":"query { events { totalCount } }"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testJWT("admin-1"))
+	req.Header.Set("Authorization", "Bearer "+testJWTWithRole("admin-1", "admin"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -149,7 +153,35 @@ func TestValidateGraphQLToken(t *testing.T) {
 }
 
 func testJWT(sub string) string {
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sub":%q}`, sub)))
-	return header + "." + payload + ".sig"
+	return testJWTWithRole(sub, "")
+}
+
+func testJWTWithRole(sub string, role string) string {
+	claims := platformjwt.Claims{
+		Subject:   sub,
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}
+	if role != "" {
+		claims.Custom = map[string]interface{}{"role": role}
+	}
+	token, err := platformjwt.Sign(claims, graphQLTestKeyPair.PrivateKey, graphQLTestKeyPair.Algorithm, graphQLTestKeyPair.KeyID)
+	if err != nil {
+		panic(err)
+	}
+	return token
+}
+
+func init() {
+	keyPair, err := platformjwt.GenerateECKeyPair("test-key")
+	if err != nil {
+		panic(err)
+	}
+	graphQLTestKeyPair = keyPair
+	if err := setGraphQLTestJWTKey(keyPair.PublicKey); err != nil {
+		panic(err)
+	}
+}
+
+func setGraphQLTestJWTKey(publicKey []byte) error {
+	return os.Setenv("AEGION_ANALYTICS_REST_JWT_PUBLIC_KEY_BASE64", base64.StdEncoding.EncodeToString(publicKey))
 }

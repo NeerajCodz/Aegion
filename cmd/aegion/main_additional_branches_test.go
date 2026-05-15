@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/config"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 type telemetryProbe struct {
@@ -96,13 +96,13 @@ func TestDefaultMainDepsStartHTTPServerBranches(t *testing.T) {
 	listenAndServeHTTPHook = func(*http.Server) error { return errors.New("http failed") }
 	listenAndServeTLSHook = func(*http.Server, string, string) error { return errors.New("tls failed") }
 	var fatalCalls int32
-	fatalHTTPServerHook = func(l *logger.Logger, msg string, args ...any) {
+	fatalHTTPServerHook = func(l *xlog.Logger, msg string, args ...any) {
 		atomic.AddInt32(&fatalCalls, 1)
 		// Logger.Fatal() will log the error and call os.Exit(1), which we'll intercept below
 	}
 
 	deps := defaultMainDeps()
-	log := deps.newLogger(logger.Config{Level: "error", Format: "json"})
+	log := deps.newLogger(xlog.Config{Level: "error", Format: "json"})
 	cfg := validMainConfig()
 
 	cfg.Server.TLS.Enabled = false

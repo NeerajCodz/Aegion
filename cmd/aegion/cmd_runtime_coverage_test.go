@@ -24,7 +24,7 @@ import (
 	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 type openErrFS struct {
@@ -199,7 +199,7 @@ func TestServerAdditionalCoverageBranches(t *testing.T) {
 			Config:     cfg,
 			ConfigPath: "configs\\aegion.yaml",
 			DB:         &database.DB{Pool: nil},
-			Log:        logger.New(logger.Config{Level: "error", Format: "json"}),
+			Log:        xlog.New(xlog.Config{Level: "error", Format: "json"}),
 		})
 		if err == nil || !strings.Contains(err.Error(), "orchestrator ctor failed") {
 			t.Fatalf("expected wrapped constructor error, got %v", err)
@@ -316,9 +316,9 @@ func TestMainAndModuleMigrationCoverageBranches(t *testing.T) {
 			Config:     cfg,
 			ConfigPath: "configs\\aegion.yaml",
 			DB:         &database.DB{Pool: nil},
-			Log:        logger.New(logger.Config{Level: "error", Format: "json"}),
+			Log:        xlog.New(xlog.Config{Level: "error", Format: "json"}),
 			WorkerManager: workers.NewManager(workers.ManagerConfig{
-				Log: logger.New(logger.Config{Level: "error", Format: "json"}),
+				Log: xlog.New(xlog.Config{Level: "error", Format: "json"}),
 			}),
 		})
 		if err == nil || !strings.Contains(err.Error(), "forced newServer error") {

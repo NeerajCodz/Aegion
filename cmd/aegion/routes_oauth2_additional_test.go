@@ -8,6 +8,19 @@ import (
 	"github.com/aegion/aegion/core/registry"
 )
 
+func registerOAuth2EndpointFixture(t *testing.T, s *Server, endpointType registry.EndpointType, endpointURL string) {
+	t.Helper()
+	_, err := s.registry.Register(registry.RegistrationRequest{
+		ID:        "oauth2",
+		Name:      "oauth2",
+		Version:   "v1.0.0",
+		Endpoints: []registry.Endpoint{{Type: endpointType, URL: endpointURL}},
+	})
+	if err != nil {
+		t.Fatalf("failed to register module: %v", err)
+	}
+}
+
 func TestOIDCProxyHandlerMethodRestrictions(t *testing.T) {
 	s := newTestServer(t)
 
@@ -54,7 +67,7 @@ func TestOAuth2EndpointURLBranches(t *testing.T) {
 
 	t.Run("no http endpoint", func(t *testing.T) {
 		s := newTestServer(t)
-		registerTestModule(t, s, "oauth2", registry.EndpointGRPC, "grpc://oauth2.example.com")
+		registerOAuth2EndpointFixture(t, s, registry.EndpointGRPC, "grpc://oauth2.example.com")
 		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
 			t.Fatal("oauth2EndpointURL(no http endpoint) expected error")
 		}
@@ -62,7 +75,7 @@ func TestOAuth2EndpointURLBranches(t *testing.T) {
 
 	t.Run("invalid parse", func(t *testing.T) {
 		s := newTestServer(t)
-		registerTestModule(t, s, "oauth2", registry.EndpointHTTP, "://bad")
+		registerOAuth2EndpointFixture(t, s, registry.EndpointHTTP, "://bad")
 		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
 			t.Fatal("oauth2EndpointURL(parse error) expected error")
 		}
@@ -70,7 +83,7 @@ func TestOAuth2EndpointURLBranches(t *testing.T) {
 
 	t.Run("invalid scheme", func(t *testing.T) {
 		s := newTestServer(t)
-		registerTestModule(t, s, "oauth2", registry.EndpointHTTP, "ftp://oauth2.example.com")
+		registerOAuth2EndpointFixture(t, s, registry.EndpointHTTP, "ftp://oauth2.example.com")
 		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
 			t.Fatal("oauth2EndpointURL(scheme error) expected error")
 		}
@@ -78,7 +91,7 @@ func TestOAuth2EndpointURLBranches(t *testing.T) {
 
 	t.Run("missing host", func(t *testing.T) {
 		s := newTestServer(t)
-		registerTestModule(t, s, "oauth2", registry.EndpointHTTP, "http:///missing-host")
+		registerOAuth2EndpointFixture(t, s, registry.EndpointHTTP, "http:///missing-host")
 		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
 			t.Fatal("oauth2EndpointURL(host error) expected error")
 		}

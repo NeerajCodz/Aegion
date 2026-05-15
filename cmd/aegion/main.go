@@ -19,8 +19,8 @@ import (
 	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
-	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 //go:embed migrations/*.sql
@@ -32,7 +32,7 @@ var (
 	exitProcess            = os.Exit
 	listenAndServeHTTPHook = (*http.Server).ListenAndServe
 	listenAndServeTLSHook  = (*http.Server).ListenAndServeTLS
-	fatalHTTPServerHook    = (*logger.Logger).Fatal
+	fatalHTTPServerHook    = (*xlog.Logger).Fatal
 )
 
 // Command line flags
@@ -65,11 +65,11 @@ type mainDeps struct {
 	stderr           io.Writer
 	loadConfig       func(path string) (*config.Config, error)
 	validateConfig   func(cfg *config.Config) error
-	newLogger        func(cfg logger.Config) *logger.Logger
+	newLogger        func(cfg xlog.Config) *xlog.Logger
 	connectDB        func(ctx context.Context, cfg database.Config) (*database.DB, error)
 	newMigrator      func(db *database.DB) migrator
 	runModuleMigrate func(ctx context.Context, cfg *config.Config, db *database.DB, configPath string) error
-	newWorkerMgr     func(log *logger.Logger, db *database.DB) *workers.Manager
+	newWorkerMgr     func(log *xlog.Logger, db *database.DB) *workers.Manager
 	newObservability func(ctx context.Context, cfg *config.Config) (telemetryProvider, error)
 	newServer        func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error)
 	newHTTPServer    func(cfg *config.Config, handler http.Handler) *http.Server
@@ -77,7 +77,7 @@ type mainDeps struct {
 	newSignalChan    func() chan os.Signal
 	notifySignals    func(c chan<- os.Signal, sig ...os.Signal)
 	stopSignals      func(c chan<- os.Signal)
-	startHTTPServer  func(cfg *config.Config, log *logger.Logger, httpServer *http.Server)
+	startHTTPServer  func(cfg *config.Config, log *xlog.Logger, httpServer *http.Server)
 }
 
 type migrator interface {
@@ -127,7 +127,6 @@ func validateShutdownTimeout(timeout time.Duration) error {
 	return nil
 }
 
-
 func defaultMainDeps() mainDeps {
 	return mainDeps{
 		stdout: os.Stdout,
@@ -138,13 +137,13 @@ func defaultMainDeps() mainDeps {
 		validateConfig: func(cfg *config.Config) error {
 			return cfg.Validate()
 		},
-		newLogger: logger.New,
+		newLogger: xlog.New,
 		connectDB: database.Connect,
 		newMigrator: func(db *database.DB) migrator {
 			return database.NewMigrator(db, migrations, "migrations")
 		},
 		runModuleMigrate: runEnabledModuleMigrations,
-		newWorkerMgr: func(log *logger.Logger, db *database.DB) *workers.Manager {
+		newWorkerMgr: func(log *xlog.Logger, db *database.DB) *workers.Manager {
 			return workers.NewManager(workers.ManagerConfig{
 				DB:  db.Pool,
 				Log: log,
@@ -181,7 +180,7 @@ func defaultMainDeps() mainDeps {
 		},
 		notifySignals: signal.Notify,
 		stopSignals:   signal.Stop,
-		startHTTPServer: func(cfg *config.Config, log *logger.Logger, httpServer *http.Server) {
+		startHTTPServer: func(cfg *config.Config, log *xlog.Logger, httpServer *http.Server) {
 			tlsEnabled := cfg.Server.TLS.Enabled
 			certFile := cfg.Server.TLS.CertFile
 			keyFile := cfg.Server.TLS.KeyFile
@@ -244,14 +243,14 @@ func run(args []string, deps mainDeps) int {
 		return 1
 	}
 
-	log := deps.newLogger(logger.Config{
+	log := deps.newLogger(xlog.Config{
 		Level:            cfg.Log.Level,
 		Format:           cfg.Log.Format,
 		ServiceName:      "aegion",
 		ServiceNamespace: cfg.Log.ServiceNamespace,
 		CloudRegion:      cfg.Log.CloudRegion,
 		Environment:      os.Getenv("AEGION_ENV"),
-		Version:          version,
+		ServiceVersion:   version,
 		CommitHash:       os.Getenv("GIT_COMMIT"),
 		Developer:        os.Getenv("DEV_NAME"),
 		RedactFields:     cfg.Log.RedactFields,

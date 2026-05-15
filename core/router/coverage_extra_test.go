@@ -6,17 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/aegion/aegion/core/registry"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 func TestReadyEndpoint_DegradedAndCancelledContext(t *testing.T) {
-	reg := registry.New(registry.DefaultConfig(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	reg := registry.New(registry.DefaultConfig(), xlog.New(xlog.Config{}))
 	defer reg.Stop()
 
 	_, _ = reg.Register(registry.RegistrationRequest{
@@ -37,7 +37,7 @@ func TestReadyEndpoint_DegradedAndCancelledContext(t *testing.T) {
 	})
 	_ = reg.UpdateStatus("mod-healthy", registry.StatusHealthy)
 
-	nopLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	nopLog := xlog.New(xlog.Config{})
 	r := New(DefaultConfig(), nopLog, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
@@ -81,7 +81,7 @@ func TestHealthChecker_AdditionalBranches(t *testing.T) {
 }
 
 func TestModuleProxy_TimeoutAndForwardedProtoBranches(t *testing.T) {
-	nopLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	nopLog := xlog.New(xlog.Config{})
 	proxy := NewModuleProxy(ModuleProxyConfig{
 		ModuleID: "password",
 		Logger:   nopLog,
@@ -111,7 +111,7 @@ func TestModuleProxy_TimeoutAndForwardedProtoBranches(t *testing.T) {
 }
 
 func TestModuleProxyServeHTTP_TransportErrorPath(t *testing.T) {
-	nopLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	nopLog := xlog.New(xlog.Config{})
 	reg := registry.New(registry.DefaultConfig(), nopLog)
 	defer reg.Stop()
 

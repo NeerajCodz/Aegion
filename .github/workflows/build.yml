@@ -168,8 +168,8 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ github.sha }}
-            BASE_IMAGE=golang:1.25.9-bookworm
-            RUNTIME_IMAGE=debian:bookworm-slim
+            BASE_IMAGE=golang:1.25.10-bookworm
+            RUNTIME_IMAGE=gcr.io/distroless/cc-debian13:nonroot
 
   # ---------------------------------------------------------------------------
   # Create Multi-Platform Manifest

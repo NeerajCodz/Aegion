@@ -137,32 +137,34 @@ requestCounter.Add(ctx, 1,
 
 ## Logging
 
-### Requirements
+Aegion uses `internal/xlog` as the canonical logging path. xlog emits one
+wide event per service hop, job, worker run, message, security decision, or
+audit action. Existing `internal/platform/logger` and `slog` default logging
+are bridged into xlog so legacy call sites still produce xlog-shaped records.
 
-* Structured logging only
-* Logs must include:
-
-  * `trace_id`
-  * `span_id`
-  * `request_id`
-
----
+Every event must include `event.name`, `event.kind`, `event.outcome`,
+`timestamp`, `duration_ms`, `service.name`, `service.version`, and
+`environment`. Field names are dot-separated lowercase keys such as
+`request.id`, `trace.id`, `http.status_code`, and `user.id`.
 
 ### Example
 
 ```go
-logger.InfoContext(ctx, "user created",
-    "user_id", user.ID,
-)
-```
+event := xlog.Default().Start(ctx, "identity.created", xlog.WithKind(xlog.KindWorkflow))
+defer event.Emit()
 
----
+event.Set("identity.id", identityID)
+event.Set("tenant.id", tenantID)
+event.Success()
+```
 
 ### Rules
 
-* Never log sensitive data
-* Always log with context
-* Ensure logs correlate with traces
+* Emit exactly one parent event per operation; add context to that event instead of scattering debug logs.
+* Use xlog HTTP middleware and gRPC interceptors for request boundaries.
+* Do not set raw secrets or PII. xlog redacts tokens, passwords, cookies, authorization headers, and hashes configured PII fields.
+* xlog always writes JSON locally and can batch events to the analytics module over internal gRPC using best-effort delivery.
+* Analytics ingestion failures must never fail user traffic.
 
 ---
 

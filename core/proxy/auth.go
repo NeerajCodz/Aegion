@@ -3,11 +3,11 @@ package proxy
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 type requestIDContextKey struct{}
@@ -21,19 +21,17 @@ func withRequestID(ctx context.Context, requestID string) context.Context {
 // AuthMiddleware provides authentication middleware for the proxy.
 type AuthMiddleware struct {
 	sessionManager *session.Manager
-	logger         *slog.Logger
+	logger         *xlog.Logger
 	optional       bool // If true, missing sessions are not treated as errors
 	getFromRequest func(context.Context, *http.Request) (*session.Session, error)
 }
 
 // NewAuthMiddleware creates a new authentication middleware.
-func NewAuthMiddleware(sessionManager *session.Manager, logger *slog.Logger, optional bool) *AuthMiddleware {
-	if logger == nil {
-		logger = slog.Default()
-	}
+func NewAuthMiddleware(sessionManager *session.Manager, logger any, optional bool) *AuthMiddleware {
+	log := xlog.Adapt(logger)
 	return &AuthMiddleware{
 		sessionManager: sessionManager,
-		logger:         logger.With("component", "auth-middleware"),
+		logger:         log.With("component", "auth-middleware"),
 		optional:       optional,
 	}
 }

@@ -1,0 +1,12 @@
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile* text eol=lf
+*.go text
+*.rs text
+*.ts text
+*.tsx text
+*.js text
+*.jsx text
+*.json text
+*.md text

@@ -9,7 +9,7 @@ import (
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/registry"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 var (
@@ -53,7 +53,7 @@ type Orchestrator struct {
 	registry       *registry.Registry
 	configLoader   *ConfigLoader
 	tokenGenerator *authtoken.Generator
-	logger         *logger.Logger
+	logger         *xlog.Logger
 
 	modules map[string]*moduleInstance
 	mu      sync.RWMutex
@@ -130,7 +130,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		registry:       cfg.Registry,
 		configLoader:   configLoader,
 		tokenGenerator: tokenGen,
-		logger:         logger.New(logger.Config{}),
+		logger:         xlog.New(xlog.Config{}),
 		modules:        make(map[string]*moduleInstance),
 	}
 

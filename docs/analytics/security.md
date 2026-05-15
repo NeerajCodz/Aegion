@@ -463,7 +463,7 @@ analytics:
 
 ```bash
 # Only admins can access
-curl -H "Authorization: Bearer admin_token" \
+curl -H "Authorization: Bearer ${AEGION_ADMIN_TOKEN}" \
   http://localhost:8080/api/v1/analytics/audit-logs
 ```
 
@@ -543,7 +543,7 @@ analytics:
 ```bash
 # Delete all events for a user (GDPR)
 POST /api/v1/analytics/users/{userId}/delete
-Authorization: Bearer admin_token
+Authorization: Bearer ${AEGION_ADMIN_TOKEN}
 
 Response:
 {

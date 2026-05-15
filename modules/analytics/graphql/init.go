@@ -3,7 +3,8 @@ package graphql
 import (
 	"context"
 	"fmt"
-	"log/slog"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // Config holds GraphQL module configuration.
@@ -78,7 +79,7 @@ func (c *Config) Validate() error {
 
 // Module represents the GraphQL module.
 type Module struct {
-	logger             *slog.Logger
+	logger             *xlog.Logger
 	config             *Config
 	server             *Server
 	directiveRegistry  *DirectiveRegistry
@@ -91,7 +92,7 @@ type Module struct {
 
 // InitOptions holds options for initializing the GraphQL module.
 type InitOptions struct {
-	Logger             *slog.Logger
+	Logger             *xlog.Logger
 	Config             *Config
 	Store              Store
 	DirectiveRegistry  *DirectiveRegistry
@@ -110,7 +111,7 @@ func Initialize(ctx context.Context, opts InitOptions) (*Module, error) {
 
 	logger := opts.Logger
 	if logger == nil {
-		logger = slog.Default()
+		logger = xlog.Default()
 	}
 
 	// Create resolver

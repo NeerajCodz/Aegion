@@ -44,4 +44,9 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 0
 fi
 
+if [[ -z "${AEGION_E2E_DATABASE_URL:-}" ]]; then
+    echo "Skipping integration smoke tests because AEGION_E2E_DATABASE_URL is not set."
+    exit 0
+fi
+
 "$GO_CMD" test -count=1 -v ./tests/e2e -run '^(TestLoginFlowInitiation|TestSessionValidation|TestAdminAuthentication)$' -timeout 15m

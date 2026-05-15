@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/core/courier"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // CourierDispatchConfig configures the courier dispatch worker.
 type CourierDispatchConfig struct {
 	DB         *pgxpool.Pool
-	Log        *logger.Logger
+	Log        *xlog.Logger
 	Courier    *courier.Courier
 	Interval   time.Duration // How often to check for messages (default: 30 seconds)
 	BatchSize  int           // Number of messages to process per batch (default: 10)

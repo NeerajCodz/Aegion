@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/go-chi/chi/v5"
-	"log/slog"
 )
 
 // Server handles GraphQL HTTP and WebSocket requests.
 type Server struct {
-	logger              *slog.Logger
+	logger              *xlog.Logger
 	resolver            *Resolver
 	schemaBuilder       *SchemaBuilder
 	maxQueryDepth       int
@@ -76,7 +76,7 @@ type GraphQLRequest struct {
 
 // NewServer creates a new GraphQL HTTP server.
 func NewServer(
-	logger *slog.Logger,
+	logger *xlog.Logger,
 	resolver *Resolver,
 	schemaBuilder *SchemaBuilder,
 	executor QueryExecutor,
@@ -184,7 +184,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 				{"message": "rate limit exceeded"},
 			},
 		}); err != nil {
-			s.logger.Error().Err(err).Msg("Failed to encode rate limit response")
+			s.logger.Error("failed to encode rate limit response", "error", err)
 		}
 		return
 	}
@@ -198,7 +198,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 				{"message": fmt.Sprintf("invalid request: %v", err)},
 			},
 		}); encErr != nil {
-			s.logger.Error().Err(encErr).Msg("Failed to encode error response")
+			s.logger.Error("failed to encode error response", "error", encErr)
 		}
 		return
 	}
@@ -216,7 +216,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}); encErr != nil {
-			s.logger.Error().Err(encErr).Msg("Failed to encode depth error response")
+			s.logger.Error("failed to encode depth error response", "error", encErr)
 		}
 		return
 	}
@@ -231,7 +231,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}); encErr != nil {
-			s.logger.Error().Err(encErr).Msg("Failed to encode complexity error response")
+			s.logger.Error("failed to encode complexity error response", "error", encErr)
 		}
 		return
 	} else if complexity > s.maxQueryComplexity {
@@ -243,7 +243,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}); encErr != nil {
-			s.logger.Error().Err(encErr).Msg("Failed to encode complexity error response")
+			s.logger.Error("failed to encode complexity error response", "error", encErr)
 		}
 		return
 	}
@@ -280,7 +280,7 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	// Write response
 	w.Header().Set("X-Execution-Time-Ms", fmt.Sprintf("%d", executionTimeMs))
 	if err := json.NewEncoder(w).Encode(result); err != nil {
-		s.logger.Error().Err(err).Msg("Failed to encode query result")
+		s.logger.Error("failed to encode query result", "error", err)
 	}
 }
 
@@ -305,7 +305,7 @@ func (s *Server) HandleIntrospection(w http.ResponseWriter, r *http.Request) {
 				{"message": "introspection disabled"},
 			},
 		}); err != nil {
-			s.logger.Error().Err(err).Msg("Failed to encode introspection disabled response")
+			s.logger.Error("failed to encode introspection disabled response", "error", err)
 		}
 		return
 	}
@@ -319,7 +319,7 @@ func (s *Server) HandleIntrospection(w http.ResponseWriter, r *http.Request) {
 				{"message": fmt.Sprintf("failed to build schema: %v", err)},
 			},
 		}); encErr != nil {
-			s.logger.Error().Err(encErr).Msg("Failed to encode schema error response")
+			s.logger.Error("failed to encode schema error response", "error", encErr)
 		}
 		return
 	}
@@ -330,7 +330,7 @@ func (s *Server) HandleIntrospection(w http.ResponseWriter, r *http.Request) {
 			"__schema": parseSchema(schema),
 		},
 	}); err != nil {
-		s.logger.Error().Err(err).Msg("Failed to encode introspection result")
+		s.logger.Error("failed to encode introspection result", "error", err)
 	}
 }
 
@@ -347,7 +347,7 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 			"status": "down",
 			"ready":  false,
 		}); err != nil {
-			s.logger.Error().Err(err).Msg("Failed to encode health response")
+			s.logger.Error("failed to encode health response", "error", err)
 		}
 		return
 	}
@@ -357,10 +357,9 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		"ready":  true,
 		"time":   time.Now(),
 	}); err != nil {
-		s.logger.Error().Err(err).Msg("Failed to encode health response")
+		s.logger.Error("failed to encode health response", "error", err)
 	}
 }
-
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -546,11 +545,14 @@ const playgroundHTML = `
 // SimpleQueryExecutor is a basic implementation of QueryExecutor.
 type SimpleQueryExecutor struct {
 	resolver *Resolver
-	logger   *slog.Logger
+	logger   *xlog.Logger
 }
 
 // NewSimpleQueryExecutor creates a new simple query executor.
-func NewSimpleQueryExecutor(resolver *Resolver, logger *slog.Logger) *SimpleQueryExecutor {
+func NewSimpleQueryExecutor(resolver *Resolver, logger *xlog.Logger) *SimpleQueryExecutor {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &SimpleQueryExecutor{
 		resolver: resolver,
 		logger:   logger,

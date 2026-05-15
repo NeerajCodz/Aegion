@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 )
 
@@ -18,7 +19,7 @@ type BatchSync struct {
 	tables       []string
 	batchSize    int
 	chunkSize    int
-	logger       Logger
+	logger       *xlog.Logger
 	db           DB
 	duckdb       DuckDB
 	mu           sync.RWMutex
@@ -39,10 +40,13 @@ func NewBatchSync(
 	tables []string,
 	batchSize int,
 	chunkSize int,
-	logger Logger,
+	logger *xlog.Logger,
 	db DB,
 	duckdb DuckDB,
 ) *BatchSync {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &BatchSync{
 		enabled:   enabled,
 		interval:  interval,

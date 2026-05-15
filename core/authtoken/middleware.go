@@ -2,9 +2,10 @@ package authtoken
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"path"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 const (
@@ -25,7 +26,7 @@ type MiddlewareConfig struct {
 	// Generator is the token generator/validator
 	Generator *Generator
 	// Logger is optional; if nil, no logging occurs
-	Logger *slog.Logger
+	Logger *xlog.Logger
 	// SkipPaths are paths that bypass token validation
 	SkipPaths []string
 }

@@ -393,7 +393,6 @@ log:
 	}
 }
 
-
 func TestLoadConfig_InvalidAPIKeyLookupPrefixLenDefaults(t *testing.T) {
 	tempDir := t.TempDir()
 	cfgPath := filepath.Join(tempDir, "aegion.yaml")
@@ -481,13 +480,13 @@ func baseRunDeps(cfg *Config) (mainDeps, *bytes.Buffer, *testRuntimeServer) {
 		loadConfig: func(path string) (*Config, error) {
 			return cfg, nil
 		},
-		rustSelfCheck: func() error { return nil },
-		setupLogger:   func(logConfig LogConfig) {},
-		parseDBConfig: func(connString string) (*pgxpool.Config, error) { return &pgxpool.Config{}, nil },
-		newDBPool:     func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error) { return nil, nil },
-		pingDB:        func(ctx context.Context, db *pgxpool.Pool) error { return nil },
-		closeDB:       func(db *pgxpool.Pool) {},
-		runMigrations: func(ctx context.Context, db *pgxpool.Pool) error { return nil },
+		cryptoSelfCheck: func() error { return nil },
+		setupLogger:     func(logConfig LogConfig) {},
+		parseDBConfig:   func(connString string) (*pgxpool.Config, error) { return &pgxpool.Config{}, nil },
+		newDBPool:       func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error) { return nil, nil },
+		pingDB:          func(ctx context.Context, db *pgxpool.Pool) error { return nil },
+		closeDB:         func(db *pgxpool.Pool) {},
+		runMigrations:   func(ctx context.Context, db *pgxpool.Pool) error { return nil },
 		startServer: func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 			return runtime, nil
 		},
@@ -532,15 +531,15 @@ func TestRun(t *testing.T) {
 		}
 	})
 
-	t.Run("rust runtime self-check error", func(t *testing.T) {
+	t.Run("crypto runtime self-check error", func(t *testing.T) {
 		deps, _, _ := baseRunDeps(baseRunConfig())
-		deps.rustSelfCheck = func() error {
+		deps.cryptoSelfCheck = func() error {
 			return errors.New("ffi unavailable")
 		}
 
 		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed rust runtime self-check") {
-			t.Fatalf("expected rust runtime self-check error, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "failed crypto runtime self-check") {
+			t.Fatalf("expected crypto runtime self-check error, got %v", err)
 		}
 	})
 

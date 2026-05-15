@@ -8,24 +8,18 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // Dispatcher handles webhook HTTP delivery.
 type Dispatcher struct {
 	client *http.Client
-	logger Logger
-}
-
-// Logger interface for logging.
-type Logger interface {
-	Debug(msg string, keysAndValues ...interface{})
-	Info(msg string, keysAndValues ...interface{})
-	Warn(msg string, keysAndValues ...interface{})
-	Error(msg string, keysAndValues ...interface{})
+	logger *xlog.Logger
 }
 
 // NewDispatcher creates a new webhook dispatcher.
-func NewDispatcher(timeoutSeconds int, logger Logger) *Dispatcher {
+func NewDispatcher(timeoutSeconds int, logger *xlog.Logger) *Dispatcher {
 	client := &http.Client{
 		Timeout: time.Duration(timeoutSeconds) * time.Second,
 	}
@@ -78,7 +72,7 @@ func (d *Dispatcher) Deliver(ctx context.Context, url string, payload interface{
 		d.logger.Warn("webhook delivery failed", "url", url, "error", result.Error)
 		return result
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	result.StatusCode = resp.StatusCode
 

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"log/slog"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 type NetworkManager struct {
@@ -221,5 +221,5 @@ type dockerNetworkInspect struct {
 }
 
 func init() {
-	slog.Debug("using docker CLI orchestrator backend")
+	xlog.Default().Debug("using docker CLI orchestrator backend")
 }

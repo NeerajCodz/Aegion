@@ -44,6 +44,16 @@
       ],
       "required_gates": ["ci", "security", "release-checklist", "admin-e2e"]
     },
+    "analytics": {
+      "status": "Beta",
+      "deployment": "standalone",
+      "summary": "Analytics ingestion, REST, GraphQL, and gRPC surfaces are functional with storage/runtime hardening still gated.",
+      "caveats": [
+        "DuckDB/Iceberg extension availability depends on deployment environment.",
+        "Full cross-service analytics E2E harness is not GA-scoped in this train."
+      ],
+      "required_gates": ["ci", "security", "release-checklist"]
+    },
     "oauth2": {
       "status": "Beta",
       "deployment": "standalone",

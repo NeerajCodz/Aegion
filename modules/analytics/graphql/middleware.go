@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics/rbac"
 )
 
@@ -20,7 +22,7 @@ import (
 type Middleware func(http.Handler) http.Handler
 
 // AuthMiddleware enforces authentication for GraphQL queries.
-func AuthMiddleware(logger *slog.Logger, requiredForFields map[string]bool) Middleware {
+func AuthMiddleware(logger *xlog.Logger, requiredForFields map[string]bool) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			query, updatedRequest, err := extractGraphQLQuery(r)
@@ -48,22 +50,32 @@ func AuthMiddleware(logger *slog.Logger, requiredForFields map[string]bool) Midd
 				return
 			}
 
-			userID, err := validateGraphQLToken(token)
+			claims, err := validateGraphQLTokenClaims(token)
 			if err != nil {
 				logger.WarnContext(r.Context(), "invalid graphql auth token", "error", err)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), "userID", userID)
+			ctx := context.WithValue(r.Context(), "userID", claims.Subject)
 			ctx = context.WithValue(ctx, "token", token)
+			if claims.Role != "" {
+				ctx = context.WithValue(ctx, "role", claims.Role)
+				manager := rbac.NewManager()
+				if err := manager.SetUserRole(claims.Subject, rbac.Role(claims.Role)); err != nil {
+					logger.WarnContext(r.Context(), "invalid graphql role claim", "error", err)
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				ctx = rbac.WithManager(ctx, manager)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
 // InstrumentationMiddleware adds tracing and logging to GraphQL requests.
-func InstrumentationMiddleware(logger *slog.Logger) Middleware {
+func InstrumentationMiddleware(logger *xlog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -95,7 +107,7 @@ func InstrumentationMiddleware(logger *slog.Logger) Middleware {
 }
 
 // RateLimitMiddleware enforces per-user or per-IP rate limiting.
-func RateLimitMiddleware(logger *slog.Logger, limiter RateLimiter) Middleware {
+func RateLimitMiddleware(logger *xlog.Logger, limiter RateLimiter) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			clientID := getClientID(r)
@@ -118,7 +130,10 @@ func RateLimitMiddleware(logger *slog.Logger, limiter RateLimiter) Middleware {
 }
 
 // ErrorHandlingMiddleware catches and formats errors consistently.
-func ErrorHandlingMiddleware(logger *slog.Logger) Middleware {
+func ErrorHandlingMiddleware(logger *xlog.Logger) Middleware {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// In a real implementation, this would wrap the response writer
@@ -175,7 +190,10 @@ func CORSMiddleware(allowedOrigins []string) Middleware {
 }
 
 // RequestValidationMiddleware validates incoming requests.
-func RequestValidationMiddleware(logger *slog.Logger) Middleware {
+func RequestValidationMiddleware(logger *xlog.Logger) Middleware {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Validate content type for POST requests
@@ -279,35 +297,58 @@ func queryRequiresAuthentication(query string, requiredForFields map[string]bool
 	return false
 }
 
-func validateGraphQLToken(token string) (string, error) {
-	if token == "" {
-		return "", fmt.Errorf("empty token")
-	}
-
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("invalid token format")
-	}
-
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("invalid token payload")
-	}
-
-	var claims struct {
-		Subject string `json:"sub"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", fmt.Errorf("invalid token claims")
-	}
-
-	userID := strings.TrimSpace(claims.Subject)
-	if userID == "" {
-		return "", fmt.Errorf("invalid token: missing subject")
-	}
-	return userID, nil
+type graphQLTokenClaims struct {
+	Subject string
+	Role    string
 }
 
+func validateGraphQLToken(token string) (string, error) {
+	claims, err := validateGraphQLTokenClaims(token)
+	if err != nil {
+		return "", err
+	}
+	return claims.Subject, nil
+}
+
+func validateGraphQLTokenClaims(token string) (graphQLTokenClaims, error) {
+	if token == "" {
+		return graphQLTokenClaims{}, fmt.Errorf("empty token")
+	}
+
+	publicKeyB64 := strings.TrimSpace(os.Getenv("AEGION_ANALYTICS_REST_JWT_PUBLIC_KEY_BASE64"))
+	if publicKeyB64 == "" {
+		return graphQLTokenClaims{}, fmt.Errorf("jwt verification key is not configured")
+	}
+
+	publicKey, err := base64.StdEncoding.DecodeString(publicKeyB64)
+	if err != nil {
+		return graphQLTokenClaims{}, fmt.Errorf("invalid jwt verification key: %w", err)
+	}
+
+	verified, err := platformjwt.Verify(token, publicKey, "ES256", platformjwt.VerifyOptions{})
+	if err != nil {
+		return graphQLTokenClaims{}, fmt.Errorf("token verification failed: %w", err)
+	}
+
+	userID := strings.TrimSpace(verified.Claims.Subject)
+	if userID == "" {
+		return graphQLTokenClaims{}, fmt.Errorf("invalid token: missing sub claim")
+	}
+
+	role, _ := verified.Claims.Custom["role"].(string)
+	role = strings.TrimSpace(role)
+
+	if role == "" {
+		if _, ok := verified.Claims.Custom["role"]; ok {
+			return graphQLTokenClaims{}, fmt.Errorf("invalid token: role claim must be a string")
+		}
+	}
+
+	return graphQLTokenClaims{
+		Subject: userID,
+		Role:    role,
+	}, nil
+}
 
 func generateTraceID() string {
 	return fmt.Sprintf("trace-%d", time.Now().UnixNano())
@@ -435,11 +476,14 @@ func (sca *SimpleComplexityAnalyzer) ValidateDepth(query string, maxDepth int) (
 
 // SimpleRequestLogger logs GraphQL requests and responses.
 type SimpleRequestLogger struct {
-	logger *slog.Logger
+	logger *xlog.Logger
 }
 
 // NewSimpleRequestLogger creates a new request logger.
-func NewSimpleRequestLogger(logger *slog.Logger) *SimpleRequestLogger {
+func NewSimpleRequestLogger(logger *xlog.Logger) *SimpleRequestLogger {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &SimpleRequestLogger{
 		logger: logger,
 	}

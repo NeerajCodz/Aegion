@@ -2,7 +2,7 @@ package router
 
 import (
 	"errors"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"net/http"
 	"testing"
 
@@ -190,7 +190,7 @@ func TestTimeToSeconds(t *testing.T) {
 func TestRouterWrapperMethods(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.RateLimit.Enabled = false // Disable rate limiting for tests
-	l := logger.TestLogger()
+	l := xlog.Default()
 	r := New(cfg, l, nil)
 
 	// Test Get
@@ -310,10 +310,10 @@ func TestRouterModuleProxy(t *testing.T) {
 	cfg.InternalToken = "test-token"
 	cfg.SessionSecret = []byte("test-secret")
 	cfg.RateLimit.Enabled = false
-	l := logger.New(logger.Config{Level: "error", Format: "text"})
+	l := xlog.New(xlog.Config{Level: "error"})
 
 	// Use nil registry (acceptable for this test)
-	r := New(cfg, l.Logger, nil)
+	r := New(cfg, l, nil)
 
 	t.Run("ProxyToModule", func(t *testing.T) {
 		handler := r.ProxyToModule("test-module")

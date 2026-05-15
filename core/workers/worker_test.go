@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 func TestWorkerInterface(t *testing.T) {
@@ -35,7 +35,7 @@ func TestNewManager(t *testing.T) {
 		{
 			name: "with custom logger",
 			config: ManagerConfig{
-				Log: logger.New(logger.Config{Level: "debug", Format: "json"}),
+				Log: xlog.New(xlog.Config{Level: "debug", Format: "json"}),
 			},
 		},
 	}
@@ -70,7 +70,7 @@ func TestNewBaseWorker(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		logger *logger.Logger
+		logger *xlog.Logger
 	}{
 		{
 			name:   "with nil logger gets default",
@@ -78,7 +78,7 @@ func TestNewBaseWorker(t *testing.T) {
 		},
 		{
 			name:   "with custom logger",
-			logger: logger.New(logger.Config{Level: "debug", Format: "json"}),
+			logger: xlog.New(xlog.Config{Level: "debug", Format: "json"}),
 		},
 	}
 
@@ -268,7 +268,7 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestManagerConfig(t *testing.T) {
-	log := logger.New(logger.Config{Level: "info", Format: "json"})
+	log := xlog.New(xlog.Config{Level: "info", Format: "json"})
 
 	config := ManagerConfig{
 		Log: log,
@@ -282,7 +282,7 @@ func TestManagerConfig(t *testing.T) {
 func TestBaseWorkerFields(t *testing.T) {
 	name := "test-worker"
 	interval := 5 * time.Second
-	customLog := logger.New(logger.Config{Level: "debug", Format: "text"})
+	customLog := xlog.New(xlog.Config{Level: "debug", Format: "text"})
 
 	worker := NewBaseWorker(name, nil, customLog, interval)
 

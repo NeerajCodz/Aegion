@@ -1,13 +1,11 @@
 package grpc
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"log/slog"
 	"testing"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -65,10 +63,14 @@ func TestStreamAuthInterceptor_RequiresVerifier(t *testing.T) {
 }
 
 func TestLoggingInterceptor_EmitsLine(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	var events []xlog.Record
+	sink := xlog.SinkFunc(func(ctx context.Context, r xlog.Record) error {
+		events = append(events, r)
+		return nil
+	})
+	logger := xlog.New(xlog.Config{Sinks: []xlog.Sink{sink}})
 
-	interceptor := LoggingInterceptor(logger)
+	interceptor := logger.UnaryServerInterceptor()
 
 	resp, err := interceptor(context.Background(), struct{}{}, &grpc.UnaryServerInfo{FullMethod: "/m"}, func(context.Context, interface{}) (interface{}, error) {
 		return "ok", nil
@@ -76,21 +78,23 @@ func TestLoggingInterceptor_EmitsLine(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ok", resp)
 
-	// Verify the log output contains expected fields
-	var logData map[string]interface{}
-	if err := json.Unmarshal(buf.Bytes(), &logData); err == nil {
-		require.Contains(t, logData, "msg")
-		require.Contains(t, logData["msg"], "RPC call completed")
-		require.Contains(t, logData, "method")
-		require.Equal(t, "/m", logData["method"])
-	}
+	require.Len(t, events, 1)
+	logData := events[0].Fields
+	require.Equal(t, "grpc.request", logData["event.name"])
+	require.Equal(t, "/m", logData["rpc.method"])
+	require.Equal(t, "OK", logData["rpc.grpc.status_code"])
+	require.Equal(t, "success", logData["event.outcome"])
 }
 
 func TestStreamLoggingInterceptor_EmitsLine(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	var events []xlog.Record
+	sink := xlog.SinkFunc(func(ctx context.Context, r xlog.Record) error {
+		events = append(events, r)
+		return nil
+	})
+	logger := xlog.New(xlog.Config{Sinks: []xlog.Sink{sink}})
 
-	interceptor := StreamLoggingInterceptor(logger)
+	interceptor := logger.StreamServerInterceptor()
 
 	stream := &mockGRPCServerStream{ctx: context.Background()}
 	err := interceptor(struct{}{}, stream, &grpc.StreamServerInfo{FullMethod: "/m", IsServerStream: true}, func(interface{}, grpc.ServerStream) error {
@@ -98,14 +102,12 @@ func TestStreamLoggingInterceptor_EmitsLine(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify the log output contains expected fields
-	var logData map[string]interface{}
-	if err := json.Unmarshal(buf.Bytes(), &logData); err == nil {
-		require.Contains(t, logData, "msg")
-		require.Contains(t, logData["msg"], "Stream RPC call completed")
-		require.Contains(t, logData, "method")
-		require.Equal(t, "/m", logData["method"])
-	}
+	require.Len(t, events, 1)
+	logData := events[0].Fields
+	require.Equal(t, "grpc.stream", logData["event.name"])
+	require.Equal(t, "/m", logData["rpc.method"])
+	require.Equal(t, "OK", logData["rpc.grpc.status_code"])
+	require.Equal(t, "success", logData["event.outcome"])
 }
 
 func TestTracingInterceptor_RecordsErrorAttributes(t *testing.T) {

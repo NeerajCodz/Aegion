@@ -2,12 +2,13 @@ package registry
 
 import (
 	"errors"
-	"log/slog"
 	"net"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 var (
@@ -22,7 +23,7 @@ type Registry struct {
 	modules map[string]*Module
 	mu      sync.RWMutex
 	closed  bool
-	logger  *slog.Logger
+	logger  *xlog.Logger
 
 	// Health checker
 	healthChecker *HealthChecker
@@ -46,23 +47,21 @@ func DefaultConfig() Config {
 }
 
 // New creates a new service registry.
-func New(cfg Config, logger *slog.Logger) *Registry {
+func New(cfg Config, logger any) *Registry {
 	if cfg.HealthCheckInterval == 0 {
 		cfg.HealthCheckInterval = 30 * time.Second
 	}
 	if cfg.HealthCheckTimeout == 0 {
 		cfg.HealthCheckTimeout = 5 * time.Second
 	}
-	if logger == nil {
-		logger = slog.Default()
-	}
+	log := xlog.Adapt(logger)
 
 	r := &Registry{
 		modules: make(map[string]*Module),
-		logger:  logger,
+		logger:  log,
 	}
 
-	r.healthChecker = NewHealthChecker(r, cfg.HealthCheckInterval, cfg.HealthCheckTimeout, logger)
+	r.healthChecker = NewHealthChecker(r, cfg.HealthCheckInterval, cfg.HealthCheckTimeout, log)
 	r.discovery = NewDiscovery(r)
 
 	return r
@@ -177,7 +176,6 @@ func hostsMatch(endpointHost, healthHost string) bool {
 	return (endpointHost == "localhost" && healthIP != nil && healthIP.IsLoopback()) ||
 		(healthHost == "localhost" && endpointIP != nil && endpointIP.IsLoopback())
 }
-
 
 // Deregister removes a module from the registry.
 func (r *Registry) Deregister(moduleID string) (*DeregistrationResponse, error) {

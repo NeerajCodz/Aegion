@@ -56,7 +56,7 @@ Ingest custom events via REST API:
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Authorization: Bearer ${AEGION_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "category": "custom_event",
@@ -420,7 +420,7 @@ Update config without restart:
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer admin_token" \
+  -H "Authorization: Bearer ${AEGION_ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "sync": {
@@ -461,7 +461,7 @@ analytics:
 **Delete user data:**
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer admin_token" \
+  -H "Authorization: Bearer ${AEGION_ADMIN_TOKEN}" \
   http://localhost:8080/api/v1/analytics/users/{userId}/delete
 
 Response:

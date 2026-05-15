@@ -3,8 +3,8 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"net/url"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -617,15 +617,15 @@ func (h *Handler) ListProxyUpstreams(w http.ResponseWriter, r *http.Request) {
 }
 
 type ProxyUpstreamRequest struct {
-	Name                    string                 `json:"name"`
-	URL                     string                 `json:"url"`
-	HealthCheck             string                 `json:"health_check"`
-	HealthCheckExpectedBody string                 `json:"health_check_expected_body"`
-	Timeout                 string                 `json:"timeout"`
-	MaxConnections          int                    `json:"max_connections"`
-	Headers                 map[string]string      `json:"headers"`
+	Name                    string                     `json:"name"`
+	URL                     string                     `json:"url"`
+	HealthCheck             string                     `json:"health_check"`
+	HealthCheckExpectedBody string                     `json:"health_check_expected_body"`
+	Timeout                 string                     `json:"timeout"`
+	MaxConnections          int                        `json:"max_connections"`
+	Headers                 map[string]string          `json:"headers"`
 	CircuitBreaker          *proxystore.CircuitBreaker `json:"circuit_breaker"`
-	Enabled                 bool                   `json:"enabled"`
+	Enabled                 bool                       `json:"enabled"`
 }
 
 func (h *Handler) UpsertProxyUpstream(w http.ResponseWriter, r *http.Request) {
@@ -760,19 +760,19 @@ func (h *Handler) ListProxyRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 type ProxyRouteRequest struct {
-	ID           string                 `json:"id"`
-	Path         string                 `json:"path"`
-	Methods      []string               `json:"methods"`
-	RequireAuth  bool                   `json:"require_auth"`
-	RequiredAAL  string                 `json:"required_aal"`
-	Capabilities []string               `json:"capabilities"`
-	RateLimit    *proxystore.RateLimit  `json:"rate_limit"`
-	Target       string                 `json:"target"`
-	Priority     int                    `json:"priority"`
-	Headers      map[string]string      `json:"headers"`
-	Rewrite      *proxystore.Rewrite    `json:"rewrite"`
-	Enabled      bool                   `json:"enabled"`
-	Description  string                 `json:"description"`
+	ID           string                `json:"id"`
+	Path         string                `json:"path"`
+	Methods      []string              `json:"methods"`
+	RequireAuth  bool                  `json:"require_auth"`
+	RequiredAAL  string                `json:"required_aal"`
+	Capabilities []string              `json:"capabilities"`
+	RateLimit    *proxystore.RateLimit `json:"rate_limit"`
+	Target       string                `json:"target"`
+	Priority     int                   `json:"priority"`
+	Headers      map[string]string     `json:"headers"`
+	Rewrite      *proxystore.Rewrite   `json:"rewrite"`
+	Enabled      bool                  `json:"enabled"`
+	Description  string                `json:"description"`
 }
 
 type ProxySimulationRequest struct {

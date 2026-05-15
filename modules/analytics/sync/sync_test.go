@@ -2,50 +2,38 @@ package sync
 
 import (
 	"context"
+	stdsync "sync"
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/stretchr/testify/assert"
 )
 
-// MockLogger implements the Logger interface for testing.
-type MockLogger struct {
-	messages []string
-}
-
-func (ml *MockLogger) Debug(msg string, keysAndValues ...interface{}) {
-	ml.messages = append(ml.messages, msg)
-}
-
-func (ml *MockLogger) Info(msg string, keysAndValues ...interface{}) {
-	ml.messages = append(ml.messages, msg)
-}
-
-func (ml *MockLogger) Warn(msg string, keysAndValues ...interface{}) {
-	ml.messages = append(ml.messages, msg)
-}
-
-func (ml *MockLogger) Error(msg string, keysAndValues ...interface{}) {
-	ml.messages = append(ml.messages, msg)
-}
-
 // MockDB implements the DB interface for testing.
 type MockDB struct {
+	mu          stdsync.Mutex
 	lastExecSQL string
 	queryResult []map[string]interface{}
 }
 
 func (md *MockDB) Exec(ctx context.Context, sql string, args ...interface{}) error {
+	md.mu.Lock()
+	defer md.mu.Unlock()
 	md.lastExecSQL = sql
 	return nil
 }
 
 func (md *MockDB) Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
+	md.mu.Lock()
+	defer md.mu.Unlock()
 	return md.queryResult, nil
 }
 
 func (md *MockDB) QueryRow(ctx context.Context, sql string, args ...interface{}) (map[string]interface{}, error) {
+	md.mu.Lock()
+	defer md.mu.Unlock()
 	if len(md.queryResult) > 0 {
 		return md.queryResult[0], nil
 	}
@@ -54,25 +42,32 @@ func (md *MockDB) QueryRow(ctx context.Context, sql string, args ...interface{})
 
 // MockDuckDB implements the DuckDB interface for testing.
 type MockDuckDB struct {
+	mu          stdsync.Mutex
 	lastExecSQL string
 }
 
 func (mddb *MockDuckDB) Exec(ctx context.Context, sql string, args ...interface{}) error {
+	mddb.mu.Lock()
+	defer mddb.mu.Unlock()
 	mddb.lastExecSQL = sql
 	return nil
 }
 
 func (mddb *MockDuckDB) Query(ctx context.Context, sql string, args ...interface{}) ([]map[string]interface{}, error) {
+	mddb.mu.Lock()
+	defer mddb.mu.Unlock()
 	return []map[string]interface{}{}, nil
 }
 
 func (mddb *MockDuckDB) QueryRow(ctx context.Context, sql string, args ...interface{}) (map[string]interface{}, error) {
+	mddb.mu.Lock()
+	defer mddb.mu.Unlock()
 	return make(map[string]interface{}), nil
 }
 
 // TestRealTimeSyncStrategy tests the real-time sync strategy.
 func TestRealTimeSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -128,7 +123,7 @@ func TestRealTimeSyncStrategy(t *testing.T) {
 
 // TestBatchSyncStrategy tests the batch sync strategy.
 func TestBatchSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -177,7 +172,7 @@ func TestBatchSyncStrategy(t *testing.T) {
 
 // TestAsyncSyncStrategy tests the async sync strategy.
 func TestAsyncSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -234,7 +229,7 @@ func TestAsyncSyncStrategy(t *testing.T) {
 
 // TestHybridSyncStrategy tests the hybrid sync strategy.
 func TestHybridSyncStrategy(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 
@@ -276,7 +271,7 @@ func TestHybridSyncStrategy(t *testing.T) {
 
 // TestSyncManager tests the sync manager orchestration.
 func TestSyncManager(t *testing.T) {
-	logger := &MockLogger{}
+	logger := xlog.New(xlog.Config{})
 	db := &MockDB{}
 	duckdb := &MockDuckDB{}
 

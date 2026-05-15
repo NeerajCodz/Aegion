@@ -3,16 +3,15 @@ package rest
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // InitParams holds parameters for initializing the REST API module
 type InitParams struct {
 	Config         Config
-	Logger         *slog.Logger
+	Logger         *xlog.Logger
 	DB             Database
 	Validator      *Validator
 	WebhookManager WebhookManager
@@ -22,7 +21,7 @@ type InitParams struct {
 func Initialize(params InitParams) (*Handler, error) {
 	// Create a default logger if not provided
 	if params.Logger == nil {
-		params.Logger = logger.New(logger.Config{Level: "info", Format: "json"}).Logger
+		params.Logger = xlog.New(xlog.Config{Level: "info", Format: "json"})
 	}
 
 	// Validate config

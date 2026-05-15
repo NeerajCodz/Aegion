@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 )
 
 // InitParams holds parameters for initializing the sync layer.
 type InitParams struct {
 	Config *analytics.Config
-	Logger Logger
+	Logger *xlog.Logger
 	DB     DB
 	DuckDB DuckDB
 }

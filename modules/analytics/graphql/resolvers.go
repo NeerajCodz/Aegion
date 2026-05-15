@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/rbac"
-	"log/slog"
 )
 
 // Resolver handles GraphQL query, mutation, and subscription resolving.
 type Resolver struct {
-	logger    *slog.Logger
+	logger    *xlog.Logger
 	store     Store
 	startTime time.Time
 	// Subscription channels
@@ -58,7 +58,7 @@ type Store interface {
 }
 
 // NewResolver creates a new GraphQL resolver.
-func NewResolver(logger *slog.Logger, store Store) *Resolver {
+func NewResolver(logger *xlog.Logger, store Store) *Resolver {
 	return &Resolver{
 		logger:        logger,
 		store:         store,
@@ -89,7 +89,7 @@ func (r *Resolver) Events(ctx context.Context, filter *EventFilter, first *int, 
 	offset := 0
 	if after != nil && *after != "" {
 		// Parse cursor - for simplicity, use numeric offset
-		fmt.Sscanf(*after, "%d", &offset)
+		_, _ = fmt.Sscanf(*after, "%d", &offset)
 	}
 
 	events, total, err := r.store.ListEvents(ctx, filter, limit, offset)

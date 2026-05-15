@@ -4,10 +4,10 @@ import "errors"
 
 var runtimeSelfCheckCompare = ConstantTimeCompare
 
-// ErrRuntimeSelfCheck indicates the Rust crypto runtime self-check failed.
-var ErrRuntimeSelfCheck = errors.New("rust crypto runtime self-check failed")
+// ErrRuntimeSelfCheck indicates the Go crypto runtime self-check failed.
+var ErrRuntimeSelfCheck = errors.New("go crypto runtime self-check failed")
 
-// RuntimeSelfCheck verifies that Rust-backed crypto primitives are operational.
+// RuntimeSelfCheck verifies that Go-native crypto primitives are operational.
 func RuntimeSelfCheck() error {
 	if !runtimeSelfCheckCompare([]byte{0xA5}, []byte{0xA5}) {
 		return ErrRuntimeSelfCheck

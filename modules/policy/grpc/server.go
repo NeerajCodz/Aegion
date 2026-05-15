@@ -90,7 +90,6 @@ func (s *Server) Check(ctx context.Context, req *policypb.CheckRequest) (*policy
 		return s.evaluateABACOnly(ctx, req, rules)
 	}
 
-
 	if denied, ruleName, err := s.firstMatchedABACRule(ctx, req, rules, "deny"); err != nil {
 		return nil, err
 	} else if denied {

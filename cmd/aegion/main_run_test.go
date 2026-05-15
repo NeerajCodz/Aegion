@@ -17,7 +17,7 @@ import (
 	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 type stubMigrator struct {
@@ -90,8 +90,8 @@ func buildRunDeps(cfg *config.Config) (mainDeps, *bytes.Buffer, *bytes.Buffer, *
 		validateConfig: func(cfg *config.Config) error {
 			return nil
 		},
-		newLogger: func(cfg logger.Config) *logger.Logger {
-			return logger.New(logger.Config{Level: "error", Format: "json"})
+		newLogger: func(cfg xlog.Config) *xlog.Logger {
+			return xlog.New(xlog.Config{Level: "error", Format: "json"})
 		},
 		connectDB: func(ctx context.Context, cfg database.Config) (*database.DB, error) {
 			return db, nil
@@ -99,7 +99,7 @@ func buildRunDeps(cfg *config.Config) (mainDeps, *bytes.Buffer, *bytes.Buffer, *
 		newMigrator: func(db *database.DB) migrator {
 			return mig
 		},
-		newWorkerMgr: func(log *logger.Logger, db *database.DB) *workers.Manager {
+		newWorkerMgr: func(log *xlog.Logger, db *database.DB) *workers.Manager {
 			return workers.NewManager(workers.ManagerConfig{Log: log})
 		},
 		newObservability: func(ctx context.Context, cfg *config.Config) (telemetryProvider, error) {
@@ -124,7 +124,7 @@ func buildRunDeps(cfg *config.Config) (mainDeps, *bytes.Buffer, *bytes.Buffer, *
 			c <- os.Interrupt
 		},
 		stopSignals: func(c chan<- os.Signal) {},
-		startHTTPServer: func(cfg *config.Config, log *logger.Logger, httpServer *http.Server) {
+		startHTTPServer: func(cfg *config.Config, log *xlog.Logger, httpServer *http.Server) {
 		},
 	}
 
@@ -544,7 +544,7 @@ func TestRunServerAndShutdownPaths(t *testing.T) {
 		stopSignalsCalled := false
 		serverCfg := &ServerConfig{}
 
-		deps.newWorkerMgr = func(log *logger.Logger, db *database.DB) *workers.Manager {
+		deps.newWorkerMgr = func(log *xlog.Logger, db *database.DB) *workers.Manager {
 			workerMgrCalled = true
 			return workers.NewManager(workers.ManagerConfig{Log: log})
 		}
@@ -554,7 +554,7 @@ func TestRunServerAndShutdownPaths(t *testing.T) {
 				handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
 			}, nil
 		}
-		deps.startHTTPServer = func(cfg *config.Config, log *logger.Logger, httpServer *http.Server) {
+		deps.startHTTPServer = func(cfg *config.Config, log *xlog.Logger, httpServer *http.Server) {
 			startHTTPCalled = true
 		}
 		deps.stopSignals = func(c chan<- os.Signal) {
@@ -623,7 +623,7 @@ func TestDefaultMainDepsHooksSmoke(t *testing.T) {
 
 	_ = deps.validateConfig(cfg)
 
-	log := deps.newLogger(logger.Config{Level: "info", Format: "json"})
+	log := deps.newLogger(xlog.Config{Level: "info", Format: "json"})
 	if log == nil {
 		t.Fatalf("expected logger instance")
 	}

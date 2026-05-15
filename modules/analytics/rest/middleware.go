@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/internal/platform/jwt"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 type contextKey string
@@ -28,7 +28,7 @@ func userIDFromContext(ctx context.Context) (string, bool) {
 }
 
 // AuthMiddleware validates JWT bearer tokens
-func AuthMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
+func AuthMiddleware(log *xlog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract token from Authorization header
@@ -62,7 +62,7 @@ func AuthMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
 }
 
 // RateLimitMiddleware enforces rate limiting per user
-func RateLimitMiddleware(log *logger.Logger, rateLimit int) func(http.Handler) http.Handler {
+func RateLimitMiddleware(log *xlog.Logger, rateLimit int) func(http.Handler) http.Handler {
 	limiter := NewRateLimiter(rateLimit)
 
 	return func(next http.Handler) http.Handler {
@@ -95,28 +95,8 @@ func QueryTimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handl
 	}
 }
 
-// RequestLoggingMiddleware logs incoming requests using wide events pattern
-func RequestLoggingMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			start := time.Now()
-			ctx := r.Context()
-
-			next.ServeHTTP(w, r)
-
-			// Wide event: single log with all context
-			log.InfoContext(ctx, "request completed",
-				"http.method", r.Method,
-				"http.path", r.RequestURI,
-				"http.remote_addr", r.RemoteAddr,
-				"latency_ms", time.Since(start).Milliseconds(),
-			)
-		})
-	}
-}
-
 // CORSMiddleware adds CORS headers (deprecated - use RestrictedCORSMiddleware instead)
-func CORSMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
+func CORSMiddleware(log *xlog.Logger) func(http.Handler) http.Handler {
 	return RestrictedCORSMiddleware(log, []string{})
 }
 

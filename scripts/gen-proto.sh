@@ -7,7 +7,14 @@ MODULE_PATH="github.com/aegion/aegion"
 
 echo "Generating protobuf stubs..."
 
-PROTOC_BIN="$(command -v protoc || true)"
+PROTOC_BIN=""
+if [ -x ".tools/protoc/bin/protoc" ]; then
+    PROTOC_BIN=".tools/protoc/bin/protoc"
+fi
+
+if [ -z "$PROTOC_BIN" ]; then
+    PROTOC_BIN="$(command -v protoc || true)"
+fi
 if [ -z "$PROTOC_BIN" ]; then
     PROTOC_BIN="$(command -v protoc.exe || true)"
 fi

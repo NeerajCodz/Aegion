@@ -4,7 +4,6 @@ package security
 import (
 	"context"
 	"encoding/base64"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/google/uuid"
 )
 
@@ -286,9 +286,9 @@ func logSecurityEvent(r *http.Request, statusCode int) {
 	}
 
 	if statusCode >= http.StatusBadRequest {
-		slog.WarnContext(ctx, "admin security event", attrs...)
+		xlog.Default().WarnContext(ctx, "admin security event", attrs...)
 	} else {
-		slog.InfoContext(ctx, "admin security event", attrs...)
+		xlog.Default().InfoContext(ctx, "admin security event", attrs...)
 	}
 }
 

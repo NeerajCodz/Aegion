@@ -312,7 +312,7 @@ func TestModuleMigrationUtilityPaths(t *testing.T) {
 		t.Fatalf("expected nil cfg to no-op, got %v", err)
 	}
 
-	if _, err := resolveModuleFS("..\\..\\configs\\aegion.yaml"); err != nil {
+	if _, err := resolveModuleFS(filepath.Join("..", "..", "configs", "aegion.yaml")); err != nil {
 		t.Fatalf("expected module fs resolution from repo root to succeed, got %v", err)
 	}
 

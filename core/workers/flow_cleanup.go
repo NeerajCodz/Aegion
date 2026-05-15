@@ -4,14 +4,14 @@ import (
 	"context"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // FlowCleanupConfig configures the flow cleanup worker.
 type FlowCleanupConfig struct {
 	DB             *pgxpool.Pool
-	Log            *logger.Logger
+	Log            *xlog.Logger
 	Interval       time.Duration // How often to run cleanup (default: 30 minutes)
 	ExpiredAfter   time.Duration // Active flows expired more than this (default: 1 hour)
 	CompletedAfter time.Duration // Completed/failed flows older than this (default: 24 hours)

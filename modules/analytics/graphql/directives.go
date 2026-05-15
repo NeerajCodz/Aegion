@@ -3,10 +3,11 @@ package graphql
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // DirectiveContext holds context information for directive execution.
@@ -22,7 +23,7 @@ type DirectiveHandler func(ctx context.Context, next func() error, dirCtx *Direc
 
 // DirectiveRegistry manages custom directives.
 type DirectiveRegistry struct {
-	logger     *slog.Logger
+	logger     *xlog.Logger
 	directives map[string]DirectiveHandler
 	caches     map[string]Cache
 }
@@ -35,7 +36,7 @@ type Cache interface {
 }
 
 // NewDirectiveRegistry creates a new directive registry.
-func NewDirectiveRegistry(logger *slog.Logger) *DirectiveRegistry {
+func NewDirectiveRegistry(logger *xlog.Logger) *DirectiveRegistry {
 	return &DirectiveRegistry{
 		logger:     logger,
 		directives: make(map[string]DirectiveHandler),
@@ -114,8 +115,11 @@ func DeprecatedDirectiveHandler(ctx context.Context, next func() error, dirCtx *
 		reason = r
 	}
 
-	// Log deprecation warning
-	fmt.Printf("DEPRECATION WARNING: Field %s.%s is deprecated: %s\n", dirCtx.ParentType, dirCtx.FieldName, reason)
+	xlog.FromContext(ctx).WarnContext(ctx, "graphql deprecated field accessed",
+		"graphql.parent_type", dirCtx.ParentType,
+		"graphql.field_name", dirCtx.FieldName,
+		"graphql.deprecation_reason", reason,
+	)
 
 	// Still execute the field
 	return next()
@@ -175,11 +179,14 @@ func (sc *SimpleCache) Clear() {
 // DirectiveChainExecutor executes a chain of directives.
 type DirectiveChainExecutor struct {
 	registry *DirectiveRegistry
-	logger   *slog.Logger
+	logger   *xlog.Logger
 }
 
 // NewDirectiveChainExecutor creates a new directive chain executor.
-func NewDirectiveChainExecutor(registry *DirectiveRegistry, logger *slog.Logger) *DirectiveChainExecutor {
+func NewDirectiveChainExecutor(registry *DirectiveRegistry, logger *xlog.Logger) *DirectiveChainExecutor {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &DirectiveChainExecutor{
 		registry: registry,
 		logger:   logger,
@@ -234,11 +241,14 @@ func RegisterBuiltInDirectives(registry *DirectiveRegistry) {
 
 // DirectiveParser parses directive definitions from schema.
 type DirectiveParser struct {
-	logger *slog.Logger
+	logger *xlog.Logger
 }
 
 // NewDirectiveParser creates a new directive parser.
-func NewDirectiveParser(logger *slog.Logger) *DirectiveParser {
+func NewDirectiveParser(logger *xlog.Logger) *DirectiveParser {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &DirectiveParser{
 		logger: logger,
 	}
@@ -281,11 +291,14 @@ func extractDirectiveDefinitions(schema string) (map[string]interface{}, error) 
 // DirectiveValidator validates directive usage in queries.
 type DirectiveValidator struct {
 	registry *DirectiveRegistry
-	logger   *slog.Logger
+	logger   *xlog.Logger
 }
 
 // NewDirectiveValidator creates a new directive validator.
-func NewDirectiveValidator(registry *DirectiveRegistry, logger *slog.Logger) *DirectiveValidator {
+func NewDirectiveValidator(registry *DirectiveRegistry, logger *xlog.Logger) *DirectiveValidator {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &DirectiveValidator{
 		registry: registry,
 		logger:   logger,

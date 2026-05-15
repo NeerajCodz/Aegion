@@ -15,7 +15,7 @@ const (
 // ErrMismatchedHashAndPassword mirrors bcrypt mismatch semantics.
 var ErrMismatchedHashAndPassword = errors.New("crypto/bcrypt: hashedPassword is not the hash of the given password")
 
-// GenerateFromPassword hashes a password using the Rust-backed crypto engine.
+// GenerateFromPassword hashes a password using the Go-native crypto engine.
 func GenerateFromPassword(password []byte, _ int) ([]byte, error) {
 	hash, err := platformcrypto.HashPassword(string(password))
 	if err != nil {
@@ -24,7 +24,7 @@ func GenerateFromPassword(password []byte, _ int) ([]byte, error) {
 	return []byte(hash), nil
 }
 
-// CompareHashAndPassword verifies a password against a Rust-backed hash.
+// CompareHashAndPassword verifies a password against a Go-native hash.
 func CompareHashAndPassword(hashedPassword, password []byte) error {
 	matches, err := platformcrypto.VerifyPassword(string(password), string(hashedPassword))
 	if err != nil {

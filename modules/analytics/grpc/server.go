@@ -3,10 +3,10 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
@@ -14,10 +14,9 @@ import (
 	pb "github.com/aegion/aegion/internal/proto/analytics"
 )
 
-// Server holds the gRPC server configuration and components.
 type Server struct {
 	grpcServer        *grpc.Server
-	logger            *slog.Logger
+	logger            *xlog.Logger
 	port              int
 	listener          net.Listener
 	service           *Service
@@ -25,14 +24,13 @@ type Server struct {
 	streamInterceptor grpc.StreamServerInterceptor
 }
 
-// ServerConfig holds gRPC server configuration.
 type ServerConfig struct {
 	Port                  int
 	MaxConcurrentStreams  int
 	KeepaliveTime         int
 	KeepaliveTimeout      int
 	MaxConnectionIdleTime int
-	Logger                *slog.Logger
+	Logger                *xlog.Logger
 	UnaryInterceptor      grpc.UnaryServerInterceptor
 	StreamInterceptor     grpc.StreamServerInterceptor
 	AuthVerifier          func(context.Context) error
@@ -40,11 +38,14 @@ type ServerConfig struct {
 	TracingEnabled        bool
 }
 
-// NewServer creates a new gRPC server for pb.
 func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
-	// Support cfg.Port == 0 (ephemeral port). We'll store the actual bound port from the listener.
+	event := cfg.Logger.Start(context.Background(), "grpc.server.start", xlog.WithKind(xlog.KindSystem)).
+		Set("port", cfg.Port)
+
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Port))
 	if err != nil {
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return nil, fmt.Errorf("failed to listen on port %d: %w", cfg.Port, err)
 	}
 	port := 0
@@ -52,13 +53,12 @@ func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
 		port = addr.Port
 	}
 
-	// Build gRPC server options
 	opts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.MaxHeaderListSize(16 * 1024), // 16KB default
+		grpc.MaxHeaderListSize(16 * 1024),
 	}
 	if cfg.MaxConcurrentStreams > 0 {
 		opts = append(opts, grpc.MaxConcurrentStreams(uint32(cfg.MaxConcurrentStreams)))
@@ -70,7 +70,6 @@ func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
 		}))
 	}
 
-	// Add interceptors
 	if cfg.UnaryInterceptor != nil {
 		opts = append(opts, grpc.UnaryInterceptor(cfg.UnaryInterceptor))
 	}
@@ -81,11 +80,13 @@ func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
 
 	grpcServer := grpc.NewServer(opts...)
 
-	// Register service
 	pb.RegisterAnalyticsServiceServer(grpcServer, service)
 
-	// Enable reflection for debugging
 	reflection.Register(grpcServer)
+
+	event.Set("bound_port", port)
+	event.Success()
+	_ = event.Emit()
 
 	return &Server{
 		grpcServer: grpcServer,
@@ -96,33 +97,35 @@ func NewServer(cfg ServerConfig, service *Service) (*Server, error) {
 	}, nil
 }
 
-// Start starts the gRPC server and blocks until shutdown or error.
 func (s *Server) Start() error {
-	s.logger.Info("Starting gRPC server", "port", s.port)
+	event := s.logger.Start(context.Background(), "grpc.server.serve", xlog.WithKind(xlog.KindSystem)).
+		Set("port", s.port)
 
 	if err := s.grpcServer.Serve(s.listener); err != nil {
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return fmt.Errorf("gRPC server error: %w", err)
 	}
 
+	event.Success()
+	_ = event.Emit()
 	return nil
 }
 
-// StartAsync starts the gRPC server in a background goroutine.
 func (s *Server) StartAsync() error {
 	go func() {
 		if err := s.Start(); err != nil {
-			s.logger.ErrorContext(context.Background(), "gRPC server error", "error", err)
+			s.logger.Start(context.Background(), "grpc.server.error", xlog.WithKind(xlog.KindSystem)).
+				Set("error", err.Error()).Error(err)
 		}
 	}()
 
-	// Give server time to start
 	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
-// Stop gracefully stops the gRPC server.
 func (s *Server) Stop(timeout time.Duration) error {
-	s.logger.Info("Stopping gRPC server")
+	event := s.logger.Start(context.Background(), "grpc.server.stop", xlog.WithKind(xlog.KindSystem))
 
 	done := make(chan struct{})
 	go func() {
@@ -132,21 +135,21 @@ func (s *Server) Stop(timeout time.Duration) error {
 
 	select {
 	case <-done:
-		s.logger.Info("gRPC server stopped gracefully")
+		event.Success()
+		_ = event.Emit()
 		return nil
 	case <-time.After(timeout):
-		s.logger.Warn("gRPC server graceful stop timeout, forcing shutdown")
+		event.Timeout(fmt.Errorf("graceful stop timeout"))
+		_ = event.Emit()
 		s.grpcServer.Stop()
 		return fmt.Errorf("graceful stop timeout")
 	}
 }
 
-// Port returns the port the server is listening on.
 func (s *Server) Port() int {
 	return s.port
 }
 
-// IsRunning returns whether the server is currently running.
 func (s *Server) IsRunning() bool {
 	return s.grpcServer != nil
 }

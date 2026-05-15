@@ -17,6 +17,7 @@ This table summarizes the current release stance for each module. The machine-ch
 | magic_link | GA | embedded in core | Stable passwordless/recovery delivery path |
 | policy | Beta | embedded at GA default | Extraction to standalone is optional post-GA |
 | admin | Beta | standalone | Backend broad; SPA coverage and contract harmonization still closing |
+| analytics | Beta | standalone | Ingestion/API surfaces functional; runtime storage and full cross-service E2E remain gated |
 | oauth2 | Beta | standalone | Protocol closure work remains (request context + subject strategy) |
 | social | Beta | standalone | Provider/runtime completion still under hardening |
 | sso | Beta | standalone | Enterprise validation and lifecycle hardening in progress |

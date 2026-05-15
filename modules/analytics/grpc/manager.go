@@ -2,26 +2,24 @@ package grpc
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"google.golang.org/grpc"
 
 	pb "github.com/aegion/aegion/internal/proto/analytics"
 )
 
-// Manager manages the gRPC server lifecycle.
 type Manager struct {
-	logger *slog.Logger
+	logger *xlog.Logger
 	server *Server
 	config ServerConfig
 	store  Store
 	sync   SyncManager
 }
 
-// NewManager creates a new gRPC manager.
 func NewManager(
-	logger *slog.Logger,
+	logger *xlog.Logger,
 	store Store,
 	syncManager SyncManager,
 	port int,
@@ -45,18 +43,18 @@ func NewManager(
 	}
 }
 
-// SetUnaryInterceptor sets the unary interceptor.
 func (m *Manager) SetUnaryInterceptor(interceptor grpc.UnaryServerInterceptor) {
 	m.config.UnaryInterceptor = interceptor
 }
 
-// SetStreamInterceptor sets the stream interceptor.
 func (m *Manager) SetStreamInterceptor(interceptor grpc.StreamServerInterceptor) {
 	m.config.StreamInterceptor = interceptor
 }
 
-// Start starts the gRPC server.
 func (m *Manager) Start(ctx context.Context) error {
+	event := m.logger.Start(ctx, "grpc.manager.start", xlog.WithKind(xlog.KindSystem)).
+		Set("port", m.config.Port)
+
 	service := NewService(m.logger, m.store, m.sync, Config{
 		MaxConcurrentStreams: m.config.MaxConcurrentStreams,
 		KeepaliveTime:        m.config.KeepaliveTime,
@@ -65,28 +63,34 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	server, err := NewServer(m.config, service)
 	if err != nil {
+		event.Set("error", err.Error()).Error(err)
+		_ = event.Emit()
 		return err
 	}
 
 	m.server = server
 
-	// Start server in background
 	go func() {
 		if err := server.Start(); err != nil {
-			m.logger.ErrorContext(context.Background(), "gRPC server error", "error", err)
+			m.logger.Start(context.Background(), "grpc.manager.error", xlog.WithKind(xlog.KindSystem)).
+				Set("error", err.Error()).Error(err)
 		}
 	}()
 
-	// Wait for server to start
 	time.Sleep(100 * time.Millisecond)
 
-	m.logger.InfoContext(context.Background(), "gRPC server started", "port", server.Port())
+	event.Set("bound_port", server.Port())
+	event.Success()
+	_ = event.Emit()
 	return nil
 }
 
-// Stop stops the gRPC server.
 func (m *Manager) Stop(ctx context.Context) error {
+	event := m.logger.Start(ctx, "grpc.manager.stop", xlog.WithKind(xlog.KindSystem))
+
 	if m.server == nil {
+		event.Success()
+		_ = event.Emit()
 		return nil
 	}
 
@@ -95,10 +99,16 @@ func (m *Manager) Stop(ctx context.Context) error {
 		timeout = time.Until(dl)
 	}
 
-	return m.server.Stop(timeout)
+	err := m.server.Stop(timeout)
+	if err != nil {
+		event.Set("error", err.Error()).Error(err)
+	} else {
+		event.Success()
+	}
+	_ = event.Emit()
+	return err
 }
 
-// Port returns the port the server is listening on.
 func (m *Manager) Port() int {
 	if m.server == nil {
 		return 0
@@ -106,7 +116,6 @@ func (m *Manager) Port() int {
 	return m.server.Port()
 }
 
-// IsRunning returns whether the server is running.
 func (m *Manager) IsRunning() bool {
 	if m.server == nil {
 		return false
@@ -114,9 +123,8 @@ func (m *Manager) IsRunning() bool {
 	return m.server.IsRunning()
 }
 
-// BuildInterceptorChain builds a chain of interceptors based on configuration.
 func BuildInterceptorChain(
-	logger *slog.Logger,
+	logger *xlog.Logger,
 	enableLogging bool,
 	enableAuth bool,
 	enableTracing bool,
@@ -127,8 +135,8 @@ func BuildInterceptorChain(
 		interceptors = append(interceptors, AuthInterceptor(nil))
 	}
 
-	if enableLogging {
-		interceptors = append(interceptors, LoggingInterceptor(logger))
+	if enableLogging && logger != nil {
+		interceptors = append(interceptors, logger.UnaryServerInterceptor())
 	}
 
 	if len(interceptors) == 0 {
@@ -138,9 +146,8 @@ func BuildInterceptorChain(
 	return ChainUnaryInterceptors(interceptors...)
 }
 
-// BuildStreamInterceptorChain builds a chain of stream interceptors.
 func BuildStreamInterceptorChain(
-	logger *slog.Logger,
+	logger *xlog.Logger,
 	enableLogging bool,
 	enableAuth bool,
 	enableTracing bool,
@@ -151,8 +158,8 @@ func BuildStreamInterceptorChain(
 		interceptors = append(interceptors, StreamAuthInterceptor(nil))
 	}
 
-	if enableLogging {
-		interceptors = append(interceptors, StreamLoggingInterceptor(logger))
+	if enableLogging && logger != nil {
+		interceptors = append(interceptors, logger.StreamServerInterceptor())
 	}
 
 	if len(interceptors) == 0 {
@@ -162,8 +169,6 @@ func BuildStreamInterceptorChain(
 	return ChainStreamInterceptors(interceptors...)
 }
 
-// Register registers the gRPC analytics service with a gRPC server.
-// This is useful for embedding gRPC in an existing server.
 func Register(grpcServer *grpc.Server, service *Service) {
 	pb.RegisterAnalyticsServiceServer(grpcServer, service)
 }

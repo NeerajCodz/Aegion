@@ -2,15 +2,16 @@ package dashboards
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
+
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // Manager handles dashboard operations including CRUD, metrics computation, and real-time updates.
@@ -20,14 +21,14 @@ type Manager struct {
 	cacheMu  sync.RWMutex
 	cacheTTL map[string]time.Time
 	cacheAt  map[string]time.Time
-	logger   *slog.Logger
+	logger   *xlog.Logger
 	config   DashboardConfig
 }
 
 // NewManager creates a new dashboard manager.
-func NewManager(db *sql.DB, logger *slog.Logger, config DashboardConfig) *Manager {
+func NewManager(db *sql.DB, logger *xlog.Logger, config DashboardConfig) *Manager {
 	if logger == nil {
-		logger = slog.Default()
+		logger = xlog.Default()
 	}
 	return &Manager{
 		db:       db,
@@ -42,7 +43,11 @@ func NewManager(db *sql.DB, logger *slog.Logger, config DashboardConfig) *Manage
 // CreateDashboard creates a new custom dashboard.
 func (m *Manager) CreateDashboard(ctx context.Context, dashboard *Dashboard) (*Dashboard, error) {
 	if dashboard.ID == "" {
-		dashboard.ID = generateID()
+		id, err := generateID()
+		if err != nil {
+			return nil, err
+		}
+		dashboard.ID = id
 	}
 	if dashboard.OwnerID == nil {
 		return nil, fmt.Errorf("owner_id is required for custom dashboards")
@@ -331,10 +336,19 @@ func (m *Manager) ExecuteQuery(ctx context.Context, queryID string, query *Dashb
 
 // CreateShare creates a shareable link for a dashboard.
 func (m *Manager) CreateShare(ctx context.Context, dashboardID string, expiresIn *time.Duration, readOnly bool) (*DashboardShare, error) {
+	id, err := generateID()
+	if err != nil {
+		return nil, err
+	}
+	token, err := generateToken(32)
+	if err != nil {
+		return nil, err
+	}
+
 	share := &DashboardShare{
-		ID:          generateID(),
+		ID:          id,
 		DashboardID: dashboardID,
-		Token:       generateToken(32),
+		Token:       token,
 		ReadOnly:    readOnly,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -350,7 +364,7 @@ func (m *Manager) CreateShare(ctx context.Context, dashboardID string, expiresIn
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 
-	_, err := m.db.ExecContext(ctx, query,
+	_, err = m.db.ExecContext(ctx, query,
 		share.ID,
 		share.DashboardID,
 		share.Token,
@@ -400,7 +414,11 @@ func (m *Manager) GetShareByToken(ctx context.Context, token string) (*Dashboard
 // SaveAlert creates or updates an alert threshold.
 func (m *Manager) SaveAlert(ctx context.Context, alert *AlertThreshold) (*AlertThreshold, error) {
 	if alert.ID == "" {
-		alert.ID = generateID()
+		id, err := generateID()
+		if err != nil {
+			return nil, err
+		}
+		alert.ID = id
 	}
 
 	alert.CreatedAt = time.Now()
@@ -457,16 +475,20 @@ func (m *Manager) ClearCache() {
 
 // Helper functions
 
-func generateID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+func generateID() (string, error) {
+	b, err := platformcrypto.RandomBytes(16)
+	if err != nil {
+		return "", fmt.Errorf("generate dashboard id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
-func generateToken(length int) string {
-	b := make([]byte, length)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+func generateToken(length int) (string, error) {
+	b, err := platformcrypto.RandomBytes(length)
+	if err != nil {
+		return "", fmt.Errorf("generate dashboard token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func marshalJSON(v interface{}) (string, error) {

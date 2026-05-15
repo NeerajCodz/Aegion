@@ -15,11 +15,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/oauth2/handler"
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/service/device"
@@ -43,14 +43,17 @@ const (
 )
 
 var (
-	loadConfigHook        = loadConfig
-	connectDBHook         = connectDB
-	buildHandlerHook      = buildHandler
-	newHTTPServerHook     = newHTTPServer
-	rustSelfCheckHook     = platformcrypto.RuntimeSelfCheck
-	notifySignalsHook     = signal.Notify
-	stopSignalsHook       = signal.Stop
-	fatalHook             = func(err error, message string) { log.Fatal().Err(err).Msg(message) }
+	loadConfigHook      = loadConfig
+	connectDBHook       = connectDB
+	buildHandlerHook    = buildHandler
+	newHTTPServerHook   = newHTTPServer
+	cryptoSelfCheckHook = platformcrypto.RuntimeSelfCheck
+	notifySignalsHook   = signal.Notify
+	stopSignalsHook     = signal.Stop
+	fatalHook           = func(err error, message string) {
+		xlog.Default().Error(message, "error", err)
+		os.Exit(1)
+	}
 	newPoolWithConfigHook = pgxpool.NewWithConfig
 	poolPingHook          = func(ctx context.Context, db *pgxpool.Pool) error { return db.Ping(ctx) }
 	poolCloseHook         = func(db *pgxpool.Pool) {
@@ -90,6 +93,14 @@ type Config struct {
 }
 
 func main() {
+	xlog.New(xlog.Config{
+		Level:          os.Getenv("AEGION_LOG_LEVEL"),
+		Format:         os.Getenv("AEGION_LOG_FORMAT"),
+		ServiceName:    "aegion-oauth2",
+		ServiceVersion: version,
+		Environment:    firstNonEmptyEnv("AEGION_ENVIRONMENT", "AEGION_ENV"),
+	})
+
 	configPath := flag.String("config", getEnv("AEGION_OAUTH2_CONFIG", "oauth2.yaml"), "Path to OAuth2 config file")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
@@ -98,8 +109,8 @@ func main() {
 		_, _ = fmt.Printf("Aegion OAuth2 Module v%s\n", version)
 		return
 	}
-	if err := rustSelfCheckHook(); err != nil {
-		fatalHook(err, "Rust crypto runtime check failed")
+	if err := cryptoSelfCheckHook(); err != nil {
+		fatalHook(err, "Go crypto runtime check failed")
 		return
 	}
 
@@ -126,7 +137,7 @@ func main() {
 	serve := listenAndServeHook
 
 	go func() {
-		log.Info().Str("addr", srv.Addr).Msg("OAuth2 module listening")
+		xlog.Default().Info("OAuth2 module listening", "addr", srv.Addr)
 		if err := serve(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fatalHook(err, "OAuth2 server failed")
 		}
@@ -136,7 +147,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := shutdownServerHook(srv, shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("OAuth2 server shutdown failed")
+		xlog.Default().Error("OAuth2 server shutdown failed", "error", err)
 	}
 }
 
@@ -513,7 +524,7 @@ func newOAuth2SigningKeyPair() (*platformjwt.KeyPair, error) {
 		if err := validateSigningKeyPairHook(keyPair); err != nil {
 			return nil, err
 		}
-		log.Warn().Str("key_id", keyPair.KeyID).Msg("Using ephemeral OAuth2 signing keys; configure static signing keys for production")
+		xlog.Default().Warn("Using ephemeral OAuth2 signing keys; configure static signing keys for production", "key_id", keyPair.KeyID)
 		return keyPair, nil
 	case privateKeyB64 == "" || publicKeyB64 == "":
 		return nil, fmt.Errorf("both %s and %s must be set together", signingPrivateKeyB64Env, signingPublicKeyB64Env)
@@ -672,4 +683,13 @@ func isProductionEnvironment() bool {
 		}
 	}
 	return false
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }

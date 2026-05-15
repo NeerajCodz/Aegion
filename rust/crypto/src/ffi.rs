@@ -35,7 +35,10 @@ pub struct ParsedTokenResult {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn crypto_hash_password(password: *const u8, password_len: size_t) -> CryptoResult {
+pub unsafe extern "C" fn crypto_hash_password(
+    password: *const u8,
+    password_len: size_t,
+) -> CryptoResult {
     if password.is_null() && password_len > 0 {
         return CryptoResult {
             error_code: -1,

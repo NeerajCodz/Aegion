@@ -206,14 +206,14 @@
 
 1. **Check token is included:**
    ```bash
-   curl -H "Authorization: Bearer YOUR_TOKEN" \
+   curl -H "Authorization: Bearer ${AEGION_TOKEN}" \
      http://localhost:8080/api/v1/analytics/health
    ```
 
 2. **Verify token is valid:**
    ```bash
    # Decode JWT to check expiry
-   echo YOUR_TOKEN | jq '.exp'
+   echo "$AEGION_TOKEN" | jq '.exp'
    
    # Compare with current timestamp
    date +%s
@@ -244,7 +244,7 @@
 1. **Check user role:**
    ```bash
    # Decode JWT
-   jwt-decode YOUR_TOKEN
+   jwt-decode "$AEGION_TOKEN"
    # Look for 'roles' claim
    ```
 

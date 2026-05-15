@@ -5,10 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // HealthStatus represents the health status of an upstream.
@@ -44,7 +45,7 @@ type HealthCheckerConfig struct {
 	Timeout time.Duration
 
 	// Logger for health check events
-	Logger *slog.Logger
+	Logger any
 
 	// ExpectedStatus is the HTTP status code expected for a healthy response
 	ExpectedStatus int
@@ -63,7 +64,7 @@ type HealthCheckerConfig struct {
 type HealthChecker struct {
 	config HealthCheckerConfig
 	client *http.Client
-	logger *slog.Logger
+	logger *xlog.Logger
 
 	status       HealthStatus
 	lastCheck    time.Time
@@ -92,9 +93,7 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 		config.Method = "GET"
 	}
 
-	if config.Logger == nil {
-		config.Logger = slog.Default()
-	}
+	log := xlog.Adapt(config.Logger)
 
 	client := &http.Client{
 		Timeout: config.Timeout,
@@ -107,7 +106,7 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 	return &HealthChecker{
 		config:  config,
 		client:  client,
-		logger:  config.Logger.With("component", "health-checker"),
+		logger:  log.WithComponent("health-checker"),
 		status:  HealthStatusUnknown,
 		stop:    make(chan struct{}),
 		stopped: make(chan struct{}),

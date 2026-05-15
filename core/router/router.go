@@ -3,7 +3,6 @@ package router
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -11,13 +10,14 @@ import (
 
 	"github.com/aegion/aegion/core/registry"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 // Router wraps chi.Router with Aegion-specific functionality.
 type Router struct {
 	mux       *chi.Mux
 	config    Config
-	logger    *slog.Logger
+	logger    *xlog.Logger
 	startedAt time.Time
 
 	// Dependencies
@@ -115,7 +115,7 @@ func DefaultConfig() Config {
 }
 
 // New creates a new Router with the default middleware stack.
-func New(cfg Config, log *slog.Logger, reg *registry.Registry) *Router {
+func New(cfg Config, log *xlog.Logger, reg *registry.Registry) *Router {
 	r := &Router{
 		mux:             chi.NewRouter(),
 		config:          cfg,

@@ -386,7 +386,6 @@ func (s *Server) handleGetLoginFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	writeJSON(w, http.StatusOK, flow)
 }
 
@@ -539,8 +538,12 @@ func (s *Server) handleInitSettingsAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, flow)
 }
 
-
 func (s *Server) requireSettingsFlowAccess(ctx context.Context, r *http.Request, flow *flows.Flow) error {
+	if flow != nil {
+		if recoveryVerified, _ := flow.GetContext("recovery_verified"); recoveryVerified == true {
+			return nil
+		}
+	}
 	if s.sessionManager == nil {
 		return errors.New("session manager unavailable")
 	}
@@ -670,23 +673,23 @@ func (s *Server) handleFlowSubmit(w http.ResponseWriter, r *http.Request, expect
 		return
 	}
 
-  if expectedType == flows.TypeSettings {
-      if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
-          s.writeSettingsSessionError(w, err)
-          return
-      }
-  }
+	if expectedType == flows.TypeSettings {
+		if err := s.requireSettingsFlowAccess(r.Context(), r, flow); err != nil {
+			s.writeSettingsSessionError(w, err)
+			return
+		}
+	}
 
-  result, err := s.executeFlowSubmission(r.Context(), w, r, flow, input)
-  if err != nil {
-      s.writeFlowExecutionError(w, err)
-      return
-  }
+	result, err := s.executeFlowSubmission(r.Context(), w, r, flow, input)
+	if err != nil {
+		s.writeFlowExecutionError(w, err)
+		return
+	}
 
-  if result == nil {
-      writeError(w, http.StatusBadRequest, "unsupported flow submission method", nil)
-      return
-  }
+	if result == nil {
+		writeError(w, http.StatusBadRequest, "unsupported flow submission method", nil)
+		return
+	}
 
 	if result != nil && result.KeepFlowActive {
 		response := map[string]any{
@@ -1028,7 +1031,7 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 		PolicyChecker:               checker,
 		RequirePolicy:               requirePolicy,
 		PolicyModel:                 policySettings.DefaultModel,
-		Logger:                      s.log.Logger.With("component", "module_proxy"),
+		Logger:                      s.log.WithComponent("module_proxy"),
 	})
 
 	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContextWithTrust(r.Context(), r, proxySettings.TrustForwardedHeaders)))

@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 func withFlagArgs(t *testing.T, args []string, fn func()) {
@@ -33,8 +33,8 @@ func withFlagArgs(t *testing.T, args []string, fn func()) {
 	fn()
 }
 
-func testLogger() *logger.Logger {
-	return logger.New(logger.Config{
+func testLogger() *xlog.Logger {
+	return xlog.New(xlog.Config{
 		Level:  "error",
 		Format: "json",
 	})

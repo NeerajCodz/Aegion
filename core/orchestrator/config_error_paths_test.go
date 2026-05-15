@@ -250,7 +250,6 @@ server:
 	}
 }
 
-
 func TestLoadModuleConfig_RejectsExperimentalModuleInProductionWhenOmittedFromMainConfig(t *testing.T) {
 	t.Setenv("AEGION_ENV", "production")
 	t.Setenv("AEGION_ALLOW_EXPERIMENTAL_MODULES", "false")

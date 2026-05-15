@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 )
 
@@ -13,7 +14,7 @@ import (
 type HybridSync struct {
 	primaryStrategy   Strategy
 	fallbackStrategy  Strategy
-	logger            Logger
+	logger            *xlog.Logger
 	mu                sync.RWMutex
 	primaryHealthy    bool
 	lastPrimaryError  *string
@@ -25,8 +26,11 @@ type HybridSync struct {
 func NewHybridSync(
 	primaryStrategy Strategy,
 	fallbackStrategy Strategy,
-	logger Logger,
+	logger *xlog.Logger,
 ) *HybridSync {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &HybridSync{
 		primaryStrategy:  primaryStrategy,
 		fallbackStrategy: fallbackStrategy,

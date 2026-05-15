@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	platformobservability "github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/xlog"
 	admin "github.com/aegion/aegion/modules/admin"
 	"github.com/aegion/aegion/modules/admin/handler"
 	"github.com/aegion/aegion/modules/admin/scim"
@@ -226,7 +226,7 @@ func (s *Server) logRequest(next http.Handler) http.Handler {
 				operatorID = operator.ID.String()
 			}
 
-			slog.InfoContext(ctx, "request completed",
+			xlog.Default().InfoContext(ctx, "request completed",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", ww.Status(),
@@ -253,7 +253,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(health); err != nil {
-		slog.ErrorContext(r.Context(), "Failed to encode health response", "error", err)
+		xlog.Default().ErrorContext(r.Context(), "Failed to encode health response", "error", err)
 	}
 }
 
@@ -271,25 +271,25 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if pinger == nil {
-		slog.ErrorContext(ctx, "No database connection configured")
+		xlog.Default().ErrorContext(ctx, "No database connection configured")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
 			"error":  "database not configured",
 		}); err != nil {
-			log.Error().Err(err).Msg("Failed to encode health response")
+			xlog.Default().Error("failed to encode health response", "error", err)
 		}
 		return
 	}
 
 	if err := pinger.Ping(ctx); err != nil {
-		slog.ErrorContext(ctx, "Database health check failed", "error", err)
+		xlog.Default().ErrorContext(ctx, "Database health check failed", "error", err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		if encErr := json.NewEncoder(w).Encode(map[string]string{
 			"status": "not ready",
 			"error":  "database unavailable",
 		}); encErr != nil {
-			log.Error().Err(encErr).Msg("Failed to encode health response")
+			xlog.Default().Error("failed to encode health response", "error", encErr)
 		}
 		return
 	}
@@ -302,7 +302,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"database":  "connected",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode health response")
+		xlog.Default().Error("failed to encode health response", "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -314,7 +314,7 @@ func (s *Server) handleDashboardConfig(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]string{
 		"base_path": s.adminPath,
 	}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode config response")
+		xlog.Default().Error("failed to encode config response", "error", err)
 	}
 }
 
@@ -324,7 +324,7 @@ func (s *Server) handleDashboardObservability(w http.ResponseWriter, r *http.Req
 
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Error().Err(err).Msg("Failed to encode observability response")
+		xlog.Default().Error("failed to encode observability response", "error", err)
 	}
 }
 
@@ -661,7 +661,7 @@ func (s *Server) handleListSCIMTokens(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]any{"tokens": tokens}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM tokens response")
+		xlog.Default().Error("failed to encode SCIM tokens response", "error", err)
 	}
 }
 
@@ -703,7 +703,7 @@ func (s *Server) handleCreateSCIMToken(w http.ResponseWriter, r *http.Request) {
 		"token":       token,
 		"plain_token": plainToken,
 	}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM token creation response")
+		xlog.Default().Error("failed to encode SCIM token creation response", "error", err)
 	}
 }
 
@@ -729,7 +729,7 @@ func (s *Server) handleListSCIMMappings(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]any{"mappings": mappings}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM mappings response")
+		xlog.Default().Error("failed to encode SCIM mappings response", "error", err)
 	}
 }
 
@@ -756,7 +756,7 @@ func (s *Server) handleCreateSCIMMapping(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(map[string]any{"mapping": mapping}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM mapping creation response")
+		xlog.Default().Error("failed to encode SCIM mapping creation response", "error", err)
 	}
 }
 
@@ -790,7 +790,7 @@ func (s *Server) handleUpdateSCIMMapping(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(map[string]any{"mapping": mapping}); err != nil {
-		log.Error().Err(err).Msg("Failed to encode SCIM mapping update response")
+		xlog.Default().Error("failed to encode SCIM mapping update response", "error", err)
 	}
 }
 
@@ -843,7 +843,7 @@ func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
 func (s *Server) registerWithCore(ctx context.Context) error {
 	s.ensureRoutingAssets()
 	if s.Config.Core.ServiceURL == "" {
-		slog.WarnContext(ctx, "Core service URL not configured, skipping registration")
+		xlog.Default().WarnContext(ctx, "Core service URL not configured, skipping registration")
 		return nil
 	}
 
@@ -902,7 +902,7 @@ func (s *Server) registerWithCore(ctx context.Context) error {
 		return fmt.Errorf("registration failed with status %d", resp.StatusCode)
 	}
 
-	slog.InfoContext(ctx, "Successfully registered with core service",
+	xlog.Default().InfoContext(ctx, "Successfully registered with core service",
 		"core_url", s.Config.Core.ServiceURL,
 		"module_id", registration.ID,
 	)

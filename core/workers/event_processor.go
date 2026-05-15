@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/core/eventbus"
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -14,7 +14,7 @@ import (
 // EventProcessorConfig configures the event processor worker.
 type EventProcessorConfig struct {
 	DB         *pgxpool.Pool
-	Log        *logger.Logger
+	Log        *xlog.Logger
 	EventBus   *eventbus.Bus
 	Subscriber string        // Subscriber name (required if EventBus is nil)
 	Interval   time.Duration // How often to check for events (default: 10 seconds)

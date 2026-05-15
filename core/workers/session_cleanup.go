@@ -4,14 +4,14 @@ import (
 	"context"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SessionCleanupConfig configures the session cleanup worker.
 type SessionCleanupConfig struct {
 	DB            *pgxpool.Pool
-	Log           *logger.Logger
+	Log           *xlog.Logger
 	Interval      time.Duration // How often to run cleanup (default: 1 hour)
 	ExpiredAfter  time.Duration // Delete sessions expired more than this (default: 7 days)
 	InactiveAfter time.Duration // Delete inactive sessions after this (default: 1 day)

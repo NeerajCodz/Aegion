@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -19,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/admin/service"
 	"github.com/aegion/aegion/modules/admin/store"
 	socialservice "github.com/aegion/aegion/modules/social/service"
@@ -69,7 +69,7 @@ type HandlerConfig struct {
 	APIKeyPrefix       string        // API key token prefix (default: aegion_)
 	APIKeyPrefixLen    int           // Lookup prefix chars after token prefix (default: 12)
 	APIKeyEntropyBytes int           // Random token entropy bytes (default: 32)
-	Logger             *slog.Logger  // Structured logger (default: slog.Default)
+	Logger             *xlog.Logger
 	SocialProviders    SocialProviderManager
 }
 
@@ -122,7 +122,7 @@ type Handler struct {
 	service         Service
 	db              dbQuerier
 	config          HandlerConfig
-	log             *slog.Logger
+	log             *xlog.Logger
 	socialProviders SocialProviderManager
 }
 
@@ -153,12 +153,12 @@ func New(svc Service, cfgOverride ...HandlerConfig) *Handler {
 	}
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.Default()
+		logger = xlog.Default()
 	}
 	return &Handler{
 		service:         svc,
 		config:          cfg,
-		log:             logger.With("component", "admin.handler"),
+		log:             logger.WithComponent("admin.handler"),
 		socialProviders: cfg.SocialProviders,
 	}
 }

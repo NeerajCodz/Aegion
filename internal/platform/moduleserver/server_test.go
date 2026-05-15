@@ -100,11 +100,11 @@ func TestBuildModuleMuxEndpoints(t *testing.T) {
 }
 
 func TestRunValidationAndListenErrors(t *testing.T) {
-	origSelfCheck := rustRuntimeSelfCheck
+	origSelfCheck := cryptoRuntimeSelfCheck
 	t.Cleanup(func() {
-		rustRuntimeSelfCheck = origSelfCheck
+		cryptoRuntimeSelfCheck = origSelfCheck
 	})
-	rustRuntimeSelfCheck = func() error { return nil }
+	cryptoRuntimeSelfCheck = func() error { return nil }
 
 	if err := Run(Config{}); err == nil || !strings.Contains(err.Error(), "module name is required") {
 		t.Fatalf("expected missing module validation error, got %v", err)
@@ -119,20 +119,20 @@ func TestRunValidationAndListenErrors(t *testing.T) {
 	}
 }
 
-func TestRunReturnsRustSelfCheckError(t *testing.T) {
-	origSelfCheck := rustRuntimeSelfCheck
+func TestRunReturnsCryptoSelfCheckError(t *testing.T) {
+	origSelfCheck := cryptoRuntimeSelfCheck
 	t.Cleanup(func() {
-		rustRuntimeSelfCheck = origSelfCheck
+		cryptoRuntimeSelfCheck = origSelfCheck
 	})
 
-	rustRuntimeSelfCheck = func() error { return errors.New("ffi unavailable") }
+	cryptoRuntimeSelfCheck = func() error { return errors.New("crypto unavailable") }
 
 	err := Run(Config{
 		Module:     "policy",
 		ListenAddr: "127.0.0.1:0",
 	})
-	if err == nil || !strings.Contains(err.Error(), "rust runtime self-check failed") {
-		t.Fatalf("expected rust self-check failure, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "crypto runtime self-check failed") {
+		t.Fatalf("expected crypto self-check failure, got %v", err)
 	}
 }
 

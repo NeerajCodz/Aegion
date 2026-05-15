@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 )
 
@@ -13,7 +14,7 @@ import (
 type Manager struct {
 	strategies    map[string]Strategy
 	strategyOrder []string
-	logger        Logger
+	logger        *xlog.Logger
 	mu            sync.RWMutex
 	isRunning     bool
 	rateLimiters  map[string]*RateLimiter
@@ -21,7 +22,10 @@ type Manager struct {
 }
 
 // NewManager creates a new sync manager instance.
-func NewManager(logger Logger) *Manager {
+func NewManager(logger *xlog.Logger) *Manager {
+	if logger == nil {
+		logger = xlog.Default()
+	}
 	return &Manager{
 		strategies:    make(map[string]Strategy),
 		strategyOrder: make([]string, 0),

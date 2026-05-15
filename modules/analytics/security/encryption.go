@@ -1,7 +1,6 @@
 package security
 
 import (
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 
@@ -95,8 +94,8 @@ func GenerateSecret(length int) (string, error) {
 		return "", errors.New("secret length must be positive")
 	}
 
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
+	bytes, err := crypto.RandomBytes(length)
+	if err != nil {
 		return "", err
 	}
 

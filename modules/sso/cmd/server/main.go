@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/sso/handler"
 	"github.com/aegion/aegion/modules/sso/service"
 	"github.com/aegion/aegion/modules/sso/store"
@@ -34,11 +34,21 @@ const (
 var (
 	runModuleServer       = moduleserver.Run
 	buildRuntimeHook      = buildRuntime
-	logFatal              = log.Fatal
 	newPoolWithConfigHook = pgxpool.NewWithConfig
 	poolPingHook          = func(ctx context.Context, pool *pgxpool.Pool) error { return pool.Ping(ctx) }
 	poolCloseHook         = func(pool *pgxpool.Pool) { pool.Close() }
 	newPostgresRepoHook   = store.NewPostgres
+	logFatal              = func(v ...any) {
+		if len(v) == 0 {
+			xlog.Default().Fatal("sso server failed")
+			return
+		}
+		if err, ok := v[0].(error); ok {
+			xlog.Default().Fatal(err.Error(), "error", err)
+			return
+		}
+		xlog.Default().Fatal(v[0].(string), v[1:]...)
+	}
 )
 
 type moduleRuntime struct {

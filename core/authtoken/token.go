@@ -38,7 +38,7 @@ func buildPayload(moduleID string, timestamp time.Time) []byte {
 	return []byte("internal_token\nv1\n" + strconv.FormatInt(timestamp.UTC().UnixMilli(), 10) + "\n" + encodedModuleID)
 }
 
-// sign creates an HMAC-SHA256 signature through the Rust-backed crypto layer.
+// sign creates an HMAC-SHA256 signature through the Go-native crypto layer.
 func sign(payload, secret []byte) []byte {
 	signature, err := platformcrypto.HMACSHA256Hex(secret, payload)
 	if err != nil {

@@ -101,6 +101,9 @@ func TestIntegrationsWriteEndpointsCoverage(t *testing.T) {
 		upstreamID := uuid.New()
 		h.db = &fakeDB{
 			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				if strings.Contains(sql, "SELECT COUNT(*) FROM proxy_routes") {
+					return fakeRow{vals: []any{0}}
+				}
 				return fakeRow{vals: []any{upstreamID, now, now}}
 			},
 			execFn: func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -116,7 +119,7 @@ func TestIntegrationsWriteEndpointsCoverage(t *testing.T) {
 			"timeout":         "5s",
 			"max_connections": 64,
 			"headers":         map[string]string{"x-env": "prod"},
-			"circuit_breaker": map[string]any{"enabled": true},
+			"circuit_breaker": map[string]any{"failure_threshold": 3, "timeout": "10s", "success_threshold": 2},
 			"enabled":         true,
 		})))
 		h.UpsertProxyUpstream(rec, req)
@@ -153,6 +156,8 @@ func TestIntegrationsWriteEndpointsCoverage(t *testing.T) {
 		h.db = &fakeDB{
 			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 				switch {
+				case strings.Contains(sql, "SELECT EXISTS"):
+					return fakeRow{vals: []any{true}}
 				case strings.Contains(sql, "INSERT INTO proxy_routes"):
 					return fakeRow{vals: []any{now, now}}
 				case strings.Contains(sql, "FROM proxy_upstreams"):
@@ -170,7 +175,7 @@ func TestIntegrationsWriteEndpointsCoverage(t *testing.T) {
 						true,
 						"aal2",
 						[]byte(`["profile:read"]`),
-						[]byte(`{"requests":10}`),
+						[]byte(`{"requests_per_second":10,"burst_size":20}`),
 						"api",
 						100,
 						[]byte(`{"x-test":"1"}`),
@@ -195,7 +200,7 @@ func TestIntegrationsWriteEndpointsCoverage(t *testing.T) {
 			"require_auth": true,
 			"required_aal": "aal2",
 			"capabilities": []string{"profile:read"},
-			"rate_limit":   map[string]any{"requests": 10},
+			"rate_limit":   map[string]any{"requests_per_second": 10, "burst_size": 20},
 			"target":       "API",
 			"priority":     100,
 			"headers":      map[string]string{"x-test": "1"},

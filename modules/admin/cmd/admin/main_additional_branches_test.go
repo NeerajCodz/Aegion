@@ -14,7 +14,7 @@ func TestRunVersionWithNilRustHook(t *testing.T) {
 	var out bytes.Buffer
 	deps := defaultMainDeps()
 	deps.stdout = &out
-	deps.rustSelfCheck = nil
+	deps.cryptoSelfCheck = nil
 
 	if err := run([]string{"-version"}, deps); err != nil {
 		t.Fatalf("run(-version) error = %v", err)

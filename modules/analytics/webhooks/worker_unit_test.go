@@ -9,15 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/stretchr/testify/require"
 )
 
-type noopLogger struct{}
-
-func (noopLogger) Debug(string, ...interface{}) {}
-func (noopLogger) Info(string, ...interface{})  {}
-func (noopLogger) Warn(string, ...interface{})  {}
-func (noopLogger) Error(string, ...interface{}) {}
+func testLogger() *xlog.Logger {
+	return xlog.New(xlog.Config{})
+}
 
 func TestDeliveryWorker_processJob_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -68,9 +66,9 @@ func TestDeliveryWorker_processJob_Success(t *testing.T) {
 
 	store := NewStore(db)
 	queue := NewQueue(10)
-	dispatcher := NewDispatcher(2, noopLogger{})
+	dispatcher := NewDispatcher(2, testLogger())
 	retry := NewRetryPolicy(RetryConfig{MaxRetries: 5, BackoffBaseMs: 0, CircuitBreakerThreshold: 10})
-	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), noopLogger{})
+	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), testLogger())
 
 	job := &DeliveryJob{
 		ID:         "job_1",
@@ -135,9 +133,9 @@ func TestDeliveryWorker_processJob_RetryPath_Requeues(t *testing.T) {
 
 	store := NewStore(db)
 	queue := NewQueue(10)
-	dispatcher := NewDispatcher(2, noopLogger{})
+	dispatcher := NewDispatcher(2, testLogger())
 	retry := NewRetryPolicy(RetryConfig{MaxRetries: 5, BackoffBaseMs: 0, CircuitBreakerThreshold: 10})
-	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), noopLogger{})
+	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), testLogger())
 
 	job := &DeliveryJob{
 		ID:         "job_1",
@@ -178,7 +176,7 @@ func TestDeliveryWorker_processJob_DisabledMovesToDLQ(t *testing.T) {
 				*(dest[4].(*string)) = `[]`
 				*(dest[5].(*string)) = `{}`
 				*(dest[6].(*string)) = "secret"
-				*(dest[7].(*bool)) = false // disabled
+				*(dest[7].(*bool)) = false
 				*(dest[8].(*int)) = 0
 				*(dest[9].(*time.Time)) = now
 				*(dest[10].(*time.Time)) = now
@@ -200,9 +198,9 @@ func TestDeliveryWorker_processJob_DisabledMovesToDLQ(t *testing.T) {
 
 	store := NewStore(db)
 	queue := NewQueue(10)
-	dispatcher := NewDispatcher(2, noopLogger{})
+	dispatcher := NewDispatcher(2, testLogger())
 	retry := NewRetryPolicy(RetryConfig{MaxRetries: 5, BackoffBaseMs: 0, CircuitBreakerThreshold: 1})
-	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), noopLogger{})
+	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), testLogger())
 
 	job := &DeliveryJob{
 		ID:         "job_1",
@@ -270,10 +268,9 @@ func TestDeliveryWorker_processJob_CircuitBreakFinalFailureMovesToDLQ(t *testing
 
 	store := NewStore(db)
 	queue := NewQueue(10)
-	dispatcher := NewDispatcher(2, noopLogger{})
-	// Circuit breaker trips at 1 failure; job has max retries 0 so it is treated as final failure.
+	dispatcher := NewDispatcher(2, testLogger())
 	retry := NewRetryPolicy(RetryConfig{MaxRetries: 5, BackoffBaseMs: 0, CircuitBreakerThreshold: 1})
-	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), noopLogger{})
+	worker := NewDeliveryWorker(1, queue, store, dispatcher, retry, NewSignature(), testLogger())
 
 	job := &DeliveryJob{
 		ID:         "job_1",

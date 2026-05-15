@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/aegion/aegion/internal/platform/logger"
 	"github.com/aegion/aegion/internal/platform/observability"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 func decodeLogPayload(t *testing.T, buf *bytes.Buffer) map[string]interface{} {
@@ -25,22 +24,9 @@ func decodeLogPayload(t *testing.T, buf *bytes.Buffer) map[string]interface{} {
 
 func TestLoggerMiddlewareStandardKeys(t *testing.T) {
 	var logBuf bytes.Buffer
-	// This is tricky because logger.New sets global default.
-	// Let's just use LogWideEvent directly to test it.
-
-	l := &logger.Logger{
-		Logger: slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{
-			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-				if len(groups) == 0 {
-					switch a.Key {
-					case slog.MessageKey:
-						return slog.Attr{Key: "msg", Value: a.Value}
-					}
-				}
-				return a
-			},
-		})),
-	}
+	l := xlog.New(xlog.Config{
+		Sinks: []xlog.Sink{xlog.NewJSONSink(&logBuf)},
+	})
 
 	ctx := observability.WithRequestIDForLogger(context.Background(), "ctx-request-id")
 
@@ -49,8 +35,9 @@ func TestLoggerMiddlewareStandardKeys(t *testing.T) {
 	})
 
 	payload := decodeLogPayload(t, &logBuf)
-	if payload["msg"] != "test-event" {
-		t.Fatalf("expected msg 'test-event', got %v", payload["msg"])
+	// xlog uses event.name for the message/event name
+	if payload["event.name"] != "test-event" {
+		t.Fatalf("expected event.name 'test-event', got %v", payload["event.name"])
 	}
 	if payload["foo"] != "bar" {
 		t.Fatalf("expected foo 'bar', got %v", payload["foo"])
@@ -59,8 +46,9 @@ func TestLoggerMiddlewareStandardKeys(t *testing.T) {
 
 func TestRecovererMiddlewareRecoversPanic(t *testing.T) {
 	var logBuf bytes.Buffer
-	// Mock logger for test
-	ml := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	ml := xlog.New(xlog.Config{
+		Sinks: []xlog.Sink{xlog.NewJSONSink(&logBuf)},
+	})
 
 	wrapped := Recoverer(ml)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("boom")
@@ -105,14 +93,9 @@ func TestGetClientIPAdditionalBranches(t *testing.T) {
 
 func TestLoggerMiddleware4xxStatusCodes(t *testing.T) {
 	var logBuf bytes.Buffer
-	ml := slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if len(groups) == 0 && a.Key == slog.LevelKey {
-				return slog.Attr{Key: "level", Value: slog.StringValue(strings.ToLower(a.Value.String()))}
-			}
-			return a
-		},
-	}))
+	ml := xlog.New(xlog.Config{
+		Sinks: []xlog.Sink{xlog.NewJSONSink(&logBuf)},
+	})
 
 	handler := Logger(ml)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -129,10 +112,14 @@ func TestLoggerMiddleware4xxStatusCodes(t *testing.T) {
 	}
 
 	logOutput := logBuf.String()
-	// slog default level is INFO, but for 404 we might expect something else if implemented
-	// In middleware.go, we log at default level but with outcome=warning
-	if !strings.Contains(logOutput, `"outcome":"warning"`) {
-		t.Fatalf("expected outcome warning for 404, got %q", logOutput)
+	// xlog uses event.outcome
+	if !strings.Contains(logOutput, `"event.outcome":"rejected"`) && !strings.Contains(logOutput, `"event.outcome":"warning"`) {
+		// xlog's WarnContext uses OutcomeRejected, which serializes to "rejected"
+		// But let's check what exactly it is. In api.go: WarnContext uses OutcomeRejected.
+		// In types.go: OutcomeRejected = "rejected"
+		if !strings.Contains(logOutput, `"event.outcome":"rejected"`) {
+			t.Fatalf("expected event.outcome rejected for 404, got %q", logOutput)
+		}
 	}
 	if !strings.Contains(logOutput, `"http.status":404`) {
 		t.Fatalf("expected status 404 in log, got %q", logOutput)

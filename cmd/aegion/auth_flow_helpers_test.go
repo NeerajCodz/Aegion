@@ -21,6 +21,21 @@ import (
 	passwordservice "github.com/aegion/aegion/modules/password/service"
 )
 
+func scanIdentityOrActive(identityID uuid.UUID, dest ...any) error {
+	if len(dest) == 0 {
+		return nil
+	}
+	switch v := dest[0].(type) {
+	case *uuid.UUID:
+		*v = identityID
+	case *bool:
+		*v = true
+	default:
+		return errors.New("unexpected scan destination")
+	}
+	return nil
+}
+
 func TestAuthFlowHelpersContextAndMethods(t *testing.T) {
 	if got := (*flowHTTPError)(nil).Error(); got != "flow execution failed" {
 		t.Fatalf("nil flowHTTPError.Error() = %q", got)

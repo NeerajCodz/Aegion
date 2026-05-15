@@ -121,7 +121,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(Response{Data: healthStatus})
+	_ = json.NewEncoder(w).Encode(Response{Data: healthStatus})
 }
 
 // Ready handles GET /ready - Readiness probe
@@ -177,7 +177,7 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // Live handles GET /live - Liveness probe
@@ -193,7 +193,7 @@ func (h *Handler) Live(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // Metrics handles GET /metrics - Prometheus metrics endpoint

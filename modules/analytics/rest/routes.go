@@ -7,16 +7,16 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/go-chi/chi/v5"
 )
 
 // Router sets up all REST API routes
-func Router(h *Handler, log *logger.Logger) chi.Router {
+func Router(h *Handler, log *xlog.Logger) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middleware
-	r.Use(RequestLoggingMiddleware(log))
+	r.Use(log.HTTPMiddleware("analytics.rest.request"))
 	r.Use(CORSMiddleware(log))
 	r.Use(QueryTimeoutMiddleware(time.Duration(h.config.QueryTimeoutSeconds) * time.Second))
 
@@ -431,7 +431,7 @@ func (h *Handler) GenerateReport(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(report)
+	_ = json.NewEncoder(w).Encode(report)
 }
 
 // GetReport handles GET /reports/:id
@@ -980,14 +980,13 @@ func (h *Handler) ReplayWebhookDeliveries(w http.ResponseWriter, r *http.Request
 // ============================================================================
 
 func parseIntParam(s string) (int, error) {
-	n, err := fmt.Sscanf(s, "%d", new(int))
+	var val int
+	n, err := fmt.Sscanf(s, "%d", &val)
 	if err != nil {
 		return 0, err
 	}
 	if n != 1 {
 		return 0, fmt.Errorf("failed to parse integer")
 	}
-	val := 0
-	fmt.Sscanf(s, "%d", &val)
 	return val, nil
 }

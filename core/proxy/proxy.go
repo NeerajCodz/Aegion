@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -19,6 +18,7 @@ import (
 	"github.com/aegion/aegion/core/session"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 var (
@@ -49,7 +49,7 @@ type Proxy struct {
 	ruleLimitersMux sync.RWMutex
 	breakers        map[string]*CircuitBreaker
 	breakersMux     sync.RWMutex
-	logger          *slog.Logger
+	logger          *xlog.Logger
 
 	// Health checking
 	healthCheckers map[string]*HealthChecker
@@ -57,14 +57,12 @@ type Proxy struct {
 }
 
 // NewProxy creates a new proxy instance.
-func NewProxy(config Config, rules *RuleEngine, logger *slog.Logger) *Proxy {
+func NewProxy(config Config, rules *RuleEngine, logger any) *Proxy {
 	if rules == nil {
 		rules = NewRuleEngine([]Rule{})
 	}
 
-	if logger == nil {
-		logger = slog.Default()
-	}
+	log := xlog.Adapt(logger)
 
 	// Create HTTP transport
 	transport := &http.Transport{
@@ -86,7 +84,7 @@ func NewProxy(config Config, rules *RuleEngine, logger *slog.Logger) *Proxy {
 		rules:          rules,
 		ruleLimiters:   make(map[string]*RateLimiter),
 		breakers:       make(map[string]*CircuitBreaker),
-		logger:         logger.With("component", "proxy"),
+		logger:         log.With("component", "proxy"),
 		healthCheckers: make(map[string]*HealthChecker),
 	}
 
@@ -109,7 +107,7 @@ func NewProxy(config Config, rules *RuleEngine, logger *slog.Logger) *Proxy {
 				URL:            upstream.URL + upstream.HealthCheck,
 				Interval:       config.HealthCheckInterval,
 				Timeout:        config.Transport.DialTimeout,
-				Logger:         logger,
+				Logger:         log,
 				ExpectedBody:   upstream.HealthCheckExpectedBody,
 				ExpectedStatus: http.StatusOK,
 			})

@@ -5,13 +5,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aegion/aegion/internal/platform/logger"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics/rbac"
 	"github.com/aegion/aegion/modules/analytics/store"
 )
 
 // PermissionMiddleware enforces permission-based access control
-func PermissionMiddleware(manager *rbac.Manager, log *logger.Logger, requiredPerms ...rbac.Permission) func(http.Handler) http.Handler {
+func PermissionMiddleware(manager *rbac.Manager, log *xlog.Logger, requiredPerms ...rbac.Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID, ok := userIDFromContext(r.Context())
@@ -40,7 +40,7 @@ func PermissionMiddleware(manager *rbac.Manager, log *logger.Logger, requiredPer
 }
 
 // SecurityHeadersMiddleware adds security headers to responses
-func SecurityHeadersMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
+func SecurityHeadersMiddleware(log *xlog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Prevent clickjacking
@@ -72,7 +72,7 @@ func SecurityHeadersMiddleware(log *logger.Logger) func(http.Handler) http.Handl
 }
 
 // RestrictedCORSMiddleware enforces strict CORS policies
-func RestrictedCORSMiddleware(log *logger.Logger, allowedOrigins []string) func(http.Handler) http.Handler {
+func RestrictedCORSMiddleware(log *xlog.Logger, allowedOrigins []string) func(http.Handler) http.Handler {
 	originMap := make(map[string]bool)
 	for _, origin := range allowedOrigins {
 		originMap[origin] = true
@@ -102,7 +102,7 @@ func RestrictedCORSMiddleware(log *logger.Logger, allowedOrigins []string) func(
 }
 
 // AuditLoggingMiddleware logs all requests to audit store
-func AuditLoggingMiddleware(auditStore *store.AuditStore, log *logger.Logger) func(http.Handler) http.Handler {
+func AuditLoggingMiddleware(auditStore *store.AuditStore, log *xlog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID, _ := userIDFromContext(r.Context())
@@ -169,7 +169,7 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 }
 
 // AuthenticationCheckMiddleware enforces authentication on all requests
-func AuthenticationCheckMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
+func AuthenticationCheckMiddleware(log *xlog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Allow health checks without authentication
@@ -191,7 +191,7 @@ func AuthenticationCheckMiddleware(log *logger.Logger) func(http.Handler) http.H
 }
 
 // InputValidationMiddleware validates and sanitizes all inputs
-func InputValidationMiddleware(log *logger.Logger) func(http.Handler) http.Handler {
+func InputValidationMiddleware(log *xlog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Validate Content-Type for POST/PUT requests
@@ -213,7 +213,7 @@ func InputValidationMiddleware(log *logger.Logger) func(http.Handler) http.Handl
 }
 
 // EndpointRateLimitMiddleware enforces per-endpoint rate limits
-func EndpointRateLimitMiddleware(log *logger.Logger, endpointLimits map[string]int) func(http.Handler) http.Handler {
+func EndpointRateLimitMiddleware(log *xlog.Logger, endpointLimits map[string]int) func(http.Handler) http.Handler {
 	limiters := make(map[string]*RateLimiter, len(endpointLimits))
 	for endpoint, limit := range endpointLimits {
 		if limit <= 0 {

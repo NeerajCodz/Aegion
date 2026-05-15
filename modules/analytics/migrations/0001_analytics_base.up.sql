@@ -10,18 +10,18 @@ CREATE TABLE IF NOT EXISTS analytics_events (
     event_type VARCHAR NOT NULL,
     user_id UUID,
     session_id UUID,
-    data JSON DEFAULT '{}',
+    data JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Partition events by month for better query performance
+-- Time-range index for monthly and windowed event queries.
 CREATE INDEX IF NOT EXISTS idx_analytics_events_month 
-    ON analytics_events(DATE_TRUNC('month', created_at));
+    ON analytics_events(created_at DESC, category);
 
 -- Index by category for filtering
 CREATE INDEX IF NOT EXISTS idx_analytics_events_category 
-    ON analytics_events(category) WHERE created_at > NOW() - INTERVAL '90 days';
+    ON analytics_events(category, created_at DESC);
 
 -- Index by user_id for user-based queries
 CREATE INDEX IF NOT EXISTS idx_analytics_events_user_id 

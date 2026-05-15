@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/social/handler"
 	"github.com/aegion/aegion/modules/social/providers/catalog"
 	"github.com/aegion/aegion/modules/social/service"
@@ -34,13 +34,23 @@ const (
 var runModuleServer = moduleserver.Run
 var buildRepositoryHook = buildRepository
 var newSocialServiceHook = func(repo store.Repository) runtimeSocialService { return service.New(repo) }
-var logFatal = log.Fatal
 var newPoolWithConfigHook = pgxpool.NewWithConfig
 var poolPingHook = func(ctx context.Context, pool *pgxpool.Pool) error { return pool.Ping(ctx) }
 var poolCloseHook = func(pool *pgxpool.Pool) { pool.Close() }
 var deriveCipherKeyHook = deriveCipherKey
 var newPostgresRepoHook = func(pool *pgxpool.Pool, cipherKey []byte) (store.Repository, error) {
 	return store.NewPostgres(pool, cipherKey)
+}
+var logFatal = func(v ...any) {
+	if len(v) == 0 {
+		xlog.Default().Fatal("social server failed")
+		return
+	}
+	if err, ok := v[0].(error); ok {
+		xlog.Default().Fatal(err.Error(), "error", err)
+		return
+	}
+	xlog.Default().Fatal("social server failed", v...)
 }
 
 type runtimeSocialService interface {
