@@ -216,6 +216,20 @@ func TestEventProcessorWorker_DBSeams(t *testing.T) {
 		}
 	})
 
+	t.Run("process falls back to direct path without event bus", func(t *testing.T) {
+		worker := NewEventProcessorWorker(EventProcessorConfig{
+			Interval:   time.Second,
+			Subscriber: "sub",
+			BatchSize:  10,
+		})
+		worker.queryFn = func(context.Context, string, ...interface{}) (pgx.Rows, error) {
+			return &dbPathRows{}, nil
+		}
+		if err := worker.process(ctx); err != nil {
+			t.Fatalf("process fallback should succeed, got %v", err)
+		}
+	})
+
 	t.Run("processDirectly handles scan errors, invalid JSON and row errors", func(t *testing.T) {
 		worker := NewEventProcessorWorker(EventProcessorConfig{
 			Interval:   time.Second,

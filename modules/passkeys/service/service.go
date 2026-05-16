@@ -8,6 +8,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,8 +77,16 @@ type AuthenticationFinishRequest struct {
 }
 
 func New(challengeStore ChallengeStore, cfg Config) *Service {
+	cfg.RPID = strings.TrimSpace(cfg.RPID)
+	cfg.RPOrigin = strings.TrimSpace(cfg.RPOrigin)
 	if cfg.ChallengeTTL <= 0 {
 		cfg.ChallengeTTL = 5 * time.Minute
+	}
+	if cfg.RPID == "" {
+		cfg.RPID = deriveRPID(cfg.RPOrigin)
+	}
+	if cfg.RPOrigin == "" {
+		cfg.RPOrigin = deriveRPOrigin(cfg.RPID)
 	}
 	if cfg.RPID == "" {
 		cfg.RPID = "localhost"
@@ -161,6 +171,15 @@ func (s *Service) BeginAuthentication(identityID string) (*AuthenticationStartRe
 		ExpiresAt:  time.Now().UTC().Add(s.cfg.ChallengeTTL),
 	})
 	credentials := s.store.ListCredentialsByIdentity(identityID)
+	sort.SliceStable(credentials, func(i, j int) bool {
+		if credentials[i].CreatedAt.Equal(credentials[j].CreatedAt) {
+			return credentials[i].ID < credentials[j].ID
+		}
+		return credentials[i].CreatedAt.After(credentials[j].CreatedAt)
+	})
+	if limit := s.cfg.AllowedCredentials; limit > 0 && len(credentials) > limit {
+		credentials = credentials[:limit]
+	}
 	allowed := make([]string, 0, len(credentials))
 	for _, credential := range credentials {
 		allowed = append(allowed, credential.ID)
@@ -248,4 +267,24 @@ func verifyAssertionSignature(pub *ecdsa.PublicKey, identityID, credentialID, ch
 		return ErrInvalidSignature
 	}
 	return nil
+}
+
+func deriveRPID(origin string) string {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return ""
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Hostname())
+}
+
+func deriveRPOrigin(rpID string) string {
+	rpID = strings.TrimSpace(rpID)
+	if rpID == "" {
+		return ""
+	}
+	return "https://" + rpID
 }

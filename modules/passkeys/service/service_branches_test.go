@@ -74,6 +74,16 @@ func TestServiceDefaultsAndValidationBranches(t *testing.T) {
 		t.Fatalf("unexpected default allowed credentials: %d", svc.cfg.AllowedCredentials)
 	}
 
+	derivedOriginSvc := New(mockStore, Config{RPID: "example.com"})
+	if derivedOriginSvc.cfg.RPOrigin != "https://example.com" {
+		t.Fatalf("expected origin derived from rp id, got %q", derivedOriginSvc.cfg.RPOrigin)
+	}
+
+	derivedRPIDSvc := New(mockStore, Config{RPOrigin: "https://login.example.com"})
+	if derivedRPIDSvc.cfg.RPID != "login.example.com" {
+		t.Fatalf("expected rp id derived from origin, got %q", derivedRPIDSvc.cfg.RPID)
+	}
+
 	if _, err := svc.BeginRegistration("   "); !errors.Is(err, ErrInvalidIdentity) {
 		t.Fatalf("BeginRegistration expected ErrInvalidIdentity, got %v", err)
 	}
@@ -92,6 +102,28 @@ func TestServiceDefaultsAndValidationBranches(t *testing.T) {
 	}
 	if err := svc.FinishAuthentication(&AuthenticationFinishRequest{IdentityID: "id"}); !errors.Is(err, ErrInvalidCredential) {
 		t.Fatalf("FinishAuthentication missing fields expected ErrInvalidCredential, got %v", err)
+	}
+}
+
+func TestBeginAuthenticationRespectsAllowedCredentialsLimit(t *testing.T) {
+	mockStore := &mockChallengeStore{
+		listCredentialsResp: []store.Credential{
+			{ID: "cred-older", IdentityID: "identity-1", CreatedAt: time.Unix(100, 0).UTC()},
+			{ID: "cred-middle", IdentityID: "identity-1", CreatedAt: time.Unix(200, 0).UTC()},
+			{ID: "cred-newer", IdentityID: "identity-1", CreatedAt: time.Unix(300, 0).UTC()},
+		},
+	}
+	svc := New(mockStore, Config{ChallengeTTL: time.Minute, AllowedCredentials: 2})
+
+	resp, err := svc.BeginAuthentication("identity-1")
+	if err != nil {
+		t.Fatalf("BeginAuthentication returned error: %v", err)
+	}
+	if len(resp.AllowedCredentialIDs) != 2 {
+		t.Fatalf("expected 2 allowed credentials, got %d", len(resp.AllowedCredentialIDs))
+	}
+	if resp.AllowedCredentialIDs[0] != "cred-newer" || resp.AllowedCredentialIDs[1] != "cred-middle" {
+		t.Fatalf("unexpected allowed credential ordering: %#v", resp.AllowedCredentialIDs)
 	}
 }
 

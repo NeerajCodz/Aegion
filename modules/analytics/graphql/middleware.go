@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
@@ -376,6 +377,7 @@ func getClientIP(r *http.Request) string {
 type SimpleRateLimiter struct {
 	requestsPerMinute int
 	clients           map[string]*ClientRateLimit
+	mu                sync.RWMutex
 }
 
 // ClientRateLimit tracks rate limit state for a single client.
@@ -394,6 +396,9 @@ func NewSimpleRateLimiter(requestsPerMinute int) *SimpleRateLimiter {
 
 // AllowRequest checks if a request should be allowed.
 func (srl *SimpleRateLimiter) AllowRequest(ctx context.Context, clientID string) bool {
+	srl.mu.Lock()
+	defer srl.mu.Unlock()
+
 	now := time.Now()
 
 	// Get or create client limit
@@ -418,6 +423,9 @@ func (srl *SimpleRateLimiter) AllowRequest(ctx context.Context, clientID string)
 
 // GetRemaining returns the number of remaining requests for a client.
 func (srl *SimpleRateLimiter) GetRemaining(clientID string) int {
+	srl.mu.RLock()
+	defer srl.mu.RUnlock()
+
 	limit, exists := srl.clients[clientID]
 	if !exists {
 		return srl.requestsPerMinute

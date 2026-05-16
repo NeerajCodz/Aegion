@@ -71,8 +71,8 @@ func (w *EventProcessorWorker) process(ctx context.Context) error {
 	w.Log().Debug("processing pending events")
 
 	if w.eventBus == nil {
-		w.Log().Error("event processor requires event bus; refusing to process deliveries", "subscriber", w.subscriber)
-		return nil
+		w.Log().Info("event processor falling back to direct database polling", "subscriber", w.subscriber)
+		return w.processDirectly(ctx)
 	}
 
 	err := w.eventBus.ProcessPending(ctx, w.subscriber)

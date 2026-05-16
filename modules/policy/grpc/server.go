@@ -29,6 +29,7 @@ type Server struct {
 	store PolicyStore
 	env   *cel.Env
 	cache sync.Map
+	initErr error
 }
 
 var errReBACMaxDepthExceeded = errors.New("rebac max depth exceeded")
@@ -45,7 +46,10 @@ func NewServer(store PolicyStore) *Server {
 		),
 	)
 	if err != nil {
-		panic("failed to initialize CEL env: " + err.Error())
+		return &Server{
+			store:   store,
+			initErr: fmt.Errorf("initialize CEL env: %w", err),
+		}
 	}
 
 	return &Server{store: store, env: env}
@@ -55,6 +59,9 @@ func NewServer(store PolicyStore) *Server {
 func (s *Server) Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("policy store is required")
+	}
+	if s.initErr != nil {
+		return nil, s.initErr
 	}
 	if req == nil {
 		return nil, fmt.Errorf("check request is required")

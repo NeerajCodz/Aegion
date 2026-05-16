@@ -2,8 +2,11 @@ package graphql
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -28,6 +31,8 @@ type Server struct {
 	complexityAnalyzer  ComplexityAnalyzer
 	rateLimiter         RateLimiter
 }
+
+const maxGraphQLRequestBodyBytes int64 = 1 << 20
 
 // QueryExecutor executes parsed GraphQL queries.
 type QueryExecutor interface {
@@ -82,6 +87,12 @@ func NewServer(
 	executor QueryExecutor,
 	opts ...ServerOption,
 ) *Server {
+	if logger == nil {
+		logger = xlog.Default()
+	}
+	if executor == nil {
+		executor = NewSimpleQueryExecutor(resolver, logger)
+	}
 	s := &Server{
 		logger:              logger,
 		resolver:            resolver,
@@ -173,6 +184,10 @@ func WithRateLimiter(limiter RateLimiter) ServerOption {
 
 // HandleQuery handles POST requests with GraphQL queries.
 func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 
 	// Check rate limit
@@ -190,12 +205,41 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse request
+	r.Body = http.MaxBytesReader(w, r.Body, maxGraphQLRequestBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
 	var req GraphQLRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decoder.Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 			"errors": []map[string]string{
 				{"message": fmt.Sprintf("invalid request: %v", err)},
+			},
+		}); encErr != nil {
+			s.logger.Error("failed to encode error response", "error", encErr)
+		}
+		return
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		w.WriteHeader(http.StatusBadRequest)
+		if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+			"errors": []map[string]string{
+				{"message": "invalid request: request body must contain a single JSON object"},
+			},
+		}); encErr != nil {
+			s.logger.Error("failed to encode error response", "error", encErr)
+		}
+		return
+	}
+	req.Query = strings.TrimSpace(req.Query)
+	req.OperationName = strings.TrimSpace(req.OperationName)
+	if req.Query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
+			"errors": []map[string]string{
+				{"message": "query is required"},
 			},
 		}); encErr != nil {
 			s.logger.Error("failed to encode error response", "error", encErr)
@@ -448,7 +492,8 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 func getClientID(r *http.Request) string {
 	// Try to get from authorization header
 	if auth := r.Header.Get("Authorization"); auth != "" {
-		return auth
+		sum := sha256.Sum256([]byte(auth))
+		return "auth:" + hex.EncodeToString(sum[:8])
 	}
 	// Fall back to IP address
 	return r.RemoteAddr

@@ -36,8 +36,8 @@ func TestLoggerMiddlewareStandardKeys(t *testing.T) {
 
 	payload := decodeLogPayload(t, &logBuf)
 	// xlog uses event.name for the message/event name
-	if payload["event.name"] != "test-event" {
-		t.Fatalf("expected event.name 'test-event', got %v", payload["event.name"])
+	if payload["event.name"] != "test.event" {
+		t.Fatalf("expected event.name 'test.event', got %v", payload["event.name"])
 	}
 	if payload["foo"] != "bar" {
 		t.Fatalf("expected foo 'bar', got %v", payload["foo"])
@@ -66,7 +66,7 @@ func TestRecovererMiddlewareRecoversPanic(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), http.StatusText(http.StatusInternalServerError)) {
 		t.Fatalf("expected internal server error body, got %q", rec.Body.String())
 	}
-	if !strings.Contains(logBuf.String(), "panic recovered") {
+	if !strings.Contains(logBuf.String(), `"event.name":"panic.recovered"`) {
 		t.Fatalf("expected panic recovery log entry, got %q", logBuf.String())
 	}
 }
