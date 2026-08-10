@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
 )
 
@@ -304,32 +303,12 @@ func TestResolveBootstrapSchemaID_Branches(t *testing.T) {
 
 func TestModuleMigrationUtilityPaths(t *testing.T) {
 	deps := defaultModuleMigrationDeps()
-	if deps.moduleOrder == nil || deps.moduleFS == nil || deps.moduleMigrator == nil {
+	if deps.moduleMigrator == nil {
 		t.Fatal("expected default migration deps to be fully wired")
 	}
 
-	if err := runEnabledModuleMigrations(context.Background(), nil, &database.DB{}, "configs\\aegion.yaml"); err != nil {
-		t.Fatalf("expected nil cfg to no-op, got %v", err)
-	}
-
-	if _, err := resolveModuleFS(filepath.Join("..", "..", "configs", "aegion.yaml")); err != nil {
-		t.Fatalf("expected module fs resolution from repo root to succeed, got %v", err)
-	}
-
-	origWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("failed to get working directory: %v", err)
-	}
-	tempDir := t.TempDir()
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("failed to chdir temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(origWd)
-	})
-
-	if _, err := resolveModuleFS(filepath.Join(tempDir, "configs", "missing.yaml")); err == nil {
-		t.Fatal("expected missing modules directory error")
+	if err := runEnabledModuleMigrations(context.Background(), config.ModulePlan{}, &database.DB{}); err != nil {
+		t.Fatalf("expected empty module plan to no-op, got %v", err)
 	}
 }
 

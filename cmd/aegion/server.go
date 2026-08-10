@@ -18,7 +18,6 @@ import (
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/courier"
 	"github.com/aegion/aegion/core/flows"
-	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/core/workers"
@@ -42,7 +41,7 @@ import (
 // ServerConfig holds the server configuration.
 type ServerConfig struct {
 	Config         *config.Config
-	ConfigPath     string
+	ModulePlan     config.ModulePlan
 	DB             *database.DB
 	Log            *xlog.Logger
 	WorkerManager  *workers.Manager
@@ -56,7 +55,8 @@ type Server struct {
 	log            *xlog.Logger
 	router         chi.Router
 	registry       *registry.Registry
-	orchestrator   moduleOrchestrator
+	modulePlan     config.ModulePlan
+	moduleRoutes   ModuleRouteTable
 	sessionManager sessionManager
 	tokenGen       *authtoken.Generator
 	flowService    *flows.Service
@@ -75,12 +75,6 @@ type Server struct {
 
 type policyChecker interface {
 	Check(ctx context.Context, req *policypb.CheckRequest) (*policypb.CheckResponse, error)
-}
-
-type moduleOrchestrator interface {
-	Start(ctx context.Context) error
-	Stop(ctx context.Context) error
-	RestartModule(ctx context.Context, moduleID string) error
 }
 
 type sessionManager interface {
@@ -129,10 +123,6 @@ type passkeyFlowService interface {
 	FinishRegistration(req *passkeysservice.RegistrationFinishRequest) error
 	BeginAuthentication(identityID string) (*passkeysservice.AuthenticationStartResponse, error)
 	FinishAuthentication(req *passkeysservice.AuthenticationFinishRequest) error
-}
-
-var newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
-	return orchestrator.New(cfg)
 }
 
 var newSessionManager = func(cfg session.ManagerConfig) sessionManager {
@@ -241,8 +231,8 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 
 	// Initialize service registry
 	reg := registry.New(registry.Config{
-		HealthCheckInterval: cfg.Config.Server.InternalNet.HealthCheckInt.Duration(),
-		HealthCheckTimeout:  cfg.Config.Server.InternalNet.HealthCheckTimeout.Duration(),
+		HealthCheckInterval: cfg.Config.Server.Registry.HealthCheckInterval.Duration(),
+		HealthCheckTimeout:  cfg.Config.Server.Registry.HealthCheckTimeout.Duration(),
 	}, cfg.Log)
 
 	// Initialize flow store and service
@@ -252,7 +242,6 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		flowConfig.DefaultMethods = append(flowConfig.DefaultMethods, flows.AuthMethod{Method: "passkey"})
 	}
 	flowService := flows.NewService(flowStore, flowConfig)
-
 	sessionSecret := []byte(internalSecret)
 	if len(cfg.Config.Secrets.Cookie) > 0 {
 		sessionSecret = []byte(cfg.Config.Secrets.Cookie[0])
@@ -400,11 +389,19 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		checker = policygrpc.NewServer(policystore.New(cfg.DB.Pool))
 	}
 
+	moduleRoutes, err := NewModuleRouteTable(cfg.ModulePlan)
+	if err != nil {
+		reg.Stop()
+		return nil, err
+	}
+
 	s := &Server{
 		cfg:            cfg.Config,
 		db:             cfg.DB,
 		log:            cfg.Log,
 		registry:       reg,
+		modulePlan:     cfg.ModulePlan,
+		moduleRoutes:   moduleRoutes,
 		tokenGen:       tokenGen,
 		sessionManager: sessionMgr,
 		flowService:    flowService,
@@ -423,24 +420,6 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	// Start registry
 	reg.Start()
 	s.log.Info("Service registry started")
-
-	if cfg.ConfigPath != "" {
-		moduleOrchestrator, err := newModuleOrchestrator(orchestrator.Config{
-			ConfigPath:  cfg.ConfigPath,
-			Registry:    reg,
-			TokenSecret: []byte(internalSecret),
-		})
-		if err != nil {
-			reg.Stop()
-			return nil, err
-		}
-		if err := moduleOrchestrator.Start(ctx); err != nil {
-			reg.Stop()
-			return nil, err
-		}
-		s.orchestrator = moduleOrchestrator
-		s.log.Info("Module orchestrator started", "config_path", cfg.ConfigPath)
-	}
 
 	// Bootstrap admin if requested
 	if cfg.AdminBootstrap {
@@ -705,34 +684,17 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("Shutting down server components")
 
-	var shutdownErr error
-
-	if s.orchestrator != nil {
-		if err := s.orchestrator.Stop(ctx); err != nil {
-			s.log.Error("Failed to stop module orchestrator", "error", err)
-			shutdownErr = err
-		} else {
-			s.log.Info("Module orchestrator stopped")
-		}
-	}
-
-	// Stop registry
 	if s.registry != nil {
 		s.registry.Stop()
 		s.log.Info("Service registry stopped")
 	}
 
-	return shutdownErr
+	return nil
 }
 
 // Registry returns the service registry.
 func (s *Server) Registry() *registry.Registry {
 	return s.registry
-}
-
-// Orchestrator returns the module orchestrator.
-func (s *Server) Orchestrator() moduleOrchestrator {
-	return s.orchestrator
 }
 
 // FlowService returns the flow service.
@@ -897,7 +859,6 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"status":        "ready",
 		"database":      "ok",
 		"registry":      registryOK,
-		"orchestrator":  s.orchestrator != nil,
 		"module_count":  moduleCount,
 		"healthy_count": healthyCount,
 		"courier":       s.courier != nil,

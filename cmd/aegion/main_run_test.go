@@ -435,7 +435,7 @@ func TestRunDBAndMigrationErrors(t *testing.T) {
 
 	t.Run("module migration error", func(t *testing.T) {
 		deps, _, stderr, migrator, _, _ := buildRunDeps(validMainConfig())
-		deps.runModuleMigrate = func(ctx context.Context, cfg *config.Config, db *database.DB, configPath string) error {
+		deps.runModuleMigrate = func(ctx context.Context, plan config.ModulePlan, db *database.DB) error {
 			return errors.New("module migration failed")
 		}
 

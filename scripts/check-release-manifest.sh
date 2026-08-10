@@ -116,7 +116,20 @@ def extract_module_versions(config_path: Path) -> set[str]:
     return modules
 
 
-required_modules = {"core"}
+embedded_modules = {"password", "magic_link", "policy"}
+external_modules = {
+    "admin",
+    "analytics",
+    "cli",
+    "introspection",
+    "mfa",
+    "oauth2",
+    "passkeys",
+    "proxy",
+    "social",
+    "sso",
+}
+configured_modules = set()
 for config_file in (
     Path("configs/aegion.yaml"),
     Path("configs/aegion.example.yaml"),
@@ -124,7 +137,18 @@ for config_file in (
     Path("configs/aegion.staging.yaml"),
     Path("configs/aegion.production.yaml"),
 ):
-    required_modules.update(extract_module_versions(config_file))
+    configured_modules.update(extract_module_versions(config_file))
+
+unknown_modules = configured_modules - embedded_modules - external_modules
+for module in sorted(unknown_modules):
+    errors.append(f"configured module {module!r} is not in the module plan")
+
+required_modules = {"core"} | (configured_modules & external_modules)
+for module in sorted(images):
+    if module in embedded_modules:
+        errors.append(f"images.{module} must not exist because {module} is embedded")
+    elif module not in required_modules:
+        errors.append(f"images.{module} is not declared by the module plan")
 
 normalized_version = version[1:] if isinstance(version, str) and version.startswith("v") else version
 

@@ -100,6 +100,9 @@ func TestOAuth2EndpointURLBranches(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		s := newTestServer(t)
 		registerTestModule(t, s, "oauth2", registry.EndpointHTTP, "http://oauth2.example.com")
+		if err := s.registry.UpdateStatus("oauth2", registry.StatusHealthy); err != nil {
+			t.Fatalf("UpdateStatus(healthy) = %v", err)
+		}
 		u, err := s.oauth2EndpointURL("/oidc/userinfo")
 		if err != nil {
 			t.Fatalf("oauth2EndpointURL(success) err=%v", err)

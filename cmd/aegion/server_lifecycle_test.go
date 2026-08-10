@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,28 +31,6 @@ func (w *blockingWorker) Start(ctx context.Context) error {
 	return nil
 }
 func (w *blockingWorker) Stop() { time.Sleep(w.stopDelay) }
-
-type stubModuleOrchestrator struct {
-	startErr error
-	stopErr  error
-
-	startCalls int
-	stopCalls  int
-}
-
-func (s *stubModuleOrchestrator) Start(ctx context.Context) error {
-	s.startCalls++
-	return s.startErr
-}
-
-func (s *stubModuleOrchestrator) Stop(ctx context.Context) error {
-	s.stopCalls++
-	return s.stopErr
-}
-
-func (s *stubModuleOrchestrator) RestartModule(ctx context.Context, moduleID string) error {
-	return nil
-}
 
 type stubTelemetryProvider struct {
 	shutdownCalls int
@@ -307,9 +284,9 @@ func TestNewServerInitializesCoreComponents(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			RequestTimeout: config.Duration(10 * time.Second),
-			InternalNet: config.InternalNetConfig{
-				HealthCheckInt:     config.Duration(time.Second),
-				HealthCheckTimeout: config.Duration(time.Second),
+			Registry: config.ServiceRegistryConfig{
+				HealthCheckInterval: config.Duration(time.Second),
+				HealthCheckTimeout:  config.Duration(time.Second),
 			},
 		},
 		Admin: config.AdminConfig{
@@ -359,9 +336,9 @@ func TestNewServerInitializesPolicyCheckerWhenEnabled(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			RequestTimeout: config.Duration(10 * time.Second),
-			InternalNet: config.InternalNetConfig{
-				HealthCheckInt:     config.Duration(time.Second),
-				HealthCheckTimeout: config.Duration(time.Second),
+			Registry: config.ServiceRegistryConfig{
+				HealthCheckInterval: config.Duration(time.Second),
+				HealthCheckTimeout:  config.Duration(time.Second),
 			},
 		},
 		Admin: config.AdminConfig{
@@ -395,121 +372,6 @@ func TestNewServerInitializesPolicyCheckerWhenEnabled(t *testing.T) {
 
 	if err := server.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutdown should not fail: %v", err)
-	}
-}
-
-func TestNewServerStartsModuleOrchestratorWhenConfigPathProvided(t *testing.T) {
-	log := testLogger()
-
-	cfg := &config.Config{
-		Server: config.ServerConfig{
-			RequestTimeout: config.Duration(10 * time.Second),
-			InternalNet: config.InternalNetConfig{
-				HealthCheckInt:     config.Duration(time.Second),
-				HealthCheckTimeout: config.Duration(time.Second),
-			},
-		},
-		Admin: config.AdminConfig{
-			Enabled: false,
-			Path:    "/aegion",
-		},
-		Secrets: config.SecretsConfig{
-			Internal: []string{"dev-internal-secret-change-me-32chars"},
-		},
-	}
-
-	stub := &stubModuleOrchestrator{}
-	var capturedCfg orchestrator.Config
-	orig := newModuleOrchestrator
-	t.Cleanup(func() {
-		newModuleOrchestrator = orig
-	})
-	newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
-		capturedCfg = cfg
-		return stub, nil
-	}
-
-	server, err := NewServer(context.Background(), &ServerConfig{
-		Config:         cfg,
-		ConfigPath:     "configs/aegion.yaml",
-		DB:             &database.DB{Pool: nil},
-		Log:            log,
-		WorkerManager:  workers.NewManager(workers.ManagerConfig{Log: log}),
-		AdminBootstrap: false,
-	})
-	if err != nil {
-		t.Fatalf("NewServer returned error: %v", err)
-	}
-	if server.Orchestrator() == nil {
-		t.Fatalf("expected orchestrator to be initialized")
-	}
-	if stub.startCalls != 1 {
-		t.Fatalf("expected orchestrator start to be called once, got %d", stub.startCalls)
-	}
-	if capturedCfg.ConfigPath != "configs/aegion.yaml" {
-		t.Fatalf("expected config path to be forwarded")
-	}
-	if capturedCfg.Registry == nil {
-		t.Fatalf("expected registry to be passed to orchestrator config")
-	}
-	if len(capturedCfg.TokenSecret) == 0 {
-		t.Fatalf("expected token secret in orchestrator config")
-	}
-}
-
-func TestNewServerReturnsErrorWhenOrchestratorStartFails(t *testing.T) {
-	log := testLogger()
-	cfg := &config.Config{
-		Server: config.ServerConfig{
-			RequestTimeout: config.Duration(10 * time.Second),
-			InternalNet: config.InternalNetConfig{
-				HealthCheckInt:     config.Duration(time.Second),
-				HealthCheckTimeout: config.Duration(time.Second),
-			},
-		},
-		Admin: config.AdminConfig{
-			Enabled: false,
-			Path:    "/aegion",
-		},
-		Secrets: config.SecretsConfig{
-			Internal: []string{"dev-internal-secret-change-me-32chars"},
-		},
-	}
-
-	orig := newModuleOrchestrator
-	t.Cleanup(func() {
-		newModuleOrchestrator = orig
-	})
-	newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
-		return &stubModuleOrchestrator{startErr: errors.New("orchestrator start failed")}, nil
-	}
-
-	_, err := NewServer(context.Background(), &ServerConfig{
-		Config:         cfg,
-		ConfigPath:     "configs/aegion.yaml",
-		DB:             &database.DB{Pool: nil},
-		Log:            log,
-		WorkerManager:  workers.NewManager(workers.ManagerConfig{Log: log}),
-		AdminBootstrap: false,
-	})
-	if err == nil {
-		t.Fatalf("expected NewServer to fail when orchestrator start fails")
-	}
-	if !strings.Contains(err.Error(), "orchestrator start failed") {
-		t.Fatalf("expected orchestrator start error, got %v", err)
-	}
-}
-
-func TestServerShutdownStopsModuleOrchestrator(t *testing.T) {
-	s := newTestServer(t)
-	stub := &stubModuleOrchestrator{}
-	s.orchestrator = stub
-
-	if err := s.Shutdown(context.Background()); err != nil {
-		t.Fatalf("shutdown should not fail: %v", err)
-	}
-	if stub.stopCalls != 1 {
-		t.Fatalf("expected orchestrator stop to be called once, got %d", stub.stopCalls)
 	}
 }
 

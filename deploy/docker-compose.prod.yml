@@ -111,55 +111,6 @@ services:
         max-size: "50m"
         max-file: "10"
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Password Module - Production
-  # ─────────────────────────────────────────────────────────────────────────
-  module-password:
-    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-password:${AEGION_VERSION}
-    # No exposed ports in production
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
-    environment:
-      MODULE_LOG_LEVEL: info
-      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
-    secrets:
-      - aegion_internal_secret
-    logging:
-      driver: json-file
-      options:
-        max-size: "25m"
-        max-file: "5"
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Magic Link Module - Production
-  # ─────────────────────────────────────────────────────────────────────────
-  module-magic-link:
-    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-magic-link:${AEGION_VERSION}
-    # No exposed ports in production
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
-    environment:
-      MODULE_LOG_LEVEL: info
-      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
-    secrets:
-      - aegion_internal_secret
-    logging:
-      driver: json-file
-      options:
-        max-size: "25m"
-        max-file: "5"
 
   # ─────────────────────────────────────────────────────────────────────────
   # Admin Module - Production

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/core/flows"
-	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/router"
 	coresession "github.com/aegion/aegion/core/session"
 	"github.com/go-chi/chi/v5"
@@ -331,7 +330,6 @@ func setupAdminRoutes(r chi.Router, s *Server) {
 		r.Route("/modules", func(r chi.Router) {
 			r.Get("/", s.handleAdminListModules)
 			r.Get("/{id}", s.handleAdminGetModule)
-			r.Post("/{id}/restart", s.handleAdminRestartModule)
 		})
 
 		// System configuration
@@ -858,34 +856,7 @@ func (s *Server) proxyOAuth2Endpoint(w http.ResponseWriter, r *http.Request, mod
 }
 
 func (s *Server) oauth2EndpointURL(modulePath string) (*url.URL, error) {
-	module, err := s.registry.GetModule("oauth2")
-	if err != nil {
-		return nil, err
-	}
-	if module.Status != registry.StatusHealthy && module.Status != registry.StatusStarting {
-		return nil, errors.New("oauth2 module is not healthy")
-	}
-
-	for _, endpoint := range module.Endpoints {
-		if endpoint.Type != registry.EndpointHTTP {
-			continue
-		}
-		parsed, parseErr := url.Parse(strings.TrimSpace(endpoint.URL))
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return nil, errors.New("oauth2 module endpoint must use http or https")
-		}
-		if parsed.Host == "" {
-			return nil, errors.New("oauth2 module endpoint is missing host")
-		}
-		parsed.Path = modulePath
-		parsed.RawPath = ""
-		return parsed, nil
-	}
-
-	return nil, errors.New("oauth2 module has no HTTP endpoint")
+	return s.moduleEndpointURL("oauth2", modulePath)
 }
 
 // Module registration handlers
@@ -2052,40 +2023,6 @@ func (s *Server) handleAdminGetModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, module)
-}
-
-func (s *Server) handleAdminRestartModule(w http.ResponseWriter, r *http.Request) {
-	moduleID := strings.TrimSpace(chi.URLParam(r, "id"))
-	if moduleID == "" {
-		writeError(w, http.StatusBadRequest, "module id is required", nil)
-		return
-	}
-	if _, err := s.registry.GetModule(moduleID); err != nil {
-		writeError(w, http.StatusNotFound, "module not found", err)
-		return
-	}
-	if s.orchestrator == nil {
-		writeError(w, http.StatusServiceUnavailable, "module orchestrator unavailable", nil)
-		return
-	}
-
-	err := s.orchestrator.RestartModule(r.Context(), moduleID)
-	if err != nil {
-		switch {
-		case errors.Is(err, orchestrator.ErrModuleNotFound):
-			writeError(w, http.StatusNotFound, "module not found", err)
-		case errors.Is(err, orchestrator.ErrOrchestratorClosed):
-			writeError(w, http.StatusServiceUnavailable, "module orchestrator unavailable", err)
-		default:
-			writeError(w, http.StatusInternalServerError, "failed to restart module", err)
-		}
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":    "restarted",
-		"module_id": moduleID,
-	})
 }
 
 func (s *Server) handleAdminGetConfig(w http.ResponseWriter, r *http.Request) {

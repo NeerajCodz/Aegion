@@ -20,9 +20,9 @@ func newBranchServerConfig() *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{
 			RequestTimeout: config.Duration(10 * time.Second),
-			InternalNet: config.InternalNetConfig{
-				HealthCheckInt:     config.Duration(time.Second),
-				HealthCheckTimeout: config.Duration(time.Second),
+			Registry: config.ServiceRegistryConfig{
+				HealthCheckInterval: config.Duration(time.Second),
+				HealthCheckTimeout:  config.Duration(time.Second),
 			},
 			CORS: config.CORSConfig{
 				AllowedOrigins:   []string{"https://example.com"},

@@ -15,28 +15,29 @@ import (
 
 // Config represents the complete Aegion configuration.
 type Config struct {
-	XTimeouts      map[string]any      `yaml:"x-timeouts"`
-	XRateLimits    map[string]any      `yaml:"x-rate-limits"`
-	ModuleVersions map[string]string   `yaml:"module_versions"`
-	ModuleRegistry ModuleRegistry      `yaml:"module_registry"`
-	Server         ServerConfig        `yaml:"server"`
-	Database       DatabaseConfig      `yaml:"database"`
-	Cache          CacheConfig         `yaml:"cache"`
-	Secrets        SecretsConfig       `yaml:"secrets"`
-	Log            LogConfig           `yaml:"log"`
-	Operator       OperatorConfig      `yaml:"operator"`
-	Courier        CourierConfig       `yaml:"courier"`
-	Sessions       SessionsConfig      `yaml:"sessions"`
-	Identity       IdentityConfig      `yaml:"identity"`
-	Security       SecurityConfig      `yaml:"security"`
-	Password       PasswordConfig      `yaml:"password"`
-	MagicLink      MagicLinkConfig     `yaml:"magic_link"`
-	MFA            MFAConfig           `yaml:"mfa"`
-	Passkeys       PasskeysConfig      `yaml:"passkeys"`
-	Admin          AdminConfig         `yaml:"admin"`
-	Policy         PolicyConfig        `yaml:"policy"`
-	Proxy          ProxyConfig         `yaml:"proxy"`
-	Observability  ObservabilityConfig `yaml:"observability"`
+	XTimeouts      map[string]any                    `yaml:"x-timeouts"`
+	XRateLimits    map[string]any                    `yaml:"x-rate-limits"`
+	ModuleVersions map[string]string                 `yaml:"module_versions"`
+	Modules        map[string]ModuleDeploymentConfig `yaml:"modules"`
+	ModuleRegistry ModuleRegistry                    `yaml:"module_registry"`
+	Server         ServerConfig                      `yaml:"server"`
+	Database       DatabaseConfig                    `yaml:"database"`
+	Cache          CacheConfig                       `yaml:"cache"`
+	Secrets        SecretsConfig                     `yaml:"secrets"`
+	Log            LogConfig                         `yaml:"log"`
+	Operator       OperatorConfig                    `yaml:"operator"`
+	Courier        CourierConfig                     `yaml:"courier"`
+	Sessions       SessionsConfig                    `yaml:"sessions"`
+	Identity       IdentityConfig                    `yaml:"identity"`
+	Security       SecurityConfig                    `yaml:"security"`
+	Password       PasswordConfig                    `yaml:"password"`
+	MagicLink      MagicLinkConfig                   `yaml:"magic_link"`
+	MFA            MFAConfig                         `yaml:"mfa"`
+	Passkeys       PasskeysConfig                    `yaml:"passkeys"`
+	Admin          AdminConfig                       `yaml:"admin"`
+	Policy         PolicyConfig                      `yaml:"policy"`
+	Proxy          ProxyConfig                       `yaml:"proxy"`
+	Observability  ObservabilityConfig               `yaml:"observability"`
 }
 
 // ModuleRegistry configures where to pull module images from.
@@ -47,15 +48,15 @@ type ModuleRegistry struct {
 
 // ServerConfig configures the HTTP server.
 type ServerConfig struct {
-	Port           int               `yaml:"port"`
-	Host           string            `yaml:"host"`
-	TLS            TLSConfig         `yaml:"tls"`
-	CORS           CORSConfig        `yaml:"cors"`
-	RequestTimeout Duration          `yaml:"request_timeout"`
-	ReadTimeout    Duration          `yaml:"read_timeout"`
-	WriteTimeout   Duration          `yaml:"write_timeout"`
-	IdleTimeout    Duration          `yaml:"idle_timeout"`
-	InternalNet    InternalNetConfig `yaml:"internal_network"`
+	Port           int                   `yaml:"port"`
+	Host           string                `yaml:"host"`
+	TLS            TLSConfig             `yaml:"tls"`
+	CORS           CORSConfig            `yaml:"cors"`
+	RequestTimeout Duration              `yaml:"request_timeout"`
+	ReadTimeout    Duration              `yaml:"read_timeout"`
+	WriteTimeout   Duration              `yaml:"write_timeout"`
+	IdleTimeout    Duration              `yaml:"idle_timeout"`
+	Registry       ServiceRegistryConfig `yaml:"registry"`
 }
 
 // TLSConfig configures TLS settings.
@@ -77,15 +78,11 @@ type CORSConfig struct {
 	MaxAge           int      `yaml:"max_age"`
 }
 
-// InternalNetConfig configures the internal Docker network.
-type InternalNetConfig struct {
-	Name               string   `yaml:"name"`
-	Subnet             string   `yaml:"subnet"`
-	HealthCheckInt     Duration `yaml:"health_check_interval"`
-	HealthCheckTimeout Duration `yaml:"health_check_timeout"`
-	HealthCheckFails   int      `yaml:"health_check_failures"`
-	RestartOnFailure   bool     `yaml:"restart_on_failure"`
-	StartupTimeout     Duration `yaml:"startup_timeout"`
+// ServiceRegistryConfig controls core registry health checks. Workload
+// networking and restarts are deployment-owned by Compose or Helm.
+type ServiceRegistryConfig struct {
+	HealthCheckInterval Duration `yaml:"health_check_interval"`
+	HealthCheckTimeout  Duration `yaml:"health_check_timeout"`
 }
 
 // DatabaseConfig configures the database connection.
@@ -780,6 +777,10 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(c.Passkeys.RPOrigin) == "" {
 			return fmt.Errorf("passkeys.rp_origin is required when passkeys are enabled")
 		}
+	}
+
+	if _, err := ResolveModulePlan(c); err != nil {
+		return fmt.Errorf("resolving module plan: %w", err)
 	}
 
 	if !isProductionEnvironment() {

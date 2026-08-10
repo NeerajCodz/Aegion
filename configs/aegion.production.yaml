@@ -38,6 +38,7 @@ module_versions:
   oauth2:     "${AEGION_MODULE_OAUTH2_VERSION:-v1.0.0}"
   introspection: "${AEGION_MODULE_INTROSPECTION_VERSION:-off}"
   admin:      "${AEGION_MODULE_ADMIN_VERSION:-v1.0.0}"
+  analytics:     "${AEGION_MODULE_ANALYTICS_VERSION:-off}"
   policy:     "${AEGION_MODULE_POLICY_VERSION:-v1.0.0}"
   proxy:      "${AEGION_MODULE_PROXY_VERSION:-off}"
   cli:        "${AEGION_MODULE_CLI_VERSION:-off}"
@@ -45,6 +46,68 @@ module_versions:
 module_registry:
   base_url: "${AEGION_MODULE_REGISTRY:-ghcr.io/aegion}"
   pull_policy: "always"
+
+# External workload contracts. Deployment supplies these as per-module secrets
+# and configuration; core refuses enabled external modules without them.
+modules:
+  admin:
+    image: ${AEGION_MODULE_ADMIN_IMAGE}
+    public_url: ${AEGION_MODULE_ADMIN_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_ADMIN_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_ADMIN_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_ADMIN_CREDENTIAL_FILE}
+  analytics:
+    image: ${AEGION_MODULE_ANALYTICS_IMAGE}
+    public_url: ${AEGION_MODULE_ANALYTICS_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_ANALYTICS_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_ANALYTICS_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_ANALYTICS_CREDENTIAL_FILE}
+  cli:
+    image: ${AEGION_MODULE_CLI_IMAGE}
+    database_url: ${AEGION_MODULE_CLI_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_CLI_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_CLI_CREDENTIAL_FILE}
+  introspection:
+    image: ${AEGION_MODULE_INTROSPECTION_IMAGE}
+    public_url: ${AEGION_MODULE_INTROSPECTION_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_INTROSPECTION_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_INTROSPECTION_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_INTROSPECTION_CREDENTIAL_FILE}
+  mfa:
+    image: ${AEGION_MODULE_MFA_IMAGE}
+    public_url: ${AEGION_MODULE_MFA_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_MFA_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_MFA_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_MFA_CREDENTIAL_FILE}
+  oauth2:
+    image: ${AEGION_MODULE_OAUTH2_IMAGE}
+    public_url: ${AEGION_MODULE_OAUTH2_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_OAUTH2_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_OAUTH2_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_OAUTH2_CREDENTIAL_FILE}
+  passkeys:
+    image: ${AEGION_MODULE_PASSKEYS_IMAGE}
+    public_url: ${AEGION_MODULE_PASSKEYS_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_PASSKEYS_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_PASSKEYS_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_PASSKEYS_CREDENTIAL_FILE}
+  proxy:
+    image: ${AEGION_MODULE_PROXY_IMAGE}
+    database_url: ${AEGION_MODULE_PROXY_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_PROXY_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_PROXY_CREDENTIAL_FILE}
+  social:
+    image: ${AEGION_MODULE_SOCIAL_IMAGE}
+    public_url: ${AEGION_MODULE_SOCIAL_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_SOCIAL_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_SOCIAL_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_SOCIAL_CREDENTIAL_FILE}
+  sso:
+    image: ${AEGION_MODULE_SSO_IMAGE}
+    public_url: ${AEGION_MODULE_SSO_PUBLIC_URL}
+    database_url: ${AEGION_MODULE_SSO_DATABASE_URL}
+    ca_cert_file: ${AEGION_MODULE_SSO_CA_CERT_FILE}
+    credential_file: ${AEGION_MODULE_SSO_CREDENTIAL_FILE}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Server Configuration
@@ -85,14 +148,9 @@ server:
 
   <<: *default-timeouts
 
-  internal_network:
-    name: aegion_modules
-    subnet: 172.20.0.0/16
+  registry:
     health_check_interval: 10s
     health_check_timeout: 5s
-    health_check_failures: 3
-    restart_on_failure: true
-    startup_timeout: 60s
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Database Configuration

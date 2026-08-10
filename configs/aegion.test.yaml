@@ -36,6 +36,7 @@ module_versions:
   oauth2:     "latest"
   introspection: "latest"
   admin:      "latest"
+  analytics:    "latest"
   policy:     "latest"
   proxy:      "latest"
   cli:        "latest"
@@ -73,14 +74,9 @@ server:
 
   <<: *fast-timeouts
 
-  internal_network:
-    name: aegion_test_modules
-    subnet: 172.21.0.0/16
+  registry:
     health_check_interval: 1s
     health_check_timeout: 1s
-    health_check_failures: 1
-    restart_on_failure: false
-    startup_timeout: 5s
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Database Configuration — SQLite for fast isolated tests

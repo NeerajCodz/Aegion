@@ -13,18 +13,14 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/aegion/aegion/core/orchestrator"
-	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
-	"github.com/aegion/aegion/internal/xlog"
 )
 
 type openErrFS struct {
@@ -165,51 +161,10 @@ func TestServerAdditionalCoverageBranches(t *testing.T) {
 		}
 	})
 
-	t.Run("shutdown returns orchestrator stop error", func(t *testing.T) {
-		s := newTestServer(t)
-		s.orchestrator = &stubModuleOrchestrator{stopErr: errors.New("stop failed")}
-
-		if err := s.Shutdown(context.Background()); err == nil {
-			t.Fatal("expected shutdown to return orchestrator stop error")
-		}
-	})
-
-	t.Run("new server wraps orchestrator constructor error", func(t *testing.T) {
-		cfg := &config.Config{
-			Server: config.ServerConfig{
-				RequestTimeout: config.Duration(5 * time.Second),
-				InternalNet: config.InternalNetConfig{
-					HealthCheckInt:     config.Duration(time.Second),
-					HealthCheckTimeout: config.Duration(time.Second),
-				},
-			},
-			Admin: config.AdminConfig{Path: "/aegion"},
-			Secrets: config.SecretsConfig{
-				Internal: []string{"dev-internal-secret-change-me-32chars"},
-			},
-		}
-
-		orig := newModuleOrchestrator
-		t.Cleanup(func() { newModuleOrchestrator = orig })
-		newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
-			return nil, errors.New("orchestrator ctor failed")
-		}
-
-		_, err := NewServer(context.Background(), &ServerConfig{
-			Config:     cfg,
-			ConfigPath: "configs\\aegion.yaml",
-			DB:         &database.DB{Pool: nil},
-			Log:        xlog.New(xlog.Config{Level: "error", Format: "json"}),
-		})
-		if err == nil || !strings.Contains(err.Error(), "orchestrator ctor failed") {
-			t.Fatalf("expected wrapped constructor error, got %v", err)
-		}
-	})
 }
 
 func TestLifecycleAdditionalErrorPaths(t *testing.T) {
 	s := newTestServer(t)
-	s.orchestrator = &stubModuleOrchestrator{stopErr: errors.New("stop failed")}
 
 	httpSrv := &http.Server{}
 	obs := &stubObsProvider{shutdownErr: errors.New("obs shutdown failed")}
@@ -305,25 +260,6 @@ func TestMainAndModuleMigrationCoverageBranches(t *testing.T) {
 			_ = provider.Shutdown(context.Background())
 		}
 
-		orig := newModuleOrchestrator
-		t.Cleanup(func() { newModuleOrchestrator = orig })
-		newModuleOrchestrator = func(cfg orchestrator.Config) (moduleOrchestrator, error) {
-			return nil, errors.New("forced newServer error")
-		}
-
-		cfg.Secrets.Internal = []string{"dev-internal-secret-change-me-32chars"}
-		_, err = deps.newServer(context.Background(), &ServerConfig{
-			Config:     cfg,
-			ConfigPath: "configs\\aegion.yaml",
-			DB:         &database.DB{Pool: nil},
-			Log:        xlog.New(xlog.Config{Level: "error", Format: "json"}),
-			WorkerManager: workers.NewManager(workers.ManagerConfig{
-				Log: xlog.New(xlog.Config{Level: "error", Format: "json"}),
-			}),
-		})
-		if err == nil || !strings.Contains(err.Error(), "forced newServer error") {
-			t.Fatalf("expected forced newServer error, got %v", err)
-		}
 	})
 
 	t.Run("run logs module migration completion", func(t *testing.T) {
@@ -331,7 +267,7 @@ func TestMainAndModuleMigrationCoverageBranches(t *testing.T) {
 		deps, _, _, migrator, lifecycle, _ := buildRunDeps(cfg)
 
 		moduleMigrateCalls := 0
-		deps.runModuleMigrate = func(ctx context.Context, cfg *config.Config, db *database.DB, configPath string) error {
+		deps.runModuleMigrate = func(ctx context.Context, plan config.ModulePlan, db *database.DB) error {
 			moduleMigrateCalls++
 			return nil
 		}
@@ -351,33 +287,27 @@ func TestMainAndModuleMigrationCoverageBranches(t *testing.T) {
 
 	t.Run("module migrations helper deps branches", func(t *testing.T) {
 		deps := defaultModuleMigrationDeps()
-		if deps.moduleOrder == nil || deps.moduleFS == nil || deps.moduleMigrator == nil {
+		if deps.moduleMigrator == nil {
 			t.Fatal("expected fully wired default module migration deps")
 		}
-		if deps.moduleMigrator(&database.DB{}, "oauth2", fstest.MapFS{}, "modules/oauth2/migrations") == nil {
+		if deps.moduleMigrator(&database.DB{}, "oauth2", fstest.MapFS{}, "oauth2/migrations") == nil {
 			t.Fatal("expected default module migrator factory to return migrator")
 		}
 
-		cfg := &config.Config{ModuleVersions: map[string]string{"oauth2": "latest"}}
 		customDeps := moduleMigrationDeps{
-			moduleOrder: func(moduleVersions map[string]string) ([]string, error) { return []string{}, nil },
-			moduleFS:    func(configPath string) (fs.FS, error) { return fstest.MapFS{}, nil },
 			moduleMigrator: func(db *database.DB, moduleID string, migrationFS fs.FS, basePath string) migrator {
 				return &moduleTestMigrator{}
 			},
 		}
-		if err := runEnabledModuleMigrationsWithDeps(context.Background(), cfg, &database.DB{}, "configs\\aegion.yaml", customDeps); err != nil {
-			t.Fatalf("expected no-op on empty module list, got %v", err)
+		if err := runEnabledModuleMigrationsWithDeps(context.Background(), config.ModulePlan{}, &database.DB{}, customDeps); err != nil {
+			t.Fatalf("expected no-op on empty module plan, got %v", err)
 		}
 
-		customDeps.moduleOrder = func(moduleVersions map[string]string) ([]string, error) { return []string{"oauth2"}, nil }
-		customDeps.moduleFS = func(configPath string) (fs.FS, error) { return nil, errors.New("fs load failed") }
-		if err := runEnabledModuleMigrationsWithDeps(context.Background(), cfg, &database.DB{}, "configs\\aegion.yaml", customDeps); err == nil {
-			t.Fatal("expected module fs load error")
-		}
-
-		customDeps.moduleFS = func(configPath string) (fs.FS, error) { return openErrFS{err: errors.New("stat failed")}, nil }
-		if err := runEnabledModuleMigrationsWithDeps(context.Background(), cfg, &database.DB{}, "configs\\aegion.yaml", customDeps); err == nil || !strings.Contains(err.Error(), "checking module") {
+		plan := config.ModulePlan{Modules: []config.ResolvedModule{{
+			ID:        "oauth2",
+			Migration: config.ModuleMigration{Filesystem: openErrFS{err: errors.New("stat failed")}, BasePath: "oauth2/migrations"},
+		}}}
+		if err := runEnabledModuleMigrationsWithDeps(context.Background(), plan, &database.DB{}, customDeps); err == nil || !strings.Contains(err.Error(), "checking module") {
 			t.Fatalf("expected wrapped stat error, got %v", err)
 		}
 	})

@@ -61,23 +61,24 @@ type telemetryProvider interface {
 }
 
 type mainDeps struct {
-	stdout           io.Writer
-	stderr           io.Writer
-	loadConfig       func(path string) (*config.Config, error)
-	validateConfig   func(cfg *config.Config) error
-	newLogger        func(cfg xlog.Config) *xlog.Logger
-	connectDB        func(ctx context.Context, cfg database.Config) (*database.DB, error)
-	newMigrator      func(db *database.DB) migrator
-	runModuleMigrate func(ctx context.Context, cfg *config.Config, db *database.DB, configPath string) error
-	newWorkerMgr     func(log *xlog.Logger, db *database.DB) *workers.Manager
-	newObservability func(ctx context.Context, cfg *config.Config) (telemetryProvider, error)
-	newServer        func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error)
-	newHTTPServer    func(cfg *config.Config, handler http.Handler) *http.Server
-	newLifecycle     func(cfg *LifecycleConfig) lifecycleManager
-	newSignalChan    func() chan os.Signal
-	notifySignals    func(c chan<- os.Signal, sig ...os.Signal)
-	stopSignals      func(c chan<- os.Signal)
-	startHTTPServer  func(cfg *config.Config, log *xlog.Logger, httpServer *http.Server)
+	stdout            io.Writer
+	stderr            io.Writer
+	loadConfig        func(path string) (*config.Config, error)
+	validateConfig    func(cfg *config.Config) error
+	resolveModulePlan func(cfg *config.Config) (config.ModulePlan, error)
+	newLogger         func(cfg xlog.Config) *xlog.Logger
+	connectDB         func(ctx context.Context, cfg database.Config) (*database.DB, error)
+	newMigrator       func(db *database.DB) migrator
+	runModuleMigrate  func(ctx context.Context, plan config.ModulePlan, db *database.DB) error
+	newWorkerMgr      func(log *xlog.Logger, db *database.DB) *workers.Manager
+	newObservability  func(ctx context.Context, cfg *config.Config) (telemetryProvider, error)
+	newServer         func(ctx context.Context, cfg *ServerConfig) (runtimeServer, error)
+	newHTTPServer     func(cfg *config.Config, handler http.Handler) *http.Server
+	newLifecycle      func(cfg *LifecycleConfig) lifecycleManager
+	newSignalChan     func() chan os.Signal
+	notifySignals     func(c chan<- os.Signal, sig ...os.Signal)
+	stopSignals       func(c chan<- os.Signal)
+	startHTTPServer   func(cfg *config.Config, log *xlog.Logger, httpServer *http.Server)
 }
 
 type migrator interface {
@@ -137,8 +138,9 @@ func defaultMainDeps() mainDeps {
 		validateConfig: func(cfg *config.Config) error {
 			return cfg.Validate()
 		},
-		newLogger: xlog.New,
-		connectDB: database.Connect,
+		resolveModulePlan: config.ResolveModulePlan,
+		newLogger:         xlog.New,
+		connectDB:         database.Connect,
 		newMigrator: func(db *database.DB) migrator {
 			return database.NewMigrator(db, migrations, "migrations")
 		},
@@ -243,6 +245,16 @@ func run(args []string, deps mainDeps) int {
 		return 1
 	}
 
+	resolveModulePlan := deps.resolveModulePlan
+	if resolveModulePlan == nil {
+		resolveModulePlan = config.ResolveModulePlan
+	}
+	modulePlan, err := resolveModulePlan(cfg)
+	if err != nil {
+		_, _ = fmt.Fprintf(deps.stderr, "Invalid module plan: %v\n", err)
+		return 1
+	}
+
 	log := deps.newLogger(xlog.Config{
 		Level:            cfg.Log.Level,
 		Format:           cfg.Log.Format,
@@ -312,7 +324,7 @@ func run(args []string, deps mainDeps) int {
 	log.Info("Migrations complete")
 
 	if deps.runModuleMigrate != nil {
-		if err := deps.runModuleMigrate(ctx, cfg, db, f.configPath); err != nil {
+		if err := deps.runModuleMigrate(ctx, modulePlan, db); err != nil {
 			_, _ = fmt.Fprintf(deps.stderr, "Failed to run module migrations: %v\n", err)
 			return 1
 		}
@@ -332,7 +344,7 @@ func run(args []string, deps mainDeps) int {
 
 	server, err := deps.newServer(ctx, &ServerConfig{
 		Config:         cfg,
-		ConfigPath:     f.configPath,
+		ModulePlan:     modulePlan,
 		DB:             db,
 		Log:            log,
 		WorkerManager:  workerMgr,

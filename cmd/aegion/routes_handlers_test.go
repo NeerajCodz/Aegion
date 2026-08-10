@@ -17,13 +17,12 @@ import (
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/flows"
-	"github.com/aegion/aegion/core/orchestrator"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
-	"github.com/aegion/aegion/internal/xlog"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
+	"github.com/aegion/aegion/internal/xlog"
 )
 
 type stubCmdPolicyChecker struct {
@@ -42,24 +41,6 @@ func (s *stubCmdPolicyChecker) Check(ctx context.Context, req *policypb.CheckReq
 		return s.resp, nil
 	}
 	return &policypb.CheckResponse{Allowed: true, ModelUsed: "rbac", EvalPath: []string{"rbac:allow"}}, nil
-}
-
-type stubRouteOrchestrator struct {
-	restartErr   error
-	restartCalls []string
-}
-
-func (s *stubRouteOrchestrator) Start(ctx context.Context) error {
-	return nil
-}
-
-func (s *stubRouteOrchestrator) Stop(ctx context.Context) error {
-	return nil
-}
-
-func (s *stubRouteOrchestrator) RestartModule(ctx context.Context, moduleID string) error {
-	s.restartCalls = append(s.restartCalls, moduleID)
-	return s.restartErr
 }
 
 type stubRouteSessionManager struct {
@@ -164,11 +145,33 @@ func newTestServer(t *testing.T) *Server {
 		},
 	}
 
+	modulePlan, err := config.ResolveModulePlan(&config.Config{
+		ModuleVersions: map[string]string{"oauth2": "v1.0.0"},
+		Modules: map[string]config.ModuleDeploymentConfig{
+			"oauth2": {
+				Image:          "ghcr.io/aegion/aegion-oauth2:v1.0.0",
+				PublicURL:      "https://oauth.example.test",
+				DatabaseURL:    "postgres://oauth:secret@postgres/oauth?sslmode=verify-full",
+				CACertFile:     "/run/secrets/core-ca.pem",
+				CredentialFile: "/run/secrets/oauth2-credential",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolve module plan: %v", err)
+	}
+	moduleRoutes, err := NewModuleRouteTable(modulePlan)
+	if err != nil {
+		t.Fatalf("build module route table: %v", err)
+	}
+
 	return &Server{
-		cfg:      cfg,
-		log:      xlog.New(xlog.Config{Level: "error", Format: "json"}),
-		registry: registry.New(registry.DefaultConfig(), xlog.Default()),
-		tokenGen: tokenGen,
+		cfg:          cfg,
+		log:          xlog.New(xlog.Config{Level: "error", Format: "json"}),
+		registry:     registry.New(registry.DefaultConfig(), xlog.Default()),
+		modulePlan:   modulePlan,
+		moduleRoutes: moduleRoutes,
+		tokenGen:     tokenGen,
 	}
 }
 
@@ -1926,94 +1929,6 @@ func TestOIDCRootRoutesProxyToOAuth2Module(t *testing.T) {
 		}
 		if gotUserInfoAuthz != "Bearer test-token-2" {
 			t.Fatalf("expected authorization header to be forwarded, got %q", gotUserInfoAuthz)
-		}
-	})
-}
-
-func TestHandleAdminRestartModule(t *testing.T) {
-	s := newTestServer(t)
-
-	t.Run("module id required", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules//restart", nil)
-		s.handleAdminRestartModule(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("expected %d, got %d", http.StatusBadRequest, rec.Code)
-		}
-	})
-
-	t.Run("orchestrator unavailable", func(t *testing.T) {
-		registerTestModule(t, s, "password-unavailable", registry.EndpointHTTP, "http://password:8080")
-		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-unavailable/restart", nil), "id", "password-unavailable")
-		s.handleAdminRestartModule(rec, req)
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
-		}
-	})
-
-	t.Run("module not found", func(t *testing.T) {
-		stub := &stubRouteOrchestrator{restartErr: orchestrator.ErrModuleNotFound}
-		s.orchestrator = stub
-
-		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/missing/restart", nil), "id", "missing")
-		s.handleAdminRestartModule(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
-		}
-	})
-
-	t.Run("orchestrator closed", func(t *testing.T) {
-		registerTestModule(t, s, "password-closed", registry.EndpointHTTP, "http://password:8080")
-		stub := &stubRouteOrchestrator{restartErr: orchestrator.ErrOrchestratorClosed}
-		s.orchestrator = stub
-
-		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-closed/restart", nil), "id", "password-closed")
-		s.handleAdminRestartModule(rec, req)
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
-		}
-	})
-
-	t.Run("restart error", func(t *testing.T) {
-		registerTestModule(t, s, "password-error", registry.EndpointHTTP, "http://password:8080")
-		stub := &stubRouteOrchestrator{restartErr: errors.New("restart failed")}
-		s.orchestrator = stub
-
-		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-error/restart", nil), "id", "password-error")
-		s.handleAdminRestartModule(rec, req)
-		if rec.Code != http.StatusInternalServerError {
-			t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		registerTestModule(t, s, "password-success", registry.EndpointHTTP, "http://password:8080")
-		stub := &stubRouteOrchestrator{}
-		s.orchestrator = stub
-
-		rec := httptest.NewRecorder()
-		req := withURLParam(httptest.NewRequest(http.MethodPost, "/aegion/api/v1/modules/password-success/restart", nil), "id", "password-success")
-		s.handleAdminRestartModule(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
-		}
-		if len(stub.restartCalls) != 1 || stub.restartCalls[0] != "password-success" {
-			t.Fatalf("expected restart to be called for password-success, got %+v", stub.restartCalls)
-		}
-
-		var resp map[string]string
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("failed to parse response: %v", err)
-		}
-		if resp["status"] != "restarted" {
-			t.Fatalf("expected status restarted, got %q", resp["status"])
-		}
-		if resp["module_id"] != "password-success" {
-			t.Fatalf("expected module_id=password-success, got %q", resp["module_id"])
 		}
 	})
 }

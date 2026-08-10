@@ -38,6 +38,7 @@ module_versions:
   oauth2:     "${AEGION_MODULE_OAUTH2_VERSION:-latest}"
   introspection: "${AEGION_MODULE_INTROSPECTION_VERSION:-latest}"
   admin:      "${AEGION_MODULE_ADMIN_VERSION:-latest}"
+  analytics:     "${AEGION_MODULE_ANALYTICS_VERSION:-latest}"
   policy:     "${AEGION_MODULE_POLICY_VERSION:-latest}"
   proxy:      "${AEGION_MODULE_PROXY_VERSION:-latest}"
   cli:        "${AEGION_MODULE_CLI_VERSION:-latest}"
@@ -84,14 +85,9 @@ server:
 
   <<: *default-timeouts
 
-  internal_network:
-    name: aegion_modules
-    subnet: 172.20.0.0/16
+  registry:
     health_check_interval: 5s
     health_check_timeout: 3s
-    health_check_failures: 3
-    restart_on_failure: true
-    startup_timeout: 45s
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Database Configuration
