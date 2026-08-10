@@ -63,7 +63,6 @@ func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)
 		ListenAddr:   listenAddr,
 		Capabilities: []string{"authz_proxy", "policy_enforcement", "proxy_rule_registry"},
 		Routes:       []string{"/proxy/*", "/api/v1/proxy/*"},
-		GRPCServices: []string{"proxy.PolicyProxy"},
 		EventSubscriptions: []string{
 			"policy.updated",
 			"identity.updated",

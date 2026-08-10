@@ -41,7 +41,6 @@ func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)
 		ListenAddr:   listenAddr,
 		Capabilities: []string{"webauthn_passwordless"},
 		Routes:       []string{"/self-service/passkeys/*", "/api/v1/passkeys/*"},
-		GRPCServices: []string{"passkeys.PasskeyEngine"},
 		EventSubscriptions: []string{
 			"session.created",
 			"identity.deleted",

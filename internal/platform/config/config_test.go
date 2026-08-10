@@ -771,6 +771,15 @@ func TestConfig_Validate_ProductionMode(t *testing.T) {
 		Operator: OperatorConfig{
 			Password: "StrongBootstrapPassword#2026",
 		},
+		Server: ServerConfig{
+			TLS: TLSConfig{
+				Enabled:      true,
+				CertFile:     "/etc/aegion/core-cert.pem",
+				KeyFile:      "/etc/aegion/core-key.pem",
+				ClientCAFile: "/etc/aegion/module-ca.pem",
+			},
+			Registry: ServiceRegistryConfig{GRPCListenAddr: "127.0.0.1:9443"},
+		},
 	}
 
 	tests := []struct {
@@ -959,10 +968,19 @@ func TestConfig_Validate_ProductionTLSAndProxyTrustRequirements(t *testing.T) {
 		Operator: OperatorConfig{
 			Password: "StrongBootstrapPassword#2026",
 		},
+		Server: ServerConfig{
+			TLS: TLSConfig{
+				Enabled:      true,
+				CertFile:     "/etc/aegion/core-cert.pem",
+				KeyFile:      "/etc/aegion/core-key.pem",
+				ClientCAFile: "/etc/aegion/module-ca.pem",
+			},
+			Registry: ServiceRegistryConfig{GRPCListenAddr: "127.0.0.1:9443"},
+		},
 	}
 
 	missingTLS := *base
-	missingTLS.Server.TLS.Enabled = true
+	missingTLS.Server.TLS = TLSConfig{Enabled: true}
 	err := missingTLS.Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server.tls.cert_file and server.tls.key_file are required")
@@ -1011,6 +1029,7 @@ func TestLoad_ProductionConfigConformance(t *testing.T) {
 		"AEGION_SMTP_PASSWORD":                 "smtp-password",
 		"AEGION_TLS_CERT_FILE":                 "/etc/ssl/cert.pem",
 		"AEGION_TLS_KEY_FILE":                  "/etc/ssl/key.pem",
+		"AEGION_TLS_CLIENT_CA_FILE":            "/etc/ssl/client-ca.pem",
 	}
 	for key, value := range env {
 		t.Setenv(key, value)

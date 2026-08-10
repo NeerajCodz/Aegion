@@ -354,6 +354,12 @@ func run(args []string, deps mainDeps) int {
 		_, _ = fmt.Fprintf(deps.stderr, "Failed to initialize server: %v\n", err)
 		return 1
 	}
+	if controlPlane, ok := server.(grpcControlPlane); ok {
+		if err := controlPlane.StartGRPCControlPlane(); err != nil {
+			_, _ = fmt.Fprintf(deps.stderr, "Failed to start gRPC control plane: %v\n", err)
+			return 1
+		}
+	}
 
 	if workerMgr != nil {
 		workerMgr.Start(ctx)

@@ -39,9 +39,6 @@ func TestModuleConfig(t *testing.T) {
 	if len(cfg.Routes) != 3 || cfg.Routes[0] != "/self-service/social/*" || cfg.Routes[1] != "/api/v1/social/*" || cfg.Routes[2] != "/api/v1/social/admin/*" {
 		t.Fatalf("unexpected routes: %#v", cfg.Routes)
 	}
-	if len(cfg.GRPCServices) != 1 || cfg.GRPCServices[0] != "social.SocialEngine" {
-		t.Fatalf("unexpected grpc services: %#v", cfg.GRPCServices)
-	}
 	if len(cfg.EventSubscriptions) != 2 || cfg.EventSubscriptions[0] != "identity.created" || cfg.EventSubscriptions[1] != "identity.updated" {
 		t.Fatalf("unexpected event subscriptions: %#v", cfg.EventSubscriptions)
 	}

@@ -69,7 +69,6 @@ func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)
 		ListenAddr:   listenAddr,
 		Capabilities: []string{"token_introspection", "session_lookup"},
 		Routes:       []string{"/oauth2/introspect", "/api/v1/introspection/*"},
-		GRPCServices: []string{"introspection.IntrospectionService"},
 		EventSubscriptions: []string{
 			"session.created",
 			"session.revoked",

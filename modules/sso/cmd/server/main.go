@@ -67,7 +67,6 @@ func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)
 		ListenAddr:   listenAddr,
 		Capabilities: []string{"saml", "connection_registry", "domain_routing"},
 		Routes:       []string{"/self-service/sso/*", "/api/v1/sso/*"},
-		GRPCServices: []string{"sso.SSOEngine"},
 		EventSubscriptions: []string{
 			"identity.updated",
 			"identity.deleted",

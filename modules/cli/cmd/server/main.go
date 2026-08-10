@@ -63,7 +63,6 @@ func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)
 		ListenAddr:   listenAddr,
 		Capabilities: []string{"ops_interface", "read_only_commands", "diagnostics"},
 		Routes:       []string{"/api/v1/cli/*"},
-		GRPCServices: []string{"cli.CommandGateway"},
 		EventSubscriptions: []string{
 			"system.health",
 			"policy.updated",

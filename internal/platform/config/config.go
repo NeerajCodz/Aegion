@@ -78,9 +78,11 @@ type CORSConfig struct {
 	MaxAge           int      `yaml:"max_age"`
 }
 
-// ServiceRegistryConfig controls core registry health checks. Workload
-// networking and restarts are deployment-owned by Compose or Helm.
+// ServiceRegistryConfig controls the mutually authenticated gRPC control plane
+// and core registry health checks. Workload networking and restarts are
+// deployment-owned by Compose or Helm.
 type ServiceRegistryConfig struct {
+	GRPCListenAddr      string   `yaml:"grpc_listen_addr"`
 	HealthCheckInterval Duration `yaml:"health_check_interval"`
 	HealthCheckTimeout  Duration `yaml:"health_check_timeout"`
 }
@@ -806,8 +808,17 @@ func (c *Config) Validate() error {
 	if strings.EqualFold(strings.TrimSpace(c.Log.Level), "debug") {
 		return fmt.Errorf("log.level=debug is not allowed in production")
 	}
-	if c.Server.TLS.Enabled && (strings.TrimSpace(c.Server.TLS.CertFile) == "" || strings.TrimSpace(c.Server.TLS.KeyFile) == "") {
-		return fmt.Errorf("server.tls.cert_file and server.tls.key_file are required when tls is enabled")
+	if !c.Server.TLS.Enabled {
+		return fmt.Errorf("server.tls.enabled must be true in production")
+	}
+	if strings.TrimSpace(c.Server.TLS.CertFile) == "" || strings.TrimSpace(c.Server.TLS.KeyFile) == "" {
+		return fmt.Errorf("server.tls.cert_file and server.tls.key_file are required in production")
+	}
+	if strings.TrimSpace(c.Server.TLS.ClientCAFile) == "" {
+		return fmt.Errorf("server.tls.client_ca_file is required for the gRPC control plane in production")
+	}
+	if strings.TrimSpace(c.Server.Registry.GRPCListenAddr) == "" {
+		return fmt.Errorf("server.registry.grpc_listen_addr is required in production")
 	}
 	if c.Courier.SMS.Enabled {
 		smsURL := strings.ToLower(strings.TrimSpace(c.Courier.SMS.URL))

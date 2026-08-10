@@ -1,6 +1,7 @@
 package moduleserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -133,6 +134,48 @@ func TestRunReturnsCryptoSelfCheckError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "crypto runtime self-check failed") {
 		t.Fatalf("expected crypto self-check failure, got %v", err)
+	}
+}
+func TestRunFailsClosedForUnimplementedOrInsecureGRPC(t *testing.T) {
+	origSelfCheck := cryptoRuntimeSelfCheck
+	t.Cleanup(func() {
+		cryptoRuntimeSelfCheck = origSelfCheck
+	})
+	cryptoRuntimeSelfCheck = func() error { return nil }
+
+	err := Run(Config{
+		Module:       "analytics",
+		ListenAddr:   "127.0.0.1:0",
+		GRPCServices: []string{"analytics.v1.AnalyticsService"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "without registering an implementation") {
+		t.Fatalf("expected unimplemented gRPC rejection, got %v", err)
+	}
+
+	err = Run(Config{
+		Module:       "analytics",
+		ListenAddr:   "127.0.0.1:0",
+		CoreGRPCAddr: "core.internal:9443",
+	})
+	if err == nil || !strings.Contains(err.Error(), "mTLS client configuration") {
+		t.Fatalf("expected insecure core gRPC rejection, got %v", err)
+	}
+}
+
+func TestBuildModuleMuxReadinessReflectsDependencyState(t *testing.T) {
+	handler := buildModuleMux(Config{
+		Module: "analytics",
+		Readiness: func(context.Context) error {
+			return errors.New("database unavailable")
+		},
+	})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected dependency failure to make module unready, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"not_ready"`) {
+		t.Fatalf("expected not_ready response, got %s", rec.Body.String())
 	}
 }
 

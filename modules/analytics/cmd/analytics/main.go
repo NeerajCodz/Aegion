@@ -25,7 +25,6 @@ func main() {
 			"/ready",
 			"/meta",
 		},
-		GRPCServices: []string{"analytics.v1.AnalyticsService"},
 	}); err != nil {
 		msg := "analytics startup failed"
 		if *configPath != "" {

@@ -37,7 +37,6 @@ func moduleConfig(listenAddr string) moduleserver.Config {
 		ListenAddr:   listenAddr,
 		Capabilities: []string{"totp", "webauthn", "sms", "backup_codes"},
 		Routes:       []string{"/self-service/mfa/*", "/api/v1/mfa/*"},
-		GRPCServices: []string{"mfa.MFAEngine"},
 		EventSubscriptions: []string{
 			"session.created",
 			"identity.updated",

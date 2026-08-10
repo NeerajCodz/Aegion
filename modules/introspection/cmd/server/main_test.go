@@ -43,9 +43,6 @@ func TestModuleConfig(t *testing.T) {
 	if len(cfg.Routes) != 2 || cfg.Routes[0] != "/oauth2/introspect" || cfg.Routes[1] != "/api/v1/introspection/*" {
 		t.Fatalf("unexpected routes: %#v", cfg.Routes)
 	}
-	if len(cfg.GRPCServices) != 1 || cfg.GRPCServices[0] != "introspection.IntrospectionService" {
-		t.Fatalf("unexpected grpc services: %#v", cfg.GRPCServices)
-	}
 	if len(cfg.EventSubscriptions) != 3 || cfg.EventSubscriptions[0] != "session.created" || cfg.EventSubscriptions[1] != "session.revoked" || cfg.EventSubscriptions[2] != "identity.updated" {
 		t.Fatalf("unexpected event subscriptions: %#v", cfg.EventSubscriptions)
 	}

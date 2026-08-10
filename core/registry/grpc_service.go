@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aegion/aegion/core/authtoken"
 	pb "github.com/aegion/aegion/internal/proto/core"
 )
 
@@ -27,6 +28,9 @@ func (s *GRPCService) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 	address := strings.TrimSpace(req.GetAddress())
 	if module == "" || address == "" {
 		return &pb.RegisterResponse{Success: false, Error: "module and address are required"}, nil
+	}
+	if caller := authtoken.ModuleIDFromContext(ctx); caller == "" || caller != module {
+		return &pb.RegisterResponse{Success: false, Error: "authenticated module does not match registration"}, nil
 	}
 	id := module
 	if existing, err := s.registry.GetModule(id); err == nil && existing != nil {

@@ -121,8 +121,8 @@ server:
     enabled: true
     cert_file: ${AEGION_TLS_CERT_FILE}
     key_file: ${AEGION_TLS_KEY_FILE}
-    # Optional: Client certificate verification
-    client_ca_file: ${AEGION_TLS_CLIENT_CA_FILE:-}
+    # Module control-plane clients must present a certificate issued by this CA.
+    client_ca_file: ${AEGION_TLS_CLIENT_CA_FILE}
     # Minimum TLS version (1.2 or 1.3)
     min_version: "1.2"
 
@@ -149,6 +149,7 @@ server:
   <<: *default-timeouts
 
   registry:
+    grpc_listen_addr: ${AEGION_REGISTRY_GRPC_LISTEN_ADDR:-0.0.0.0:9443}
     health_check_interval: 10s
     health_check_timeout: 5s
 

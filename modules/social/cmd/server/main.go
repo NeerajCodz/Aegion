@@ -69,7 +69,6 @@ func moduleConfig(listenAddr string, registerHTTPRoutes func(mux *http.ServeMux)
 		ListenAddr:   listenAddr,
 		Capabilities: []string{"oauth2_social_login", "social_provider_registry"},
 		Routes:       []string{"/self-service/social/*", "/api/v1/social/*", "/api/v1/social/admin/*"},
-		GRPCServices: []string{"social.SocialEngine"},
 		EventSubscriptions: []string{
 			"identity.created",
 			"identity.updated",

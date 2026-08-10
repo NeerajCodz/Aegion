@@ -2,6 +2,8 @@ package moduleserver
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,7 +20,7 @@ import (
 	corepb "github.com/aegion/aegion/internal/proto/core"
 	"github.com/aegion/aegion/internal/xlog"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -36,8 +40,11 @@ type Config struct {
 	GRPCServices       []string
 	EventSubscriptions []string
 	RegisterHTTPRoutes func(mux *http.ServeMux)
+	Readiness          func(context.Context) error
 	GRPCListenAddr     string
 	CoreGRPCAddr       string
+	CoreGRPCTLS        *tls.Config
+	GRPCServerTLS      *tls.Config
 	InternalToken      string
 	RegisterGRPC       func(*grpc.Server)
 }
@@ -61,8 +68,18 @@ func buildModuleMux(cfg Config) *http.ServeMux {
 			"module": cfg.Module,
 		})
 	})
-	mux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if cfg.Readiness != nil {
+			if err := cfg.Readiness(r.Context()); err != nil {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"status": "not_ready",
+					"module": cfg.Module,
+				})
+				return
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status": "ready",
@@ -113,6 +130,35 @@ func Run(cfg Config) error {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = "0.0.0.0:9000"
 	}
+	if len(cfg.GRPCServices) > 0 && cfg.RegisterGRPC == nil {
+		return fmt.Errorf("[%s] advertises gRPC services without registering an implementation", cfg.Module)
+	}
+	if cfg.CoreGRPCAddr != "" {
+		if cfg.CoreGRPCTLS == nil {
+			return fmt.Errorf("[%s] core gRPC requires an mTLS client configuration", cfg.Module)
+		}
+		if strings.TrimSpace(cfg.InternalToken) == "" {
+			return fmt.Errorf("[%s] core gRPC requires an internal authentication token", cfg.Module)
+		}
+	}
+	if cfg.RegisterGRPC != nil || cfg.CoreGRPCAddr != "" {
+		if cfg.GRPCServerTLS == nil {
+			return fmt.Errorf("[%s] module gRPC requires an mTLS server configuration", cfg.Module)
+		}
+	}
+
+	ready := cfg.Readiness
+	var registered atomic.Bool
+	registered.Store(cfg.CoreGRPCAddr == "")
+	cfg.Readiness = func(ctx context.Context) error {
+		if !registered.Load() {
+			return errors.New("core registration is incomplete")
+		}
+		if ready != nil {
+			return ready(ctx)
+		}
+		return nil
+	}
 
 	srv := &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -123,7 +169,7 @@ func Run(cfg Config) error {
 	}
 	var grpcServer *grpc.Server
 	var grpcErrCh <-chan error
-	if cfg.RegisterGRPC != nil || cfg.CoreGRPCAddr != "" || len(cfg.GRPCServices) > 0 {
+	if cfg.RegisterGRPC != nil || cfg.CoreGRPCAddr != "" {
 		if cfg.GRPCListenAddr == "" {
 			cfg.GRPCListenAddr = "0.0.0.0:9100"
 		}
@@ -133,8 +179,33 @@ func Run(cfg Config) error {
 			return err
 		}
 	}
+
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	defer runtimeCancel()
 	if cfg.CoreGRPCAddr != "" {
-		go registerWithCore(context.Background(), cfg, log)
+		go func() {
+			retryDelay := 250 * time.Millisecond
+			for {
+				err := registerWithCore(runtimeCtx, cfg)
+				if err == nil {
+					registered.Store(true)
+					return
+				}
+				timer := time.NewTimer(retryDelay)
+				select {
+				case <-runtimeCtx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+				if retryDelay < 30*time.Second {
+					retryDelay *= 2
+					if retryDelay > 30*time.Second {
+						retryDelay = 30 * time.Second
+					}
+				}
+			}
+		}()
 	}
 
 	errCh := make(chan error, 1)
@@ -173,9 +244,13 @@ func Run(cfg Config) error {
 }
 
 func startGRPCServer(cfg Config) (*grpc.Server, <-chan error, error) {
+	if cfg.GRPCServerTLS == nil || cfg.GRPCServerTLS.ClientAuth < tls.RequireAnyClientCert || cfg.GRPCServerTLS.ClientCAs == nil {
+		return nil, nil, fmt.Errorf("[%s] module gRPC requires a client-authenticating TLS configuration", cfg.Module)
+	}
 	errCh := make(chan error, 1)
 	log := xlog.Default().WithComponent("moduleserver.grpc")
 	server := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(cfg.GRPCServerTLS.Clone())),
 		grpc.UnaryInterceptor(log.UnaryServerInterceptor()),
 		grpc.StreamInterceptor(log.StreamServerInterceptor()),
 	)
@@ -192,7 +267,7 @@ func startGRPCServer(cfg Config) (*grpc.Server, <-chan error, error) {
 			"listen_addr", cfg.GRPCListenAddr,
 			"version", cfg.Version,
 		)
-		if err := server.Serve(listener); err != nil {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			errCh <- err
 			return
 		}
@@ -201,19 +276,19 @@ func startGRPCServer(cfg Config) (*grpc.Server, <-chan error, error) {
 	return server, errCh, nil
 }
 
-func registerWithCore(ctx context.Context, cfg Config, log *xlog.Logger) {
-	conn, err := grpc.NewClient(cfg.CoreGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func registerWithCore(ctx context.Context, cfg Config) error {
+	if cfg.CoreGRPCTLS == nil {
+		return errors.New("core gRPC TLS configuration is required")
+	}
+	conn, err := grpc.NewClient(cfg.CoreGRPCAddr, grpc.WithTransportCredentials(credentials.NewTLS(cfg.CoreGRPCTLS.Clone())))
 	if err != nil {
-		log.ErrorContext(ctx, "core gRPC dial failed", "error", err, "core_addr", cfg.CoreGRPCAddr)
-		return
+		return fmt.Errorf("dial core gRPC: %w", err)
 	}
 	defer conn.Close()
 	client := corepb.NewModuleRegistryClient(conn)
 	callCtx, callCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer callCancel()
-	if cfg.InternalToken != "" {
-		callCtx = metadata.AppendToOutgoingContext(callCtx, "x-aegion-internal-token", cfg.InternalToken)
-	}
+	callCtx = metadata.AppendToOutgoingContext(callCtx, "x-aegion-internal-token", cfg.InternalToken)
 	resp, err := client.Register(callCtx, &corepb.RegisterRequest{
 		Module:             cfg.Module,
 		Version:            cfg.Version,
@@ -224,14 +299,61 @@ func registerWithCore(ctx context.Context, cfg Config, log *xlog.Logger) {
 		EventSubscriptions: cfg.EventSubscriptions,
 	})
 	if err != nil {
-		log.ErrorContext(ctx, "core gRPC registration failed", "error", err, "module", cfg.Module)
-		return
+		return fmt.Errorf("register with core: %w", err)
 	}
 	if !resp.GetSuccess() {
-		log.ErrorContext(ctx, "core gRPC registration rejected", "error", resp.GetError(), "module", cfg.Module)
-		return
+		return fmt.Errorf("core rejected registration: %s", resp.GetError())
 	}
-	log.InfoContext(ctx, "core gRPC registration completed", "module", cfg.Module, "instance_id", resp.GetInstanceId())
+	return nil
+}
+
+// NewMutualTLSClientConfig builds a core-control-plane client configuration
+// from mounted PEM files. The caller's certificate is mandatory.
+func NewMutualTLSClientConfig(certFile, keyFile, caFile, serverName string) (*tls.Config, error) {
+	certificate, roots, err := loadMutualTLSMaterial(certFile, keyFile, caFile)
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		RootCAs:      roots,
+		ServerName:   strings.TrimSpace(serverName),
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
+// NewMutualTLSServerConfig builds a module gRPC server configuration. Every
+// caller must present a certificate signed by the configured client CA.
+func NewMutualTLSServerConfig(certFile, keyFile, clientCAFile string) (*tls.Config, error) {
+	certificate, clientCAs, err := loadMutualTLSMaterial(certFile, keyFile, clientCAFile)
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    clientCAs,
+		MinVersion:   tls.VersionTLS12,
+	}, nil
+}
+
+func loadMutualTLSMaterial(certFile, keyFile, caFile string) (tls.Certificate, *x509.CertPool, error) {
+	if strings.TrimSpace(certFile) == "" || strings.TrimSpace(keyFile) == "" || strings.TrimSpace(caFile) == "" {
+		return tls.Certificate{}, nil, errors.New("certificate, key, and CA files are required")
+	}
+	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("load TLS certificate: %w", err)
+	}
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("read TLS CA file: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return tls.Certificate{}, nil, errors.New("TLS CA file does not contain a certificate")
+	}
+	return certificate, pool, nil
 }
 
 // EnvOrDefault returns env value if set, otherwise fallback.

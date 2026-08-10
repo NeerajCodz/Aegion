@@ -57,6 +57,7 @@ type Server struct {
 	registry       *registry.Registry
 	modulePlan     config.ModulePlan
 	moduleRoutes   ModuleRouteTable
+	registryGRPC   *registryGRPCServer
 	sessionManager sessionManager
 	tokenGen       *authtoken.Generator
 	flowService    *flows.Service
@@ -684,6 +685,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("Shutting down server components")
 
+	if err := s.shutdownGRPCControlPlane(ctx); err != nil {
+		return err
+	}
 	if s.registry != nil {
 		s.registry.Stop()
 		s.log.Info("Service registry stopped")
