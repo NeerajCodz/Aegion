@@ -103,6 +103,12 @@ func Middleware(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 	}
 }
 
+// ContextWithModuleID attaches an authenticated internal module identity to a
+// context. It is used by non-HTTP control-plane authenticators.
+func ContextWithModuleID(ctx context.Context, moduleID string) context.Context {
+	return context.WithValue(ctx, ContextKeyModuleID, moduleID)
+}
+
 // ModuleIDFromContext extracts the module ID from the request context.
 func ModuleIDFromContext(ctx context.Context) string {
 	if v := ctx.Value(ContextKeyModuleID); v != nil {

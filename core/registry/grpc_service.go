@@ -59,15 +59,23 @@ func (s *GRPCService) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 }
 
 func (s *GRPCService) Deregister(ctx context.Context, req *pb.DeregisterRequest) (*pb.DeregisterResponse, error) {
-	if req == nil || s.registry == nil {
+	if req == nil || s.registry == nil || authtoken.ModuleIDFromContext(ctx) != strings.TrimSpace(req.GetModule()) {
 		return &pb.DeregisterResponse{Success: false}, nil
 	}
-	_, err := s.registry.Deregister(req.GetInstanceId())
+	module, err := s.registry.GetModule(req.GetInstanceId())
+	if err != nil || module.Name != strings.TrimSpace(req.GetModule()) {
+		return &pb.DeregisterResponse{Success: false}, nil
+	}
+	_, err = s.registry.Deregister(req.GetInstanceId())
 	return &pb.DeregisterResponse{Success: err == nil}, nil
 }
 
 func (s *GRPCService) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
-	if req == nil || s.registry == nil {
+	if req == nil || s.registry == nil || authtoken.ModuleIDFromContext(ctx) != strings.TrimSpace(req.GetModule()) {
+		return &pb.HeartbeatResponse{Accepted: false, ShouldReregister: true}, nil
+	}
+	module, err := s.registry.GetModule(req.GetInstanceId())
+	if err != nil || module.Name != strings.TrimSpace(req.GetModule()) {
 		return &pb.HeartbeatResponse{Accepted: false, ShouldReregister: true}, nil
 	}
 	status := StatusHealthy

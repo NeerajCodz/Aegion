@@ -153,6 +153,8 @@ func newTestServer(t *testing.T) *Server {
 				PublicURL:      "https://oauth.example.test",
 				DatabaseURL:    "postgres://oauth:secret@postgres/oauth?sslmode=verify-full",
 				CACertFile:     "/run/secrets/core-ca.pem",
+				ClientCertFile: "/run/secrets/oauth2-client.pem",
+				ClientKeyFile:  "/run/secrets/oauth2-client-key.pem",
 				CredentialFile: "/run/secrets/oauth2-credential",
 			},
 		},

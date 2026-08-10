@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/aegion/aegion/core/authtoken"
+	"github.com/aegion/aegion/core/moduleauth"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/internal/platform/config"
 	corepb "github.com/aegion/aegion/internal/proto/core"
@@ -42,6 +42,9 @@ func (s *Server) StartGRPCControlPlane() error {
 	if listenAddr == "" {
 		return nil
 	}
+	if s.moduleAuth == nil {
+		return errors.New("module credential manager is unavailable")
+	}
 	tlsConfig, err := registryTLSConfig(s.cfg.Server.TLS)
 	if err != nil {
 		return fmt.Errorf("configure registry gRPC TLS: %w", err)
@@ -51,17 +54,33 @@ func (s *Server) StartGRPCControlPlane() error {
 		return fmt.Errorf("listen for registry gRPC: %w", err)
 	}
 
+	requirements := map[string]moduleauth.Requirement{
+		corepb.InternalTokenService_GetCurrent_FullMethodName: {Bootstrap: true},
+		corepb.InternalTokenService_Validate_FullMethodName: {
+			Audience: "core.registry", Permission: "registry:register",
+		},
+		corepb.ModuleRegistry_Register_FullMethodName: {
+			Audience: "core.registry", Permission: "registry:register",
+		},
+		corepb.ModuleRegistry_Deregister_FullMethodName: {
+			Audience: "core.registry", Permission: "registry:deregister",
+		},
+		corepb.ModuleRegistry_Heartbeat_FullMethodName: {
+			Audience: "core.registry", Permission: "registry:heartbeat",
+		},
+		corepb.ModuleRegistry_GetModules_FullMethodName: {
+			Audience: "core.registry", Permission: "registry:read",
+		},
+	}
 	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.ChainUnaryInterceptor(
 			s.log.UnaryServerInterceptor(),
-			authtoken.UnaryServerInterceptor(s.tokenGen),
+			s.moduleAuth.UnaryServerInterceptor(requirements),
 		),
-		grpc.ChainStreamInterceptor(
-			s.log.StreamServerInterceptor(),
-			authtoken.StreamServerInterceptor(s.tokenGen),
-		),
+		grpc.StreamInterceptor(s.log.StreamServerInterceptor()),
 	)
+	corepb.RegisterInternalTokenServiceServer(grpcServer, moduleauth.NewGRPCService(s.moduleAuth))
 	corepb.RegisterModuleRegistryServer(grpcServer, registry.NewGRPCService(s.registry))
 	controlPlane := &registryGRPCServer{server: grpcServer, listener: listener}
 	s.registryGRPC = controlPlane

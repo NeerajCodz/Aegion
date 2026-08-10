@@ -178,6 +178,29 @@ func TestBuildModuleMuxReadinessReflectsDependencyState(t *testing.T) {
 		t.Fatalf("expected not_ready response, got %s", rec.Body.String())
 	}
 }
+func TestApplyControlPlaneEnvironmentReadsMountedCredential(t *testing.T) {
+	credentialFile := t.TempDir() + "/module-credential"
+	if err := os.WriteFile(credentialFile, []byte("  bootstrap-credential  \n"), 0o600); err != nil {
+		t.Fatalf("write credential file: %v", err)
+	}
+	t.Setenv("AEGION_MODULE_CREDENTIAL_FILE", credentialFile)
+	cfg := Config{CoreGRPCAddr: "core.internal:9443"}
+	if err := applyControlPlaneEnvironment(&cfg); err != nil {
+		t.Fatalf("apply control-plane environment: %v", err)
+	}
+	if cfg.BootstrapCredential != "bootstrap-credential" {
+		t.Fatalf("expected trimmed mounted credential, got %q", cfg.BootstrapCredential)
+	}
+
+	oversizedFile := t.TempDir() + "/oversized-credential"
+	if err := os.WriteFile(oversizedFile, []byte(strings.Repeat("x", 4097)), 0o600); err != nil {
+		t.Fatalf("write oversized credential file: %v", err)
+	}
+	cfg = Config{CoreGRPCAddr: "core.internal:9443", BootstrapCredentialFile: oversizedFile}
+	if err := applyControlPlaneEnvironment(&cfg); err == nil || !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("expected oversized credential error, got %v", err)
+	}
+}
 
 func TestEnvOrDefault(t *testing.T) {
 	t.Setenv("AEGION_MODULE_NAME", "module-from-env")

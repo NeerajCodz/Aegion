@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -32,21 +33,22 @@ var (
 
 // Config defines a standard HTTP module process contract.
 type Config struct {
-	Module             string
-	Version            string
-	ListenAddr         string
-	Capabilities       []string
-	Routes             []string
-	GRPCServices       []string
-	EventSubscriptions []string
-	RegisterHTTPRoutes func(mux *http.ServeMux)
-	Readiness          func(context.Context) error
-	GRPCListenAddr     string
-	CoreGRPCAddr       string
-	CoreGRPCTLS        *tls.Config
-	GRPCServerTLS      *tls.Config
-	InternalToken      string
-	RegisterGRPC       func(*grpc.Server)
+	Module                  string
+	Version                 string
+	ListenAddr              string
+	Capabilities            []string
+	Routes                  []string
+	GRPCServices            []string
+	EventSubscriptions      []string
+	RegisterHTTPRoutes      func(mux *http.ServeMux)
+	Readiness               func(context.Context) error
+	GRPCListenAddr          string
+	CoreGRPCAddr            string
+	CoreGRPCTLS             *tls.Config
+	GRPCServerTLS           *tls.Config
+	BootstrapCredential     string
+	BootstrapCredentialFile string
+	RegisterGRPC            func(*grpc.Server)
 }
 
 type metaResponse struct {
@@ -109,6 +111,9 @@ func Run(cfg Config) error {
 	if cfg.Module == "" {
 		return errors.New("module name is required")
 	}
+	if err := applyControlPlaneEnvironment(&cfg); err != nil {
+		return fmt.Errorf("[%s] resolve control-plane configuration: %w", cfg.Module, err)
+	}
 
 	log := xlog.New(xlog.Config{
 		Level:            os.Getenv("AEGION_LOG_LEVEL"),
@@ -137,8 +142,8 @@ func Run(cfg Config) error {
 		if cfg.CoreGRPCTLS == nil {
 			return fmt.Errorf("[%s] core gRPC requires an mTLS client configuration", cfg.Module)
 		}
-		if strings.TrimSpace(cfg.InternalToken) == "" {
-			return fmt.Errorf("[%s] core gRPC requires an internal authentication token", cfg.Module)
+		if strings.TrimSpace(cfg.BootstrapCredential) == "" {
+			return fmt.Errorf("[%s] core gRPC requires a module bootstrap credential", cfg.Module)
 		}
 	}
 	if cfg.RegisterGRPC != nil || cfg.CoreGRPCAddr != "" {
@@ -288,7 +293,19 @@ func registerWithCore(ctx context.Context, cfg Config) error {
 	client := corepb.NewModuleRegistryClient(conn)
 	callCtx, callCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer callCancel()
-	callCtx = metadata.AppendToOutgoingContext(callCtx, "x-aegion-internal-token", cfg.InternalToken)
+	tokenResponse, err := corepb.NewInternalTokenServiceClient(conn).GetCurrent(callCtx, &corepb.GetCurrentRequest{
+		Module: cfg.Module,
+		BootstrapProof: &corepb.GetCurrentRequest_BootstrapSecret{
+			BootstrapSecret: cfg.BootstrapCredential,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("exchange module credential: %w", err)
+	}
+	if strings.TrimSpace(tokenResponse.GetToken()) == "" {
+		return errors.New("core returned an empty module token")
+	}
+	callCtx = metadata.AppendToOutgoingContext(callCtx, "x-aegion-internal-token", tokenResponse.GetToken())
 	resp, err := client.Register(callCtx, &corepb.RegisterRequest{
 		Module:             cfg.Module,
 		Version:            cfg.Version,
@@ -354,6 +371,67 @@ func loadMutualTLSMaterial(certFile, keyFile, caFile string) (tls.Certificate, *
 		return tls.Certificate{}, nil, errors.New("TLS CA file does not contain a certificate")
 	}
 	return certificate, pool, nil
+}
+func applyControlPlaneEnvironment(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("module server configuration is required")
+	}
+	if strings.TrimSpace(cfg.CoreGRPCAddr) == "" {
+		cfg.CoreGRPCAddr = strings.TrimSpace(os.Getenv("AEGION_CORE_GRPC_ADDR"))
+	}
+	if cfg.CoreGRPCAddr == "" {
+		return nil
+	}
+	if strings.TrimSpace(cfg.BootstrapCredentialFile) == "" {
+		cfg.BootstrapCredentialFile = strings.TrimSpace(os.Getenv("AEGION_MODULE_CREDENTIAL_FILE"))
+	}
+	if cfg.BootstrapCredential == "" && cfg.BootstrapCredentialFile != "" {
+		credential, err := readCredentialFile(cfg.BootstrapCredentialFile)
+		if err != nil {
+			return err
+		}
+		cfg.BootstrapCredential = credential
+	}
+
+	certFile := strings.TrimSpace(os.Getenv("AEGION_MODULE_TLS_CERT_FILE"))
+	keyFile := strings.TrimSpace(os.Getenv("AEGION_MODULE_TLS_KEY_FILE"))
+	caFile := strings.TrimSpace(os.Getenv("AEGION_MODULE_CA_CERT_FILE"))
+	if cfg.CoreGRPCTLS == nil && certFile != "" && keyFile != "" && caFile != "" {
+		coreTLS, err := NewMutualTLSClientConfig(certFile, keyFile, caFile, os.Getenv("AEGION_CORE_GRPC_SERVER_NAME"))
+		if err != nil {
+			return err
+		}
+		cfg.CoreGRPCTLS = coreTLS
+	}
+	if cfg.GRPCServerTLS == nil && certFile != "" && keyFile != "" && caFile != "" {
+		serverTLS, err := NewMutualTLSServerConfig(certFile, keyFile, caFile)
+		if err != nil {
+			return err
+		}
+		cfg.GRPCServerTLS = serverTLS
+	}
+	return nil
+}
+
+func readCredentialFile(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open module credential file: %w", err)
+	}
+	defer file.Close()
+	const maxCredentialBytes = 4096
+	value, err := io.ReadAll(io.LimitReader(file, maxCredentialBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read module credential file: %w", err)
+	}
+	if len(value) > maxCredentialBytes {
+		return "", errors.New("module credential file exceeds maximum size")
+	}
+	credential := strings.TrimSpace(string(value))
+	if credential == "" {
+		return "", errors.New("module credential file is empty")
+	}
+	return credential, nil
 }
 
 // EnvOrDefault returns env value if set, otherwise fallback.

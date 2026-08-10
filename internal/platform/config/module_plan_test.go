@@ -71,6 +71,8 @@ func TestResolveModulePlanProductionDeploymentRequirements(t *testing.T) {
 				PublicURL:      "https://oauth.example.test",
 				DatabaseURL:    "postgres://oauth:secret@postgres/oauth?sslmode=verify-full",
 				CACertFile:     "/run/secrets/core-ca.pem",
+				ClientCertFile: "/run/secrets/oauth2-client.pem",
+				ClientKeyFile:  "/run/secrets/oauth2-client-key.pem",
 				CredentialFile: "/run/secrets/oauth2-credential",
 			},
 		},
@@ -101,6 +103,8 @@ func TestResolveModulePlanProductionDeploymentRequirements(t *testing.T) {
 		PublicURL:      "http://oauth.example.test",
 		DatabaseURL:    "postgres://oauth:secret@postgres/oauth?sslmode=verify-full",
 		CACertFile:     "/run/secrets/core-ca.pem",
+		ClientCertFile: "/run/secrets/oauth2-client.pem",
+		ClientKeyFile:  "/run/secrets/oauth2-client-key.pem",
 		CredentialFile: "/run/secrets/oauth2-credential",
 	}}
 	_, err = ResolveModulePlan(&invalidURL)

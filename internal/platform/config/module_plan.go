@@ -28,6 +28,8 @@ type ModuleDeploymentConfig struct {
 	PublicURL      string `yaml:"public_url"`
 	DatabaseURL    string `yaml:"database_url"`
 	CACertFile     string `yaml:"ca_cert_file"`
+	ClientCertFile string `yaml:"client_cert_file"`
+	ClientKeyFile  string `yaml:"client_key_file"`
 	CredentialFile string `yaml:"credential_file"`
 }
 
@@ -400,6 +402,9 @@ func validateProductionDeployment(module ResolvedModule, deployment ModuleDeploy
 	}
 	if strings.TrimSpace(deployment.CACertFile) == "" {
 		return fmt.Errorf("modules.%s.ca_cert_file is required in production", module.ID)
+	}
+	if strings.TrimSpace(deployment.ClientCertFile) == "" || strings.TrimSpace(deployment.ClientKeyFile) == "" {
+		return fmt.Errorf("modules.%s.client_cert_file and modules.%s.client_key_file are required in production", module.ID, module.ID)
 	}
 	if strings.TrimSpace(deployment.CredentialFile) == "" {
 		return fmt.Errorf("modules.%s.credential_file is required in production", module.ID)

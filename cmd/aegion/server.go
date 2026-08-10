@@ -18,6 +18,7 @@ import (
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/courier"
 	"github.com/aegion/aegion/core/flows"
+	"github.com/aegion/aegion/core/moduleauth"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/core/session"
 	"github.com/aegion/aegion/core/workers"
@@ -58,6 +59,7 @@ type Server struct {
 	modulePlan     config.ModulePlan
 	moduleRoutes   ModuleRouteTable
 	registryGRPC   *registryGRPCServer
+	moduleAuth     *moduleauth.Manager
 	sessionManager sessionManager
 	tokenGen       *authtoken.Generator
 	flowService    *flows.Service
@@ -226,6 +228,14 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		Secret: []byte(internalSecret),
 		TTL:    5 * time.Minute,
 	})
+	if err != nil {
+		return nil, err
+	}
+	moduleAuth, err := moduleauth.NewManager(
+		moduleauth.NewPostgresStore(cfg.DB.Pool),
+		[]byte(internalSecret),
+		5*time.Minute,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +414,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		modulePlan:     cfg.ModulePlan,
 		moduleRoutes:   moduleRoutes,
 		tokenGen:       tokenGen,
+		moduleAuth:     moduleAuth,
 		sessionManager: sessionMgr,
 		flowService:    flowService,
 		policyChecker:  checker,

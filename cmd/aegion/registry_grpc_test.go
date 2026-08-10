@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aegion/aegion/core/authtoken"
+	"github.com/aegion/aegion/core/moduleauth"
 	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/internal/platform/config"
 	corepb "github.com/aegion/aegion/internal/proto/core"
@@ -28,7 +28,16 @@ import (
 
 func TestRegistryGRPCControlPlaneUsesMTLSAndModuleIdentity(t *testing.T) {
 	certs := writeRegistryTestCertificates(t)
-	generator, err := authtoken.NewGenerator(authtoken.GeneratorConfig{Secret: []byte("01234567890123456789012345678901")})
+	bootstrapCredential, credentialHash, err := moduleauth.NewCredential()
+	require.NoError(t, err)
+	manager, err := moduleauth.NewManager(registryTestCredentialStore{credential: moduleauth.Credential{
+		ID:          "credential-analytics-1",
+		ModuleID:    "analytics",
+		SecretHash:  credentialHash,
+		Permissions: []string{"registry:register", "registry:heartbeat", "registry:deregister"},
+		Audiences:   []string{"core.registry"},
+		Enabled:     true,
+	}}, []byte("01234567890123456789012345678901"), time.Minute)
 	require.NoError(t, err)
 
 	server := &Server{
@@ -41,9 +50,9 @@ func TestRegistryGRPCControlPlaneUsesMTLSAndModuleIdentity(t *testing.T) {
 			},
 			Registry: config.ServiceRegistryConfig{GRPCListenAddr: "127.0.0.1:0"},
 		}},
-		log:      xlog.Default(),
-		registry: registry.New(registry.DefaultConfig(), xlog.Default()),
-		tokenGen: generator,
+		log:        xlog.Default(),
+		registry:   registry.New(registry.DefaultConfig(), xlog.Default()),
+		moduleAuth: manager,
 	}
 	require.NoError(t, server.StartGRPCControlPlane())
 	t.Cleanup(func() {
@@ -62,11 +71,17 @@ func TestRegistryGRPCControlPlaneUsesMTLSAndModuleIdentity(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, conn.Close()) })
 
-	token, err := generator.Generate("analytics")
-	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	ctx = metadata.AppendToOutgoingContext(ctx, "x-aegion-internal-token", token)
+	tokenResponse, err := corepb.NewInternalTokenServiceClient(conn).GetCurrent(ctx, &corepb.GetCurrentRequest{
+		Module: "analytics",
+		BootstrapProof: &corepb.GetCurrentRequest_BootstrapSecret{
+			BootstrapSecret: bootstrapCredential,
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, tokenResponse.GetToken())
+	ctx = metadata.AppendToOutgoingContext(ctx, "x-aegion-internal-token", tokenResponse.GetToken())
 	response, err := corepb.NewModuleRegistryClient(conn).Register(ctx, &corepb.RegisterRequest{
 		Module:  "analytics",
 		Version: "v1.2.3",
@@ -83,6 +98,14 @@ func TestRegistryGRPCControlPlaneUsesMTLSAndModuleIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, mismatched.GetSuccess())
 	require.Contains(t, mismatched.GetError(), "does not match")
+}
+
+type registryTestCredentialStore struct {
+	credential moduleauth.Credential
+}
+
+func (s registryTestCredentialStore) Credential(context.Context, string) (moduleauth.Credential, error) {
+	return s.credential, nil
 }
 
 type registryTestCertificates struct {
@@ -151,6 +174,7 @@ func createSignedCertificate(t *testing.T, ca *x509.Certificate, caKey *rsa.Priv
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 	}
 	if client {
+		template.Subject.CommonName = "analytics"
 		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 	} else {
 		template.Subject.CommonName = "localhost"
