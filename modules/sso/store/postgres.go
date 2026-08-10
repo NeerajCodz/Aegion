@@ -164,6 +164,55 @@ func (s *PostgresStore) DeleteConnection(ctx context.Context, slug string) error
 	return nil
 }
 
+func (s *PostgresStore) CreateAuthRequest(ctx context.Context, requestID, connectionSlug string, expiresAt time.Time) error {
+	requestID = strings.TrimSpace(requestID)
+	connectionSlug = normalizeSlug(connectionSlug)
+	if requestID == "" || connectionSlug == "" || !expiresAt.After(time.Now().UTC()) {
+		return ErrAuthRequestConflict
+	}
+	result, err := s.pool.Exec(ctx, `
+		WITH pruned AS (
+			DELETE FROM sso_auth_requests
+			WHERE expires_at <= CURRENT_TIMESTAMP
+		)
+		INSERT INTO sso_auth_requests (request_id, connection_slug, expires_at)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (request_id) DO NOTHING
+	`, requestID, connectionSlug, expiresAt.UTC())
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrAuthRequestConflict
+	}
+	return nil
+}
+
+func (s *PostgresStore) ConsumeAuthRequest(ctx context.Context, requestID, connectionSlug string, now time.Time) (bool, error) {
+	requestID = strings.TrimSpace(requestID)
+	connectionSlug = normalizeSlug(connectionSlug)
+	if requestID == "" || connectionSlug == "" {
+		return false, nil
+	}
+	var consumed bool
+	err := s.pool.QueryRow(ctx, `
+		UPDATE sso_auth_requests
+		SET consumed_at = $3
+		WHERE request_id = $1
+			AND connection_slug = $2
+			AND consumed_at IS NULL
+			AND expires_at > $3
+		RETURNING TRUE
+	`, requestID, connectionSlug, now.UTC()).Scan(&consumed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return consumed, nil
+}
+
 func scanConnection(scanner interface{ Scan(dest ...any) error }) (Connection, error) {
 	var (
 		connection  Connection

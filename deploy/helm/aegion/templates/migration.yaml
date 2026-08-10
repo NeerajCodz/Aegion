@@ -1,0 +1,93 @@
+{{- if .Values.migration.enabled }}
+{{- $fullName := include "aegion.fullname" . -}}
+{{- $coreImage := .Values.core.image -}}
+{{- $coreSecrets := .Values.core.secrets -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullName }}-migrate
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  labels:
+    {{- include "aegion.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "aegion.name" . }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: {{ required "core.image.repository is required" $coreImage.repository }}:{{ required "core.image.tag is required" $coreImage.tag }}@{{ required "core.image.digest is required" $coreImage.digest }}
+          args: ["migrate", "--config", "/config/aegion.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+          env:
+            - {name: AEGION_ENV, value: production}
+            - {name: AEGION_DATABASE_URL_FILE, value: /var/run/aegion/core/database-url}
+            - {name: AEGION_SECRETS_COOKIE_FILE, value: /var/run/aegion/core/cookie-secret}
+            - {name: AEGION_SECRETS_CIPHER_FILE, value: /var/run/aegion/core/cipher-secret}
+            - {name: AEGION_SECRETS_INTERNAL_FILE, value: /var/run/aegion/core/internal-secret}
+            - {name: AEGION_TLS_CERT_FILE, value: /var/run/aegion/server/tls.crt}
+            - {name: AEGION_TLS_KEY_FILE, value: /var/run/aegion/server/tls.key}
+            - {name: AEGION_TLS_CLIENT_CA_FILE, value: /var/run/aegion/control-plane/ca.crt}
+            {{- range $id, $module := .Values.modules }}
+            {{- if $module.enabled }}
+            {{- $moduleName := upper $id }}
+            - name: AEGION_MODULE_{{ $moduleName }}_IMAGE
+              value: {{ required (printf "modules.%s.image.repository is required" $id) $module.image.repository | quote }}:{{ required (printf "modules.%s.image.tag is required" $id) $module.image.tag }}@{{ required (printf "modules.%s.image.digest is required" $id) $module.image.digest }}
+            - name: AEGION_MODULE_{{ $moduleName }}_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required (printf "modules.%s.databaseSecret is required" $id) $module.databaseSecret }}
+                  key: database-url
+            - name: AEGION_MODULE_{{ $moduleName }}_CA_CERT_FILE
+              value: /var/run/aegion/modules/{{ $id }}/ca/ca.crt
+            - name: AEGION_MODULE_{{ $moduleName }}_CLIENT_CERT_FILE
+              value: /var/run/aegion/modules/{{ $id }}/client/tls.crt
+            - name: AEGION_MODULE_{{ $moduleName }}_CLIENT_KEY_FILE
+              value: /var/run/aegion/modules/{{ $id }}/client/tls.key
+            - name: AEGION_MODULE_{{ $moduleName }}_CREDENTIAL_FILE
+              value: /var/run/aegion/modules/{{ $id }}/credential/credential
+            {{- if $module.publicPath }}
+            - name: AEGION_MODULE_{{ $moduleName }}_PUBLIC_URL
+              value: {{ printf "%s%s" (required "publicBaseURL is required for enabled public modules" $.Values.publicBaseURL) $module.publicPath | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - {name: config, mountPath: /config/aegion.yaml, subPath: {{ .Values.core.configKey }}, readOnly: true}
+            - {name: database, mountPath: /var/run/aegion/core, readOnly: true}
+            - {name: cookie, mountPath: /var/run/aegion/core, readOnly: true}
+            - {name: cipher, mountPath: /var/run/aegion/core, readOnly: true}
+            - {name: internal, mountPath: /var/run/aegion/core, readOnly: true}
+            - {name: server-tls, mountPath: /var/run/aegion/server, readOnly: true}
+            - {name: control-plane-ca, mountPath: /var/run/aegion/control-plane, readOnly: true}
+      volumes:
+        - {name: config, configMap: {name: {{ required "core.configMapName is required" .Values.core.configMapName }}}}
+        - name: database
+          secret: {secretName: {{ required "core.secrets.database is required" $coreSecrets.database }}, items: [{key: database-url, path: database-url}]}
+        - name: cookie
+          secret: {secretName: {{ required "core.secrets.cookie is required" $coreSecrets.cookie }}, items: [{key: cookie-secret, path: cookie-secret}]}
+        - name: cipher
+          secret: {secretName: {{ required "core.secrets.cipher is required" $coreSecrets.cipher }}, items: [{key: cipher-secret, path: cipher-secret}]}
+        - name: internal
+          secret: {secretName: {{ required "core.secrets.internal is required" $coreSecrets.internal }}, items: [{key: internal-secret, path: internal-secret}]}
+        - name: server-tls
+          secret: {secretName: {{ required "core.secrets.serverTLS is required" $coreSecrets.serverTLS }}}
+        - name: control-plane-ca
+          secret: {secretName: {{ required "core.secrets.controlPlaneCA is required" $coreSecrets.controlPlaneCA }}, items: [{key: ca.crt, path: ca.crt}]}
+{{- end }}

@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/moduleserver"
 	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
 	"github.com/aegion/aegion/modules/oauth2/handler"
 	"github.com/aegion/aegion/modules/oauth2/store"
@@ -266,8 +268,8 @@ func TestUserInfoProviderAndHelpers(t *testing.T) {
 	info, err := p.GetUserInfo(context.Background(), "identity-1", []string{"openid", "profile", "email"})
 	require.NoError(t, err)
 	assert.Equal(t, "identity-1", info.Sub)
-	require.NotNil(t, info.Name)
-	require.NotNil(t, info.Email)
+	assert.Nil(t, info.Name)
+	assert.Nil(t, info.Email)
 
 	assert.True(t, containsScope([]string{"a", "b"}, "b"))
 	assert.False(t, containsScope([]string{"a", "b"}, "c"))
@@ -577,30 +579,27 @@ func TestMainWithInjectedHooks(t *testing.T) {
 
 	origLoadConfigHook := loadConfigHook
 	origConnectDBHook := connectDBHook
-	origBuildHandlerHook := buildHandlerHook
-	origNewHTTPServerHook := newHTTPServerHook
 	origCryptoSelfCheckHook := cryptoSelfCheckHook
-	origNotifySignalsHook := notifySignalsHook
-	origStopSignalsHook := stopSignalsHook
-	origListenAndServeHook := listenAndServeHook
+	origRunModuleServerHook := runModuleServerHook
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	t.Cleanup(func() {
 		loadConfigHook = origLoadConfigHook
 		connectDBHook = origConnectDBHook
-		buildHandlerHook = origBuildHandlerHook
-		newHTTPServerHook = origNewHTTPServerHook
 		cryptoSelfCheckHook = origCryptoSelfCheckHook
-		notifySignalsHook = origNotifySignalsHook
-		stopSignalsHook = origStopSignalsHook
-		listenAndServeHook = origListenAndServeHook
+		runModuleServerHook = origRunModuleServerHook
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 	})
 
+	secretFile := filepath.Join(t.TempDir(), "identity-signing-secret")
+	require.NoError(t, os.WriteFile(secretFile, []byte("01234567890123456789012345678901"), 0o600))
+	t.Setenv("AEGION_ENV", "development")
+	t.Setenv("AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE", secretFile)
 	loadConfigHook = func(path string) (*Config, error) {
 		cfg := &Config{}
 		applyDefaults(cfg)
+		cfg.Database.URL = "postgres://demo:demo@127.0.0.1:1/demo?sslmode=disable"
 		cfg.Server.Address = "127.0.0.1"
 		cfg.Server.Port = 0
 		return cfg, nil
@@ -608,29 +607,48 @@ func TestMainWithInjectedHooks(t *testing.T) {
 	connectDBHook = func(ctx context.Context, cfg *Config) (*pgxpool.Pool, error) {
 		return pool, nil
 	}
-	buildInvoked := false
-	buildHandlerHook = func(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
-		buildInvoked = true
-		require.NotNil(t, oauthStore)
-		return &handler.OAuth2Handler{}
-	}
 	cryptoSelfCheckHook = func() error { return nil }
-	newHTTPServerHook = func(cfg *Config, oauthHandler *handler.OAuth2Handler) *http.Server {
-		require.NotNil(t, oauthHandler)
-		return &http.Server{Addr: "127.0.0.1:0", Handler: http.NewServeMux()}
-	}
-	notifySignalsHook = func(c chan<- os.Signal, sig ...os.Signal) {
-		c <- os.Interrupt
-	}
-	stopSignalsHook = func(c chan<- os.Signal) {}
-	listenAndServeHook = func(srv *http.Server) error {
-		return http.ErrServerClosed
+	runInvoked := false
+	runModuleServerHook = func(cfg moduleserver.Config) error {
+		runInvoked = true
+		assert.Equal(t, "oauth2", cfg.Module)
+		assert.Contains(t, cfg.Routes, "/oauth2/device/verify")
+		return nil
 	}
 
 	os.Args = []string{"oauth2-server"}
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-
 	main()
+	assert.True(t, runInvoked, "expected moduleserver runtime to be invoked")
+}
 
-	assert.True(t, buildInvoked, "expected buildHandlerHook to be invoked")
+func TestTrustedIdentityResolver(t *testing.T) {
+	secret := []byte("01234567890123456789012345678901")
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/login", nil)
+	req.Header.Set("X-User-ID", "identity-1")
+	req.Header.Set("X-User-Session-ID", "session-1")
+	req.Header.Set("X-User-AAL", "aal2")
+	sig, err := platformcrypto.SignIdentityHeaders(secret, req.Header, []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}, time.Now().UTC())
+	require.NoError(t, err)
+	req.Header.Set("X-Aegion-Signature", sig)
+
+	identityID, sessionID, err := newTrustedIdentityResolver(secret, time.Minute)(req)
+	require.NoError(t, err)
+	assert.Equal(t, "identity-1", identityID)
+	assert.Equal(t, "session-1", sessionID)
+
+	req.Header.Set("X-User-ID", "attacker")
+	_, _, err = newTrustedIdentityResolver(secret, time.Minute)(req)
+	assert.Error(t, err)
+}
+
+func TestModuleServerMetadataMatchesMountedOAuthRoutes(t *testing.T) {
+	cfg := &Config{}
+	applyDefaults(cfg)
+	runtime := newModuleServerConfig(cfg, nil, nil, &handler.OAuth2Handler{}, []byte("01234567890123456789012345678901"))
+	assert.Equal(t, []string{"aegion.oauth2.v1.TokenStore"}, runtime.GRPCServices)
+	assert.Contains(t, runtime.Routes, "/oauth2/login")
+	assert.Contains(t, runtime.Routes, "/oauth2/consent")
+	assert.Contains(t, runtime.Routes, "/oauth2/device/verify")
+	assert.NotContains(t, runtime.Routes, "/oauth2/logout")
 }

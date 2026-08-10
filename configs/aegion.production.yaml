@@ -41,7 +41,6 @@ module_versions:
   analytics:     "${AEGION_MODULE_ANALYTICS_VERSION:-off}"
   policy:     "${AEGION_MODULE_POLICY_VERSION:-v1.0.0}"
   proxy:      "${AEGION_MODULE_PROXY_VERSION:-off}"
-  cli:        "${AEGION_MODULE_CLI_VERSION:-off}"
 
 module_registry:
   base_url: "${AEGION_MODULE_REGISTRY:-ghcr.io/aegion}"
@@ -66,13 +65,6 @@ modules:
     client_cert_file: ${AEGION_MODULE_ANALYTICS_CLIENT_CERT_FILE}
     client_key_file: ${AEGION_MODULE_ANALYTICS_CLIENT_KEY_FILE}
     credential_file: ${AEGION_MODULE_ANALYTICS_CREDENTIAL_FILE}
-  cli:
-    image: ${AEGION_MODULE_CLI_IMAGE}
-    database_url: ${AEGION_MODULE_CLI_DATABASE_URL}
-    ca_cert_file: ${AEGION_MODULE_CLI_CA_CERT_FILE}
-    client_cert_file: ${AEGION_MODULE_CLI_CLIENT_CERT_FILE}
-    client_key_file: ${AEGION_MODULE_CLI_CLIENT_KEY_FILE}
-    credential_file: ${AEGION_MODULE_CLI_CREDENTIAL_FILE}
   introspection:
     image: ${AEGION_MODULE_INTROSPECTION_IMAGE}
     public_url: ${AEGION_MODULE_INTROSPECTION_PUBLIC_URL}

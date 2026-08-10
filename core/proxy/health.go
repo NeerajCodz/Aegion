@@ -58,6 +58,10 @@ type HealthCheckerConfig struct {
 
 	// Headers to send with health check requests
 	Headers map[string]string
+
+	// Transport executes health checks under the same egress policy as
+	// proxied traffic when supplied.
+	Transport http.RoundTripper
 }
 
 // HealthChecker performs periodic health checks on an upstream service.
@@ -96,7 +100,8 @@ func NewHealthChecker(config HealthCheckerConfig) *HealthChecker {
 	log := xlog.Adapt(config.Logger)
 
 	client := &http.Client{
-		Timeout: config.Timeout,
+		Timeout:   config.Timeout,
+		Transport: config.Transport,
 		// Don't follow redirects for health checks
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse

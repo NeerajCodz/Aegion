@@ -162,6 +162,11 @@ func ConstantTimeCompare(a, b []byte) bool {
 	return subtle.ConstantTimeCompare(a, b) == 1
 }
 
+// SHA256Digest returns the SHA-256 digest of value.
+func SHA256Digest(value []byte) [sha256.Size]byte {
+	return sha256.Sum256(value)
+}
+
 type phcParams struct {
 	memoryKiB   uint32
 	iterations  uint32

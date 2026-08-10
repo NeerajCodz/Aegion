@@ -7,19 +7,26 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
+	"github.com/aegion/aegion/internal/platform/moduleserver"
+	"github.com/aegion/aegion/internal/platform/securefile"
+	oauth2pb "github.com/aegion/aegion/internal/proto/oauth2/v1"
 	"github.com/aegion/aegion/internal/xlog"
+	oauth2grpc "github.com/aegion/aegion/modules/oauth2/grpc"
 	"github.com/aegion/aegion/modules/oauth2/handler"
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
 	"github.com/aegion/aegion/modules/oauth2/service/device"
@@ -68,6 +75,7 @@ var (
 	newStaticJWKSProviderHook   = newStaticJWKSProvider
 	listenAndServeHook          = (*http.Server).ListenAndServe
 	shutdownServerHook          = func(srv *http.Server, ctx context.Context) error { return srv.Shutdown(ctx) }
+	runModuleServerHook         = moduleserver.Run
 )
 
 type Config struct {
@@ -89,6 +97,7 @@ type Config struct {
 		DeviceCodeTTL         time.Duration `yaml:"device_code_ttl"`
 		DevicePollInterval    int           `yaml:"device_poll_interval"`
 		DeviceVerificationURI string        `yaml:"device_verification_uri"`
+		IdentitySignatureTTL  time.Duration `yaml:"identity_signature_ttl"`
 	} `yaml:"oauth2"`
 }
 
@@ -104,7 +113,6 @@ func main() {
 	configPath := flag.String("config", getEnv("AEGION_OAUTH2_CONFIG", "oauth2.yaml"), "Path to OAuth2 config file")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
-
 	if *showVersion {
 		_, _ = fmt.Printf("Aegion OAuth2 Module v%s\n", version)
 		return
@@ -113,41 +121,34 @@ func main() {
 		fatalHook(err, "Go crypto runtime check failed")
 		return
 	}
-
 	cfg, err := loadConfigHook(*configPath)
 	if err != nil {
 		fatalHook(err, "Failed to load config")
 		return
 	}
-
-	ctx := context.Background()
-	db, err := connectDBHook(ctx, cfg)
+	if err := validateRuntimeConfig(cfg); err != nil {
+		fatalHook(err, "Invalid OAuth2 runtime configuration")
+		return
+	}
+	identitySigningSecret, err := readModuleIdentitySigningSecret()
+	if err != nil {
+		fatalHook(err, "Invalid OAuth2 identity signing configuration")
+		return
+	}
+	db, err := connectDBHook(context.Background(), cfg)
 	if err != nil {
 		fatalHook(err, "Failed to connect database")
 		return
 	}
 	defer db.Close()
-
-	h := buildHandlerHook(cfg, store.New(db))
-	srv := newHTTPServerHook(cfg, h)
-
-	stop := make(chan os.Signal, 1)
-	notifySignalsHook(stop, os.Interrupt, syscall.SIGTERM)
-	defer stopSignalsHook(stop)
-	serve := listenAndServeHook
-
-	go func() {
-		xlog.Default().Info("OAuth2 module listening", "addr", srv.Addr)
-		if err := serve(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			fatalHook(err, "OAuth2 server failed")
-		}
-	}()
-
-	<-stop
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := shutdownServerHook(srv, shutdownCtx); err != nil {
-		xlog.Default().Error("OAuth2 server shutdown failed", "error", err)
+	oauthStore := store.New(db)
+	h, err := buildOAuth2Handler(cfg, oauthStore, identitySigningSecret)
+	if err != nil {
+		fatalHook(err, "Failed to initialize OAuth2 services")
+		return
+	}
+	if err := runModuleServerHook(newModuleServerConfig(cfg, db, oauthStore, h, identitySigningSecret)); err != nil {
+		fatalHook(err, "OAuth2 module runtime failed")
 	}
 }
 
@@ -196,6 +197,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.OAuth2.BaseURL == "" {
 		cfg.OAuth2.BaseURL = cfg.OAuth2.Issuer
 	}
+	if cfg.OAuth2.IdentitySignatureTTL == 0 {
+		cfg.OAuth2.IdentitySignatureTTL = 2 * time.Minute
+	}
 	cfg.OAuth2.BaseURL = strings.TrimRight(cfg.OAuth2.BaseURL, "/")
 	if cfg.OAuth2.DeviceCodeTTL == 0 {
 		cfg.OAuth2.DeviceCodeTTL = 10 * time.Minute
@@ -206,6 +210,100 @@ func applyDefaults(cfg *Config) {
 	if cfg.OAuth2.DeviceVerificationURI == "" {
 		cfg.OAuth2.DeviceVerificationURI = cfg.OAuth2.BaseURL + "/oauth2/device/verify"
 	}
+}
+
+func validateRuntimeConfig(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("configuration is required")
+	}
+	if strings.TrimSpace(cfg.Database.URL) == "" {
+		return errors.New("database.url is required")
+	}
+	if _, err := pgxpool.ParseConfig(cfg.Database.URL); err != nil {
+		return fmt.Errorf("parse database.url: %w", err)
+	}
+	if err := validatePublicURL("oauth2.issuer", cfg.OAuth2.Issuer); err != nil {
+		return err
+	}
+	if err := validatePublicURL("oauth2.base_url", cfg.OAuth2.BaseURL); err != nil {
+		return err
+	}
+	if cfg.OAuth2.IdentitySignatureTTL <= 0 || cfg.OAuth2.IdentitySignatureTTL > 5*time.Minute {
+		return errors.New("oauth2.identity_signature_ttl must be between one nanosecond and five minutes")
+	}
+	return nil
+}
+
+func validatePublicURL(name, rawURL string) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
+		return fmt.Errorf("%s must be an absolute HTTP(S) URL without userinfo", name)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("%s must use HTTP or HTTPS", name)
+	}
+	if isProductionEnvironment() && parsed.Scheme != "https" {
+		return fmt.Errorf("%s must use HTTPS in production", name)
+	}
+	return nil
+}
+
+func readModuleIdentitySigningSecret() ([]byte, error) {
+	path := strings.TrimSpace(os.Getenv("AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE"))
+	if path == "" {
+		return nil, errors.New("AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE is required")
+	}
+	const maxSecretBytes = 4096
+	value, err := securefile.ReadRegularFile(path, maxSecretBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read module identity signing secret file: %w", err)
+	}
+	secret := []byte(strings.TrimSpace(string(value)))
+	if len(secret) < 32 {
+		return nil, errors.New("module identity signing secret must contain at least 32 bytes")
+	}
+	return secret, nil
+}
+
+func newModuleServerConfig(cfg *Config, db *pgxpool.Pool, oauthStore *store.Store, h *handler.OAuth2Handler, identitySigningSecret []byte) moduleserver.Config {
+	return moduleserver.Config{
+		Module:             "oauth2",
+		Version:            version,
+		ListenAddr:         net.JoinHostPort(cfg.Server.Address, strconv.Itoa(cfg.Server.Port)),
+		Capabilities:       []string{"oauth2.authorization", "oauth2.tokens", "oauth2.introspection", "oauth2.revocation", "oauth2.device_authorization", "oidc.discovery", "oidc.userinfo"},
+		Routes:             []string{"/health", "/ready", "/meta", "/.well-known/openid-configuration", "/.well-known/jwks.json", "/oidc/userinfo", "/oauth2/authorize", "/oauth2/login", "/oauth2/consent", "/oauth2/token", "/oauth2/introspect", "/oauth2/revoke", "/oauth2/device/authorize", "/oauth2/device/verify", "/oauth2/userinfo"},
+		GRPCServices:       []string{"aegion.oauth2.v1.TokenStore"},
+		EventSubscriptions: []string{},
+		RegisterHTTPRoutes: func(mux *http.ServeMux) {
+			registerRoutes(mux, h)
+			mux.HandleFunc("/oauth2/device/verify", newDeviceVerificationHandler(cfg, oauthStore, identitySigningSecret))
+		},
+		Readiness: func(ctx context.Context) error {
+			return checkOAuth2Readiness(ctx, db)
+		},
+		GRPCListenAddr: moduleserver.EnvOrDefault("AEGION_OAUTH2_GRPC_LISTEN_ADDR", "0.0.0.0:9103"),
+		RegisterGRPC: func(server *grpc.Server) {
+			oauth2pb.RegisterTokenStoreServer(server, oauth2grpc.NewServer(oauthStore))
+		},
+	}
+}
+
+func checkOAuth2Readiness(ctx context.Context, db *pgxpool.Pool) error {
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := db.Ping(pingCtx); err != nil {
+		return fmt.Errorf("database ping: %w", err)
+	}
+	for _, table := range []string{"oa2_clients", "oa2_auth_codes", "oa2_access_tokens", "oa2_device_codes"} {
+		var exists bool
+		if err := db.QueryRow(pingCtx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&exists); err != nil {
+			return fmt.Errorf("check schema relation %s: %w", table, err)
+		}
+		if !exists {
+			return fmt.Errorf("required OAuth2 schema relation %s is missing", table)
+		}
+	}
+	return nil
 }
 
 func connectDB(ctx context.Context, cfg *Config) (*pgxpool.Pool, error) {
@@ -250,6 +348,8 @@ func newHTTPServer(cfg *Config, oauthHandler *handler.OAuth2Handler) *http.Serve
 
 func registerRoutes(mux *http.ServeMux, h *handler.OAuth2Handler) {
 	mux.HandleFunc("/oauth2/authorize", h.HandleAuthorize)
+	mux.HandleFunc("/oauth2/login", h.HandleLogin)
+	mux.HandleFunc("/oauth2/consent", h.HandleConsent)
 	mux.HandleFunc("/oauth2/token", h.HandleToken)
 	mux.HandleFunc("/oauth2/introspect", h.HandleIntrospect)
 	mux.HandleFunc("/oauth2/revoke", h.HandleRevoke)
@@ -340,18 +440,10 @@ func (v *accessTokenValidator) ValidateAccessToken(ctx context.Context, token st
 type userInfoProvider struct{}
 
 func (p *userInfoProvider) GetUserInfo(ctx context.Context, identityID string, scopes []string) (*oidc.UserInfoClaims, error) {
-	claims := &oidc.UserInfoClaims{Sub: identityID}
-	if containsScope(scopes, "profile") {
-		name := identityID
-		claims.Name = &name
+	if strings.TrimSpace(identityID) == "" {
+		return nil, errors.New("token identity is required")
 	}
-	if containsScope(scopes, "email") {
-		email := identityID + "@example.local"
-		emailVerified := false
-		claims.Email = &email
-		claims.EmailVerified = &emailVerified
-	}
-	return claims, nil
+	return &oidc.UserInfoClaims{Sub: identityID}, nil
 }
 
 type oauth2JWTSigner struct {
@@ -618,17 +710,24 @@ func newStaticJWKSProvider(keyPair *platformjwt.KeyPair) (*staticJWKSProvider, e
 }
 
 func buildHandler(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
+	h, err := buildOAuth2Handler(cfg, oauthStore, nil)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
+func buildOAuth2Handler(cfg *Config, oauthStore *store.Store, identitySigningSecret []byte) (*handler.OAuth2Handler, error) {
 	keyPair, err := newOAuth2SigningKeyPairHook()
 	if err != nil {
-		panic(fmt.Sprintf("initialize oauth2 signing keys: %v", err))
+		return nil, fmt.Errorf("initialize oauth2 signing keys: %w", err)
 	}
-	signer := &oauth2JWTSigner{keyPair: keyPair}
 	jwksProvider, err := newStaticJWKSProviderHook(keyPair)
 	if err != nil {
-		panic(fmt.Sprintf("initialize oauth2 jwks provider: %v", err))
+		return nil, fmt.Errorf("initialize oauth2 jwks provider: %w", err)
 	}
+	signer := &oauth2JWTSigner{keyPair: keyPair}
 	deviceStore := &deviceStoreAdapter{Store: oauthStore}
-
 	authzSvc := authorization.NewAuthorizationService(oauthStore)
 	tokenSvc := tokenservice.NewTokenService(oauthStore, signer, cfg.OAuth2.Issuer)
 	revocationSvc := revocation.NewRevocationService(oauthStore)
@@ -644,8 +743,7 @@ func buildHandler(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
 		algorithm: keyPair.Algorithm,
 		issuer:    cfg.OAuth2.Issuer,
 	}, &userInfoProvider{})
-
-	return handler.NewOAuth2Handler(
+	h := handler.NewOAuth2Handler(
 		authzSvc,
 		tokenSvc,
 		revocationSvc,
@@ -656,6 +754,61 @@ func buildHandler(cfg *Config, oauthStore *store.Store) *handler.OAuth2Handler {
 		jwksSvc,
 		userInfoSvc,
 	).WithIntrospectionService(introspectSvc)
+	if len(identitySigningSecret) > 0 {
+		h.WithIdentityResolver(newTrustedIdentityResolver(identitySigningSecret, cfg.OAuth2.IdentitySignatureTTL))
+	}
+	return h, nil
+}
+
+func newTrustedIdentityResolver(secret []byte, maxAge time.Duration) handler.IdentityResolver {
+	const signatureHeader = "X-Aegion-Signature"
+	signedHeaders := []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
+	return func(r *http.Request) (string, string, error) {
+		if r == nil || !platformcrypto.VerifyIdentityHeaders(secret, r.Header, signedHeaders, r.Header.Get(signatureHeader), maxAge, time.Now().UTC()) {
+			return "", "", errors.New("core identity signature is invalid")
+		}
+		identityID := strings.TrimSpace(r.Header.Get("X-User-ID"))
+		sessionID := strings.TrimSpace(r.Header.Get("X-User-Session-ID"))
+		if identityID == "" || sessionID == "" || strings.TrimSpace(r.Header.Get("X-User-AAL")) == "" {
+			return "", "", errors.New("core identity context is incomplete")
+		}
+		return identityID, sessionID, nil
+	}
+}
+
+func newDeviceVerificationHandler(cfg *Config, oauthStore *store.Store, identitySigningSecret []byte) http.HandlerFunc {
+	resolveIdentity := newTrustedIdentityResolver(identitySigningSecret, cfg.OAuth2.IdentitySignatureTTL)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"invalid_request"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil || strings.TrimSpace(r.FormValue("user_code")) == "" {
+			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+			return
+		}
+		identityID, sessionID, err := resolveIdentity(r)
+		if err != nil {
+			http.Error(w, `{"error":"login_required"}`, http.StatusUnauthorized)
+			return
+		}
+		userCode := strings.TrimSpace(r.FormValue("user_code"))
+		decision := r.FormValue("decision")
+		switch decision {
+		case "deny":
+			err = oauthStore.DenyDeviceCode(r.Context(), userCode)
+		case "accept":
+			err = oauthStore.ApproveDeviceCode(r.Context(), userCode, identityID, sessionID)
+		default:
+			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func containsScope(scopes []string, wanted string) bool {

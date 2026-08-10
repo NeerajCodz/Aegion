@@ -1,12 +1,8 @@
 package main
 
 import (
-	"context"
-	"errors"
-	"net/http"
 	"os"
 	"testing"
-	"time"
 )
 
 func TestDefaultMainDepsProvidesRuntimeHooks(t *testing.T) {
@@ -18,62 +14,54 @@ func TestDefaultMainDepsProvidesRuntimeHooks(t *testing.T) {
 	if deps.parseDBConfig == nil || deps.newDBPool == nil || deps.pingDB == nil || deps.closeDB == nil {
 		t.Fatalf("defaultMainDeps returned nil db hooks")
 	}
-	if deps.runMigrations == nil || deps.startServer == nil || deps.newSignalChan == nil {
+	if deps.runMigrations == nil || deps.buildRuntime == nil || deps.runModuleServer == nil {
 		t.Fatalf("defaultMainDeps returned nil runtime hooks")
-	}
-	if deps.notifySignals == nil || deps.stopSignalChan == nil {
-		t.Fatalf("defaultMainDeps returned nil signal hooks")
 	}
 
 	deps.closeDB(nil)
-	ch := deps.newSignalChan()
-	if ch == nil || cap(ch) != 1 {
-		t.Fatalf("expected buffered signal channel with cap=1")
-	}
 }
 
-func TestLiveRuntimeServerAdapters(t *testing.T) {
+func TestAdminModuleConfigMatchesPublicRuntime(t *testing.T) {
 	cfg := &Config{}
 	cfg.Server.Address = "127.0.0.1"
 	cfg.Server.Port = 8082
+	cfg.Admin.SCIM.Enabled = true
+	moduleCfg := adminModuleConfig(cfg, &moduleRuntime{})
 
-	s := &liveRuntimeServer{
-		server: &Server{Config: cfg},
-		httpServer: &http.Server{
-			Addr: "127.0.0.1:0",
-		},
+	if moduleCfg.Module != "admin" || moduleCfg.Version != adminModuleVersion {
+		t.Fatalf("unexpected module identity: %#v", moduleCfg)
 	}
-
-	if err := s.registerWithCore(context.Background()); err != nil {
-		t.Fatalf("registerWithCore adapter returned error: %v", err)
+	if len(moduleCfg.Routes) != 1 || moduleCfg.Routes[0] != adminPublicRoutePrefix {
+		t.Fatalf("unexpected route metadata: %#v", moduleCfg.Routes)
 	}
-
-	err := s.shutdown(context.Background())
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		t.Fatalf("shutdown adapter returned unexpected error: %v", err)
+	if len(moduleCfg.GRPCServices) != 0 || len(moduleCfg.EventSubscriptions) != 0 {
+		t.Fatalf("admin must not advertise unimplemented gRPC or event APIs: %#v", moduleCfg)
+	}
+	if len(moduleCfg.Capabilities) != 8 || moduleCfg.Capabilities[0] != "admin.identities" || moduleCfg.Capabilities[7] != "admin.scim" {
+		t.Fatalf("unexpected capability metadata: %#v", moduleCfg.Capabilities)
 	}
 }
 
-func TestStartServerRuntimeStartsAndStops(t *testing.T) {
+func TestPreparePublicRouteConfigUsesCoreOwnedPrefix(t *testing.T) {
 	cfg := &Config{}
-	cfg.Server.Address = "127.0.0.1"
-	cfg.Server.Port = 0
-	cfg.Server.ReadTimeout = time.Second
-	cfg.Server.WriteTimeout = time.Second
-	cfg.Server.IdleTimeout = time.Second
 	cfg.Admin.Path = "/admin"
+	cfg.Admin.SCIM.Enabled = true
+	cfg.Admin.SCIM.BasePath = "/scim/v2"
 
-	rt, err := startServerRuntime(cfg, nil)
-	if err != nil {
-		t.Fatalf("startServerRuntime returned error: %v", err)
+	preparePublicRouteConfig(cfg)
+
+	if cfg.Admin.Path != adminPublicRoutePrefix {
+		t.Fatalf("admin path = %q, want %q", cfg.Admin.Path, adminPublicRoutePrefix)
 	}
+	if cfg.Admin.SCIM.BasePath != "/aegion/scim/v2" {
+		t.Fatalf("SCIM path = %q, want /aegion/scim/v2", cfg.Admin.SCIM.BasePath)
+	}
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	err = rt.shutdown(ctx)
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		t.Fatalf("shutdown returned unexpected error: %v", err)
+func TestBuildRuntimeFailsWithoutDurableDependencies(t *testing.T) {
+	cfg := &Config{}
+	if _, err := buildRuntime(cfg, nil); err == nil {
+		t.Fatal("expected missing database dependency to fail")
 	}
 }
 

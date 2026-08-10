@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/social/service"
 	"github.com/aegion/aegion/modules/social/store"
 )
@@ -177,6 +179,76 @@ func TestManagementRoutes(t *testing.T) {
 		}
 		if body.Slug != "custom-oidc" {
 			t.Fatalf("unexpected provider slug: %s", body.Slug)
+		}
+	})
+}
+
+func TestManagementRoutesRequireCoreSignedIdentity(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	h := New(&stubSocialService{
+		configured: []store.Provider{{Slug: "google"}},
+	}, Config{
+		ManagementToken:       "management-token",
+		IdentitySigningSecret: secret,
+	})
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	newRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/social/admin/providers", nil)
+		req.Header.Set("Authorization", "Bearer management-token")
+		req.Header.Set("X-User-ID", "identity-1")
+		req.Header.Set("X-User-Session-ID", "session-1")
+		req.Header.Set("X-User-AAL", "aal2")
+		return req
+	}
+
+	t.Run("rejects unsigned identity headers", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, newRequest())
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("accepts signed identity headers", func(t *testing.T) {
+		req := newRequest()
+		signature, err := platformcrypto.SignIdentityHeaders(
+			secret,
+			req.Header,
+			[]string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"},
+			time.Now().UTC(),
+		)
+		if err != nil {
+			t.Fatalf("sign identity headers: %v", err)
+		}
+		req.Header.Set("X-Aegion-Signature", signature)
+
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+	})
+
+	t.Run("rejects tampered signed identity headers", func(t *testing.T) {
+		req := newRequest()
+		signature, err := platformcrypto.SignIdentityHeaders(
+			secret,
+			req.Header,
+			[]string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"},
+			time.Now().UTC(),
+		)
+		if err != nil {
+			t.Fatalf("sign identity headers: %v", err)
+		}
+		req.Header.Set("X-Aegion-Signature", signature)
+		req.Header.Set("X-User-AAL", "aal3")
+
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 		}
 	})
 }

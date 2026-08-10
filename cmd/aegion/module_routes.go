@@ -1,12 +1,9 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
-	"github.com/aegion/aegion/core/registry"
 	"github.com/aegion/aegion/internal/platform/config"
 )
 
@@ -65,55 +62,4 @@ func (t ModuleRouteTable) Match(method, requestPath string) (string, bool) {
 		matchLen = len(route.prefix)
 	}
 	return moduleID, moduleID != ""
-}
-
-func (t ModuleRouteTable) owns(moduleID, requestPath string) bool {
-	for _, route := range t.routes {
-		if route.moduleID != moduleID {
-			continue
-		}
-		if requestPath == route.prefix || strings.HasPrefix(requestPath, route.prefix+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Server) moduleEndpointURL(moduleID, modulePath string) (*url.URL, error) {
-	if !s.moduleRoutes.owns(moduleID, modulePath) {
-		return nil, fmt.Errorf("module %q does not own route %q", moduleID, modulePath)
-	}
-	plannedModule, ok := s.modulePlan.Module(moduleID)
-	if !ok || plannedModule.Mode != config.ModuleModeExternal {
-		return nil, fmt.Errorf("module %q is not enabled as an external workload", moduleID)
-	}
-
-	module, err := s.registry.GetModule(moduleID)
-	if err != nil {
-		return nil, err
-	}
-	if module.Status != registry.StatusHealthy {
-		return nil, errors.New("module is not healthy")
-	}
-
-	for _, endpoint := range module.Endpoints {
-		if endpoint.Type != registry.EndpointHTTP {
-			continue
-		}
-		parsed, parseErr := url.Parse(strings.TrimSpace(endpoint.URL))
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return nil, errors.New("module endpoint must use http or https")
-		}
-		if parsed.Host == "" || parsed.User != nil {
-			return nil, errors.New("module endpoint is missing a valid host")
-		}
-		parsed.Path = modulePath
-		parsed.RawPath = ""
-		return parsed, nil
-	}
-
-	return nil, errors.New("module has no HTTP endpoint")
 }

@@ -107,12 +107,17 @@ function Scan-DockerImages {
     }
     
     $images = @(
-        "aegion/core:latest",
-        "aegion/module-password:latest",
-        "aegion/module-magic-link:latest",
-        "aegion/module-admin:latest",
-        "aegion/module-oauth2:latest",
-        "aegion/module-policy:latest"
+        "aegion/aegion-core:latest",
+        "aegion/aegion-admin:latest",
+        "aegion/aegion-analytics:latest",
+        "aegion/aegion-cli:latest",
+        "aegion/aegion-introspection:latest",
+        "aegion/aegion-mfa:latest",
+        "aegion/aegion-oauth2:latest",
+        "aegion/aegion-passkeys:latest",
+        "aegion/aegion-proxy:latest",
+        "aegion/aegion-social:latest",
+        "aegion/aegion-sso:latest"
     )
     
     foreach ($image in $images) {

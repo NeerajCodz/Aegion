@@ -15,17 +15,17 @@ This table summarizes the current release stance for each module. The machine-ch
 | core | GA | hybrid control-plane | Primary ingress, orchestration, and shared auth/session runtime |
 | password | GA | embedded in core | Stable first-factor flow in core orchestration path |
 | magic_link | GA | embedded in core | Stable passwordless/recovery delivery path |
-| policy | Beta | embedded at GA default | Extraction to standalone is optional post-GA |
-| admin | Beta | standalone | Backend broad; SPA coverage and contract harmonization still closing |
-| analytics | Beta | standalone | Ingestion/API surfaces functional; runtime storage and full cross-service E2E remain gated |
-| oauth2 | Beta | standalone | Protocol closure work remains (request context + subject strategy) |
-| social | Beta | standalone | Provider/runtime completion still under hardening |
-| sso | Beta | standalone | Enterprise validation and lifecycle hardening in progress |
-| introspection | Beta | standalone | Token-state consistency follows OAuth2 closure work |
-| proxy | Beta | standalone | Operator diagnostics/simulation/policy integration still maturing |
-| mfa | Not GA | standalone | Present but not release-hardened |
-| passkeys | Not GA | standalone | Present but not release-hardened |
-| cli | Not GA | standalone | Internal/ops-facing surface not GA-hardened |
+| policy | GA | embedded in core | Fail-closed RBAC, ABAC, and ReBAC enforcement |
+| admin | GA | external | Authenticated management and SCIM runtime through the core gateway |
+| analytics | GA | external | Durable REST plus authenticated, bounded GraphQL |
+| oauth2 | GA | external | OAuth2/OIDC runtime with gateway-owned public routes |
+| social | GA | external | Durable provider flows with verified core identity context |
+| sso | GA | external | Durable SAML connections and callback lifecycle |
+| introspection | GA | external | Authenticated OAuth2 token introspection |
+| proxy | GA | external | Identity-aware proxy control plane with constrained egress |
+| mfa | GA | external | Durable multi-factor authentication lifecycle |
+| passkeys | GA | external | WebAuthn credential and sign-counter enforcement |
+| cli | GA | on-demand job | Operator artifact with explicit core API and mTLS credentials |
 
 ## Release gate intent
 

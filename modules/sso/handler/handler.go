@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
@@ -15,10 +17,21 @@ import (
 	"github.com/aegion/aegion/modules/sso/store"
 )
 
-const maxJSONBodyBytes int64 = 1 << 20
+const (
+	maxJSONBodyBytes      int64 = 1 << 20
+	maxSAMLFormBodyBytes  int64 = 1 << 20
+	identityContextMaxAge       = time.Minute
+)
+
+var signedIdentityHeaders = []string{
+	"X-User-ID",
+	"X-User-Session-ID",
+	"X-User-AAL",
+}
 
 type Config struct {
-	ManagementToken       string
+	IdentityContextSecret []byte
+	IdentityContextMaxAge time.Duration
 	TrustForwardedHeaders bool
 }
 
@@ -35,8 +48,10 @@ type SSOService interface {
 
 type Handler struct {
 	svc                   SSOService
-	managementToken       string
+	identityContextSecret []byte
+	identityContextMaxAge time.Duration
 	trustForwardedHeaders bool
+	now                   func() time.Time
 }
 
 func New(svc SSOService, cfgOverride ...Config) *Handler {
@@ -44,10 +59,18 @@ func New(svc SSOService, cfgOverride ...Config) *Handler {
 	if len(cfgOverride) > 0 {
 		cfg = cfgOverride[0]
 	}
+	maxAge := cfg.IdentityContextMaxAge
+	if maxAge <= 0 || maxAge > identityContextMaxAge {
+		maxAge = identityContextMaxAge
+	}
 	return &Handler{
 		svc:                   svc,
-		managementToken:       strings.TrimSpace(cfg.ManagementToken),
+		identityContextSecret: append([]byte(nil), cfg.IdentityContextSecret...),
+		identityContextMaxAge: maxAge,
 		trustForwardedHeaders: cfg.TrustForwardedHeaders,
+		now: func() time.Time {
+			return time.Now().UTC()
+		},
 	}
 }
 
@@ -59,7 +82,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/sso/admin/connections", h.handleAdminConnections)
 	mux.HandleFunc("/api/v1/sso/admin/connections/", h.handleAdminConnection)
 	mux.HandleFunc("/api/v1/sso/resolve-domain", h.handleResolveDomain)
-	mux.HandleFunc("/api/v1/sso/", h.handleSSOPath)
 	mux.HandleFunc("/self-service/sso/", h.handleSSOPath)
 }
 
@@ -95,14 +117,13 @@ func (h *Handler) handleResolveDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleSSOPath(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(r.URL.Path, "/")
-	segments := strings.Split(path, "/")
-	if len(segments) < 4 {
+	segments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(segments) != 4 || segments[0] != "self-service" || segments[1] != "sso" || strings.TrimSpace(segments[2]) == "" {
 		writeError(w, http.StatusNotFound, "route not found")
 		return
 	}
-	connection := segments[len(segments)-2]
-	action := segments[len(segments)-1]
+	connection := segments[2]
+	action := segments[3]
 	switch action {
 	case "start":
 		h.handleStart(w, r, connection)
@@ -116,6 +137,10 @@ func (h *Handler) handleSSOPath(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleStart(w http.ResponseWriter, r *http.Request, connection string) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !isJSONContentType(r) {
+		writeError(w, http.StatusUnsupportedMediaType, "application/json content type is required")
 		return
 	}
 	var req struct {
@@ -139,6 +164,11 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request, connect
 		return
 	}
 	if r.Method == http.MethodPost {
+		if !isFormContentType(r) {
+			writeError(w, http.StatusUnsupportedMediaType, "form content type is required")
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxSAMLFormBodyBytes)
 		if err := r.ParseForm(); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid callback payload")
 			return
@@ -195,6 +225,10 @@ func (h *Handler) handleAdminConnections(w http.ResponseWriter, r *http.Request)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"connections": connections})
 	case http.MethodPost:
+		if !isJSONContentType(r) {
+			writeError(w, http.StatusUnsupportedMediaType, "application/json content type is required")
+			return
+		}
 		var req service.ConnectionUpsertRequest
 		if err := decodeJSONBody(w, r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
@@ -240,17 +274,25 @@ func (h *Handler) handleAdminConnection(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) requireManagementAuth(w http.ResponseWriter, r *http.Request) bool {
-	if strings.TrimSpace(h.managementToken) == "" {
+	if len(h.identityContextSecret) == 0 {
 		writeError(w, http.StatusServiceUnavailable, "sso management is disabled")
 		return false
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if token == "" {
-		writeError(w, http.StatusUnauthorized, "missing management token")
-		return false
+	for _, header := range signedIdentityHeaders {
+		if strings.TrimSpace(r.Header.Get(header)) == "" {
+			writeError(w, http.StatusUnauthorized, "missing authenticated identity context")
+			return false
+		}
 	}
-	if !platformcrypto.ConstantTimeCompare([]byte(token), []byte(h.managementToken)) {
-		writeError(w, http.StatusUnauthorized, "invalid management token")
+	if !platformcrypto.VerifyIdentityHeaders(
+		h.identityContextSecret,
+		r.Header,
+		signedIdentityHeaders,
+		r.Header.Get("X-Aegion-Signature"),
+		h.identityContextMaxAge,
+		h.now(),
+	) {
+		writeError(w, http.StatusUnauthorized, "invalid authenticated identity context")
 		return false
 	}
 	return true
@@ -258,6 +300,22 @@ func (h *Handler) requireManagementAuth(w http.ResponseWriter, r *http.Request) 
 
 func acceptsJSON(r *http.Request) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Accept"))), "application/json")
+}
+
+func isJSONContentType(r *http.Request) bool {
+	return hasContentType(r, "application/json")
+}
+
+func isFormContentType(r *http.Request) bool {
+	return hasContentType(r, "application/x-www-form-urlencoded")
+}
+
+func hasContentType(r *http.Request, expected string) bool {
+	if r == nil {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && strings.EqualFold(mediaType, expected)
 }
 
 func withQuery(target string, additions map[string]string) string {

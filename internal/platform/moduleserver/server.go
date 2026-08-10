@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/securefile"
 	corepb "github.com/aegion/aegion/internal/proto/core"
 	"github.com/aegion/aegion/internal/xlog"
 	"google.golang.org/grpc"
@@ -36,6 +36,7 @@ type Config struct {
 	Module                  string
 	Version                 string
 	ListenAddr              string
+	HTTPAdvertiseAddr       string
 	Capabilities            []string
 	Routes                  []string
 	GRPCServices            []string
@@ -43,6 +44,7 @@ type Config struct {
 	RegisterHTTPRoutes      func(mux *http.ServeMux)
 	Readiness               func(context.Context) error
 	GRPCListenAddr          string
+	GRPCAdvertiseAddr       string
 	CoreGRPCAddr            string
 	CoreGRPCTLS             *tls.Config
 	GRPCServerTLS           *tls.Config
@@ -145,10 +147,16 @@ func Run(cfg Config) error {
 		if strings.TrimSpace(cfg.BootstrapCredential) == "" {
 			return fmt.Errorf("[%s] core gRPC requires a module bootstrap credential", cfg.Module)
 		}
+		if err := validateAdvertiseAddress(cfg.HTTPAdvertiseAddr); err != nil {
+			return fmt.Errorf("[%s] module HTTP advertise address: %w", cfg.Module, err)
+		}
 	}
-	if cfg.RegisterGRPC != nil || cfg.CoreGRPCAddr != "" {
+	if cfg.RegisterGRPC != nil {
 		if cfg.GRPCServerTLS == nil {
 			return fmt.Errorf("[%s] module gRPC requires an mTLS server configuration", cfg.Module)
+		}
+		if err := validateAdvertiseAddress(cfg.GRPCAdvertiseAddr); err != nil {
+			return fmt.Errorf("[%s] module gRPC advertise address: %w", cfg.Module, err)
 		}
 	}
 
@@ -174,7 +182,7 @@ func Run(cfg Config) error {
 	}
 	var grpcServer *grpc.Server
 	var grpcErrCh <-chan error
-	if cfg.RegisterGRPC != nil || cfg.CoreGRPCAddr != "" {
+	if cfg.RegisterGRPC != nil {
 		if cfg.GRPCListenAddr == "" {
 			cfg.GRPCListenAddr = "0.0.0.0:9100"
 		}
@@ -309,7 +317,10 @@ func registerWithCore(ctx context.Context, cfg Config) error {
 	resp, err := client.Register(callCtx, &corepb.RegisterRequest{
 		Module:             cfg.Module,
 		Version:            cfg.Version,
-		Address:            cfg.GRPCListenAddr,
+		Address:            cfg.GRPCAdvertiseAddr,
+		HttpAddress:        cfg.HTTPAdvertiseAddr,
+		HealthUrl:          "http://" + cfg.HTTPAdvertiseAddr + "/health",
+		ReadyUrl:           "http://" + cfg.HTTPAdvertiseAddr + "/ready",
 		Routes:             cfg.Routes,
 		Capabilities:       cfg.Capabilities,
 		GrpcServices:       cfg.GRPCServices,
@@ -358,11 +369,20 @@ func loadMutualTLSMaterial(certFile, keyFile, caFile string) (tls.Certificate, *
 	if strings.TrimSpace(certFile) == "" || strings.TrimSpace(keyFile) == "" || strings.TrimSpace(caFile) == "" {
 		return tls.Certificate{}, nil, errors.New("certificate, key, and CA files are required")
 	}
-	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
+	const maxTLSMaterialBytes int64 = 1 << 20
+	certPEM, err := securefile.ReadRegularFile(certFile, maxTLSMaterialBytes)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("read TLS certificate: %w", err)
+	}
+	keyPEM, err := securefile.ReadRegularFile(keyFile, maxTLSMaterialBytes)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("read TLS key: %w", err)
+	}
+	certificate, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return tls.Certificate{}, nil, fmt.Errorf("load TLS certificate: %w", err)
 	}
-	caPEM, err := os.ReadFile(caFile)
+	caPEM, err := securefile.ReadRegularFile(caFile, maxTLSMaterialBytes)
 	if err != nil {
 		return tls.Certificate{}, nil, fmt.Errorf("read TLS CA file: %w", err)
 	}
@@ -393,6 +413,12 @@ func applyControlPlaneEnvironment(cfg *Config) error {
 		cfg.BootstrapCredential = credential
 	}
 
+	if strings.TrimSpace(cfg.HTTPAdvertiseAddr) == "" {
+		cfg.HTTPAdvertiseAddr = strings.TrimSpace(os.Getenv("AEGION_MODULE_HTTP_ADVERTISE_ADDR"))
+	}
+	if strings.TrimSpace(cfg.GRPCAdvertiseAddr) == "" {
+		cfg.GRPCAdvertiseAddr = strings.TrimSpace(os.Getenv("AEGION_MODULE_GRPC_ADVERTISE_ADDR"))
+	}
 	certFile := strings.TrimSpace(os.Getenv("AEGION_MODULE_TLS_CERT_FILE"))
 	keyFile := strings.TrimSpace(os.Getenv("AEGION_MODULE_TLS_KEY_FILE"))
 	caFile := strings.TrimSpace(os.Getenv("AEGION_MODULE_CA_CERT_FILE"))
@@ -403,7 +429,7 @@ func applyControlPlaneEnvironment(cfg *Config) error {
 		}
 		cfg.CoreGRPCTLS = coreTLS
 	}
-	if cfg.GRPCServerTLS == nil && certFile != "" && keyFile != "" && caFile != "" {
+	if cfg.RegisterGRPC != nil && cfg.GRPCServerTLS == nil && certFile != "" && keyFile != "" && caFile != "" {
 		serverTLS, err := NewMutualTLSServerConfig(certFile, keyFile, caFile)
 		if err != nil {
 			return err
@@ -413,19 +439,26 @@ func applyControlPlaneEnvironment(cfg *Config) error {
 	return nil
 }
 
+func validateAdvertiseAddress(address string) error {
+	address = strings.TrimSpace(address)
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return errors.New("must be a host:port address")
+	}
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil && ip.IsUnspecified() {
+		return errors.New("must not use an unspecified bind address")
+	}
+	return nil
+}
+
 func readCredentialFile(path string) (string, error) {
-	file, err := os.Open(path)
+	const maxCredentialBytes int64 = 4096
+	value, err := securefile.ReadRegularFile(path, maxCredentialBytes)
 	if err != nil {
-		return "", fmt.Errorf("open module credential file: %w", err)
-	}
-	defer file.Close()
-	const maxCredentialBytes = 4096
-	value, err := io.ReadAll(io.LimitReader(file, maxCredentialBytes+1))
-	if err != nil {
+		if errors.Is(err, securefile.ErrFileTooLarge) {
+			return "", errors.New("module credential file exceeds maximum size")
+		}
 		return "", fmt.Errorf("read module credential file: %w", err)
-	}
-	if len(value) > maxCredentialBytes {
-		return "", errors.New("module credential file exceeds maximum size")
 	}
 	credential := strings.TrimSpace(string(value))
 	if credential == "" {

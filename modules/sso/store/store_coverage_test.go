@@ -125,6 +125,32 @@ func TestMemoryStoreAdditionalBranches(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreAuthRequestLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	now := time.Now().UTC()
+	expiresAt := now.Add(time.Minute)
+
+	if err := s.CreateAuthRequest(ctx, "request-1", "Acme", expiresAt); err != nil {
+		t.Fatalf("CreateAuthRequest() error = %v", err)
+	}
+	if err := s.CreateAuthRequest(ctx, "request-1", "acme", expiresAt); !errors.Is(err, ErrAuthRequestConflict) {
+		t.Fatalf("CreateAuthRequest(duplicate) error = %v", err)
+	}
+	if consumed, err := s.ConsumeAuthRequest(ctx, "request-1", "other", now); err != nil || consumed {
+		t.Fatalf("ConsumeAuthRequest(wrong connection) consumed=%t err=%v", consumed, err)
+	}
+	if consumed, err := s.ConsumeAuthRequest(ctx, "request-1", "acme", now); err != nil || !consumed {
+		t.Fatalf("ConsumeAuthRequest(first) consumed=%t err=%v", consumed, err)
+	}
+	if consumed, err := s.ConsumeAuthRequest(ctx, "request-1", "acme", now.Add(time.Second)); err != nil || consumed {
+		t.Fatalf("ConsumeAuthRequest(replay) consumed=%t err=%v", consumed, err)
+	}
+	if err := s.CreateAuthRequest(ctx, "expired", "acme", now.Add(-time.Second)); !errors.Is(err, ErrAuthRequestConflict) {
+		t.Fatalf("CreateAuthRequest(expired) error = %v", err)
+	}
+}
+
 func TestCloneAndNormalizeHelpers(t *testing.T) {
 	in := Connection{
 		Slug:              "acme",

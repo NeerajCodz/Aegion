@@ -2,11 +2,13 @@ package graphql
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics"
 	"github.com/aegion/aegion/modules/analytics/rbac"
@@ -73,9 +75,11 @@ func NewResolver(logger *xlog.Logger, store Store) *Resolver {
 
 // Events resolves the events query with filtering and pagination.
 func (r *Resolver) Events(ctx context.Context, filter *EventFilter, first *int, after *string, sort *SortInput) (*EventConnection, error) {
-	if _, err := requireGraphQLPermission(ctx, rbac.PermViewEvents); err != nil {
+	userID, err := requireGraphQLPermission(ctx, rbac.PermViewEvents)
+	if err != nil {
 		return nil, err
 	}
+	filter = scopedEventFilter(ctx, userID, filter)
 
 	limit := 100
 	if first != nil && *first > 0 {
@@ -88,7 +92,6 @@ func (r *Resolver) Events(ctx context.Context, filter *EventFilter, first *int, 
 
 	offset := 0
 	if after != nil && *after != "" {
-		// Parse cursor - for simplicity, use numeric offset
 		_, _ = fmt.Sscanf(*after, "%d", &offset)
 	}
 
@@ -127,7 +130,8 @@ func (r *Resolver) Events(ctx context.Context, filter *EventFilter, first *int, 
 
 // Event resolves a single event by ID.
 func (r *Resolver) Event(ctx context.Context, id string) (*EventNode, error) {
-	if _, err := requireGraphQLPermission(ctx, rbac.PermViewEvents); err != nil {
+	userID, err := requireGraphQLPermission(ctx, rbac.PermViewEvents)
+	if err != nil {
 		return nil, err
 	}
 
@@ -138,6 +142,9 @@ func (r *Resolver) Event(ctx context.Context, id string) (*EventNode, error) {
 	}
 	if event == nil {
 		return nil, errors.New("event not found")
+	}
+	if !canReadAllEvents(ctx, userID) && (event.UserID == nil || *event.UserID != userID) {
+		return nil, errors.New("forbidden: event access denied")
 	}
 	return eventToNode(event), nil
 }
@@ -249,8 +256,14 @@ func (r *Resolver) Query(ctx context.Context, id string) (*SavedQueryNode, error
 	return queryToNode(query), nil
 }
 
-// Health resolves the health status query.
 func (r *Resolver) Health(ctx context.Context) (*HealthStatusNode, error) {
+	userID, err := requireGraphQLPermission(ctx, rbac.PermViewEvents)
+	if err != nil {
+		return nil, err
+	}
+	if !canReadAllEvents(ctx, userID) {
+		return nil, errors.New("forbidden: analytics health requires analyst access")
+	}
 	health, err := r.store.GetHealth(ctx)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "failed to get health status", "error", err)
@@ -261,36 +274,51 @@ func (r *Resolver) Health(ctx context.Context) (*HealthStatusNode, error) {
 
 // Stats resolves the system statistics query.
 func (r *Resolver) Stats(ctx context.Context) (*SystemStatsNode, error) {
+	userID, err := requireGraphQLPermission(ctx, rbac.PermViewEvents)
+	if err != nil {
+		return nil, err
+	}
+	if !canReadAllEvents(ctx, userID) {
+		return nil, errors.New("forbidden: aggregate statistics require analyst access")
+	}
 	eventCount, err := r.store.CountEvents(ctx)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "failed to count events", "error", err)
-		eventCount = 0
+		return nil, fmt.Errorf("failed to count events: %w", err)
 	}
-
-	uptime := int(time.Since(r.startTime).Seconds())
-
+	dashboards, err := r.store.ListDashboards(ctx, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("count dashboards: %w", err)
+	}
+	queries, err := r.store.ListQueries(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("count queries: %w", err)
+	}
 	return &SystemStatsNode{
 		EventsTotal:     eventCount,
-		DashboardsTotal: 0,
-		QueriesTotal:    0,
-		QueryTimeAvgMs:  0.0,
-		CacheHitRate:    0.0,
-		Uptime:          uptime,
+		DashboardsTotal: len(dashboards),
+		QueriesTotal:    len(queries),
+		Uptime:          int(time.Since(r.startTime).Seconds()),
 	}, nil
 }
 
 // Metrics resolves the metrics query.
 func (r *Resolver) Metrics(ctx context.Context, category *string, timeRange *TimeRangeInput) ([]*MetricNode, error) {
-	if _, err := requireGraphQLPermission(ctx, rbac.PermViewDashboards); err != nil {
+	userID, err := requireGraphQLPermission(ctx, rbac.PermViewDashboards)
+	if err != nil {
 		return nil, err
 	}
-
+	if !canReadAllEvents(ctx, userID) {
+		return nil, errors.New("forbidden: aggregate metrics require analyst access")
+	}
+	if timeRange != nil {
+		return nil, errors.New("time-range metric queries are not available")
+	}
 	metrics, err := r.store.ListMetrics(ctx, category)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "failed to list metrics", "error", err)
 		return nil, fmt.Errorf("failed to list metrics: %w", err)
 	}
-
 	nodes := make([]*MetricNode, len(metrics))
 	for i, m := range metrics {
 		nodes[i] = metricToNode(m)
@@ -709,7 +737,32 @@ func stringPtr(s *string) *string {
 }
 
 func generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	bytes, err := platformcrypto.RandomBytes(16)
+	if err != nil {
+		return ""
+	}
+	bytes[6] = (bytes[6] & 0x0f) | 0x40
+	bytes[8] = (bytes[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hex.EncodeToString(bytes[0:4]), hex.EncodeToString(bytes[4:6]), hex.EncodeToString(bytes[6:8]), hex.EncodeToString(bytes[8:10]), hex.EncodeToString(bytes[10:16]))
+}
+
+func scopedEventFilter(ctx context.Context, userID string, filter *EventFilter) *EventFilter {
+	if canReadAllEvents(ctx, userID) {
+		return filter
+	}
+	if filter == nil {
+		filter = &EventFilter{}
+	} else {
+		copy := *filter
+		filter = &copy
+	}
+	filter.UserID = &userID
+	return filter
+}
+
+func canReadAllEvents(ctx context.Context, userID string) bool {
+	role, err := rbac.FromContext(ctx).GetUserRole(userID)
+	return err == nil && (role == rbac.RoleAdmin || role == rbac.RoleAnalyst)
 }
 
 func requireGraphQLPermission(ctx context.Context, permission rbac.Permission) (string, error) {

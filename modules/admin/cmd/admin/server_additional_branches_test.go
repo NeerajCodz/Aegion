@@ -70,22 +70,6 @@ func TestServerAdditionalRoutingAndObservabilityBranches(t *testing.T) {
 }
 
 func TestServerAdditionalRegisterAndSPAFileBranches(t *testing.T) {
-	t.Run("registerWithCore request creation error and request failure", func(t *testing.T) {
-		s := &Server{Config: &Config{}}
-		s.Config.Admin.Path = "/admin"
-		s.Config.Server.Address = "127.0.0.1"
-		s.Config.Server.Port = 8082
-
-		s.Config.Core.ServiceURL = "http://[::1"
-		if err := s.registerWithCore(context.Background()); err == nil || !strings.Contains(err.Error(), "failed to create registration request") {
-			t.Fatalf("registerWithCore(invalid URL) = %v", err)
-		}
-
-		s.Config.Core.ServiceURL = "http://127.0.0.1:1"
-		if err := s.registerWithCore(context.Background()); err == nil || !strings.Contains(err.Error(), "failed to register with core") {
-			t.Fatalf("registerWithCore(request failure) = %v", err)
-		}
-	})
 
 	t.Run("spa file server root and default cache-control path", func(t *testing.T) {
 		spa := NewSPAFileServer()

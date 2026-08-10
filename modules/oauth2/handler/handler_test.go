@@ -624,17 +624,17 @@ func TestOAuth2Handler_GrantHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
-	t.Run("jwt bearer grant", func(t *testing.T) {
+	t.Run("jwt bearer grant is not advertised without an assertion validator", func(t *testing.T) {
 		form := url.Values{}
 		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
 		form.Set("assertion", "assert")
 		req := httptest.NewRequest(http.MethodPost, "/oauth2/token", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		// Use Basic auth header for client authentication
 		req.SetBasicAuth("client-confidential", "secret")
 		rec := httptest.NewRecorder()
 		h.HandleToken(rec, req)
-		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "unsupported_grant_type")
 	})
 
 	t.Run("device code grant", func(t *testing.T) {
@@ -860,7 +860,7 @@ func TestOAuth2Handler_AdditionalErrorBranches(t *testing.T) {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		rec = httptest.NewRecorder()
 		h.HandleToken(rec, req)
-		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
 	t.Run("device grant denied and expired mapping", func(t *testing.T) {

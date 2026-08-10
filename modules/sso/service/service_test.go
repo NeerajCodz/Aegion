@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -71,6 +72,10 @@ func TestStartAndCompleteAuth(t *testing.T) {
 	}
 	if result.Subject != "sub-123" || result.Email != "user@example.com" || result.DisplayName != "User" || result.RedirectTo != "/after" {
 		t.Fatalf("unexpected callback result: %+v", result)
+	}
+	restarted := New(repo, []byte("01234567890123456789012345678901"))
+	if _, err := restarted.CompleteAuth(ctx, "acme", start.RelayState, "", "", "", nil); !errors.Is(err, ErrInvalidRelayState) {
+		t.Fatalf("complete replay after restart = %v, want %v", err, ErrInvalidRelayState)
 	}
 }
 

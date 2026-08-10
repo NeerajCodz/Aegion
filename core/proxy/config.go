@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"net/http"
 	"time"
 )
 
@@ -29,6 +30,10 @@ type Config struct {
 
 	// Transport settings for HTTP client
 	Transport TransportConfig `json:"transport" yaml:"transport"`
+
+	// EgressTransport validates outbound upstream requests at request and dial
+	// time. It is intentionally runtime-only and never deserialized.
+	EgressTransport http.RoundTripper `json:"-" yaml:"-"`
 
 	// StripInboundIdentityHeaders removes client-supplied identity headers before proxy injection.
 	StripInboundIdentityHeaders bool `json:"strip_inbound_identity_headers" yaml:"strip_inbound_identity_headers"`

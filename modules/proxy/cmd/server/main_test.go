@@ -5,12 +5,18 @@ import (
 	"errors"
 	"flag"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	coresession "github.com/aegion/aegion/core/session"
+	"github.com/aegion/aegion/internal/platform/egress"
 	"github.com/aegion/aegion/internal/platform/moduleserver"
 	"github.com/aegion/aegion/modules/proxy/store"
+	"github.com/aegion/aegion/modules/proxy/service"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,36 +32,28 @@ func TestDefaultListenAddr(t *testing.T) {
 	}
 }
 
-func TestModuleConfig(t *testing.T) {
+func TestModuleConfigDeclaresOnlyImplementedCoreSurface(t *testing.T) {
 	cfg := moduleConfig("127.0.0.1:9009", func(*http.ServeMux) {})
 	if cfg.Module != "proxy" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9009" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
-	if len(cfg.Capabilities) != 3 || cfg.Capabilities[2] != "proxy_rule_registry" {
-		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
+	if got, want := cfg.Capabilities, []string{"proxy_rule_registry"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("unexpected capabilities: %#v", got)
 	}
-	if len(cfg.Routes) != 2 || cfg.Routes[0] != "/proxy/*" || cfg.Routes[1] != "/api/v1/proxy/*" {
-		t.Fatalf("unexpected routes: %#v", cfg.Routes)
+	if len(cfg.Routes) != 0 || len(cfg.GRPCServices) != 0 || len(cfg.EventSubscriptions) != 0 {
+		t.Fatalf("proxy must not declare a core-public route, gRPC service, or event subscription: %+v", cfg)
 	}
 	if cfg.RegisterHTTPRoutes == nil {
-		t.Fatal("expected HTTP route registration hook")
+		t.Fatal("expected internal HTTP route registration hook")
 	}
 }
 
-func TestBuildRuntimeDefaultsToMemoryStore(t *testing.T) {
+func TestBuildRuntimeRejectsMissingDurableConfiguration(t *testing.T) {
 	t.Setenv(dbURLEnv, "")
-	t.Setenv(legacyDBURLEnv, "")
-	t.Setenv(managementTokenEnv, "secret")
 
 	runtime, err := buildRuntime(context.Background())
-	if err != nil {
-		t.Fatalf("buildRuntime returned error: %v", err)
-	}
-	if runtime == nil || runtime.registerHTTPRoutes == nil {
-		t.Fatal("expected runtime with HTTP routes")
-	}
-	if runtime.cleanup == nil {
-		t.Fatal("expected cleanup function")
+	if err == nil || runtime != nil {
+		t.Fatalf("buildRuntime(missing config) runtime=%v err=%v", runtime, err)
 	}
 }
 
@@ -79,6 +77,7 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 	buildRuntimeHook = func(_ context.Context) (*moduleRuntime, error) {
 		return &moduleRuntime{
 			registerHTTPRoutes: func(*http.ServeMux) {},
+			readiness:          func(context.Context) error { return nil },
 			cleanup:            func() {},
 		}, nil
 	}
@@ -87,14 +86,13 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	main()
 
-	if captured.Module != "proxy" || captured.ListenAddr != "127.0.0.1:19009" {
+	if captured.Module != "proxy" || captured.ListenAddr != "127.0.0.1:19009" || captured.Readiness == nil {
 		t.Fatalf("main did not pass expected config: %+v", captured)
 	}
 }
 
 func TestBuildRepositoryRejectsInvalidDBURL(t *testing.T) {
 	t.Setenv(dbURLEnv, "://bad-url")
-	t.Setenv(legacyDBURLEnv, "")
 
 	repo, cleanup, err := buildRepository(context.Background())
 	if err == nil {
@@ -107,7 +105,6 @@ func TestBuildRepositoryRejectsInvalidDBURL(t *testing.T) {
 
 func TestBuildRepositoryPingFailure(t *testing.T) {
 	t.Setenv(dbURLEnv, "postgres://user:pass@127.0.0.1:5432/aegion?sslmode=disable")
-	t.Setenv(legacyDBURLEnv, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -122,22 +119,95 @@ func TestBuildRepositoryPingFailure(t *testing.T) {
 }
 
 func TestBuildRuntimePropagatesRepositoryError(t *testing.T) {
+	t.Setenv(managementTokenEnv, strings.Repeat("m", minimumSecretLength))
+	t.Setenv(egressAllowedHostsEnv, "example.com")
 	t.Setenv(dbURLEnv, "://bad-url")
-	t.Setenv(legacyDBURLEnv, "")
+
 	runtime, err := buildRuntime(context.Background())
 	if err == nil || runtime != nil {
 		t.Fatalf("buildRuntime(parse error) runtime=%v err=%v", runtime, err)
 	}
 }
 
-func TestBuildRepositoryNoDBURLReturnsMemoryStore(t *testing.T) {
+func TestBuildRepositoryRejectsMissingDatabaseURL(t *testing.T) {
 	t.Setenv(dbURLEnv, "")
-	t.Setenv(legacyDBURLEnv, "")
 	repo, cleanup, err := buildRepository(context.Background())
-	if err != nil || repo == nil || cleanup == nil {
+	if err == nil || repo != nil || cleanup != nil {
 		t.Fatalf("buildRepository(no db) repo=%v cleanupNil=%t err=%v", repo, cleanup == nil, err)
 	}
-	cleanup()
+}
+
+func TestValidatingRepositoryRejectsUnsafeUpstream(t *testing.T) {
+	egressClient, err := egress.NewClient(egress.Policy{AllowedHosts: []string{"example.com"}})
+	if err != nil {
+		t.Fatalf("new egress client: %v", err)
+	}
+	repo := &validatingRepository{Repository: store.New(), egressClient: egressClient}
+	_, err = repo.UpsertUpstream(context.Background(), store.Upstream{Name: "unsafe", URL: "http://example.com"})
+	if err == nil {
+		t.Fatal("expected HTTP upstream to be rejected")
+	}
+}
+
+func TestValidatingRepositoryRejectsProtectedDataPlaneRoute(t *testing.T) {
+	repo := &validatingRepository{Repository: store.New()}
+	_, err := repo.UpsertRoute(context.Background(), store.Route{ID: "claim-core", Path: "/internal/*", Target: "upstream", Enabled: true})
+	if !errors.Is(err, service.ErrInvalidProxyConfig) {
+		t.Fatalf("expected protected path to be rejected, got %v", err)
+	}
+}
+
+func TestDataPlaneAcceptsOnlyVerifiedSessionContext(t *testing.T) {
+	secret := []byte(strings.Repeat("s", minimumSecretLength))
+	plane := &dataPlane{sessionContextSecret: secret}
+	request := httptest.NewRequest(http.MethodGet, "https://proxy.example/data", nil)
+	request.Header.Set(coresession.HeaderPrefix+"Session-ID", uuid.NewString())
+	if _, err := plane.withTrustedSession(request); err == nil {
+		t.Fatal("expected unsigned session context to be rejected")
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "https://proxy.example/data", nil)
+	original := &coresession.Session{ID: uuid.New(), IdentityID: uuid.New(), AAL: coresession.AAL2}
+	coresession.InjectHeaders(request, original, secret)
+	trusted, err := plane.withTrustedSession(request)
+	if err != nil {
+		t.Fatalf("verify signed session context: %v", err)
+	}
+	session := coresession.FromContext(trusted.Context())
+	if session == nil || session.ID != original.ID || session.IdentityID != original.IdentityID || !session.Active {
+		t.Fatalf("trusted session = %#v, want verified active session", session)
+	}
+	if trusted.Header.Get(coresession.HeaderPrefix+"Signature") != "" {
+		t.Fatal("verified context headers must not reach the configured upstream")
+	}
+}
+
+func TestCompileProxyConfigRejectsProtectedPaths(t *testing.T) {
+	egressClient, err := egress.NewClient(egress.Policy{AllowedHosts: []string{"example.com"}})
+	if err != nil {
+		t.Fatalf("new egress client: %v", err)
+	}
+	_, _, err = compileProxyConfig(context.Background(), &service.EffectiveConfig{Routes: []store.Route{{
+		ID:      "take-core",
+		Path:    "/api/v1/auth/*",
+		Target:  "nope",
+		Enabled: true,
+	}}}, egressClient, strings.Repeat("u", minimumSecretLength))
+	if err == nil || !strings.Contains(err.Error(), "protected core path") {
+		t.Fatalf("compileProxyConfig protected path error = %v", err)
+	}
+}
+
+func TestConfiguredReloadInterval(t *testing.T) {
+	t.Setenv(configReloadIntervalEnv, "1500ms")
+	got, err := configuredReloadInterval()
+	if err != nil || got != 1500*time.Millisecond {
+		t.Fatalf("configuredReloadInterval() = %v, %v", got, err)
+	}
+	t.Setenv(configReloadIntervalEnv, "100ms")
+	if _, err := configuredReloadInterval(); err == nil {
+		t.Fatal("expected sub-second reload interval to be rejected")
+	}
 }
 
 func TestMainFatalBranches(t *testing.T) {
@@ -202,14 +272,13 @@ func TestBuildRepositoryHookedBranches(t *testing.T) {
 	})
 
 	t.Setenv(dbURLEnv, "postgres://user:pass@localhost:5432/aegion?sslmode=disable")
-	t.Setenv(legacyDBURLEnv, "")
 
 	t.Run("new pool error", func(t *testing.T) {
 		newPoolWithConfigHook = func(context.Context, *pgxpool.Config) (*pgxpool.Pool, error) {
 			return nil, errors.New("new pool failed")
 		}
 		_, _, err := buildRepository(context.Background())
-		if err == nil || err.Error() != "new pool failed" {
+		if err == nil || !strings.Contains(err.Error(), "new pool failed") {
 			t.Fatalf("buildRepository(new pool error) = %v", err)
 		}
 	})
@@ -220,7 +289,7 @@ func TestBuildRepositoryHookedBranches(t *testing.T) {
 		poolCloseHook = func(*pgxpool.Pool) {}
 		newPostgresRepoHook = func(*pgxpool.Pool) (*store.PostgresStore, error) { return nil, errors.New("repo failed") }
 		_, _, err := buildRepository(context.Background())
-		if err == nil || err.Error() != "repo failed" {
+		if err == nil || !strings.Contains(err.Error(), "repo failed") {
 			t.Fatalf("buildRepository(new repository error) = %v", err)
 		}
 	})

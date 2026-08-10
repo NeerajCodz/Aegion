@@ -20,7 +20,7 @@ function Write-Info { param($Message) Write-Host "[$(Get-Date -Format 'yyyy-MM-d
 function Cleanup {
     Write-Info "Cleaning up containers and networks..."
     try {
-        docker compose -f deploy\docker-compose.yml down -v --remove-orphans 2>$null
+        docker compose -f deploy\docker-compose.yml -f deploy\docker-compose.dev.yml down -v --remove-orphans 2>$null
     } catch {
         # Ignore cleanup errors
     }
@@ -174,7 +174,7 @@ function Main {
     
     # Build all Docker images first
     Write-Info "Building Docker images..."
-    $buildResult = docker compose -f deploy\docker-compose.yml build 2>&1
+    $buildResult = docker compose -f deploy\docker-compose.yml -f deploy\docker-compose.dev.yml build aegion migration 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Failure "Failed to build Docker images"
         Write-Host $buildResult
@@ -184,7 +184,7 @@ function Main {
     
     # Start infrastructure (postgres, redis)
     Write-Info "Starting infrastructure services..."
-    docker compose -f deploy\docker-compose.yml up -d postgres redis
+    docker compose -f deploy\docker-compose.yml -f deploy\docker-compose.dev.yml up -d postgres redis
     
     # Wait for infrastructure to be healthy
     Test-ContainerHealth "aegion-postgres-1"
@@ -194,38 +194,15 @@ function Main {
     Write-Host ""
     Write-Info "TEST 1: Core Service"
     Write-Info "===================="
-    docker compose -f deploy\docker-compose.yml up -d aegion
+    docker compose -f deploy\docker-compose.yml -f deploy\docker-compose.dev.yml up -d aegion
     Test-ContainerHealth "aegion-aegion-1"
     Test-HttpEndpoint "http://localhost:8080/health"
     Test-HttpEndpoint "http://localhost:8080/.well-known/aegion/meta"
     Test-NonRootUser "aegion-aegion-1"
     
-    # Test 2: Password module
-    Write-Host ""
-    Write-Info "TEST 2: Password Module"
-    Write-Info "======================="
-    docker compose -f deploy\docker-compose.yml up -d module-password
-    Test-ContainerHealth "aegion-module-password-1"
-    Test-HttpEndpoint "http://localhost:9001/health"
-    Test-NonRootUser "aegion-module-password-1"
-    
-    # Test 3: Magic Link module
-    Write-Host ""
-    Write-Info "TEST 3: Magic Link Module"
-    Write-Info "========================="
-    docker compose -f deploy\docker-compose.yml up -d module-magic-link
-    Test-ContainerHealth "aegion-module-magic-link-1"
-    Test-HttpEndpoint "http://localhost:9002/health"
-    Test-NonRootUser "aegion-module-magic-link-1"
-    
-    # Test 4: Admin module
-    Write-Host ""
-    Write-Info "TEST 4: Admin Module"
-    Write-Info "===================="
-    docker compose -f deploy\docker-compose.yml up -d module-admin
-    Test-ContainerHealth "aegion-module-admin-1"
-    Test-HttpEndpoint "http://localhost:9003/health"
-    Test-NonRootUser "aegion-module-admin-1"
+    # External modules are independently scheduled private workloads. This
+    # legacy smoke script deliberately does not start or probe embedded-module
+    # containers or unpublished module ports.
     
     # Test 5: Security hardening
     Write-Host ""
@@ -237,7 +214,7 @@ function Main {
     Write-Host ""
     Write-Info "Container Logs (last 20 lines each):"
     Write-Info "====================================="
-    $containers = @("aegion-aegion-1", "aegion-module-password-1", "aegion-module-magic-link-1", "aegion-module-admin-1")
+    $containers = @("aegion-aegion-1")
     foreach ($container in $containers) {
         $exists = docker ps --format '{{.Names}}' | Select-String -Pattern $container
         if ($exists) {

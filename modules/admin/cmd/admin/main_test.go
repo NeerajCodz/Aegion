@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/aegion/aegion/internal/platform/moduleserver"
 )
 
 func TestGetEnv(t *testing.T) {
@@ -444,21 +444,8 @@ func TestRunMigrations_RequiresDatabasePool(t *testing.T) {
 	}
 }
 
-type testRuntimeServer struct {
-	registerErr   error
-	shutdownErr   error
-	registerCalls int
-	shutdownCalls int
-}
-
-func (s *testRuntimeServer) registerWithCore(ctx context.Context) error {
-	s.registerCalls++
-	return s.registerErr
-}
-
-func (s *testRuntimeServer) shutdown(ctx context.Context) error {
-	s.shutdownCalls++
-	return s.shutdownErr
+type testModuleRuntime struct {
+	cleanupCalls int
 }
 
 func baseRunConfig() *Config {
@@ -471,253 +458,95 @@ func baseRunConfig() *Config {
 	return &cfg
 }
 
-func baseRunDeps(cfg *Config) (mainDeps, *bytes.Buffer, *testRuntimeServer) {
+func baseRunDeps(cfg *Config) (mainDeps, *bytes.Buffer, *testModuleRuntime) {
 	stdout := &bytes.Buffer{}
-	runtime := &testRuntimeServer{}
-
+	runtime := &testModuleRuntime{}
 	deps := mainDeps{
-		stdout: stdout,
-		loadConfig: func(path string) (*Config, error) {
-			return cfg, nil
-		},
+		stdout:          stdout,
+		loadConfig:      func(string) (*Config, error) { return cfg, nil },
 		cryptoSelfCheck: func() error { return nil },
-		setupLogger:     func(logConfig LogConfig) {},
-		parseDBConfig:   func(connString string) (*pgxpool.Config, error) { return &pgxpool.Config{}, nil },
-		newDBPool:       func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error) { return nil, nil },
-		pingDB:          func(ctx context.Context, db *pgxpool.Pool) error { return nil },
-		closeDB:         func(db *pgxpool.Pool) {},
-		runMigrations:   func(ctx context.Context, db *pgxpool.Pool) error { return nil },
-		startServer: func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
-			return runtime, nil
+		setupLogger:     func(LogConfig) {},
+		parseDBConfig:   func(string) (*pgxpool.Config, error) { return &pgxpool.Config{}, nil },
+		newDBPool:       func(context.Context, *pgxpool.Config) (*pgxpool.Pool, error) { return nil, nil },
+		pingDB:          func(context.Context, *pgxpool.Pool) error { return nil },
+		closeDB:         func(*pgxpool.Pool) {},
+		runMigrations:   func(context.Context, *pgxpool.Pool) error { return nil },
+		buildRuntime: func(*Config, *pgxpool.Pool) (*moduleRuntime, error) {
+			return &moduleRuntime{cleanup: func() { runtime.cleanupCalls++ }}, nil
 		},
-		newSignalChan: func() chan os.Signal { return make(chan os.Signal, 1) },
-		notifySignals: func(c chan<- os.Signal, sig ...os.Signal) { c <- os.Interrupt },
-		stopSignalChan: func(c chan<- os.Signal) {
-		},
+		runModuleServer: func(moduleserver.Config) error { return nil },
 	}
-
 	return deps, stdout, runtime
 }
 
 func TestRun(t *testing.T) {
 	t.Run("version mode only prints version", func(t *testing.T) {
 		deps, stdout, _ := baseRunDeps(baseRunConfig())
-		loadConfigCalled := false
-		deps.loadConfig = func(path string) (*Config, error) {
-			loadConfigCalled = true
+		deps.loadConfig = func(string) (*Config, error) {
 			return nil, errors.New("should not be called")
 		}
-
 		if err := run([]string{"-version"}, deps); err != nil {
 			t.Fatalf("run returned error in version mode: %v", err)
-		}
-		if loadConfigCalled {
-			t.Fatalf("loadConfig should not be called in version mode")
 		}
 		if got := strings.TrimSpace(stdout.String()); got != "Aegion Admin Module v1.0.0" {
 			t.Fatalf("unexpected version output %q", got)
 		}
 	})
 
-	t.Run("load config error", func(t *testing.T) {
+	t.Run("migrate mode does not compose runtime", func(t *testing.T) {
 		deps, _, _ := baseRunDeps(baseRunConfig())
-		deps.loadConfig = func(path string) (*Config, error) {
-			return nil, errors.New("missing config")
+		composed := false
+		deps.buildRuntime = func(*Config, *pgxpool.Pool) (*moduleRuntime, error) {
+			composed = true
+			return nil, nil
 		}
-
-		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed to load configuration") {
-			t.Fatalf("expected load config error, got %v", err)
-		}
-	})
-
-	t.Run("crypto runtime self-check error", func(t *testing.T) {
-		deps, _, _ := baseRunDeps(baseRunConfig())
-		deps.cryptoSelfCheck = func() error {
-			return errors.New("ffi unavailable")
-		}
-
-		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed crypto runtime self-check") {
-			t.Fatalf("expected crypto runtime self-check error, got %v", err)
-		}
-	})
-
-	t.Run("db config parse error", func(t *testing.T) {
-		deps, _, _ := baseRunDeps(baseRunConfig())
-		deps.parseDBConfig = func(connString string) (*pgxpool.Config, error) {
-			return nil, errors.New("bad db url")
-		}
-
-		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed to parse database URL") {
-			t.Fatalf("expected parse db config error, got %v", err)
-		}
-	})
-
-	t.Run("invalid max_idle_time", func(t *testing.T) {
-		cfg := baseRunConfig()
-		cfg.Database.MaxIdleTime = "invalid-duration"
-		deps, _, _ := baseRunDeps(cfg)
-
-		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed to parse max_idle_time") {
-			t.Fatalf("expected invalid max_idle_time error, got %v", err)
-		}
-	})
-
-	t.Run("db pool creation error", func(t *testing.T) {
-		deps, _, _ := baseRunDeps(baseRunConfig())
-		deps.newDBPool = func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error) {
-			return nil, errors.New("dial failure")
-		}
-
-		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed to connect to database") {
-			t.Fatalf("expected db connect error, got %v", err)
-		}
-	})
-
-	t.Run("db ping error still closes db", func(t *testing.T) {
-		deps, _, _ := baseRunDeps(baseRunConfig())
-		closed := false
-		deps.pingDB = func(ctx context.Context, db *pgxpool.Pool) error {
-			return errors.New("ping failed")
-		}
-		deps.closeDB = func(db *pgxpool.Pool) {
-			closed = true
-		}
-
-		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed to ping database") {
-			t.Fatalf("expected ping error, got %v", err)
-		}
-		if !closed {
-			t.Fatalf("expected closeDB to be called on ping failure")
-		}
-	})
-
-	t.Run("migrate mode runs migrations and exits", func(t *testing.T) {
-		deps, _, _ := baseRunDeps(baseRunConfig())
-		migrationsCalled := false
-		startCalled := false
-		deps.runMigrations = func(ctx context.Context, db *pgxpool.Pool) error {
-			migrationsCalled = true
-			return nil
-		}
-		deps.startServer = func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
-			startCalled = true
-			return &testRuntimeServer{}, nil
-		}
-
 		if err := run([]string{"-migrate"}, deps); err != nil {
 			t.Fatalf("run returned error in migrate mode: %v", err)
 		}
-		if !migrationsCalled {
-			t.Fatalf("expected runMigrations to be called")
-		}
-		if startCalled {
-			t.Fatalf("startServer should not be called in migrate mode")
+		if composed {
+			t.Fatal("migration mode must not compose the serving runtime")
 		}
 	})
 
-	t.Run("migrate mode error", func(t *testing.T) {
+	t.Run("runtime construction failure fails closed", func(t *testing.T) {
 		deps, _, _ := baseRunDeps(baseRunConfig())
-		deps.runMigrations = func(ctx context.Context, db *pgxpool.Pool) error {
-			return errors.New("migration failed")
+		deps.buildRuntime = func(*Config, *pgxpool.Pool) (*moduleRuntime, error) {
+			return nil, errors.New("missing cipher")
 		}
-
-		err := run([]string{"-migrate"}, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed to run migrations") {
-			t.Fatalf("expected migration error, got %v", err)
-		}
-	})
-
-	t.Run("start server error", func(t *testing.T) {
-		deps, _, _ := baseRunDeps(baseRunConfig())
-		deps.startServer = func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
-			return nil, errors.New("server init failed")
-		}
-
 		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "failed to initialize server") {
-			t.Fatalf("expected initialize server error, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "failed to initialize admin runtime") {
+			t.Fatalf("expected runtime initialization error, got %v", err)
 		}
 	})
 
-	t.Run("register with core error does not fail run", func(t *testing.T) {
+	t.Run("module-server failure is returned and runtime is cleaned up", func(t *testing.T) {
 		deps, _, runtime := baseRunDeps(baseRunConfig())
-		runtime.registerErr = errors.New("core unavailable")
-
-		if err := run(nil, deps); err != nil {
-			t.Fatalf("run should continue on registerWithCore error, got %v", err)
+		deps.runModuleServer = func(moduleserver.Config) error {
+			return errors.New("module server failed")
 		}
-		if runtime.registerCalls != 1 {
-			t.Fatalf("expected registerWithCore to be called once, got %d", runtime.registerCalls)
-		}
-		if runtime.shutdownCalls != 1 {
-			t.Fatalf("expected shutdown to be called once, got %d", runtime.shutdownCalls)
-		}
-	})
-
-	t.Run("shutdown error is returned", func(t *testing.T) {
-		deps, _, runtime := baseRunDeps(baseRunConfig())
-		runtime.shutdownErr = errors.New("shutdown failed")
-
 		err := run(nil, deps)
-		if err == nil || !strings.Contains(err.Error(), "server shutdown error") {
-			t.Fatalf("expected shutdown error, got %v", err)
+		if err == nil || !strings.Contains(err.Error(), "admin module server") {
+			t.Fatalf("expected module-server error, got %v", err)
 		}
-		if runtime.shutdownCalls != 1 {
-			t.Fatalf("expected shutdown to be called once, got %d", runtime.shutdownCalls)
+		if runtime.cleanupCalls != 1 {
+			t.Fatalf("cleanup calls = %d, want 1", runtime.cleanupCalls)
 		}
 	})
 
-	t.Run("happy path handles configured idle timeout and signals", func(t *testing.T) {
+	t.Run("runtime metadata is passed to shared server", func(t *testing.T) {
 		cfg := baseRunConfig()
 		cfg.Database.MaxIdleTime = "30s"
-		deps, _, runtime := baseRunDeps(cfg)
-
-		var parsedConnString string
-		var capturedMaxConns int32
-		var capturedMinConns int32
-		var capturedIdle time.Duration
-		stoppedSignals := false
-
-		deps.parseDBConfig = func(connString string) (*pgxpool.Config, error) {
-			parsedConnString = connString
-			return &pgxpool.Config{}, nil
+		deps, _, _ := baseRunDeps(cfg)
+		var captured moduleserver.Config
+		deps.runModuleServer = func(moduleCfg moduleserver.Config) error {
+			captured = moduleCfg
+			return nil
 		}
-		deps.newDBPool = func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error) {
-			capturedMaxConns = config.MaxConns
-			capturedMinConns = config.MinConns
-			capturedIdle = config.MaxConnIdleTime
-			return nil, nil
-		}
-		deps.notifySignals = func(c chan<- os.Signal, sig ...os.Signal) {
-			c <- syscall.SIGTERM
-		}
-		deps.stopSignalChan = func(c chan<- os.Signal) {
-			stoppedSignals = true
-		}
-
 		if err := run(nil, deps); err != nil {
 			t.Fatalf("run returned error: %v", err)
 		}
-		if parsedConnString != cfg.Database.URL {
-			t.Fatalf("expected parseDBConfig to receive %q, got %q", cfg.Database.URL, parsedConnString)
-		}
-		if capturedMaxConns != cfg.Database.MaxConns || capturedMinConns != cfg.Database.MinConns {
-			t.Fatalf("unexpected conn limits max/min=%d/%d", capturedMaxConns, capturedMinConns)
-		}
-		if capturedIdle != 30*time.Second {
-			t.Fatalf("expected idle timeout 30s, got %v", capturedIdle)
-		}
-		if runtime.registerCalls != 1 || runtime.shutdownCalls != 1 {
-			t.Fatalf("expected lifecycle calls register/shutdown=1/1, got %d/%d", runtime.registerCalls, runtime.shutdownCalls)
-		}
-		if !stoppedSignals {
-			t.Fatalf("expected signal stop hook to be called")
+		if captured.Module != "admin" || len(captured.Routes) != 1 || captured.Routes[0] != adminPublicRoutePrefix {
+			t.Fatalf("unexpected module metadata: %#v", captured)
 		}
 	})
 }

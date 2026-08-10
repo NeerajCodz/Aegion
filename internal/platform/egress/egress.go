@@ -90,6 +90,23 @@ func NewClient(policy Policy) (*Client, error) {
 	}, nil
 }
 
+// RoundTripper returns an HTTP transport that validates each request and
+// revalidates the resolved destination immediately before it is dialed.
+func (c *Client) RoundTripper() http.RoundTripper {
+	return egressRoundTripper{client: c}
+}
+
+type egressRoundTripper struct {
+	client *Client
+}
+
+func (t egressRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.client == nil {
+		return nil, errors.New("egress client is required")
+	}
+	return t.client.Do(req)
+}
+
 // ValidateURL parses and validates one HTTPS destination without performing an
 // HTTP request. It rejects credentials and validates every DNS answer.
 func (c *Client) ValidateURL(ctx context.Context, rawURL string) (*url.URL, error) {
@@ -118,6 +135,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if _, err := c.ValidateURL(req.Context(), req.URL.String()); err != nil {
 		return nil, err
 	}
+	// #nosec G704 -- ValidateURL allowlists HTTPS hosts and revalidating DialContext prevents DNS rebinding.
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		if errors.Is(err, ErrRedirectNotAllowed) {

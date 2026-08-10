@@ -1,0 +1,136 @@
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+core:
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+  replicas: 1
+  configMapName: ""
+  configKey: aegion.yaml
+  service:
+    type: ClusterIP
+    port: 8443
+    targetPort: 8080
+  resources:
+    requests: {cpu: 500m, memory: 256Mi}
+    limits: {cpu: "2", memory: 1Gi}
+  secrets:
+    database: ""
+    cookie: ""
+    cipher: ""
+    internal: ""
+    serverTLS: ""
+    controlPlaneCA: ""
+    identityContextSigningKey: ""
+
+# The gateway host is intentionally the sole public URL. Module URL values are
+# gateway paths, never container addresses or published module ports.
+publicBaseURL: ""
+
+migration:
+  enabled: true
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+moduleResources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: "1", memory: 512Mi}
+
+# Every external service has an independent image, database credential, module
+# credential and mTLS client material. Set enabled only when the same module is
+# enabled in the core production configuration.
+modules:
+  admin:
+    enabled: false
+    publicPath: /aegion
+    port: 9003
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+  analytics:
+    enabled: false
+    publicPath: /api/v1/analytics
+    port: 8082
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+  oauth2:
+    enabled: false
+    publicPath: /oauth2
+    port: 9005
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+    identityContextRequired: true
+  social:
+    enabled: false
+    publicPath: /api/v1/self-service/social
+    port: 9006
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+    identityContextRequired: true
+  sso:
+    enabled: false
+    publicPath: /api/v1/self-service/sso
+    port: 9007
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+    identityContextRequired: true
+  introspection:
+    enabled: false
+    publicPath: /api/v1/introspection/token
+    port: 9008
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+  proxy:
+    enabled: false
+    port: 9009
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+  mfa:
+    enabled: false
+    publicPath: /api/v1/self-service/mfa
+    port: 9003
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+    identityContextRequired: true
+  passkeys:
+    enabled: false
+    publicPath: /api/v1/self-service/passkeys
+    port: 9004
+    image: {repository: "", tag: "", digest: ""}
+    databaseSecret: ""
+    credentialSecret: ""
+    clientTLSSecret: ""
+    identityContextRequired: true
+
+# CLI is a release artifact but never a Deployment or registry participant.
+# Set enabled to create a one-shot Job, or use the image as an operator toolbox.
+cli:
+  enabled: false
+  image: {repository: "", tag: "", digest: ""}
+  apiKeySecret: ""
+  clientTLSSecret: ""
+  secretCopyImage: ""
+  command: []
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 250m, memory: 256Mi}

@@ -19,7 +19,6 @@ module_versions:
   analytics:    "latest"
   policy:     "latest"
   proxy:      "latest"
-  cli:        "latest"
 
 # Module image registry for deployment tooling
 module_registry:

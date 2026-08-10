@@ -19,6 +19,12 @@ import (
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 )
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
 type failingWriteResponseWriter struct {
 	header     http.Header
 	statusCode int
@@ -1157,6 +1163,39 @@ func TestNewProxy_InitializesGlobalLimiterWithoutHealthChecks(t *testing.T) {
 	if proxy.limiter == nil {
 		t.Fatalf("expected global rate limiter to be initialized")
 	}
+}
+
+func TestProxyUsesConfiguredEgressTransport(t *testing.T) {
+	var requestCount int
+	config := DefaultConfig()
+	config.EnableHealthChecks = false
+	config.Upstreams = map[string]Upstream{
+		"upstream": {URL: "https://upstream.example"},
+	}
+	config.EgressTransport = roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		requestCount++
+		assert.Equal(t, "upstream.example", request.URL.Host)
+		return &http.Response{
+			StatusCode: http.StatusNoContent,
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+			Request:    request,
+		}, nil
+	})
+
+	proxy := newProxyForTest(t, config, NewRuleEngine([]Rule{{
+		ID:       "egress",
+		Path:     "/api/*",
+		Methods:  []string{http.MethodGet},
+		Target:   "upstream",
+		Enabled:  true,
+		Priority: 1,
+	}}), slog.Default())
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/data", nil))
+
+	assert.Equal(t, http.StatusNoContent, response.Code)
+	assert.Equal(t, 1, requestCount)
 }
 
 func TestProxy_GetRuleLimiter_ReusesLimiterPerRule(t *testing.T) {

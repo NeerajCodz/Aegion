@@ -17,9 +17,7 @@ type Query {
 		filter: EventFilter
 		first: Int
 		after: String
-		sort: SortInput
 	): EventConnection!
-
 	# Retrieve a single event by ID
 	event(id: ID!): Event
 
@@ -42,10 +40,7 @@ type Query {
 	stats: SystemStats!
 
 	# Get metrics
-	metrics(
-		category: String
-		timeRange: TimeRangeInput
-	): [Metric!]!
+	metrics(category: String): [Metric!]!
 }
 
 type Mutation {
@@ -64,26 +59,7 @@ type Mutation {
 	# Delete a saved query
 	deleteQuery(id: ID!): DeleteQueryPayload!
 
-	# Create a report from saved queries
-	createReport(input: CreateReportInput!): CreateReportPayload!
 
-	# Create a webhook for event notifications
-	createWebhook(input: CreateWebhookInput!): CreateWebhookPayload!
-
-	# Execute an arbitrary SQL query (requires auth)
-	executeQuery(sql: String!, timeout: Int): ExecuteQueryPayload!
-}
-
-type Subscription {
-	# Subscribe to new events matching filter
-	onNewEvent(filter: EventFilter): Event!
-
-	# Subscribe to metric updates
-	onMetricUpdate(category: String): Metric!
-
-	# Subscribe to dashboard data changes
-	onDashboardChange(dashboardId: ID!): Dashboard!
-}
 
 # ==================== Types ====================
 
@@ -232,13 +208,6 @@ input SaveQueryInput {
 	isPublic: Boolean
 }
 
-input CreateReportInput {
-	title: String!
-	queryIds: [ID!]!
-	format: ReportFormat!
-	dateRange: TimeRangeInput
-}
-
 enum ReportFormat {
 	PDF
 	HTML
@@ -288,12 +257,6 @@ type CreateWebhookPayload {
 	errors: [Error!]
 }
 
-type ExecuteQueryPayload {
-	rows: [JSON!]!
-	rowCount: Int!
-	executionTimeMs: Int!
-	errors: [Error!]
-}
 
 type Webhook {
 	id: ID!

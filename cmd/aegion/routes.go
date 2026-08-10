@@ -6,8 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -181,6 +179,11 @@ func SetupRoutes(s *Server) chi.Router {
 			setupAdminRoutes(r, s)
 		})
 	}
+
+	// External module routes are owned by the static resolved module plan.
+	// This catch-all runs only after every core route and forwards an owned
+	// path to the healthy module instance registered on the mTLS control plane.
+	r.HandleFunc("/*", s.handlePublicModuleProxy)
 
 	return r
 }
@@ -834,29 +837,10 @@ func (s *Server) handleOAuth2UserInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) proxyOAuth2Endpoint(w http.ResponseWriter, r *http.Request, modulePath string) {
-	target, err := s.oauth2EndpointURL(modulePath)
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "oauth2 module unavailable", err)
-		return
-	}
-
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	baseDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		baseDirector(req)
-		req.URL.Path = modulePath
-		req.URL.RawPath = ""
-		req.URL.RawQuery = r.URL.RawQuery
-		req.Host = target.Host
-	}
-	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
-		writeError(w, http.StatusBadGateway, "oauth2 upstream unavailable", proxyErr)
-	}
-	proxy.ServeHTTP(w, r)
-}
-
-func (s *Server) oauth2EndpointURL(modulePath string) (*url.URL, error) {
-	return s.moduleEndpointURL("oauth2", modulePath)
+	forwarded := r.Clone(r.Context())
+	forwarded.URL.Path = modulePath
+	forwarded.URL.RawPath = ""
+	s.handlePublicModuleProxy(w, forwarded)
 }
 
 // Module registration handlers
@@ -1006,6 +990,66 @@ func (s *Server) handleModuleProxy(w http.ResponseWriter, r *http.Request) {
 	})
 
 	moduleProxy.ServeHTTP(w, r.WithContext(withModuleProxyRequestContextWithTrust(r.Context(), r, proxySettings.TrustForwardedHeaders)))
+}
+
+func (s *Server) handlePublicModuleProxy(w http.ResponseWriter, r *http.Request) {
+	moduleID, ok := s.moduleRoutes.Match(r.Method, r.URL.Path)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if s.registry == nil {
+		writeError(w, http.StatusServiceUnavailable, "module unavailable", nil)
+		return
+	}
+	if _, err := s.registry.GetModule(moduleID); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "module unavailable", err)
+		return
+	}
+	s.proxyModuleRequest(w, r, moduleID)
+}
+
+func (s *Server) proxyModuleRequest(w http.ResponseWriter, r *http.Request, moduleID string) {
+	proxySettings, policySettings := s.moduleProxyRuntimeSettings(r.Context())
+
+	checker := s.policyChecker
+	requirePolicy := policySettings.Enabled
+	if !policySettings.Enabled {
+		checker = nil
+	}
+
+	timeout := s.cfg.Proxy.UpstreamTimeout.Duration()
+	if parsed, err := time.ParseDuration(strings.TrimSpace(proxySettings.UpstreamTimeout)); err == nil && parsed > 0 {
+		timeout = parsed
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
+	requestContext := withModuleProxyRequestContextWithTrust(r.Context(), r, proxySettings.TrustForwardedHeaders)
+	if s.sessionManager != nil {
+		if currentSession, err := s.sessionManager.GetFromRequest(requestContext, r); err == nil && currentSession != nil {
+			requestContext = coresession.WithSession(requestContext, currentSession)
+		}
+	}
+
+	moduleProxy := router.NewModuleProxy(router.ModuleProxyConfig{
+		Registry:                    s.registry,
+		ModuleID:                    moduleID,
+		InternalToken:               s.currentInternalTokenForProxy(),
+		StripInboundIdentityHeaders: true,
+		Timeout:                     timeout,
+		PreserveHost:                proxySettings.PreserveHost,
+		TrustForwardedHeaders:       proxySettings.TrustForwardedHeaders,
+		IdentitySigningSecret:       s.proxyIdentitySigningSecret(),
+		IdentitySignatureHeader:     proxySettings.IdentitySignatureHeader,
+		SignedIdentityHeaders:       proxySettings.SignedIdentityHeaders,
+		PolicyChecker:               checker,
+		RequirePolicy:               requirePolicy,
+		PolicyModel:                 policySettings.DefaultModel,
+		Logger:                      s.log.WithComponent("module_proxy"),
+	})
+	moduleProxy.ServeHTTP(w, r.WithContext(requestContext))
 }
 
 func (s *Server) moduleProxyRuntimeSettings(ctx context.Context) (runtimeProxySettings, runtimePolicySettings) {

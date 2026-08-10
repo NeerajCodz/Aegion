@@ -27,7 +27,8 @@ func TestDiscoveryService(t *testing.T) {
 	assert.Equal(t, "https://issuer.example.com", doc.Issuer)
 	assert.Equal(t, "https://auth.example.com/oauth2/authorize", doc.AuthorizationEndpoint)
 	assert.Contains(t, doc.GrantTypesSupported, "authorization_code")
-	assert.Contains(t, doc.TokenEndpointAuthMethodsSupported, "private_key_jwt")
+	assert.NotContains(t, doc.GrantTypesSupported, "urn:ietf:params:oauth:grant-type:jwt-bearer")
+	assert.NotContains(t, doc.TokenEndpointAuthMethodsSupported, "private_key_jwt")
 	assert.Contains(t, doc.CodeChallengeMethodsSupported, "S256")
 
 	raw, err := svc.MarshalDiscoveryDocument(context.Background())

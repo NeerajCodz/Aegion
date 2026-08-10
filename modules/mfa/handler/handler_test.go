@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/mfa/service"
+	"github.com/google/uuid"
 )
 
 type stubMFAService struct {
@@ -83,23 +85,45 @@ func newMFARequest(method, path, body string) *http.Request {
 	return req
 }
 
+const testIdentitySigningSecret = "mfa-test-identity-signing-secret"
+
+func newAuthenticatedMFARequest(t *testing.T, method, path, body, identityID string) *http.Request {
+	t.Helper()
+	req := newMFARequest(method, path, body)
+	req.Header.Set(identityIDHeader, identityID)
+	req.Header.Set(identitySessionIDHeader, uuid.NewString())
+	req.Header.Set(identityAALHeader, "aal1")
+	signature, err := platformcrypto.SignIdentityHeaders(
+		[]byte(testIdentitySigningSecret),
+		req.Header,
+		signedIdentityHeaders,
+		time.Now().UTC(),
+	)
+	if err != nil {
+		t.Fatalf("sign identity headers: %v", err)
+	}
+	req.Header.Set(identitySignatureHeader, signature)
+	return req
+}
+
 func TestMFAHandlersSuccessPaths(t *testing.T) {
-	h := New(&stubMFAService{})
+	h := New(&stubMFAService{}, WithIdentitySigningSecret([]byte(testIdentitySigningSecret)))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
+	identityID := uuid.NewString()
 
 	cases := []struct {
 		name string
 		req  *http.Request
 		want int
 	}{
-		{"totp start", newMFARequest(http.MethodPost, "/api/v1/mfa/totp/start", `{"identity_id":"id-1","account_name":"user@example.com"}`), http.StatusOK},
-		{"totp finish", newMFARequest(http.MethodPost, "/api/v1/mfa/totp/finish", `{"identity_id":"id-1","enrollment_id":"enroll-1","code":"123456"}`), http.StatusOK},
-		{"totp verify", newMFARequest(http.MethodPost, "/api/v1/mfa/totp/verify", `{"identity_id":"id-1","code":"123456"}`), http.StatusOK},
-		{"backup verify", newMFARequest(http.MethodPost, "/api/v1/mfa/backup/verify", `{"identity_id":"id-1","code":"AAAA-BBBB-CCCC"}`), http.StatusOK},
-		{"backup regenerate", newMFARequest(http.MethodPost, "/api/v1/mfa/backup/regenerate", `{"identity_id":"id-1"}`), http.StatusOK},
-		{"trusted device remember", newMFARequest(http.MethodPost, "/api/v1/mfa/trusted-device", `{"identity_id":"id-1","label":"browser"}`), http.StatusOK},
-		{"trusted device revoke", newMFARequest(http.MethodDelete, "/api/v1/mfa/trusted-device", `{"identity_id":"id-1","token":"trusted-token"}`), http.StatusOK},
+		{"totp start", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/start", `{"account_name":"user@example.com"}`, identityID), http.StatusOK},
+		{"totp finish", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/finish", `{"enrollment_id":"enroll-1","code":"123456"}`, identityID), http.StatusOK},
+		{"totp verify", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/verify", `{"code":"123456"}`, identityID), http.StatusOK},
+		{"backup verify", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/backup/verify", `{"code":"AAAA-BBBB-CCCC"}`, identityID), http.StatusOK},
+		{"backup regenerate", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/backup/regenerate", `{}`, identityID), http.StatusOK},
+		{"trusted device remember", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/trusted-device", `{"label":"browser"}`, identityID), http.StatusOK},
+		{"trusted device revoke", newAuthenticatedMFARequest(t, http.MethodDelete, "/api/v1/mfa/trusted-device", `{"token":"trusted-token"}`, identityID), http.StatusOK},
 	}
 
 	for _, tc := range cases {
@@ -113,8 +137,64 @@ func TestMFAHandlersSuccessPaths(t *testing.T) {
 	}
 }
 
+func TestMFAHandlersRequireVerifiedCoreIdentity(t *testing.T) {
+	subjectID := uuid.NewString()
+	calledIdentityID := ""
+	h := New(&stubMFAService{
+		verifyTOTPFn: func(_ context.Context, identityID, _ string) error {
+			calledIdentityID = identityID
+			return nil
+		},
+	}, WithIdentitySigningSecret([]byte(testIdentitySigningSecret)))
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	t.Run("uses verified signed subject", func(t *testing.T) {
+		req := newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/verify", `{"code":"123456"}`, subjectID)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		if calledIdentityID != subjectID {
+			t.Fatalf("service identity = %q, want signed subject %q", calledIdentityID, subjectID)
+		}
+	})
+
+	t.Run("rejects body identity authority", func(t *testing.T) {
+		req := newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/verify", `{"identity_id":"`+uuid.NewString()+`","code":"123456"}`, subjectID)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("rejects unsigned identity headers", func(t *testing.T) {
+		req := newMFARequest(http.MethodPost, "/api/v1/mfa/totp/verify", `{"code":"123456"}`)
+		req.Header.Set(identityIDHeader, subjectID)
+		req.Header.Set(identitySessionIDHeader, uuid.NewString())
+		req.Header.Set(identityAALHeader, "aal1")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("rejects tampered signed identity", func(t *testing.T) {
+		req := newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/verify", `{"code":"123456"}`, subjectID)
+		req.Header.Set(identityIDHeader, uuid.NewString())
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
 func TestMFAHandlersMethodAndValidationErrors(t *testing.T) {
-	h := New(&stubMFAService{})
+	h := New(&stubMFAService{}, WithIdentitySigningSecret([]byte(testIdentitySigningSecret)))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
@@ -160,21 +240,22 @@ func TestMFAHandlersServiceErrors(t *testing.T) {
 		regenerateBackupCodesFn: func(context.Context, string) ([]string, error) { return nil, boom },
 		rememberTrustedDeviceFn: func(context.Context, string, string) (string, time.Time, error) { return "", time.Time{}, boom },
 		revokeTrustedDeviceFn:   func(context.Context, string, string) error { return boom },
-	})
+	}, WithIdentitySigningSecret([]byte(testIdentitySigningSecret)))
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
+	identityID := uuid.NewString()
 
 	cases := []struct {
 		name string
 		req  *http.Request
 	}{
-		{"totp start", newMFARequest(http.MethodPost, "/api/v1/mfa/totp/start", `{"identity_id":"id-1","account_name":"user@example.com"}`)},
-		{"totp finish", newMFARequest(http.MethodPost, "/api/v1/mfa/totp/finish", `{"identity_id":"id-1","enrollment_id":"e","code":"123456"}`)},
-		{"totp verify", newMFARequest(http.MethodPost, "/api/v1/mfa/totp/verify", `{"identity_id":"id-1","code":"123456"}`)},
-		{"backup verify", newMFARequest(http.MethodPost, "/api/v1/mfa/backup/verify", `{"identity_id":"id-1","code":"A"}`)},
-		{"backup regenerate", newMFARequest(http.MethodPost, "/api/v1/mfa/backup/regenerate", `{"identity_id":"id-1"}`)},
-		{"trusted remember", newMFARequest(http.MethodPost, "/api/v1/mfa/trusted-device", `{"identity_id":"id-1","label":"browser"}`)},
-		{"trusted revoke", newMFARequest(http.MethodDelete, "/api/v1/mfa/trusted-device", `{"identity_id":"id-1","token":"trusted-token"}`)},
+		{"totp start", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/start", `{"account_name":"user@example.com"}`, identityID)},
+		{"totp finish", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/finish", `{"enrollment_id":"e","code":"123456"}`, identityID)},
+		{"totp verify", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/totp/verify", `{"code":"123456"}`, identityID)},
+		{"backup verify", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/backup/verify", `{"code":"A"}`, identityID)},
+		{"backup regenerate", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/backup/regenerate", `{}`, identityID)},
+		{"trusted remember", newAuthenticatedMFARequest(t, http.MethodPost, "/api/v1/mfa/trusted-device", `{"label":"browser"}`, identityID)},
+		{"trusted revoke", newAuthenticatedMFARequest(t, http.MethodDelete, "/api/v1/mfa/trusted-device", `{"token":"trusted-token"}`, identityID)},
 	}
 
 	for _, tc := range cases {

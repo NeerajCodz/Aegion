@@ -36,14 +36,11 @@ if [ -z "$PROTOC_BIN" ]; then
     exit 1
 fi
 
-# Git Bash can discover Windows executables through WSL-style absolute paths,
-# but invoking the executable name through PATH is more reliable there.
-if [[ "$PROTOC_BIN" == *.exe ]]; then
-    case "$PROTOC_BIN" in
-        /mnt/*|[A-Za-z]:\\*)
-            PROTOC_BIN="$(basename "$PROTOC_BIN")"
-            ;;
-    esac
+# Some POSIX-on-Windows shells resolve executables to a Windows path that this
+# shell cannot execute directly. Resolve the executable name through PATH so
+# the shell applies its Windows launcher.
+if [[ "$PROTOC_BIN" == *.exe ]] && command -v protoc.exe >/dev/null 2>&1; then
+    PROTOC_BIN="protoc.exe"
 fi
 if ! command -v "$PROTOC_BIN" >/dev/null 2>&1; then
     PROTOC_BIN="$(basename "$PROTOC_BIN")"
@@ -51,6 +48,11 @@ if ! command -v "$PROTOC_BIN" >/dev/null 2>&1; then
         echo "resolved protoc executable '$PROTOC_BIN' is not runnable in this shell"
         exit 1
     fi
+fi
+
+PROTOC_CMD=("$PROTOC_BIN")
+if [[ "$PROTOC_BIN" == *.exe ]] && command -v cmd.exe >/dev/null 2>&1; then
+    PROTOC_CMD=(cmd.exe /c "$PROTOC_BIN")
 fi
 
 proto_files=()
@@ -66,7 +68,7 @@ fi
 for proto_file in "${proto_files[@]}"; do
     rel_path="${proto_file#${PROTO_DIR}/}"
     echo "Generating: $rel_path"
-    "$PROTOC_BIN" \
+    "${PROTOC_CMD[@]}" \
         --go_out=. \
         --go_opt=module="$MODULE_PATH" \
         --go-grpc_out=. \

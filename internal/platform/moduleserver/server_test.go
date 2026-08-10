@@ -184,12 +184,16 @@ func TestApplyControlPlaneEnvironmentReadsMountedCredential(t *testing.T) {
 		t.Fatalf("write credential file: %v", err)
 	}
 	t.Setenv("AEGION_MODULE_CREDENTIAL_FILE", credentialFile)
+	t.Setenv("AEGION_MODULE_HTTP_ADVERTISE_ADDR", "analytics:9000")
 	cfg := Config{CoreGRPCAddr: "core.internal:9443"}
 	if err := applyControlPlaneEnvironment(&cfg); err != nil {
 		t.Fatalf("apply control-plane environment: %v", err)
 	}
 	if cfg.BootstrapCredential != "bootstrap-credential" {
 		t.Fatalf("expected trimmed mounted credential, got %q", cfg.BootstrapCredential)
+	}
+	if cfg.HTTPAdvertiseAddr != "analytics:9000" {
+		t.Fatalf("expected HTTP advertise address from environment, got %q", cfg.HTTPAdvertiseAddr)
 	}
 
 	oversizedFile := t.TempDir() + "/oversized-credential"
@@ -199,6 +203,19 @@ func TestApplyControlPlaneEnvironmentReadsMountedCredential(t *testing.T) {
 	cfg = Config{CoreGRPCAddr: "core.internal:9443", BootstrapCredentialFile: oversizedFile}
 	if err := applyControlPlaneEnvironment(&cfg); err == nil || !strings.Contains(err.Error(), "exceeds maximum size") {
 		t.Fatalf("expected oversized credential error, got %v", err)
+	}
+}
+
+func TestValidateAdvertiseAddress(t *testing.T) {
+	for _, address := range []string{"analytics:9000", "127.0.0.1:9000", "[::1]:9000"} {
+		if err := validateAdvertiseAddress(address); err != nil {
+			t.Fatalf("expected valid address %q, got %v", address, err)
+		}
+	}
+	for _, address := range []string{"", "analytics", "0.0.0.0:9000", "[::]:9000"} {
+		if err := validateAdvertiseAddress(address); err == nil {
+			t.Fatalf("expected invalid address %q", address)
+		}
 	}
 }
 

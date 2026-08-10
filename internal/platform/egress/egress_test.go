@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"net/netip"
 	"testing"
 
@@ -93,4 +94,33 @@ func TestLimitedReadCloserAllowsBodyAtLimit(t *testing.T) {
 	contents, err := io.ReadAll(body)
 	require.NoError(t, err)
 	require.Equal(t, "abcde", string(contents))
+}
+
+func TestClientDoRejectsDestinationBeforeTransport(t *testing.T) {
+	client, err := NewClient(Policy{
+		AllowedHosts: []string{"allowed.example"},
+		Resolver: staticResolver{
+			"allowed.example": {netip.MustParseAddr("1.1.1.1")},
+			"blocked.example": {netip.MustParseAddr("1.1.1.1")},
+		},
+	})
+	require.NoError(t, err)
+
+	calls := 0
+	client.httpClient = &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("transport must not be called")
+	})}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://blocked.example/resource", nil)
+	require.NoError(t, err)
+
+	_, err = client.Do(req)
+	require.ErrorIs(t, err, ErrDestinationNotAllowed)
+	require.Zero(t, calls)
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

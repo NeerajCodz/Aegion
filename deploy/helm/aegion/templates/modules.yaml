@@ -1,0 +1,138 @@
+{{- $fullName := include "aegion.fullname" . -}}
+{{- range $id, $module := .Values.modules }}
+{{- if $module.enabled }}
+{{- $moduleName := upper $id }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}-{{ $id }}
+  labels:
+    {{- include "aegion.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: module-{{ $id }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "aegion.name" $ }}
+    app.kubernetes.io/component: module-{{ $id }}
+  ports:
+    - name: http
+      port: {{ $module.port }}
+      targetPort: http
+    {{- if eq $id "oauth2" }}
+    - name: grpc
+      port: 9103
+      targetPort: grpc
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}-{{ $id }}
+  labels:
+    {{- include "aegion.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: module-{{ $id }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "aegion.name" $ }}
+      app.kubernetes.io/component: module-{{ $id }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "aegion.name" $ }}
+        app.kubernetes.io/component: module-{{ $id }}
+    spec:
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: {{ $id }}
+          image: {{ required (printf "modules.%s.image.repository is required" $id) $module.image.repository }}:{{ required (printf "modules.%s.image.tag is required" $id) $module.image.tag }}@{{ required (printf "modules.%s.image.digest is required" $id) $module.image.digest }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml $.Values.moduleResources | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ $module.port }}
+            {{- if eq $id "oauth2" }}
+            - name: grpc
+              containerPort: 9103
+            {{- end }}
+          env:
+            - {name: AEGION_MODULE_ID, value: {{ $id | quote }}}
+            - {name: AEGION_CORE_URL, value: {{ printf "http://%s-core-control-plane:8080" $fullName | quote }}}
+            - {name: AEGION_CORE_REGISTRY_URL, value: {{ printf "http://%s-core-control-plane:8080/internal/registry" $fullName | quote }}}
+            - {name: AEGION_CORE_GRPC_ADDR, value: {{ printf "%s-core-control-plane:9443" $fullName | quote }}}
+            - {name: AEGION_CORE_GRPC_SERVER_NAME, value: {{ printf "%s-core" $fullName | quote }}}
+            - {name: AEGION_MODULE_HTTP_ADVERTISE_ADDR, value: {{ printf "%s-%s:%v" $fullName $id $module.port | quote }}}
+            {{- if eq $id "oauth2" }}
+            - {name: AEGION_MODULE_GRPC_ADVERTISE_ADDR, value: {{ printf "%s-%s:9103" $fullName $id | quote }}}
+            - {name: AEGION_OAUTH2_GRPC_LISTEN_ADDR, value: 0.0.0.0:9103}
+            {{- end }}
+            - {name: AEGION_DATABASE_URL_FILE, value: /var/run/aegion/database/database-url}
+            - {name: AEGION_{{ $moduleName }}_DATABASE_URL_FILE, value: /var/run/aegion/database/database-url}
+            - {name: AEGION_MODULE_CREDENTIAL_FILE, value: /var/run/aegion/credential/credential}
+            - {name: AEGION_MODULE_CA_CERT_FILE, value: /var/run/aegion/control-plane/ca.crt}
+            - {name: AEGION_MODULE_TLS_CERT_FILE, value: /var/run/aegion/client/tls.crt}
+            - {name: AEGION_MODULE_TLS_KEY_FILE, value: /var/run/aegion/client/tls.key}
+            {{- if $module.publicPath }}
+            - name: AEGION_MODULE_PUBLIC_URL
+              value: {{ printf "%s%s" (required "publicBaseURL is required for enabled public modules" $.Values.publicBaseURL) $module.publicPath | quote }}
+            {{- end }}
+            {{- if $module.identityContextRequired }}
+            - name: AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE
+              value: /var/run/aegion/identity/identity-signing-key
+            {{- end }}
+          volumeMounts:
+            - {name: database, mountPath: /var/run/aegion/database, readOnly: true}
+            - {name: credential, mountPath: /var/run/aegion/credential, readOnly: true}
+            - {name: control-plane-ca, mountPath: /var/run/aegion/control-plane, readOnly: true}
+            - {name: client-tls, mountPath: /var/run/aegion/client, readOnly: true}
+            {{- if $module.identityContextRequired }}
+            - {name: identity-context, mountPath: /var/run/aegion/identity, readOnly: true}
+            {{- end }}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+      volumes:
+        - name: database
+          secret:
+            secretName: {{ required (printf "modules.%s.databaseSecret is required" $id) $module.databaseSecret }}
+            items: [{key: database-url, path: database-url}]
+        - name: credential
+          secret:
+            secretName: {{ required (printf "modules.%s.credentialSecret is required" $id) $module.credentialSecret }}
+            items: [{key: credential, path: credential}]
+        - name: control-plane-ca
+          secret:
+            secretName: {{ required "core.secrets.controlPlaneCA is required" $.Values.core.secrets.controlPlaneCA }}
+            items: [{key: ca.crt, path: ca.crt}]
+        - name: client-tls
+          secret:
+            secretName: {{ required (printf "modules.%s.clientTLSSecret is required" $id) $module.clientTLSSecret }}
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+        {{- if $module.identityContextRequired }}
+        - name: identity-context
+          secret:
+            secretName: {{ required "core.secrets.identityContextSigningKey is required" $.Values.core.secrets.identityContextSigningKey }}
+            items: [{key: identity-signing-key, path: identity-signing-key}]
+        {{- end }}
+{{- end }}
+{{- end }}

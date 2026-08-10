@@ -46,73 +46,6 @@ func TestOIDCProxyHandlerMethodRestrictions(t *testing.T) {
 	}
 }
 
-func TestOAuth2EndpointURLBranches(t *testing.T) {
-	t.Run("module missing", func(t *testing.T) {
-		s := newTestServer(t)
-		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
-			t.Fatal("oauth2EndpointURL(module missing) expected error")
-		}
-	})
-
-	t.Run("module unhealthy", func(t *testing.T) {
-		s := newTestServer(t)
-		registerTestModule(t, s, "oauth2", registry.EndpointHTTP, "http://oauth2.example.com")
-		if err := s.registry.UpdateStatus("oauth2", registry.StatusUnhealthy); err != nil {
-			t.Fatalf("UpdateStatus(unhealthy) = %v", err)
-		}
-		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
-			t.Fatal("oauth2EndpointURL(unhealthy) expected error")
-		}
-	})
-
-	t.Run("no http endpoint", func(t *testing.T) {
-		s := newTestServer(t)
-		registerOAuth2EndpointFixture(t, s, registry.EndpointGRPC, "grpc://oauth2.example.com")
-		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
-			t.Fatal("oauth2EndpointURL(no http endpoint) expected error")
-		}
-	})
-
-	t.Run("invalid parse", func(t *testing.T) {
-		s := newTestServer(t)
-		registerOAuth2EndpointFixture(t, s, registry.EndpointHTTP, "://bad")
-		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
-			t.Fatal("oauth2EndpointURL(parse error) expected error")
-		}
-	})
-
-	t.Run("invalid scheme", func(t *testing.T) {
-		s := newTestServer(t)
-		registerOAuth2EndpointFixture(t, s, registry.EndpointHTTP, "ftp://oauth2.example.com")
-		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
-			t.Fatal("oauth2EndpointURL(scheme error) expected error")
-		}
-	})
-
-	t.Run("missing host", func(t *testing.T) {
-		s := newTestServer(t)
-		registerOAuth2EndpointFixture(t, s, registry.EndpointHTTP, "http:///missing-host")
-		if _, err := s.oauth2EndpointURL("/oidc/userinfo"); err == nil {
-			t.Fatal("oauth2EndpointURL(host error) expected error")
-		}
-	})
-
-	t.Run("success", func(t *testing.T) {
-		s := newTestServer(t)
-		registerTestModule(t, s, "oauth2", registry.EndpointHTTP, "http://oauth2.example.com")
-		if err := s.registry.UpdateStatus("oauth2", registry.StatusHealthy); err != nil {
-			t.Fatalf("UpdateStatus(healthy) = %v", err)
-		}
-		u, err := s.oauth2EndpointURL("/oidc/userinfo")
-		if err != nil {
-			t.Fatalf("oauth2EndpointURL(success) err=%v", err)
-		}
-		if got := u.String(); got != "http://oauth2.example.com/oidc/userinfo" {
-			t.Fatalf("oauth2EndpointURL(success) got %q", got)
-		}
-	})
-}
-
 func TestProxyOAuth2EndpointUpstreamFailure(t *testing.T) {
 	s := newTestServer(t)
 	registerTestModule(t, s, "oauth2", registry.EndpointHTTP, "http://127.0.0.1:1")
@@ -123,7 +56,7 @@ func TestProxyOAuth2EndpointUpstreamFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
 	s.handleJWKS(rec, req)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("proxy upstream failure expected %d got %d", http.StatusBadGateway, rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("proxy upstream failure expected %d got %d", http.StatusServiceUnavailable, rec.Code)
 	}
 }

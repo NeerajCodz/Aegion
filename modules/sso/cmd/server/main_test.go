@@ -7,6 +7,7 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,6 +15,22 @@ import (
 	"github.com/aegion/aegion/modules/sso/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func configureRuntimeEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv(stateSecretEnv, strings.Repeat("s", minSecretBytes))
+	t.Setenv(coreGRPCAddrEnv, "core.internal:9443")
+	t.Setenv(moduleCredentialFileEnv, "/mounted/module-credential")
+	t.Setenv(moduleTLSCertFileEnv, "/mounted/tls.crt")
+	t.Setenv(moduleTLSKeyFileEnv, "/mounted/tls.key")
+	t.Setenv(moduleCACertFileEnv, "/mounted/ca.crt")
+
+	secretPath := filepath.Join(t.TempDir(), "identity-signing-secret")
+	if err := os.WriteFile(secretPath, []byte(strings.Repeat("i", minSecretBytes)), 0o600); err != nil {
+		t.Fatalf("write identity signing secret: %v", err)
+	}
+	t.Setenv(identitySigningSecretFileEnv, secretPath)
+}
 
 func TestDefaultListenAddr(t *testing.T) {
 	t.Setenv(listenAddrEnv, "")
@@ -23,26 +40,34 @@ func TestDefaultListenAddr(t *testing.T) {
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9007", func(*http.ServeMux) {})
+	ready := func(context.Context) error { return nil }
+	cfg := moduleConfig("127.0.0.1:9007", func(*http.ServeMux) {}, ready)
 	if cfg.Module != "sso" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9007" {
 		t.Fatalf("unexpected module config: %+v", cfg)
 	}
 	if len(cfg.Capabilities) != 3 || cfg.Capabilities[1] != "connection_registry" {
 		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
 	}
+	if cfg.Readiness == nil || len(cfg.EventSubscriptions) != 0 || len(cfg.GRPCServices) != 0 {
+		t.Fatalf("metadata must only describe installed runtime behavior: %+v", cfg)
+	}
+	if got, want := cfg.Routes, []string{
+		"/api/v1/sso/connections",
+		"/api/v1/sso/resolve-domain",
+		"/api/v1/sso/admin/connections",
+		"/api/v1/sso/admin/connections/{slug}",
+		"/self-service/sso/{connection}/start",
+		"/self-service/sso/{connection}/callback",
+	}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("routes=%v, want %v", got, want)
+	}
 }
 
-func TestBuildRuntimeDefaultsToMemoryStore(t *testing.T) {
-	t.Setenv(dbURLEnv, "")
-	t.Setenv(legacyDBURLEnv, "")
-	t.Setenv(managementTokenEnv, "secret")
-	t.Setenv(stateSecretEnv, "super-secret")
+func TestBuildRuntimeRejectsMissingRequiredConfiguration(t *testing.T) {
+	t.Setenv(stateSecretEnv, "")
 	runtime, err := buildRuntime(context.Background())
-	if err != nil {
-		t.Fatalf("buildRuntime returned error: %v", err)
-	}
-	if runtime == nil || runtime.registerHTTPRoutes == nil || runtime.cleanup == nil {
-		t.Fatalf("unexpected runtime: %+v", runtime)
+	if err == nil || runtime != nil || !strings.Contains(err.Error(), "SSO state secret") {
+		t.Fatalf("buildRuntime() runtime=%v err=%v, want missing state-secret error", runtime, err)
 	}
 }
 
@@ -63,20 +88,22 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 		return nil
 	}
 	buildRuntimeHook = func(context.Context) (*moduleRuntime, error) {
-		return &moduleRuntime{registerHTTPRoutes: func(*http.ServeMux) {}, cleanup: func() {}}, nil
+		return &moduleRuntime{
+			registerHTTPRoutes: func(*http.ServeMux) {},
+			readiness:          func(context.Context) error { return nil },
+			cleanup:            func() {},
+		}, nil
 	}
 	os.Args = []string{"sso-server", "-listen", "127.0.0.1:19007"}
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	main()
-	if captured.Module != "sso" || captured.ListenAddr != "127.0.0.1:19007" {
+	if captured.Module != "sso" || captured.ListenAddr != "127.0.0.1:19007" || captured.Readiness == nil {
 		t.Fatalf("unexpected config passed to run: %+v", captured)
 	}
 }
 
 func TestBuildRepositoryRejectsInvalidDBURL(t *testing.T) {
 	t.Setenv(dbURLEnv, "://bad-url")
-	t.Setenv(legacyDBURLEnv, "")
-
 	repo, cleanup, err := buildRepository(context.Background())
 	if err == nil {
 		t.Fatal("expected parse error for invalid SSO database URL")
@@ -88,7 +115,6 @@ func TestBuildRepositoryRejectsInvalidDBURL(t *testing.T) {
 
 func TestBuildRepositoryPingFailure(t *testing.T) {
 	t.Setenv(dbURLEnv, "postgres://user:pass@127.0.0.1:5432/aegion?sslmode=disable")
-	t.Setenv(legacyDBURLEnv, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -103,41 +129,71 @@ func TestBuildRepositoryPingFailure(t *testing.T) {
 }
 
 func TestBuildRuntimePropagatesRepositoryError(t *testing.T) {
+	configureRuntimeEnvironment(t)
 	t.Setenv(dbURLEnv, "://bad-url")
-	t.Setenv(legacyDBURLEnv, "")
 	runtime, err := buildRuntime(context.Background())
 	if err == nil || runtime != nil {
 		t.Fatalf("buildRuntime(parse error) runtime=%v err=%v", runtime, err)
 	}
 }
 
-func TestBuildRepositoryNoDBURLReturnsMemoryStore(t *testing.T) {
+func TestBuildRepositoryRejectsMissingDBURL(t *testing.T) {
 	t.Setenv(dbURLEnv, "")
-	t.Setenv(legacyDBURLEnv, "")
 	repo, cleanup, err := buildRepository(context.Background())
-	if err != nil || repo == nil || cleanup == nil {
+	if err == nil || repo != nil || cleanup != nil {
 		t.Fatalf("buildRepository(no db) repo=%v cleanupNil=%t err=%v", repo, cleanup == nil, err)
 	}
-	cleanup()
 }
 
 func TestDeriveStateSecret(t *testing.T) {
 	t.Setenv(stateSecretEnv, "")
-	t.Setenv(legacyStateEnv, "")
-	if got := deriveStateSecret(); got != nil {
-		t.Fatalf("expected nil secret when envs are empty, got %x", got)
+	if got, err := deriveStateSecret(); err == nil || got != nil {
+		t.Fatalf("deriveStateSecret() secret=%x err=%v, want missing-secret error", got, err)
 	}
 
-	t.Setenv(legacyStateEnv, "legacy-secret")
-	wantLegacy := sha256.Sum256([]byte("legacy-secret"))
-	if got := deriveStateSecret(); len(got) != sha256.Size || string(got) != string(wantLegacy[:]) {
-		t.Fatalf("unexpected legacy-derived secret: %x", got)
+	raw := strings.Repeat("s", minSecretBytes)
+	t.Setenv(stateSecretEnv, raw)
+	want := sha256.Sum256([]byte(raw))
+	got, err := deriveStateSecret()
+	if err != nil || len(got) != sha256.Size || string(got) != string(want[:]) {
+		t.Fatalf("unexpected derived secret: %x, %v", got, err)
+	}
+}
+
+func TestReadMountedSecret(t *testing.T) {
+	if got, err := readMountedSecret(identitySigningSecretFileEnv); err == nil || got != nil {
+		t.Fatalf("readMountedSecret(missing) secret=%x err=%v", got, err)
 	}
 
-	t.Setenv(stateSecretEnv, "primary-secret")
-	wantPrimary := sha256.Sum256([]byte("primary-secret"))
-	if got := deriveStateSecret(); len(got) != sha256.Size || string(got) != string(wantPrimary[:]) {
-		t.Fatalf("unexpected primary-derived secret: %x", got)
+	secretPath := filepath.Join(t.TempDir(), "identity-signing-secret")
+	raw := strings.Repeat("i", minSecretBytes)
+	if err := os.WriteFile(secretPath, []byte("\n"+raw+"\n"), 0o600); err != nil {
+		t.Fatalf("write identity signing secret: %v", err)
+	}
+	t.Setenv(identitySigningSecretFileEnv, secretPath)
+	got, err := readMountedSecret(identitySigningSecretFileEnv)
+	if err != nil || string(got) != raw {
+		t.Fatalf("readMountedSecret() secret=%q err=%v", got, err)
+	}
+}
+
+func TestDatabaseReadiness(t *testing.T) {
+	origPing := poolPingHook
+	origSchemaCheck := checkSSOSchemaHook
+	t.Cleanup(func() {
+		poolPingHook = origPing
+		checkSSOSchemaHook = origSchemaCheck
+	})
+
+	checkSSOSchemaHook = func(context.Context, *pgxpool.Pool) error { return nil }
+	poolPingHook = func(context.Context, *pgxpool.Pool) error { return nil }
+	if err := databaseReadiness(nil)(context.Background()); err != nil {
+		t.Fatalf("databaseReadiness() error = %v", err)
+	}
+
+	poolPingHook = func(context.Context, *pgxpool.Pool) error { return errors.New("database unavailable") }
+	if err := databaseReadiness(nil)(context.Background()); err == nil || !strings.Contains(err.Error(), "ping sso database") {
+		t.Fatalf("databaseReadiness(ping failure) error = %v", err)
 	}
 }
 
@@ -203,7 +259,6 @@ func TestBuildRepositoryHookedBranches(t *testing.T) {
 	})
 
 	t.Setenv(dbURLEnv, "postgres://user:pass@localhost:5432/aegion?sslmode=disable")
-	t.Setenv(legacyDBURLEnv, "")
 
 	t.Run("new pool error", func(t *testing.T) {
 		newPoolWithConfigHook = func(context.Context, *pgxpool.Config) (*pgxpool.Pool, error) {

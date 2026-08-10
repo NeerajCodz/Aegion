@@ -41,7 +41,6 @@ module_versions:
   analytics:     "${AEGION_MODULE_ANALYTICS_VERSION:-latest}"
   policy:     "${AEGION_MODULE_POLICY_VERSION:-latest}"
   proxy:      "${AEGION_MODULE_PROXY_VERSION:-latest}"
-  cli:        "${AEGION_MODULE_CLI_VERSION:-latest}"
 
 module_registry:
   base_url: "${AEGION_MODULE_REGISTRY:-ghcr.io/aegion}"

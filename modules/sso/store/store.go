@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	ErrConnectionNotFound = errors.New("sso connection not found")
+	ErrConnectionNotFound  = errors.New("sso connection not found")
+	ErrAuthRequestConflict = errors.New("sso auth request already exists")
 )
 
 type AttributeMapping struct {
@@ -51,15 +52,27 @@ type Repository interface {
 	GetConnectionByDomain(ctx context.Context, domain string) (*Connection, error)
 	UpsertConnection(ctx context.Context, connection Connection) (*Connection, error)
 	DeleteConnection(ctx context.Context, slug string) error
+	CreateAuthRequest(ctx context.Context, requestID, connectionSlug string, expiresAt time.Time) error
+	ConsumeAuthRequest(ctx context.Context, requestID, connectionSlug string, now time.Time) (bool, error)
 }
 
 type MemoryStore struct {
-	mu          sync.RWMutex
-	connections map[string]Connection
+	mu           sync.RWMutex
+	connections  map[string]Connection
+	authRequests map[string]authRequest
+}
+
+type authRequest struct {
+	connectionSlug string
+	expiresAt      time.Time
+	consumedAt     *time.Time
 }
 
 func New() *MemoryStore {
-	return &MemoryStore{connections: make(map[string]Connection)}
+	return &MemoryStore{
+		connections:  make(map[string]Connection),
+		authRequests: make(map[string]authRequest),
+	}
 }
 
 func (s *MemoryStore) ListConnections(_ context.Context, includeDisabled bool) ([]Connection, error) {
@@ -134,6 +147,50 @@ func (s *MemoryStore) DeleteConnection(_ context.Context, slug string) error {
 	}
 	delete(s.connections, key)
 	return nil
+}
+
+func (s *MemoryStore) CreateAuthRequest(_ context.Context, requestID, connectionSlug string, expiresAt time.Time) error {
+	requestID = strings.TrimSpace(requestID)
+	connectionSlug = normalizeSlug(connectionSlug)
+	if requestID == "" || connectionSlug == "" || !expiresAt.After(time.Now().UTC()) {
+		return ErrAuthRequestConflict
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	for id, request := range s.authRequests {
+		if !request.expiresAt.After(now) {
+			delete(s.authRequests, id)
+		}
+	}
+	if _, exists := s.authRequests[requestID]; exists {
+		return ErrAuthRequestConflict
+	}
+	s.authRequests[requestID] = authRequest{
+		connectionSlug: connectionSlug,
+		expiresAt:      expiresAt.UTC(),
+	}
+	return nil
+}
+
+func (s *MemoryStore) ConsumeAuthRequest(_ context.Context, requestID, connectionSlug string, now time.Time) (bool, error) {
+	requestID = strings.TrimSpace(requestID)
+	connectionSlug = normalizeSlug(connectionSlug)
+	if requestID == "" || connectionSlug == "" {
+		return false, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	request, exists := s.authRequests[requestID]
+	if !exists || request.connectionSlug != connectionSlug || !request.expiresAt.After(now) || request.consumedAt != nil {
+		return false, nil
+	}
+	consumedAt := now.UTC()
+	request.consumedAt = &consumedAt
+	s.authRequests[requestID] = request
+	return true, nil
 }
 
 func cloneConnection(in Connection) Connection {

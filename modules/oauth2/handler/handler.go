@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aegion/aegion/modules/oauth2/service/authorization"
@@ -19,16 +21,17 @@ import (
 
 // OAuth2Handler handles all OAuth2 HTTP endpoints.
 type OAuth2Handler struct {
-	authzSvc       *authorization.AuthorizationService
-	tokenSvc       *token.TokenService
-	revocationSvc  *revocation.RevocationService
-	deviceSvc      *device.DeviceService
-	clientCredsSvc *grants.ClientCredentialsService
-	jwtBearerSvc   *grants.JWTBearerService
-	discoverySvc   *oidc.DiscoveryService
-	jwksSvc        *oidc.JWKSService
-	userInfoSvc    *oidc.UserInfoService
-	introspectSvc  *introspection.Service
+	authzSvc         *authorization.AuthorizationService
+	tokenSvc         *token.TokenService
+	revocationSvc    *revocation.RevocationService
+	deviceSvc        *device.DeviceService
+	clientCredsSvc   *grants.ClientCredentialsService
+	jwtBearerSvc     *grants.JWTBearerService
+	discoverySvc     *oidc.DiscoveryService
+	jwksSvc          *oidc.JWKSService
+	userInfoSvc      *oidc.UserInfoService
+	introspectSvc    *introspection.Service
+	identityResolver IdentityResolver
 }
 
 // NewOAuth2Handler creates a new OAuth2 handler.
@@ -65,6 +68,19 @@ func (h *OAuth2Handler) WithIntrospectionService(svc *introspection.Service) *OA
 	return h
 }
 
+// IdentityResolver obtains the authenticated core identity and session from a
+// request authenticated by the module gateway.
+type IdentityResolver func(*http.Request) (identityID, sessionID string, err error)
+
+// WithIdentityResolver configures trusted identity resolution for browser
+// authorization transitions. Requests without verified core context are denied.
+func (h *OAuth2Handler) WithIdentityResolver(resolver IdentityResolver) *OAuth2Handler {
+	if h != nil {
+		h.identityResolver = resolver
+	}
+	return h
+}
+
 // HandleAuthorize handles GET /oauth2/authorize
 func (h *OAuth2Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -94,6 +110,97 @@ func (h *OAuth2Handler) HandleAuthorize(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, challenge)
 }
 
+// HandleLogin accepts a persistent authorization login challenge only for a
+// verified core session. The subject is never read from request input.
+func (h *OAuth2Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "invalid_request", "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeError(w, "invalid_request", "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+	identityID, sessionID, err := h.resolveIdentity(r)
+	if err != nil {
+		writeError(w, "login_required", "Authentication required", http.StatusUnauthorized)
+		return
+	}
+	resp, err := h.authzSvc.AcceptLogin(r.Context(), r.FormValue("challenge"), identityID, sessionID)
+	if err != nil {
+		code, description, status := mapAuthorizationError(err)
+		writeError(w, code, description, status)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleConsent accepts or rejects a persistent consent challenge only for a
+// verified core session. Granted scopes are limited by the service to those
+// requested by the registered client.
+func (h *OAuth2Handler) HandleConsent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, "invalid_request", "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeError(w, "invalid_request", "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+	identityID, _, err := h.resolveIdentity(r)
+	if err != nil {
+		writeError(w, "login_required", "Authentication required", http.StatusUnauthorized)
+		return
+	}
+	challenge := r.FormValue("challenge")
+	decision := r.FormValue("decision")
+	if decision != "accept" && decision != "deny" {
+		writeError(w, "invalid_request", "decision must be accept or deny", http.StatusBadRequest)
+		return
+	}
+	if decision == "deny" {
+		if err := h.authzSvc.RejectConsentForIdentity(r.Context(), challenge, identityID, "access_denied", "Resource owner denied consent"); err != nil {
+			code, description, status := mapAuthorizationError(err)
+			writeError(w, code, description, status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	remember, err := strconv.ParseBool(r.FormValue("remember"))
+	if err != nil && r.FormValue("remember") != "" {
+		writeError(w, "invalid_request", "remember must be a boolean", http.StatusBadRequest)
+		return
+	}
+	var rememberFor *int
+	if raw := strings.TrimSpace(r.FormValue("remember_for")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value <= 0 || value > int((365*24*time.Hour).Seconds()) {
+			writeError(w, "invalid_request", "remember_for must be between 1 second and one year", http.StatusBadRequest)
+			return
+		}
+		rememberFor = &value
+	}
+	resp, err := h.authzSvc.AcceptConsentForIdentity(r.Context(), challenge, identityID, strings.Fields(r.FormValue("scope")), remember, rememberFor)
+	if err != nil {
+		code, description, status := mapAuthorizationError(err)
+		writeError(w, code, description, status)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *OAuth2Handler) resolveIdentity(r *http.Request) (string, string, error) {
+	if h == nil || h.identityResolver == nil {
+		return "", "", errors.New("trusted identity context is not configured")
+	}
+	identityID, sessionID, err := h.identityResolver(r)
+	if err != nil || strings.TrimSpace(identityID) == "" || strings.TrimSpace(sessionID) == "" {
+		return "", "", errors.New("trusted identity context is invalid")
+	}
+	return identityID, sessionID, nil
+}
+
 // HandleToken handles POST /oauth2/token
 func (h *OAuth2Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -118,8 +225,6 @@ func (h *OAuth2Handler) HandleToken(w http.ResponseWriter, r *http.Request) {
 		h.handleClientCredentialsGrant(w, r)
 	case "urn:ietf:params:oauth:grant-type:device_code":
 		h.handleDeviceCodeGrant(w, r)
-	case "urn:ietf:params:oauth:grant-type:jwt-bearer":
-		h.handleJWTBearerGrant(w, r)
 	default:
 		writeError(w, "unsupported_grant_type", "Grant type not supported", http.StatusBadRequest)
 	}
@@ -183,7 +288,6 @@ func (h *OAuth2Handler) handleClientCredentialsGrant(w http.ResponseWriter, r *h
 		writeTokenError(w, code, description, status)
 		return
 	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 

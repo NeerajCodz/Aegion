@@ -358,6 +358,31 @@ func (s *AuthorizationService) AcceptConsent(ctx context.Context, challengeID st
 	}, nil
 }
 
+// AcceptConsentForIdentity accepts a consent challenge only for the identity
+// that completed its login challenge.
+func (s *AuthorizationService) AcceptConsentForIdentity(ctx context.Context, challengeID, identityID string, grantedScopes []string, remember bool, rememberFor *int) (*AuthorizationResponse, error) {
+	challenge, err := s.store.GetConsentChallenge(ctx, challengeID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: consent challenge not found", ErrInvalidRequest)
+	}
+	if challenge.IdentityID != identityID {
+		return nil, fmt.Errorf("%w: consent challenge belongs to another identity", ErrInvalidRequest)
+	}
+	return s.AcceptConsent(ctx, challengeID, grantedScopes, remember, rememberFor)
+}
+
+// RejectConsentForIdentity rejects a consent challenge only for its authenticated owner.
+func (s *AuthorizationService) RejectConsentForIdentity(ctx context.Context, challengeID, identityID, errorCode, errorDesc string) error {
+	challenge, err := s.store.GetConsentChallenge(ctx, challengeID)
+	if err != nil {
+		return fmt.Errorf("%w: consent challenge not found", ErrInvalidRequest)
+	}
+	if challenge.IdentityID != identityID {
+		return fmt.Errorf("%w: consent challenge belongs to another identity", ErrInvalidRequest)
+	}
+	return s.RejectConsent(ctx, challengeID, errorCode, errorDesc)
+}
+
 // RejectConsent rejects a consent challenge.
 func (s *AuthorizationService) RejectConsent(ctx context.Context, challengeID, errorCode, errorDesc string) error {
 	return s.store.RejectConsentChallenge(ctx, challengeID, errorCode, errorDesc)

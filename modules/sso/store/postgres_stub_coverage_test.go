@@ -205,6 +205,42 @@ func TestPostgresStoreSSOStubCoverage(t *testing.T) {
 		t.Fatalf("DeleteConnection(success) = %v", err)
 	}
 
+	now = time.Now().UTC()
+	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.CommandTag{}, errors.New("insert failed")
+	}}
+	if err := s.CreateAuthRequest(context.Background(), "request-1", "acme", now.Add(time.Minute)); err == nil || err.Error() != "insert failed" {
+		t.Fatalf("CreateAuthRequest(exec error) = %v", err)
+	}
+	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("INSERT 0 0"), nil
+	}}
+	if err := s.CreateAuthRequest(context.Background(), "request-1", "acme", now.Add(time.Minute)); !errors.Is(err, ErrAuthRequestConflict) {
+		t.Fatalf("CreateAuthRequest(conflict) = %v", err)
+	}
+	s.pool = &ssoFakeDB{execFn: func(context.Context, string, ...any) (pgconn.CommandTag, error) {
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	}}
+	if err := s.CreateAuthRequest(context.Background(), "request-1", "acme", now.Add(time.Minute)); err != nil {
+		t.Fatalf("CreateAuthRequest(success) = %v", err)
+	}
+	if err := s.CreateAuthRequest(context.Background(), " ", "acme", now.Add(time.Minute)); !errors.Is(err, ErrAuthRequestConflict) {
+		t.Fatalf("CreateAuthRequest(blank) = %v", err)
+	}
+
+	s.pool = &ssoFakeDB{queryRowFn: func(context.Context, string, ...any) pgx.Row { return ssoFakeRow{err: pgx.ErrNoRows} }}
+	if consumed, err := s.ConsumeAuthRequest(context.Background(), "request-1", "acme", now); err != nil || consumed {
+		t.Fatalf("ConsumeAuthRequest(not found) consumed=%t err=%v", consumed, err)
+	}
+	s.pool = &ssoFakeDB{queryRowFn: func(context.Context, string, ...any) pgx.Row { return ssoFakeRow{err: errors.New("consume failed")} }}
+	if consumed, err := s.ConsumeAuthRequest(context.Background(), "request-1", "acme", now); err == nil || consumed {
+		t.Fatalf("ConsumeAuthRequest(query error) consumed=%t err=%v", consumed, err)
+	}
+	s.pool = &ssoFakeDB{queryRowFn: func(context.Context, string, ...any) pgx.Row { return ssoFakeRow{vals: []any{true}} }}
+	if consumed, err := s.ConsumeAuthRequest(context.Background(), "request-1", "acme", now); err != nil || !consumed {
+		t.Fatalf("ConsumeAuthRequest(success) consumed=%t err=%v", consumed, err)
+	}
+
 	if _, err := scanConnection(ssoFakeRow{vals: []any{
 		id, "acme", "Acme", "ent", "sso", "cert", "meta", []byte(`{`), []byte(`{}`), true, "", []byte(`{}`), true, now, now,
 	}}); err == nil {

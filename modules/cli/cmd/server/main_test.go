@@ -1,240 +1,229 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"flag"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/aegion/aegion/internal/platform/moduleserver"
-	"github.com/aegion/aegion/modules/cli/store"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"time"
 )
 
-func TestDefaultListenAddr(t *testing.T) {
-	t.Setenv(listenAddrEnv, "")
-	if got := defaultListenAddr(); got != defaultListen {
-		t.Fatalf("expected default listen addr %q, got %q", defaultListen, got)
+func TestParseCommandUsesOnlySupportedAdminEndpoints(t *testing.T) {
+	identityID := "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+
+	tests := []struct {
+		name string
+		args []string
+		method string
+		endpoint string
+	}{
+		{name: "status", args: []string{"status"}, method: http.MethodGet, endpoint: "/api/admin/setup/status"},
+		{name: "list identities", args: []string{"identities", "list", "--page", "2", "--per-page", "25"}, method: http.MethodGet, endpoint: "/api/admin/identities/"},
+		{name: "get identity", args: []string{"identities", "get", identityID}, method: http.MethodGet, endpoint: "/api/admin/identities/" + identityID},
+		{name: "suspend identity", args: []string{"identities", "suspend", "--yes", identityID}, method: http.MethodPost, endpoint: "/api/admin/identities/" + identityID + "/suspend"},
+		{name: "revoke session", args: []string{"sessions", "revoke", "--yes", identityID}, method: http.MethodDelete, endpoint: "/api/admin/sessions/" + identityID},
+		{name: "list audit", args: []string{"audit", "list"}, method: http.MethodGet, endpoint: "/api/admin/audit/"},
 	}
 
-	t.Setenv(listenAddrEnv, "127.0.0.1:19100")
-	if got := defaultListenAddr(); got != "127.0.0.1:19100" {
-		t.Fatalf("expected env listen addr override, got %q", got)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseCommand(test.args)
+			if err != nil {
+				t.Fatalf("parseCommand(%v) error = %v", test.args, err)
+			}
+			if got.method != test.method || got.endpoint != test.endpoint {
+				t.Fatalf("parseCommand(%v) = %s %s, want %s %s", test.args, got.method, got.endpoint, test.method, test.endpoint)
+			}
+		})
 	}
 }
 
-func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9010", func(*http.ServeMux) {})
-	if cfg.Module != "cli" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9010" {
-		t.Fatalf("unexpected module config header: %+v", cfg)
-	}
-	if len(cfg.Capabilities) != 3 || cfg.Capabilities[0] != "ops_interface" {
-		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
-	}
-	if len(cfg.Routes) != 1 || cfg.Routes[0] != "/api/v1/cli/*" {
-		t.Fatalf("unexpected routes: %#v", cfg.Routes)
-	}
-	if cfg.RegisterHTTPRoutes == nil {
-		t.Fatal("expected HTTP route registration hook")
+func TestParseCommandRejectsUnsupportedAndUnconfirmedOperations(t *testing.T) {
+	identityID := "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	for _, args := range [][]string{
+		{"execute", "unsupported"},
+		{"identities", "delete", identityID},
+		{"identities", "suspend", identityID},
+		{"sessions", "revoke", identityID},
+		{"audit", "delete"},
+	} {
+		if _, err := parseCommand(args); err == nil {
+			t.Fatalf("parseCommand(%v) succeeded unexpectedly", args)
+		}
 	}
 }
 
-func TestBuildRuntimeDefaultsToMemoryStore(t *testing.T) {
-	t.Setenv(dbURLEnv, "")
-	t.Setenv(legacyDBURLEnv, "")
-	t.Setenv(managementTokenEnv, "secret")
+func TestEndpointURLAcceptsRootAndAdminBaseURLs(t *testing.T) {
+	for _, rawBase := range []string{
+		"https://admin.example.test",
+		"https://admin.example.test/api/admin",
+	} {
+		baseURL, err := url.Parse(rawBase)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := &adminClient{baseURL: baseURL}
+		endpoint, err := client.endpointURL("/api/admin/setup/status", nil)
+		if err != nil {
+			t.Fatalf("endpointURL(%q) error = %v", rawBase, err)
+		}
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := parsed.Path, "/api/admin/setup/status"; got != want {
+			t.Fatalf("endpointURL(%q) path = %q, want %q", rawBase, got, want)
+		}
+	}
+}
 
-	runtime, err := buildRuntime(context.Background())
+func TestParsePaginationBoundsResults(t *testing.T) {
+	query, err := parsePagination([]string{"--page", "3", "--per-page", "40"})
 	if err != nil {
-		t.Fatalf("buildRuntime returned error: %v", err)
+		t.Fatalf("parsePagination() error = %v", err)
 	}
-	if runtime == nil || runtime.registerHTTPRoutes == nil || runtime.cleanup == nil {
-		t.Fatalf("unexpected runtime: %+v", runtime)
+	if got, want := query.Get("page"), "3"; got != want {
+		t.Fatalf("page = %q, want %q", got, want)
 	}
-}
-
-func TestMainInvokesRunModuleServer(t *testing.T) {
-	origRun := runModuleServer
-	origBuild := buildRuntimeHook
-	origArgs := os.Args
-	origFlagSet := flag.CommandLine
-	t.Cleanup(func() {
-		runModuleServer = origRun
-		buildRuntimeHook = origBuild
-		os.Args = origArgs
-		flag.CommandLine = origFlagSet
-	})
-
-	var captured moduleserver.Config
-	runModuleServer = func(cfg moduleserver.Config) error {
-		captured = cfg
-		return nil
+	if got, want := query.Get("per_page"), "40"; got != want {
+		t.Fatalf("per_page = %q, want %q", got, want)
 	}
-	buildRuntimeHook = func(context.Context) (*moduleRuntime, error) {
-		return &moduleRuntime{
-			registerHTTPRoutes: func(*http.ServeMux) {},
-			cleanup:            func() {},
-		}, nil
-	}
-
-	os.Args = []string{"cli-server", "-listen", "127.0.0.1:19110"}
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	main()
-
-	if captured.Module != "cli" || captured.ListenAddr != "127.0.0.1:19110" {
-		t.Fatalf("main did not pass expected config: %+v", captured)
+	if _, err := parsePagination([]string{"--per-page", "101"}); err == nil {
+		t.Fatal("parsePagination accepted an unbounded result count")
 	}
 }
 
-func TestBuildRepositoryRejectsInvalidDBURL(t *testing.T) {
-	t.Setenv(dbURLEnv, "://bad-url")
-	t.Setenv(legacyDBURLEnv, "")
+func TestReadAPIKeyRequiresSingleConfiguredKey(t *testing.T) {
+	dir := t.TempDir()
+	credentialPath := filepath.Join(dir, "credential")
+	if err := os.WriteFile(credentialPath, []byte("aegion_abcdefghijkl_valid\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := readAPIKey(credentialPath, "aegion_", 12)
+	if err != nil {
+		t.Fatalf("readAPIKey() error = %v", err)
+	}
+	if key != "aegion_abcdefghijkl_valid" {
+		t.Fatalf("readAPIKey() = %q", key)
+	}
 
-	repo, cleanup, err := buildRepository(context.Background())
+	if err := os.WriteFile(credentialPath, []byte("aegion_abcdefghijkl\nanother"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readAPIKey(credentialPath, "aegion_", 12); err == nil {
+		t.Fatal("readAPIKey accepted multiple credential values")
+	}
+}
+
+func TestAdminClientSendsCredentialButRedactsResponseSecrets(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("Authorization"), "Bearer aegion_abcdefghijkl_valid"; got != want {
+			t.Errorf("authorization = %q, want %q", got, want)
+		}
+		if got, want := r.Header.Get("Cache-Control"), "no-store"; got != want {
+			t.Errorf("cache-control = %q, want %q", got, want)
+		}
+		if got, want := r.URL.Path, "/api/admin/setup/status"; got != want {
+			t.Errorf("path = %q, want %q", got, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"state":"ready","client_secret":"do-not-print","nested":{"token":"aegion_hidden"}}`)
+	}))
+	defer server.Close()
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL.Scheme = "https"
+	client := &adminClient{baseURL: baseURL, apiKey: "aegion_abcdefghijkl_valid", http: server.Client()}
+	response, err := client.do(context.Background(), commandRequest{method: http.MethodGet, endpoint: "/api/admin/setup/status"})
+	if err != nil {
+		t.Fatalf("client.do() error = %v", err)
+	}
+	var stdout bytes.Buffer
+	if err := writeJSON(&stdout, response); err != nil {
+		t.Fatalf("writeJSON() error = %v", err)
+	}
+	output := stdout.String()
+	if strings.Contains(output, "do-not-print") || strings.Contains(output, "aegion_hidden") {
+		t.Fatalf("secret reached CLI output: %s", output)
+	}
+	if !strings.Contains(output, "[REDACTED]") {
+		t.Fatalf("redacted output missing marker: %s", output)
+	}
+}
+
+func TestAdminClientBoundsErrorOutput(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"error":{"status":"insufficient_permissions","message":"aegion_do_not_print"}}`)
+	}))
+	defer server.Close()
+
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL.Scheme = "https"
+	client := &adminClient{baseURL: baseURL, apiKey: "aegion_abcdefghijkl_valid", http: server.Client()}
+	_, err = client.do(context.Background(), commandRequest{method: http.MethodGet, endpoint: "/api/admin/setup/status"})
 	if err == nil {
-		t.Fatal("expected parse error for invalid CLI database URL")
+		t.Fatal("client.do() succeeded unexpectedly")
 	}
-	if repo != nil || cleanup != nil {
-		t.Fatalf("expected nil repo/cleanup on parse error, got repo=%v cleanupNil=%t", repo, cleanup == nil)
+	if strings.Contains(err.Error(), "do_not_print") {
+		t.Fatalf("server error body leaked through CLI error: %v", err)
 	}
-}
-
-func TestBuildRepositoryPingFailure(t *testing.T) {
-	t.Setenv(dbURLEnv, "postgres://user:pass@127.0.0.1:5432/aegion?sslmode=disable")
-	t.Setenv(legacyDBURLEnv, "")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	repo, cleanup, err := buildRepository(ctx)
-	if err == nil {
-		t.Fatal("expected ping failure with canceled context")
-	}
-	if repo != nil || cleanup != nil {
-		t.Fatalf("expected nil repo/cleanup on ping failure, got repo=%v cleanupNil=%t", repo, cleanup == nil)
+	var remoteErr *apiError
+	if !errorsAs(err, &remoteErr) || remoteErr.status != http.StatusForbidden || remoteErr.code != "insufficient_permissions" {
+		t.Fatalf("unexpected API error: %#v", err)
 	}
 }
 
-func TestBuildRuntimePropagatesRepositoryError(t *testing.T) {
-	t.Setenv(dbURLEnv, "://bad-url")
-	t.Setenv(legacyDBURLEnv, "")
-	runtime, err := buildRuntime(context.Background())
-	if err == nil || runtime != nil {
-		t.Fatalf("buildRuntime(parse error) runtime=%v err=%v", runtime, err)
+func TestRunVersionDoesNotLoadConfiguration(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if got := run([]string{"--version"}, &stdout, &stderr); got != exitSuccess {
+		t.Fatalf("run(--version) = %d, want %d; stderr=%s", got, exitSuccess, stderr.String())
+	}
+	if got := strings.TrimSpace(stdout.String()); got != artifactName+" "+version {
+		t.Fatalf("version output = %q", got)
 	}
 }
 
-func TestBuildRepositoryNoDBURLReturnsMemoryStore(t *testing.T) {
-	t.Setenv(dbURLEnv, "")
-	t.Setenv(legacyDBURLEnv, "")
-	repo, cleanup, err := buildRepository(context.Background())
-	if err != nil || repo == nil || cleanup == nil {
-		t.Fatalf("buildRepository(no db) repo=%v cleanupNil=%t err=%v", repo, cleanup == nil, err)
+func TestLoadClientConfigFailsClosedWithoutCredentialPaths(t *testing.T) {
+	_, err := loadClientConfig(options{
+		apiURL:  "https://admin.example.test",
+		timeout: time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--ca-cert-file") {
+		t.Fatalf("loadClientConfig() error = %v, want missing CA certificate path", err)
 	}
-	cleanup()
 }
 
-func TestMainFatalBranches(t *testing.T) {
-	origRun := runModuleServer
-	origBuild := buildRuntimeHook
-	origFatal := logFatal
-	origArgs := os.Args
-	origFlagSet := flag.CommandLine
-	t.Cleanup(func() {
-		runModuleServer = origRun
-		buildRuntimeHook = origBuild
-		logFatal = origFatal
-		os.Args = origArgs
-		flag.CommandLine = origFlagSet
-	})
-
-	expectFatal := func(fn func(), want string) {
-		t.Helper()
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Fatal("expected fatal panic")
-			}
-			got, ok := r.(error)
-			if !ok || !strings.Contains(got.Error(), want) {
-				t.Fatalf("fatal panic=%v, want contains %q", r, want)
-			}
-		}()
-		fn()
+func TestWriteJSONBoundedAndRedacted(t *testing.T) {
+	var output bytes.Buffer
+	value := redactValue(map[string]any{"password": "super-secret", "state": "ready"})
+	if err := writeJSON(&output, value); err != nil {
+		t.Fatalf("writeJSON() error = %v", err)
 	}
-
-	logFatal = func(v ...any) { panic(v[0]) }
-
-	t.Run("runtime error", func(t *testing.T) {
-		os.Args = []string{"cli-server"}
-		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-		buildRuntimeHook = func(context.Context) (*moduleRuntime, error) { return nil, errors.New("runtime failed") }
-		expectFatal(main, "runtime failed")
-	})
-
-	t.Run("server error", func(t *testing.T) {
-		os.Args = []string{"cli-server"}
-		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-		buildRuntimeHook = func(context.Context) (*moduleRuntime, error) {
-			return &moduleRuntime{registerHTTPRoutes: func(*http.ServeMux) {}, cleanup: func() {}}, nil
-		}
-		runModuleServer = func(moduleserver.Config) error { return errors.New("server failed") }
-		expectFatal(main, "server failed")
-	})
+	var decoded map[string]string
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if decoded["password"] != "[REDACTED]" || decoded["state"] != "ready" {
+		t.Fatalf("unexpected output: %#v", decoded)
+	}
 }
 
-func TestBuildRepositoryHookedBranches(t *testing.T) {
-	origNewPool := newPoolWithConfigHook
-	origPing := poolPingHook
-	origClose := poolCloseHook
-	origNewRepo := newPostgresRepoHook
-	t.Cleanup(func() {
-		newPoolWithConfigHook = origNewPool
-		poolPingHook = origPing
-		poolCloseHook = origClose
-		newPostgresRepoHook = origNewRepo
-	})
-
-	t.Setenv(dbURLEnv, "postgres://user:pass@localhost:5432/aegion?sslmode=disable")
-	t.Setenv(legacyDBURLEnv, "")
-
-	t.Run("new pool error", func(t *testing.T) {
-		newPoolWithConfigHook = func(context.Context, *pgxpool.Config) (*pgxpool.Pool, error) {
-			return nil, errors.New("new pool failed")
-		}
-		_, _, err := buildRepository(context.Background())
-		if err == nil || err.Error() != "new pool failed" {
-			t.Fatalf("buildRepository(new pool error) = %v", err)
-		}
-	})
-
-	t.Run("new repository error", func(t *testing.T) {
-		newPoolWithConfigHook = func(context.Context, *pgxpool.Config) (*pgxpool.Pool, error) { return nil, nil }
-		poolPingHook = func(context.Context, *pgxpool.Pool) error { return nil }
-		poolCloseHook = func(*pgxpool.Pool) {}
-		newPostgresRepoHook = func(*pgxpool.Pool) (*store.PostgresStore, error) { return nil, errors.New("repo failed") }
-		_, _, err := buildRepository(context.Background())
-		if err == nil || err.Error() != "repo failed" {
-			t.Fatalf("buildRepository(new repository error) = %v", err)
-		}
-	})
-
-	t.Run("success cleanup", func(t *testing.T) {
-		closed := false
-		newPoolWithConfigHook = func(context.Context, *pgxpool.Config) (*pgxpool.Pool, error) { return nil, nil }
-		poolPingHook = func(context.Context, *pgxpool.Pool) error { return nil }
-		poolCloseHook = func(*pgxpool.Pool) { closed = true }
-		newPostgresRepoHook = func(*pgxpool.Pool) (*store.PostgresStore, error) { return &store.PostgresStore{}, nil }
-		repo, cleanup, err := buildRepository(context.Background())
-		if err != nil || repo == nil || cleanup == nil {
-			t.Fatalf("buildRepository(success) repo=%v cleanupNil=%t err=%v", repo, cleanup == nil, err)
-		}
-		cleanup()
-		if !closed {
-			t.Fatal("expected cleanup to close pool")
-		}
-	})
+func errorsAs(err error, target any) bool {
+	return errors.As(err, target)
 }

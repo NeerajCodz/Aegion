@@ -83,17 +83,28 @@ func TestRegistryGRPCControlPlaneUsesMTLSAndModuleIdentity(t *testing.T) {
 	require.NotEmpty(t, tokenResponse.GetToken())
 	ctx = metadata.AppendToOutgoingContext(ctx, "x-aegion-internal-token", tokenResponse.GetToken())
 	response, err := corepb.NewModuleRegistryClient(conn).Register(ctx, &corepb.RegisterRequest{
-		Module:  "analytics",
-		Version: "v1.2.3",
-		Address: "analytics.internal:9100",
+		Module:      "analytics",
+		Version:     "v1.2.3",
+		Address:     "analytics.internal:9100",
+		HttpAddress: "analytics.internal:9000",
+		HealthUrl:   "http://analytics.internal:9000/health",
 	})
 	require.NoError(t, err)
+	registeredModule, err := server.registry.GetModule("analytics")
+	require.NoError(t, err)
+	require.Equal(t, []registry.Endpoint{
+		{Type: registry.EndpointHTTP, URL: "http://analytics.internal:9000"},
+		{Type: registry.EndpointGRPC, URL: "grpc://analytics.internal:9100"},
+	}, registeredModule.Endpoints)
+	require.Equal(t, "http://analytics.internal:9000/health", registeredModule.HealthURL)
 	require.True(t, response.GetSuccess())
 
 	mismatched, err := corepb.NewModuleRegistryClient(conn).Register(ctx, &corepb.RegisterRequest{
-		Module:  "proxy",
-		Version: "v1.2.3",
-		Address: "proxy.internal:9100",
+		Module:      "proxy",
+		Version:     "v1.2.3",
+		Address:     "proxy.internal:9100",
+		HttpAddress: "proxy.internal:9000",
+		HealthUrl:   "http://proxy.internal:9000/health",
 	})
 	require.NoError(t, err)
 	require.False(t, mismatched.GetSuccess())

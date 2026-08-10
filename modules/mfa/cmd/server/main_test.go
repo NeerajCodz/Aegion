@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -23,31 +26,43 @@ func TestDefaultListenAddr(t *testing.T) {
 }
 
 func TestModuleConfig(t *testing.T) {
-	cfg := moduleConfig("127.0.0.1:9003")
+	runtime := &moduleRuntime{
+		registerHTTPRoutes: func(*http.ServeMux) {},
+		readiness:          func(context.Context) error { return nil },
+	}
+	cfg := moduleConfig("127.0.0.1:9003", runtime)
 	if cfg.Module != "mfa" || cfg.Version != moduleVersion || cfg.ListenAddr != "127.0.0.1:9003" {
 		t.Fatalf("unexpected module config header: %+v", cfg)
 	}
-	if len(cfg.Capabilities) != 4 || cfg.Capabilities[0] != "totp" || cfg.Capabilities[1] != "webauthn" || cfg.Capabilities[2] != "sms" || cfg.Capabilities[3] != "backup_codes" {
-		t.Fatalf("unexpected capabilities: %#v", cfg.Capabilities)
+	if got, want := strings.Join(cfg.Capabilities, ","), "totp,backup_codes,trusted_devices"; got != want {
+		t.Fatalf("unexpected capabilities: %q", got)
 	}
-	if len(cfg.Routes) != 2 || cfg.Routes[0] != "/self-service/mfa/*" || cfg.Routes[1] != "/api/v1/mfa/*" {
-		t.Fatalf("unexpected routes: %#v", cfg.Routes)
+	if got, want := strings.Join(cfg.Routes, ","), "/api/v1/mfa/totp/start,/api/v1/mfa/totp/finish,/api/v1/mfa/totp/verify,/api/v1/mfa/backup/verify,/api/v1/mfa/backup/regenerate,/api/v1/mfa/trusted-device"; got != want {
+		t.Fatalf("unexpected routes: %q", got)
 	}
-	if len(cfg.EventSubscriptions) != 3 || cfg.EventSubscriptions[0] != "session.created" || cfg.EventSubscriptions[1] != "identity.updated" || cfg.EventSubscriptions[2] != "identity.deleted" {
-		t.Fatalf("unexpected event subscriptions: %#v", cfg.EventSubscriptions)
+	if cfg.RegisterHTTPRoutes == nil || cfg.Readiness == nil {
+		t.Fatal("module config must expose the installed routes and readiness check")
+	}
+	if len(cfg.GRPCServices) != 0 || len(cfg.EventSubscriptions) != 0 {
+		t.Fatalf("metadata advertises unimplemented services or subscriptions: %+v", cfg)
 	}
 }
 
 func TestMainInvokesRunModuleServer(t *testing.T) {
 	origRun := runModuleServer
+	origBuild := buildRuntimeHook
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	t.Cleanup(func() {
 		runModuleServer = origRun
+		buildRuntimeHook = origBuild
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 	})
 
+	buildRuntimeHook = func(context.Context) (*moduleRuntime, error) {
+		return &moduleRuntime{cleanup: func() {}}, nil
+	}
 	var captured moduleserver.Config
 	runModuleServer = func(cfg moduleserver.Config) error {
 		captured = cfg
@@ -65,17 +80,22 @@ func TestMainInvokesRunModuleServer(t *testing.T) {
 
 func TestMainLogsFatalOnRunModuleError(t *testing.T) {
 	origRun := runModuleServer
+	origBuild := buildRuntimeHook
 	origFatal := logFatal
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine
 	t.Cleanup(func() {
 		runModuleServer = origRun
+		buildRuntimeHook = origBuild
 		logFatal = origFatal
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
 	})
 
 	logFatal = func(v ...any) { panic(v[0]) }
+	buildRuntimeHook = func(context.Context) (*moduleRuntime, error) {
+		return &moduleRuntime{cleanup: func() {}}, nil
+	}
 	runModuleServer = func(moduleserver.Config) error { return errors.New("module failed") }
 	os.Args = []string{"mfa-server"}
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -91,4 +111,41 @@ func TestMainLogsFatalOnRunModuleError(t *testing.T) {
 		}
 	}()
 	main()
+}
+
+func TestDeriveCipherKeyRequiresConfiguredSecret(t *testing.T) {
+	t.Setenv(cipherSecretEnv, "")
+	t.Setenv(legacyCipherSecretEnv, "")
+	if _, err := deriveCipherKey(); err == nil {
+		t.Fatal("deriveCipherKey accepted an empty secret")
+	}
+
+	t.Setenv(cipherSecretEnv, "mfa-cipher-secret")
+	key, err := deriveCipherKey()
+	if err != nil {
+		t.Fatalf("deriveCipherKey: %v", err)
+	}
+	if len(key) != 32 {
+		t.Fatalf("unexpected cipher key length %d", len(key))
+	}
+}
+
+func TestReadIdentitySigningSecretRequiresMountedFile(t *testing.T) {
+	t.Setenv(identitySigningSecretFileEnv, "")
+	if _, err := readIdentitySigningSecret(); err == nil {
+		t.Fatal("readIdentitySigningSecret accepted an absent file")
+	}
+
+	secretFile := filepath.Join(t.TempDir(), "identity-signing-secret")
+	if err := os.WriteFile(secretFile, []byte("12345678901234567890123456789012\n"), 0o600); err != nil {
+		t.Fatalf("write secret file: %v", err)
+	}
+	t.Setenv(identitySigningSecretFileEnv, secretFile)
+	secret, err := readIdentitySigningSecret()
+	if err != nil {
+		t.Fatalf("readIdentitySigningSecret: %v", err)
+	}
+	if got, want := string(secret), "12345678901234567890123456789012"; got != want {
+		t.Fatalf("secret = %q, want %q", got, want)
+	}
 }

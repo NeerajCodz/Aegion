@@ -3,7 +3,6 @@ package registry
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/aegion/aegion/core/authtoken"
 	pb "github.com/aegion/aegion/internal/proto/core"
@@ -25,31 +24,42 @@ func (s *GRPCService) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 		return &pb.RegisterResponse{Success: false, Error: "invalid registration request"}, nil
 	}
 	module := strings.TrimSpace(req.GetModule())
-	address := strings.TrimSpace(req.GetAddress())
-	if module == "" || address == "" {
-		return &pb.RegisterResponse{Success: false, Error: "module and address are required"}, nil
+	grpcAddress := strings.TrimSpace(req.GetAddress())
+	httpAddress := strings.TrimSpace(req.GetHttpAddress())
+	healthURL := strings.TrimSpace(req.GetHealthUrl())
+	if module == "" || httpAddress == "" || healthURL == "" {
+		return &pb.RegisterResponse{Success: false, Error: "module, HTTP address, and health URL are required"}, nil
 	}
 	if caller := authtoken.ModuleIDFromContext(ctx); caller == "" || caller != module {
 		return &pb.RegisterResponse{Success: false, Error: "authenticated module does not match registration"}, nil
 	}
-	id := module
-	if existing, err := s.registry.GetModule(id); err == nil && existing != nil {
-		id = module + "-" + time.Now().UTC().Format("20060102150405")
+	if existing, err := s.registry.GetModule(module); err == nil && existing != nil {
+		if _, err := s.registry.Deregister(existing.ID); err != nil {
+			return &pb.RegisterResponse{Success: false, Error: "replace existing module registration: " + err.Error()}, nil
+		}
+	}
+	endpoints := []Endpoint{{
+		Type: EndpointHTTP,
+		URL:  "http://" + httpAddress,
+	}}
+	if grpcAddress != "" {
+		endpoints = append(endpoints, Endpoint{
+			Type: EndpointGRPC,
+			URL:  "grpc://" + grpcAddress,
+		})
 	}
 	resp, err := s.registry.Register(RegistrationRequest{
-		ID:      id,
-		Name:    module,
-		Version: req.GetVersion(),
-		Endpoints: []Endpoint{{
-			Type: EndpointGRPC,
-			URL:  "grpc://" + address,
-		}},
-		HealthURL: "",
+		ID:        module,
+		Name:      module,
+		Version:   req.GetVersion(),
+		Endpoints: endpoints,
+		HealthURL: healthURL,
 		Metadata: map[string]string{
 			"routes":              strings.Join(req.GetRoutes(), ","),
 			"capabilities":        strings.Join(req.GetCapabilities(), ","),
 			"grpc_services":       strings.Join(req.GetGrpcServices(), ","),
 			"event_subscriptions": strings.Join(req.GetEventSubscriptions(), ","),
+			"ready_url":           strings.TrimSpace(req.GetReadyUrl()),
 		},
 	})
 	if err != nil {

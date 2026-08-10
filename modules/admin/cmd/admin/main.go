@@ -3,20 +3,17 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"net"
 	"os"
-	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,6 +23,7 @@ import (
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	"github.com/aegion/aegion/internal/platform/moduleserver"
 	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/xlog"
 	adminmodule "github.com/aegion/aegion/modules/admin"
@@ -55,13 +53,6 @@ type Config struct {
 		ReadTimeout  time.Duration `yaml:"read_timeout"`
 		WriteTimeout time.Duration `yaml:"write_timeout"`
 		IdleTimeout  time.Duration `yaml:"idle_timeout"`
-		TLS          struct {
-			Enabled      bool   `yaml:"enabled"`
-			CertFile     string `yaml:"cert_file"`
-			KeyFile      string `yaml:"key_file"`
-			ClientCAFile string `yaml:"client_ca_file"`
-			MinVersion   string `yaml:"min_version"`
-		} `yaml:"tls"`
 	} `yaml:"server"`
 	Admin struct {
 		Enabled          bool          `yaml:"enabled"`
@@ -84,10 +75,8 @@ type Config struct {
 			TokenLastUsedUpdateTimeout time.Duration `yaml:"token_last_used_update_timeout"`
 		} `yaml:"scim"`
 	} `yaml:"admin"`
-	Core struct {
-		ServiceURL string `yaml:"service_url"`
-		APIKey     string `yaml:"api_key"`
-	} `yaml:"core"`
+	// Core lifecycle configuration is supplied exclusively through
+	// internal/platform/moduleserver's environment/file contract.
 	Secrets struct {
 		Cipher []string `yaml:"cipher"`
 	} `yaml:"secrets"`
@@ -121,28 +110,21 @@ type Config struct {
 	Log LogConfig `yaml:"log"`
 }
 
+const (
+	adminModuleVersion      = "1.0.0"
+	adminPublicRoutePrefix  = "/aegion"
+)
 type mainFlags struct {
 	configPath string
 	version    bool
 	migrate    bool
 }
 
-type runtimeServer interface {
-	registerWithCore(ctx context.Context) error
-	shutdown(ctx context.Context) error
-}
 
-type liveRuntimeServer struct {
-	server     *Server
-	httpServer *http.Server
-}
-
-func (s *liveRuntimeServer) registerWithCore(ctx context.Context) error {
-	return s.server.registerWithCore(ctx)
-}
-
-func (s *liveRuntimeServer) shutdown(ctx context.Context) error {
-	return s.httpServer.Shutdown(ctx)
+type moduleRuntime struct {
+	registerHTTPRoutes func(*http.ServeMux)
+	readiness          func(context.Context) error
+	cleanup            func()
 }
 
 type mainDeps struct {
@@ -155,10 +137,8 @@ type mainDeps struct {
 	pingDB          func(ctx context.Context, db *pgxpool.Pool) error
 	closeDB         func(db *pgxpool.Pool)
 	runMigrations   func(ctx context.Context, db *pgxpool.Pool) error
-	startServer     func(cfg *Config, db *pgxpool.Pool) (runtimeServer, error)
-	newSignalChan   func() chan os.Signal
-	notifySignals   func(c chan<- os.Signal, sig ...os.Signal)
-	stopSignalChan  func(c chan<- os.Signal)
+	buildRuntime    func(cfg *Config, db *pgxpool.Pool) (*moduleRuntime, error)
+	runModuleServer func(moduleserver.Config) error
 }
 
 func defaultMainDeps() mainDeps {
@@ -177,13 +157,9 @@ func defaultMainDeps() mainDeps {
 				db.Close()
 			}
 		},
-		runMigrations: runMigrations,
-		startServer:   startServerRuntime,
-		newSignalChan: func() chan os.Signal {
-			return make(chan os.Signal, 1)
-		},
-		notifySignals:  signal.Notify,
-		stopSignalChan: signal.Stop,
+		runMigrations:   runMigrations,
+		buildRuntime:    buildRuntime,
+		runModuleServer: moduleserver.Run,
 	}
 }
 
@@ -238,6 +214,10 @@ func run(args []string, deps mainDeps) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if strings.TrimSpace(cfg.Database.URL) == "" {
+		return errors.New("admin database URL is required")
+	}
+
 	dbConfig, err := deps.parseDBConfig(cfg.Database.URL)
 	if err != nil {
 		return fmt.Errorf("failed to parse database URL: %w", err)
@@ -246,6 +226,7 @@ func run(args []string, deps mainDeps) error {
 	dbConfig.MaxConns = cfg.Database.MaxConns
 	dbConfig.MinConns = cfg.Database.MinConns
 	if cfg.Database.MaxIdleTime != "" {
+
 		duration, err := time.ParseDuration(cfg.Database.MaxIdleTime)
 		if err != nil {
 			return fmt.Errorf("failed to parse max_idle_time: %w", err)
@@ -272,46 +253,68 @@ func run(args []string, deps mainDeps) error {
 		return nil
 	}
 
-	serverRuntime, err := deps.startServer(cfg, db)
+	runtime, err := deps.buildRuntime(cfg, db)
 	if err != nil {
-		return fmt.Errorf("failed to initialize server: %w", err)
+		return fmt.Errorf("failed to initialize admin runtime: %w", err)
+	}
+	if runtime.cleanup != nil {
+		defer runtime.cleanup()
 	}
 
-	if err := serverRuntime.registerWithCore(ctx); err != nil {
-		xlog.Default().Error("Failed to register with core service", "error", err)
+	if err := deps.runModuleServer(adminModuleConfig(cfg, runtime)); err != nil {
+		return fmt.Errorf("admin module server: %w", err)
 	}
-
-	sigCh := deps.newSignalChan()
-	deps.notifySignals(sigCh, os.Interrupt, syscall.SIGTERM)
-	defer deps.stopSignalChan(sigCh)
-
-	sig := <-sigCh
-	xlog.Default().Info("Shutting down gracefully...", "signal", sig.String())
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := serverRuntime.shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("server shutdown error: %w", err)
-	}
-
-	xlog.Default().Info("Server stopped")
 	return nil
 }
 
-func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
+func adminModuleConfig(cfg *Config, runtime *moduleRuntime) moduleserver.Config {
+	capabilities := []string{
+		"admin.identities",
+		"admin.operators",
+		"admin.sessions",
+		"admin.roles",
+		"admin.audit",
+		"admin.configuration",
+		"admin.oauth2",
+	}
+	if cfg.Admin.SCIM.Enabled {
+		capabilities = append(capabilities, "admin.scim")
+	}
+
+	return moduleserver.Config{
+		Module:             "admin",
+		Version:            adminModuleVersion,
+		ListenAddr:         net.JoinHostPort(cfg.Server.Address, strconv.Itoa(cfg.Server.Port)),
+		Capabilities:       capabilities,
+		Routes:             []string{adminPublicRoutePrefix},
+		GRPCServices:       nil,
+		EventSubscriptions: nil,
+		RegisterHTTPRoutes: runtime.registerHTTPRoutes,
+		Readiness:          runtime.readiness,
+	}
+}
+
+func buildRuntime(cfg *Config, db *pgxpool.Pool) (*moduleRuntime, error) {
+	if cfg == nil {
+		return nil, errors.New("configuration is required")
+	}
+	if db == nil {
+		return nil, errors.New("database pool is required")
+	}
+	if len(cfg.Secrets.Cipher) == 0 || strings.TrimSpace(cfg.Secrets.Cipher[0]) == "" {
+		return nil, errors.New("admin social-provider management requires a configured cipher secret")
+	}
+
+	preparePublicRouteConfig(cfg)
 	adminStore := store.New(db)
 	adminService := service.New(adminStore, service.Config{
 		BootstrapEnabled: cfg.Admin.BootstrapEnabled,
 	})
-	var socialProviders handler.SocialProviderManager
-	if len(cfg.Secrets.Cipher) > 0 && strings.TrimSpace(cfg.Secrets.Cipher[0]) != "" {
-		sum := sha256.Sum256([]byte(strings.TrimSpace(cfg.Secrets.Cipher[0])))
-		socialRepo, err := socialstore.NewPostgres(db, sum[:])
-		if err != nil {
-			return nil, fmt.Errorf("initialize social provider manager: %w", err)
-		}
-		socialProviders = socialservice.New(socialRepo)
+
+	sum := sha256.Sum256([]byte(strings.TrimSpace(cfg.Secrets.Cipher[0])))
+	socialRepo, err := socialstore.NewPostgres(db, sum[:])
+	if err != nil {
+		return nil, fmt.Errorf("initialize social provider manager: %w", err)
 	}
 	adminHandler := handler.New(adminService, handler.HandlerConfig{
 		SessionTokenExpiry: cfg.Admin.SessionLifespan,
@@ -320,8 +323,9 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		APIKeyPrefix:       cfg.Admin.APIKeyPrefix,
 		APIKeyPrefixLen:    cfg.Admin.APIKeyPrefixLen,
 		APIKeyEntropyBytes: cfg.Admin.APIKeyEntropy,
-		SocialProviders:    socialProviders,
+		SocialProviders:    socialservice.New(socialRepo),
 	})
+
 	var scimService *scim.Service
 	var scimHandler *scim.Handler
 	if cfg.Admin.SCIM.Enabled {
@@ -347,41 +351,101 @@ func startServerRuntime(cfg *Config, db *pgxpool.Pool) (runtimeServer, error) {
 		SCIMService: scimService,
 		SCIMHandler: scimHandler,
 	}
-
-	httpServer := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Address, cfg.Server.Port),
-		Handler:      server.setupRouter(),
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		IdleTimeout:  cfg.Server.IdleTimeout,
-	}
-	if cfg.Server.TLS.Enabled {
-		tlsConfig, err := buildTLSConfig(cfg)
-		if err != nil {
-			return nil, err
-		}
-		httpServer.TLSConfig = tlsConfig
-	}
-
-	go func() {
-		xlog.Default().Info("Starting HTTP server", "address", httpServer.Addr)
-
-		var err error
-		if cfg.Server.TLS.Enabled {
-			err = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
-		} else {
-			err = httpServer.ListenAndServe()
-		}
-		if err != nil && err != http.ErrServerClosed {
-			xlog.Default().Error("Failed to start HTTP server", "error", err)
-			os.Exit(1)
-		}
-	}()
-
-	return &liveRuntimeServer{
-		server:     server,
-		httpServer: httpServer,
+	router := server.setupPublicRouter()
+	return &moduleRuntime{
+		registerHTTPRoutes: func(mux *http.ServeMux) {
+			mux.Handle(adminPublicRoutePrefix, router)
+			mux.Handle(adminPublicRoutePrefix+"/", router)
+		},
+		readiness: func(ctx context.Context) error {
+			return checkAdminRuntimeReadiness(ctx, db, cfg.Admin.SCIM.Enabled)
+		},
 	}, nil
+}
+
+func preparePublicRouteConfig(cfg *Config) {
+	cfg.Admin.Path = adminPublicRoutePrefix
+	if !cfg.Admin.SCIM.Enabled {
+		return
+	}
+
+	scimPath := normalizeMountedPath(cfg.Admin.SCIM.BasePath)
+	if scimPath != adminPublicRoutePrefix && !strings.HasPrefix(scimPath, adminPublicRoutePrefix+"/") {
+		scimPath = adminPublicRoutePrefix + scimPath
+	}
+	cfg.Admin.SCIM.BasePath = scimPath
+}
+
+func checkAdminRuntimeReadiness(ctx context.Context, db *pgxpool.Pool, scimEnabled bool) error {
+	if db == nil {
+		return errors.New("database pool is required")
+	}
+	readinessCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := db.Ping(readinessCtx); err != nil {
+		return fmt.Errorf("database unavailable: %w", err)
+	}
+
+	migrations, err := loadAdminMigrations(adminmodule.GetMigrationFiles())
+	if err != nil {
+		return fmt.Errorf("load schema contract: %w", err)
+	}
+	if len(migrations) == 0 {
+		return errors.New("admin schema contract has no migrations")
+	}
+	latestVersion := migrations[len(migrations)-1].Version
+	var latestApplied bool
+	if err := db.QueryRow(readinessCtx,
+		`SELECT EXISTS (SELECT 1 FROM adm_schema_migrations WHERE version = $1)`,
+		latestVersion,
+	).Scan(&latestApplied); err != nil {
+		return fmt.Errorf("check admin schema version: %w", err)
+	}
+	if !latestApplied {
+		return fmt.Errorf("admin schema migration %d is not applied", latestVersion)
+	}
+
+	relations := []string{
+		"core_identities",
+		"core_identity_addresses",
+		"core_identity_schemas",
+		"core_sessions",
+		"core_system_config",
+		"adm_roles",
+		"adm_operators",
+		"adm_api_keys",
+		"adm_audit_log",
+		"adm_ip_bans",
+		"mfa_enrollments",
+		"mfa_backup_codes",
+		"mfa_totp_factors",
+		"soc_providers",
+		"soc_identity_links",
+		"sso_connections",
+		"proxy_upstreams",
+		"proxy_routes",
+		"oa2_clients",
+		"oa2_access_tokens",
+		"oa2_refresh_tokens",
+		"oa2_id_tokens",
+		"oa2_token_revocations",
+		"pol_abac_rules",
+		"pol_rebac_tuples",
+		"pol_rebac_namespaces",
+	}
+	if scimEnabled {
+		relations = append(relations, "adm_scim_groups", "adm_scim_tokens", "adm_scim_mappings")
+	}
+	for _, relation := range relations {
+		var exists bool
+		if err := db.QueryRow(readinessCtx, `SELECT to_regclass($1) IS NOT NULL`, relation).Scan(&exists); err != nil {
+			return fmt.Errorf("check required relation %q: %w", relation, err)
+		}
+		if !exists {
+			return fmt.Errorf("required relation %q is missing", relation)
+		}
+	}
+	return nil
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -624,11 +688,6 @@ func mapPlatformConfig(superCfg *platformconfig.Config) Config {
 	cfg.Server.ReadTimeout = superCfg.Server.ReadTimeout.Duration()
 	cfg.Server.WriteTimeout = superCfg.Server.WriteTimeout.Duration()
 	cfg.Server.IdleTimeout = superCfg.Server.IdleTimeout.Duration()
-	cfg.Server.TLS.Enabled = superCfg.Server.TLS.Enabled
-	cfg.Server.TLS.CertFile = superCfg.Server.TLS.CertFile
-	cfg.Server.TLS.KeyFile = superCfg.Server.TLS.KeyFile
-	cfg.Server.TLS.ClientCAFile = superCfg.Server.TLS.ClientCAFile
-	cfg.Server.TLS.MinVersion = superCfg.Server.TLS.MinVersion
 
 	cfg.Admin.Enabled = superCfg.Admin.Enabled
 	cfg.Admin.Path = superCfg.Admin.Path
@@ -667,38 +726,6 @@ func safeInt32(value int) int32 {
 	}
 }
 
-func buildTLSConfig(cfg *Config) (*tls.Config, error) {
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-	}
-
-	switch strings.TrimSpace(cfg.Server.TLS.MinVersion) {
-	case "", "1.2":
-		tlsConfig.MinVersion = tls.VersionTLS12
-	case "1.3":
-		tlsConfig.MinVersion = tls.VersionTLS13
-	default:
-		return nil, fmt.Errorf("unsupported tls min_version %q", cfg.Server.TLS.MinVersion)
-	}
-
-	if strings.TrimSpace(cfg.Server.TLS.ClientCAFile) == "" {
-		return tlsConfig, nil
-	}
-
-	caPEM, err := os.ReadFile(cfg.Server.TLS.ClientCAFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read tls client CA file: %w", err)
-	}
-
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(caPEM) {
-		return nil, errors.New("failed to parse tls client CA file")
-	}
-
-	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-	tlsConfig.ClientCAs = pool
-	return tlsConfig, nil
-}
 
 func setupLogger(logConfig LogConfig) {
 	xlog.New(xlog.Config{

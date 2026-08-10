@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/social/service"
@@ -17,7 +18,8 @@ import (
 const maxJSONBodyBytes int64 = 1 << 20
 
 type Config struct {
-	ManagementToken string
+	ManagementToken       string
+	IdentitySigningSecret []byte
 }
 
 type SocialService interface {
@@ -31,8 +33,9 @@ type SocialService interface {
 }
 
 type Handler struct {
-	svc             SocialService
-	managementToken string
+	svc                   SocialService
+	managementToken       string
+	identitySigningSecret []byte
 }
 
 func New(svc SocialService, cfgOverride ...Config) *Handler {
@@ -40,9 +43,11 @@ func New(svc SocialService, cfgOverride ...Config) *Handler {
 	if len(cfgOverride) > 0 {
 		cfg = cfgOverride[0]
 	}
+	identitySigningSecret := append([]byte(nil), cfg.IdentitySigningSecret...)
 	return &Handler{
-		svc:             svc,
-		managementToken: strings.TrimSpace(cfg.ManagementToken),
+		svc:                   svc,
+		managementToken:       strings.TrimSpace(cfg.ManagementToken),
+		identitySigningSecret: identitySigningSecret,
 	}
 }
 
@@ -238,6 +243,28 @@ func (h *Handler) requireManagementAuth(w http.ResponseWriter, r *http.Request) 
 	}
 	if !platformcrypto.ConstantTimeCompare([]byte(token), []byte(h.managementToken)) {
 		writeError(w, http.StatusUnauthorized, "invalid management token")
+		return false
+	}
+	if len(h.identitySigningSecret) == 0 {
+		return true
+	}
+	const maxIdentityHeaderAge = 5 * time.Minute
+	signedHeaders := []string{"X-User-ID", "X-User-Session-ID", "X-User-AAL"}
+	for _, name := range signedHeaders {
+		if strings.TrimSpace(r.Header.Get(name)) == "" {
+			writeError(w, http.StatusUnauthorized, "missing management identity context")
+			return false
+		}
+	}
+	if !platformcrypto.VerifyIdentityHeaders(
+		h.identitySigningSecret,
+		r.Header,
+		signedHeaders,
+		r.Header.Get("X-Aegion-Signature"),
+		maxIdentityHeaderAge,
+		time.Now().UTC(),
+	) {
+		writeError(w, http.StatusUnauthorized, "invalid management identity context")
 		return false
 	}
 	return true

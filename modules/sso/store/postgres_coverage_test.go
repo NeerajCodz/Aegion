@@ -62,6 +62,12 @@ func TestPostgresStoreErrorPathsOnUnreachableDB(t *testing.T) {
 	if err := store.DeleteConnection(ctx, "acme"); err == nil {
 		t.Fatal("DeleteConnection expected error with unreachable DB")
 	}
+	if err := store.CreateAuthRequest(ctx, "request-1", "acme", time.Now().UTC().Add(time.Minute)); err == nil {
+		t.Fatal("CreateAuthRequest expected error with unreachable DB")
+	}
+	if consumed, err := store.ConsumeAuthRequest(ctx, "request-1", "acme", time.Now().UTC()); err == nil || consumed {
+		t.Fatalf("ConsumeAuthRequest expected error with unreachable DB, consumed=%t err=%v", consumed, err)
+	}
 }
 
 func TestConnectionSanitizedReturnsCopy(t *testing.T) {

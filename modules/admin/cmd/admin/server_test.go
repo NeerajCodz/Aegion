@@ -98,115 +98,23 @@ func TestHandleDashboardConfigUsesNormalizedPath(t *testing.T) {
 		t.Fatalf("expected base_path=/admin, got %q", body["base_path"])
 	}
 }
-
-func TestRegisterWithCore(t *testing.T) {
-	tests := []struct {
-		name          string
-		serviceURL    string
-		address       string
-		apiKey        string
-		statusCode    int
-		wantErr       bool
-		wantAuth      string
-		wantEndpoint  string
-		wantHealthURL string
-	}{
-		{
-			name:       "skips when core URL missing",
-			serviceURL: "",
-			wantErr:    false,
-		},
-		{
-			name:          "uses localhost for wildcard bind",
-			address:       "0.0.0.0",
-			apiKey:        "secret",
-			statusCode:    http.StatusCreated,
-			wantErr:       false,
-			wantAuth:      "Bearer secret",
-			wantEndpoint:  "http://localhost:8082",
-			wantHealthURL: "http://localhost:8082/health",
-		},
-		{
-			name:          "propagates registration failure",
-			address:       "127.0.0.1",
-			statusCode:    http.StatusBadGateway,
-			wantErr:       true,
-			wantAuth:      "",
-			wantEndpoint:  "http://127.0.0.1:8082",
-			wantHealthURL: "http://127.0.0.1:8082/health",
-		},
+func TestSetupPublicRouterOnlyMountsCoreOwnedPrefix(t *testing.T) {
+	cfg := &Config{}
+	cfg.Admin.Path = adminPublicRoutePrefix
+	server := &Server{
+		Config:  cfg,
+		Handler: adminhandler.New(nil),
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var (
-				gotAuth string
-				gotBody RegistrationRequest
-			)
-
-			serverURL := tc.serviceURL
-			if tc.serviceURL == "" && tc.statusCode != 0 {
-				core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					gotAuth = r.Header.Get("Authorization")
-					if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
-					}
-					w.WriteHeader(tc.statusCode)
-				}))
-				defer core.Close()
-				serverURL = core.URL
-			} else if tc.statusCode != 0 {
-				core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					gotAuth = r.Header.Get("Authorization")
-					if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
-					}
-					w.WriteHeader(tc.statusCode)
-				}))
-				defer core.Close()
-				serverURL = core.URL
-			}
-
-			s := &Server{
-				Config: &Config{},
-			}
-			s.Config.Core.ServiceURL = serverURL
-			s.Config.Core.APIKey = tc.apiKey
-			s.Config.Server.Address = tc.address
-			s.Config.Server.Port = 8082
-			s.Config.Admin.Path = "/aegion"
-
-			err := s.registerWithCore(context.Background())
-			if tc.wantErr && err == nil {
-				t.Fatalf("expected error, got nil")
-			}
-			if !tc.wantErr && err != nil {
-				t.Fatalf("expected nil error, got %v", err)
-			}
-
-			if tc.statusCode != 0 {
-				if gotAuth != tc.wantAuth {
-					t.Fatalf("expected auth header %q, got %q", tc.wantAuth, gotAuth)
-				}
-				if gotBody.ID != "admin" {
-					t.Fatalf("expected module id admin, got %q", gotBody.ID)
-				}
-				if len(gotBody.Endpoints) != 1 {
-					t.Fatalf("expected 1 endpoint, got %d", len(gotBody.Endpoints))
-				}
-				if gotBody.Endpoints[0].URL != tc.wantEndpoint {
-					t.Fatalf("expected endpoint URL %q, got %q", tc.wantEndpoint, gotBody.Endpoints[0].URL)
-				}
-				if gotBody.HealthURL != tc.wantHealthURL {
-					t.Fatalf("expected health URL %q, got %q", tc.wantHealthURL, gotBody.HealthURL)
-				}
-				if gotBody.Metadata["spa_path"] != "/aegion" {
-					t.Fatalf("expected spa_path metadata /aegion, got %q", gotBody.Metadata["spa_path"])
-				}
-			}
-		})
+	router := server.setupPublicRouter()
+	if !router.Match(chi.NewRouteContext(), http.MethodPost, "/aegion/api/admin/auth/login") {
+		t.Fatal("expected public admin login route to be mounted beneath /aegion")
+	}
+	if router.Match(chi.NewRouteContext(), http.MethodPost, "/api/admin/auth/login") {
+		t.Fatal("legacy unprefixed admin API route must not be mounted by the public runtime")
 	}
 }
+
 
 func TestSPAFileServerBehavior(t *testing.T) {
 	spa := NewSPAFileServer()

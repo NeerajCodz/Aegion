@@ -1,185 +1,339 @@
-# =============================================================================
-# Aegion Identity Platform - Production Overrides
-# =============================================================================
-# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# =============================================================================
+# Production overlay. Invoke with docker-compose.yml. Only aegion publishes a port;
+# every module is reached through the core gateway and registers on the private network.
+
+x-core-runtime: &core-runtime
+  environment:
+    AEGION_ENV: production
+    AEGION_LOG_LEVEL: info
+    AEGION_LOG_FORMAT: json
+    AEGION_DATABASE_URL_FILE: /run/secrets/core_database_url
+    AEGION_SECRETS_COOKIE_FILE: /run/secrets/core_cookie_secret
+    AEGION_SECRETS_CIPHER_FILE: /run/secrets/core_cipher_secret
+    AEGION_SECRETS_INTERNAL_FILE: /run/secrets/core_internal_secret
+    AEGION_TLS_CERT_FILE: /run/secrets/core_tls_cert
+    AEGION_TLS_KEY_FILE: /run/secrets/core_tls_key
+    AEGION_TLS_CLIENT_CA_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_ADMIN_IMAGE: ${AEGION_MODULE_ADMIN_IMAGE:?AEGION_MODULE_ADMIN_IMAGE is required}
+    AEGION_MODULE_ADMIN_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/aegion
+    AEGION_MODULE_ADMIN_DATABASE_URL: ${AEGION_MODULE_ADMIN_DATABASE_URL:?AEGION_MODULE_ADMIN_DATABASE_URL is required}
+    AEGION_MODULE_ADMIN_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_ADMIN_CLIENT_CERT_FILE: /run/secrets/module_admin_client_cert
+    AEGION_MODULE_ADMIN_CLIENT_KEY_FILE: /run/secrets/module_admin_client_key
+    AEGION_MODULE_ADMIN_CREDENTIAL_FILE: /run/secrets/module_admin_credential
+    AEGION_MODULE_ANALYTICS_IMAGE: ${AEGION_MODULE_ANALYTICS_IMAGE:?AEGION_MODULE_ANALYTICS_IMAGE is required}
+    AEGION_MODULE_ANALYTICS_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/analytics
+    AEGION_MODULE_ANALYTICS_DATABASE_URL: ${AEGION_MODULE_ANALYTICS_DATABASE_URL:?AEGION_MODULE_ANALYTICS_DATABASE_URL is required}
+    AEGION_MODULE_ANALYTICS_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_ANALYTICS_CLIENT_CERT_FILE: /run/secrets/module_analytics_client_cert
+    AEGION_MODULE_ANALYTICS_CLIENT_KEY_FILE: /run/secrets/module_analytics_client_key
+    AEGION_MODULE_ANALYTICS_CREDENTIAL_FILE: /run/secrets/module_analytics_credential
+    AEGION_MODULE_OAUTH2_IMAGE: ${AEGION_MODULE_OAUTH2_IMAGE:?AEGION_MODULE_OAUTH2_IMAGE is required}
+    AEGION_MODULE_OAUTH2_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/oauth2
+    AEGION_MODULE_OAUTH2_DATABASE_URL: ${AEGION_MODULE_OAUTH2_DATABASE_URL:?AEGION_MODULE_OAUTH2_DATABASE_URL is required}
+    AEGION_MODULE_OAUTH2_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_OAUTH2_CLIENT_CERT_FILE: /run/secrets/module_oauth2_client_cert
+    AEGION_MODULE_OAUTH2_CLIENT_KEY_FILE: /run/secrets/module_oauth2_client_key
+    AEGION_MODULE_OAUTH2_CREDENTIAL_FILE: /run/secrets/module_oauth2_credential
+    AEGION_MODULE_SOCIAL_IMAGE: ${AEGION_MODULE_SOCIAL_IMAGE:?AEGION_MODULE_SOCIAL_IMAGE is required}
+    AEGION_MODULE_SOCIAL_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/social
+    AEGION_MODULE_SOCIAL_DATABASE_URL: ${AEGION_MODULE_SOCIAL_DATABASE_URL:?AEGION_MODULE_SOCIAL_DATABASE_URL is required}
+    AEGION_MODULE_SOCIAL_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_SOCIAL_CLIENT_CERT_FILE: /run/secrets/module_social_client_cert
+    AEGION_MODULE_SOCIAL_CLIENT_KEY_FILE: /run/secrets/module_social_client_key
+    AEGION_MODULE_SOCIAL_CREDENTIAL_FILE: /run/secrets/module_social_credential
+    AEGION_MODULE_SSO_IMAGE: ${AEGION_MODULE_SSO_IMAGE:?AEGION_MODULE_SSO_IMAGE is required}
+    AEGION_MODULE_SSO_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/sso
+    AEGION_MODULE_SSO_DATABASE_URL: ${AEGION_MODULE_SSO_DATABASE_URL:?AEGION_MODULE_SSO_DATABASE_URL is required}
+    AEGION_MODULE_SSO_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_SSO_CLIENT_CERT_FILE: /run/secrets/module_sso_client_cert
+    AEGION_MODULE_SSO_CLIENT_KEY_FILE: /run/secrets/module_sso_client_key
+    AEGION_MODULE_SSO_CREDENTIAL_FILE: /run/secrets/module_sso_credential
+    AEGION_MODULE_INTROSPECTION_IMAGE: ${AEGION_MODULE_INTROSPECTION_IMAGE:?AEGION_MODULE_INTROSPECTION_IMAGE is required}
+    AEGION_MODULE_INTROSPECTION_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/introspection/token
+    AEGION_MODULE_INTROSPECTION_DATABASE_URL: ${AEGION_MODULE_INTROSPECTION_DATABASE_URL:?AEGION_MODULE_INTROSPECTION_DATABASE_URL is required}
+    AEGION_MODULE_INTROSPECTION_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_INTROSPECTION_CLIENT_CERT_FILE: /run/secrets/module_introspection_client_cert
+    AEGION_MODULE_INTROSPECTION_CLIENT_KEY_FILE: /run/secrets/module_introspection_client_key
+    AEGION_MODULE_INTROSPECTION_CREDENTIAL_FILE: /run/secrets/module_introspection_credential
+    AEGION_MODULE_PROXY_IMAGE: ${AEGION_MODULE_PROXY_IMAGE:?AEGION_MODULE_PROXY_IMAGE is required}
+    AEGION_MODULE_PROXY_DATABASE_URL: ${AEGION_MODULE_PROXY_DATABASE_URL:?AEGION_MODULE_PROXY_DATABASE_URL is required}
+    AEGION_MODULE_PROXY_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_PROXY_CLIENT_CERT_FILE: /run/secrets/module_proxy_client_cert
+    AEGION_MODULE_PROXY_CLIENT_KEY_FILE: /run/secrets/module_proxy_client_key
+    AEGION_MODULE_PROXY_CREDENTIAL_FILE: /run/secrets/module_proxy_credential
+    AEGION_MODULE_MFA_IMAGE: ${AEGION_MODULE_MFA_IMAGE:?AEGION_MODULE_MFA_IMAGE is required}
+    AEGION_MODULE_MFA_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/mfa
+    AEGION_MODULE_MFA_DATABASE_URL: ${AEGION_MODULE_MFA_DATABASE_URL:?AEGION_MODULE_MFA_DATABASE_URL is required}
+    AEGION_MODULE_MFA_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_MFA_CLIENT_CERT_FILE: /run/secrets/module_mfa_client_cert
+    AEGION_MODULE_MFA_CLIENT_KEY_FILE: /run/secrets/module_mfa_client_key
+    AEGION_MODULE_MFA_CREDENTIAL_FILE: /run/secrets/module_mfa_credential
+    AEGION_MODULE_PASSKEYS_IMAGE: ${AEGION_MODULE_PASSKEYS_IMAGE:?AEGION_MODULE_PASSKEYS_IMAGE is required}
+    AEGION_MODULE_PASSKEYS_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/passkeys
+    AEGION_MODULE_PASSKEYS_DATABASE_URL: ${AEGION_MODULE_PASSKEYS_DATABASE_URL:?AEGION_MODULE_PASSKEYS_DATABASE_URL is required}
+    AEGION_MODULE_PASSKEYS_CA_CERT_FILE: /run/secrets/control_plane_ca
+    AEGION_MODULE_PASSKEYS_CLIENT_CERT_FILE: /run/secrets/module_passkeys_client_cert
+    AEGION_MODULE_PASSKEYS_CLIENT_KEY_FILE: /run/secrets/module_passkeys_client_key
+    AEGION_MODULE_PASSKEYS_CREDENTIAL_FILE: /run/secrets/module_passkeys_credential
+  secrets:
+    - core_database_url
+    - core_cookie_secret
+    - core_cipher_secret
+    - core_internal_secret
+    - core_tls_cert
+    - core_tls_key
+    - control_plane_ca
+  volumes:
+    - ../configs/aegion.production.yaml:/config/aegion.yaml:ro
+    - ../configs/schemas:/config/schemas:ro
+
+x-module-control-plane: &module-control-plane
+  AEGION_CORE_URL: http://aegion:8080
+  AEGION_CORE_REGISTRY_URL: http://aegion:8080/internal/registry
+  AEGION_CORE_GRPC_ADDR: aegion:9443
+  AEGION_CORE_GRPC_SERVER_NAME: aegion
+  AEGION_MODULE_CA_CERT_FILE: /run/secrets/control_plane_ca
+  AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_client_cert
+  AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_client_key
+  AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_credential
+  AEGION_DATABASE_URL_FILE: /run/secrets/module_database_url
 
 services:
-  # ─────────────────────────────────────────────────────────────────────────
-  # PostgreSQL - Production settings
-  # ─────────────────────────────────────────────────────────────────────────
   postgres:
-    # No exposed ports in production
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2G
-        reservations:
-          cpus: "0.5"
-          memory: 512M
     environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-    secrets:
-      - postgres_password
-    command: >
-      postgres
-      -c shared_buffers=256MB
-      -c effective_cache_size=768MB
-      -c maintenance_work_mem=128MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=16MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
-      -c max_connections=200
-      -c log_statement=mod
-      -c log_min_duration_statement=1000
+    secrets: [postgres_password]
+    deploy:
+      resources:
+        limits: {cpus: "2", memory: 2G}
+        reservations: {cpus: "0.5", memory: 512M}
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Redis - Production settings
-  # ─────────────────────────────────────────────────────────────────────────
   redis:
-    # No exposed ports in production
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "384mb", "--maxmemory-policy", "allkeys-lru"]
     deploy:
       resources:
-        limits:
-          cpus: "1"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
-    command: >
-      redis-server
-      --appendonly yes
-      --maxmemory 384mb
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
-      --save 60 10000
+        limits: {cpus: "1", memory: 512M}
+        reservations: {cpus: "0.25", memory: 128M}
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Aegion Core - Production
-  # ─────────────────────────────────────────────────────────────────────────
+  migration:
+    image: ${AEGION_CORE_IMAGE:?AEGION_CORE_IMAGE is required}
+    <<: *core-runtime
+
   aegion:
-    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/core:${AEGION_VERSION}
+    image: ${AEGION_CORE_IMAGE:?AEGION_CORE_IMAGE is required}
+    <<: *core-runtime
     ports:
-      - "8080:8080"
+      - "443:8080"
     deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 1G
-        reservations:
-          cpus: "0.5"
-          memory: 256M
       replicas: 1
-    environment:
-      # Ensure strict production validation is always enabled.
-      AEGION_ENV: production
-      AEGION_LOG_LEVEL: info
-      AEGION_LOG_FORMAT: json
-      AEGION_DEBUG_PPROF: "false"
-      # Force database URL to come from a secrets file in production.
-      AEGION_DATABASE_URL: ""
-      AEGION_DATABASE_URL_FILE: /run/secrets/aegion_database_url
-      # Keep redis explicit in production (override if using external managed redis).
-      AEGION_CACHE_URL: ${AEGION_CACHE_URL:-redis://redis:6379/0}
-      # Prevent insecure fallback to plaintext env defaults from the base compose file.
-      AEGION_SECRETS_COOKIE: ""
-      AEGION_SECRETS_CIPHER: ""
-      AEGION_SECRETS_INTERNAL: ""
-      # Secrets from files
-      AEGION_SECRETS_COOKIE_FILE: /run/secrets/aegion_cookie_secret
-      AEGION_SECRETS_CIPHER_FILE: /run/secrets/aegion_cipher_secret
-      AEGION_SECRETS_INTERNAL_FILE: /run/secrets/aegion_internal_secret
-    secrets:
-      - aegion_database_url
-      - aegion_cookie_secret
-      - aegion_cipher_secret
-      - aegion_internal_secret
-    volumes:
-      - ../configs/aegion.production.yaml:/config/aegion.yaml:ro
-      - ../configs/schemas:/config/schemas:ro
-      - aegion-data:/data
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "10"
+      resources:
+        limits: {cpus: "2", memory: 1G}
+        reservations: {cpus: "0.5", memory: 256M}
 
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Admin Module - Production
-  # ─────────────────────────────────────────────────────────────────────────
   module-admin:
-    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-admin:${AEGION_VERSION}
-    # No exposed ports in production (accessed through core)
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
+    image: ${AEGION_MODULE_ADMIN_IMAGE:?AEGION_MODULE_ADMIN_IMAGE is required}
     environment:
-      MODULE_LOG_LEVEL: info
-      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
-    secrets:
-      - aegion_internal_secret
-    logging:
-      driver: json-file
-      options:
-        max-size: "25m"
-        max-file: "5"
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-admin:9003
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_admin_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_admin_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_admin_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_admin_client_key
+      AEGION_ADMIN_DATABASE_URL_FILE: /run/secrets/module_admin_database_url
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/aegion
+    secrets: [module_admin_database_url, module_admin_credential, module_admin_client_cert, module_admin_client_key, control_plane_ca]
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # OAuth2 Module - Production
-  # ─────────────────────────────────────────────────────────────────────────
+  module-analytics:
+    image: ${AEGION_MODULE_ANALYTICS_IMAGE:?AEGION_MODULE_ANALYTICS_IMAGE is required}
+    environment:
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-analytics:8082
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_analytics_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_analytics_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_analytics_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_analytics_client_key
+      AEGION_ANALYTICS_DATABASE_URL_FILE: /run/secrets/module_analytics_database_url
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/analytics
+    secrets: [module_analytics_database_url, module_analytics_credential, module_analytics_client_cert, module_analytics_client_key, control_plane_ca]
+
   module-oauth2:
-    image: ${AEGION_REGISTRY:-ghcr.io/aegion}/module-oauth2:${AEGION_VERSION}
-    # No exposed ports in production (accessed through core)
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
+    image: ${AEGION_MODULE_OAUTH2_IMAGE:?AEGION_MODULE_OAUTH2_IMAGE is required}
     environment:
-      MODULE_LOG_LEVEL: info
-      AEGION_INTERNAL_SECRET_FILE: /run/secrets/aegion_internal_secret
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-oauth2:9005
+      AEGION_MODULE_GRPC_ADVERTISE_ADDR: module-oauth2:9103
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_oauth2_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_oauth2_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_oauth2_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_oauth2_client_key
+      AEGION_OAUTH2_DATABASE_URL_FILE: /run/secrets/module_oauth2_database_url
+      AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE: /run/secrets/identity_context_signing_key
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/oauth2
+    secrets: [module_oauth2_database_url, module_oauth2_credential, module_oauth2_client_cert, module_oauth2_client_key, control_plane_ca, identity_context_signing_key]
+
+  module-social:
+    image: ${AEGION_MODULE_SOCIAL_IMAGE:?AEGION_MODULE_SOCIAL_IMAGE is required}
+    environment:
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-social:9006
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_social_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_social_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_social_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_social_client_key
+      AEGION_SOCIAL_DATABASE_URL_FILE: /run/secrets/module_social_database_url
+      AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE: /run/secrets/identity_context_signing_key
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/social
+    secrets: [module_social_database_url, module_social_credential, module_social_client_cert, module_social_client_key, control_plane_ca, identity_context_signing_key]
+
+  module-sso:
+    image: ${AEGION_MODULE_SSO_IMAGE:?AEGION_MODULE_SSO_IMAGE is required}
+    environment:
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-sso:9007
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_sso_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_sso_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_sso_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_sso_client_key
+      AEGION_SSO_DATABASE_URL_FILE: /run/secrets/module_sso_database_url
+      AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE: /run/secrets/identity_context_signing_key
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/sso
+    secrets: [module_sso_database_url, module_sso_credential, module_sso_client_cert, module_sso_client_key, control_plane_ca, identity_context_signing_key]
+
+  module-introspection:
+    image: ${AEGION_MODULE_INTROSPECTION_IMAGE:?AEGION_MODULE_INTROSPECTION_IMAGE is required}
+    environment:
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-introspection:9008
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_introspection_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_introspection_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_introspection_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_introspection_client_key
+      AEGION_INTROSPECTION_DATABASE_URL_FILE: /run/secrets/module_introspection_database_url
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/introspection/token
+    secrets: [module_introspection_database_url, module_introspection_credential, module_introspection_client_cert, module_introspection_client_key, control_plane_ca]
+
+  module-proxy:
+    image: ${AEGION_MODULE_PROXY_IMAGE:?AEGION_MODULE_PROXY_IMAGE is required}
+    environment:
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-proxy:9009
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_proxy_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_proxy_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_proxy_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_proxy_client_key
+      AEGION_PROXY_DATABASE_URL_FILE: /run/secrets/module_proxy_database_url
+    secrets: [module_proxy_database_url, module_proxy_credential, module_proxy_client_cert, module_proxy_client_key, control_plane_ca]
+    # The proxy data-plane listener is intentionally not published here. A
+    # separate ingress binding is an explicit operator decision.
+
+  module-mfa:
+    image: ${AEGION_MODULE_MFA_IMAGE:?AEGION_MODULE_MFA_IMAGE is required}
+    environment:
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-mfa:9003
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_mfa_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_mfa_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_mfa_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_mfa_client_key
+      AEGION_MFA_DATABASE_URL_FILE: /run/secrets/module_mfa_database_url
+      AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE: /run/secrets/identity_context_signing_key
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/mfa
+    secrets: [module_mfa_database_url, module_mfa_credential, module_mfa_client_cert, module_mfa_client_key, control_plane_ca, identity_context_signing_key]
+
+  module-passkeys:
+    image: ${AEGION_MODULE_PASSKEYS_IMAGE:?AEGION_MODULE_PASSKEYS_IMAGE is required}
+    environment:
+      <<: *module-control-plane
+      AEGION_MODULE_HTTP_ADVERTISE_ADDR: module-passkeys:9004
+      AEGION_DATABASE_URL_FILE: /run/secrets/module_passkeys_database_url
+      AEGION_MODULE_CREDENTIAL_FILE: /run/secrets/module_passkeys_credential
+      AEGION_MODULE_TLS_CERT_FILE: /run/secrets/module_passkeys_client_cert
+      AEGION_MODULE_TLS_KEY_FILE: /run/secrets/module_passkeys_client_key
+      AEGION_PASSKEYS_DATABASE_URL_FILE: /run/secrets/module_passkeys_database_url
+      AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE: /run/secrets/identity_context_signing_key
+      AEGION_MODULE_PUBLIC_URL: ${AEGION_PUBLIC_BASE_URL:?AEGION_PUBLIC_BASE_URL is required}/api/v1/self-service/passkeys
+    secrets: [module_passkeys_database_url, module_passkeys_credential, module_passkeys_client_cert, module_passkeys_client_key, control_plane_ca, identity_context_signing_key]
+
+  aegion-cli:
+    image: ${AEGION_MODULE_CLI_IMAGE:?AEGION_MODULE_CLI_IMAGE is required}
+    environment:
+      AEGION_CLI_API_URL: https://aegion:8080/aegion
+      AEGION_CLI_CA_CERT_FILE: /run/secrets/control_plane_ca
+      AEGION_CLI_CLIENT_CERT_FILE: /run/secrets/module_cli_client_cert
+      AEGION_CLI_CLIENT_KEY_FILE: /run/secrets/module_cli_client_key
+      AEGION_CLI_API_KEY_FILE: /run/secrets/cli_api_key
     secrets:
-      - aegion_internal_secret
-    logging:
-      driver: json-file
-      options:
-        max-size: "25m"
-        max-file: "5"
+      - source: control_plane_ca
+        target: control_plane_ca
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: module_cli_client_cert
+        target: module_cli_client_cert
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: module_cli_client_key
+        target: module_cli_client_key
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+      - source: cli_api_key
+        target: cli_api_key
+        uid: "65532"
+        gid: "65532"
+        mode: 0400
+    # This profile is an on-demand operator tool. It must be invoked with
+    # `docker compose --profile operator run --rm aegion-cli <command>`.
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Mailpit - Disabled in production
-  # ─────────────────────────────────────────────────────────────────────────
-  mailpit:
-    profiles:
-      - disabled  # Never runs in production
-
-# ─────────────────────────────────────────────────────────────────────────
-# Secrets (Docker Swarm or file-based)
-# ─────────────────────────────────────────────────────────────────────────
 secrets:
-  postgres_password:
-    file: ./secrets/postgres_password.txt
-  aegion_database_url:
-    file: ./secrets/aegion_database_url.txt
-  aegion_cookie_secret:
-    file: ./secrets/aegion_cookie_secret.txt
-  aegion_cipher_secret:
-    file: ./secrets/aegion_cipher_secret.txt
-  aegion_internal_secret:
-    file: ./secrets/aegion_internal_secret.txt
+  postgres_password: {file: ${POSTGRES_PASSWORD_FILE_SOURCE:?POSTGRES_PASSWORD_FILE_SOURCE is required}}
+  core_database_url: {file: ${AEGION_DATABASE_URL_FILE_SOURCE:?AEGION_DATABASE_URL_FILE_SOURCE is required}}
+  core_cookie_secret: {file: ${AEGION_COOKIE_SECRET_FILE_SOURCE:?AEGION_COOKIE_SECRET_FILE_SOURCE is required}}
+  core_cipher_secret: {file: ${AEGION_CIPHER_SECRET_FILE_SOURCE:?AEGION_CIPHER_SECRET_FILE_SOURCE is required}}
+  core_internal_secret: {file: ${AEGION_INTERNAL_SECRET_FILE_SOURCE:?AEGION_INTERNAL_SECRET_FILE_SOURCE is required}}
+  core_tls_cert: {file: ${AEGION_TLS_CERT_FILE_SOURCE:?AEGION_TLS_CERT_FILE_SOURCE is required}}
+  core_tls_key: {file: ${AEGION_TLS_KEY_FILE_SOURCE:?AEGION_TLS_KEY_FILE_SOURCE is required}}
+  control_plane_ca: {file: ${AEGION_CONTROL_PLANE_CA_FILE_SOURCE:?AEGION_CONTROL_PLANE_CA_FILE_SOURCE is required}}
+  identity_context_signing_key: {file: ${AEGION_IDENTITY_CONTEXT_SIGNING_KEY_FILE_SOURCE:?AEGION_IDENTITY_CONTEXT_SIGNING_KEY_FILE_SOURCE is required}}
+  cli_api_key: {file: ${AEGION_CLI_API_KEY_FILE_SOURCE:?AEGION_CLI_API_KEY_FILE_SOURCE is required}}
+  module_admin_database_url: {file: ${AEGION_MODULE_ADMIN_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_ADMIN_DATABASE_URL_FILE_SOURCE is required}}
+  module_admin_credential: {file: ${AEGION_MODULE_ADMIN_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_ADMIN_CREDENTIAL_FILE_SOURCE is required}}
+  module_admin_client_cert: {file: ${AEGION_MODULE_ADMIN_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_ADMIN_CLIENT_CERT_FILE_SOURCE is required}}
+  module_admin_client_key: {file: ${AEGION_MODULE_ADMIN_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_ADMIN_CLIENT_KEY_FILE_SOURCE is required}}
+  module_analytics_database_url: {file: ${AEGION_MODULE_ANALYTICS_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_ANALYTICS_DATABASE_URL_FILE_SOURCE is required}}
+  module_analytics_credential: {file: ${AEGION_MODULE_ANALYTICS_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_ANALYTICS_CREDENTIAL_FILE_SOURCE is required}}
+  module_analytics_client_cert: {file: ${AEGION_MODULE_ANALYTICS_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_ANALYTICS_CLIENT_CERT_FILE_SOURCE is required}}
+  module_analytics_client_key: {file: ${AEGION_MODULE_ANALYTICS_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_ANALYTICS_CLIENT_KEY_FILE_SOURCE is required}}
+  module_oauth2_database_url: {file: ${AEGION_MODULE_OAUTH2_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_OAUTH2_DATABASE_URL_FILE_SOURCE is required}}
+  module_oauth2_credential: {file: ${AEGION_MODULE_OAUTH2_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_OAUTH2_CREDENTIAL_FILE_SOURCE is required}}
+  module_oauth2_client_cert: {file: ${AEGION_MODULE_OAUTH2_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_OAUTH2_CLIENT_CERT_FILE_SOURCE is required}}
+  module_oauth2_client_key: {file: ${AEGION_MODULE_OAUTH2_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_OAUTH2_CLIENT_KEY_FILE_SOURCE is required}}
+  module_social_database_url: {file: ${AEGION_MODULE_SOCIAL_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_SOCIAL_DATABASE_URL_FILE_SOURCE is required}}
+  module_social_credential: {file: ${AEGION_MODULE_SOCIAL_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_SOCIAL_CREDENTIAL_FILE_SOURCE is required}}
+  module_social_client_cert: {file: ${AEGION_MODULE_SOCIAL_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_SOCIAL_CLIENT_CERT_FILE_SOURCE is required}}
+  module_social_client_key: {file: ${AEGION_MODULE_SOCIAL_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_SOCIAL_CLIENT_KEY_FILE_SOURCE is required}}
+  module_sso_database_url: {file: ${AEGION_MODULE_SSO_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_SSO_DATABASE_URL_FILE_SOURCE is required}}
+  module_sso_credential: {file: ${AEGION_MODULE_SSO_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_SSO_CREDENTIAL_FILE_SOURCE is required}}
+  module_sso_client_cert: {file: ${AEGION_MODULE_SSO_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_SSO_CLIENT_CERT_FILE_SOURCE is required}}
+  module_sso_client_key: {file: ${AEGION_MODULE_SSO_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_SSO_CLIENT_KEY_FILE_SOURCE is required}}
+  module_introspection_database_url: {file: ${AEGION_MODULE_INTROSPECTION_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_INTROSPECTION_DATABASE_URL_FILE_SOURCE is required}}
+  module_introspection_credential: {file: ${AEGION_MODULE_INTROSPECTION_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_INTROSPECTION_CREDENTIAL_FILE_SOURCE is required}}
+  module_introspection_client_cert: {file: ${AEGION_MODULE_INTROSPECTION_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_INTROSPECTION_CLIENT_CERT_FILE_SOURCE is required}}
+  module_introspection_client_key: {file: ${AEGION_MODULE_INTROSPECTION_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_INTROSPECTION_CLIENT_KEY_FILE_SOURCE is required}}
+  module_proxy_database_url: {file: ${AEGION_MODULE_PROXY_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_PROXY_DATABASE_URL_FILE_SOURCE is required}}
+  module_proxy_credential: {file: ${AEGION_MODULE_PROXY_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_PROXY_CREDENTIAL_FILE_SOURCE is required}}
+  module_proxy_client_cert: {file: ${AEGION_MODULE_PROXY_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_PROXY_CLIENT_CERT_FILE_SOURCE is required}}
+  module_proxy_client_key: {file: ${AEGION_MODULE_PROXY_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_PROXY_CLIENT_KEY_FILE_SOURCE is required}}
+  module_mfa_database_url: {file: ${AEGION_MODULE_MFA_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_MFA_DATABASE_URL_FILE_SOURCE is required}}
+  module_mfa_credential: {file: ${AEGION_MODULE_MFA_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_MFA_CREDENTIAL_FILE_SOURCE is required}}
+  module_mfa_client_cert: {file: ${AEGION_MODULE_MFA_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_MFA_CLIENT_CERT_FILE_SOURCE is required}}
+  module_mfa_client_key: {file: ${AEGION_MODULE_MFA_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_MFA_CLIENT_KEY_FILE_SOURCE is required}}
+  module_passkeys_database_url: {file: ${AEGION_MODULE_PASSKEYS_DATABASE_URL_FILE_SOURCE:?AEGION_MODULE_PASSKEYS_DATABASE_URL_FILE_SOURCE is required}}
+  module_passkeys_credential: {file: ${AEGION_MODULE_PASSKEYS_CREDENTIAL_FILE_SOURCE:?AEGION_MODULE_PASSKEYS_CREDENTIAL_FILE_SOURCE is required}}
+  module_passkeys_client_cert: {file: ${AEGION_MODULE_PASSKEYS_CLIENT_CERT_FILE_SOURCE:?AEGION_MODULE_PASSKEYS_CLIENT_CERT_FILE_SOURCE is required}}
+  module_passkeys_client_key: {file: ${AEGION_MODULE_PASSKEYS_CLIENT_KEY_FILE_SOURCE:?AEGION_MODULE_PASSKEYS_CLIENT_KEY_FILE_SOURCE is required}}
+  module_cli_client_cert: {file: ${AEGION_CLI_CLIENT_CERT_FILE_SOURCE:?AEGION_CLI_CLIENT_CERT_FILE_SOURCE is required}}
+  module_cli_client_key: {file: ${AEGION_CLI_CLIENT_KEY_FILE_SOURCE:?AEGION_CLI_CLIENT_KEY_FILE_SOURCE is required}}

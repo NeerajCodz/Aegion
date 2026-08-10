@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
@@ -23,13 +22,17 @@ import (
 )
 
 var (
-	ErrConnectionDisabled  = errors.New("sso connection is disabled")
-	ErrInvalidRelayState   = errors.New("invalid relay state")
-	ErrMissingStateSecret  = errors.New("sso state secret is required")
-	ErrInvalidSAMLResponse = errors.New("invalid sso response")
+	ErrConnectionDisabled    = errors.New("sso connection is disabled")
+	ErrInvalidRelayState     = errors.New("invalid relay state")
+	ErrMissingStateSecret    = errors.New("sso state secret is required")
+	ErrRepositoryUnavailable = errors.New("sso repository is required")
+	ErrInvalidSAMLResponse   = errors.New("invalid sso response")
 )
 
-const relayStateKind = "sso_state"
+const (
+	relayStateKind = "sso_state"
+	authRequestTTL = 15 * time.Minute
+)
 
 type StartResponse struct {
 	Connection  string `json:"connection"`
@@ -74,66 +77,99 @@ type Service struct {
 	stateSecret []byte
 	now         func() time.Time
 	httpClient  *http.Client
-	replayMu    sync.Mutex
-	seenRequest map[string]time.Time
 }
 
 func New(repo store.Repository, stateSecret []byte) *Service {
-	if repo == nil {
-		repo = store.New()
-	}
 	return &Service{
 		repo:        repo,
 		stateSecret: append([]byte(nil), stateSecret...),
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
-		seenRequest: make(map[string]time.Time),
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
+func (s *Service) requireRepository() (store.Repository, error) {
+	if s == nil || s.repo == nil {
+		return nil, ErrRepositoryUnavailable
+	}
+	return s.repo, nil
+}
+
 func (s *Service) ListConnections(ctx context.Context) ([]store.Connection, error) {
-	return s.repo.ListConnections(ctx, false)
+	repo, err := s.requireRepository()
+	if err != nil {
+		return nil, err
+	}
+	return repo.ListConnections(ctx, false)
 }
 
 func (s *Service) ListConfiguredConnections(ctx context.Context, includeDisabled bool) ([]store.Connection, error) {
-	return s.repo.ListConnections(ctx, includeDisabled)
+	repo, err := s.requireRepository()
+	if err != nil {
+		return nil, err
+	}
+	return repo.ListConnections(ctx, includeDisabled)
 }
 
 func (s *Service) GetConnection(ctx context.Context, slug string) (*store.Connection, error) {
-	return s.repo.GetConnectionBySlug(ctx, slug)
+	repo, err := s.requireRepository()
+	if err != nil {
+		return nil, err
+	}
+	return repo.GetConnectionBySlug(ctx, slug)
 }
 
 func (s *Service) GetConnectionForDomain(ctx context.Context, domain string) (*store.Connection, error) {
-	return s.repo.GetConnectionByDomain(ctx, domain)
+	repo, err := s.requireRepository()
+	if err != nil {
+		return nil, err
+	}
+	return repo.GetConnectionByDomain(ctx, domain)
 }
 
 func (s *Service) UpsertConnection(ctx context.Context, req ConnectionUpsertRequest) (*store.Connection, error) {
+	repo, err := s.requireRepository()
+	if err != nil {
+		return nil, err
+	}
 	connection, err := s.normalizeConnection(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.UpsertConnection(ctx, connection)
+	return repo.UpsertConnection(ctx, connection)
 }
 
 func (s *Service) DeleteConnection(ctx context.Context, slug string) error {
-	return s.repo.DeleteConnection(ctx, slug)
+	repo, err := s.requireRepository()
+	if err != nil {
+		return err
+	}
+	return repo.DeleteConnection(ctx, slug)
 }
-
 func (s *Service) StartAuth(ctx context.Context, slug, redirectTo string) (*StartResponse, error) {
-	connection, err := s.repo.GetConnectionBySlug(ctx, slug)
+	repo, err := s.requireRepository()
+	if err != nil {
+		return nil, err
+	}
+	connection, err := repo.GetConnectionBySlug(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
 	if !connection.Enabled {
 		return nil, ErrConnectionDisabled
 	}
+	now := s.now()
+	requestID, err := newSAMLRequestID()
+	if err != nil {
+		return nil, fmt.Errorf("generate SAML request ID: %w", err)
+	}
 	state := callbackState{
 		Connection: connection.Slug,
 		RedirectTo: normalizeRedirect(firstNonEmpty(redirectTo, connection.DefaultRedirectTo)),
-		RequestID:  newSAMLRequestID(),
-		IssuedAt:   s.now().Unix(),
+		RequestID:  requestID,
+		IssuedAt:   now.Unix(),
 	}
 	relayState, err := s.signRelayState(state)
 	if err != nil {
@@ -143,6 +179,9 @@ func (s *Service) StartAuth(ctx context.Context, slug, redirectTo string) (*Star
 	if err != nil {
 		return nil, err
 	}
+	if err := repo.CreateAuthRequest(ctx, state.RequestID, connection.Slug, now.Add(authRequestTTL)); err != nil {
+		return nil, fmt.Errorf("persist SSO auth request: %w", err)
+	}
 	return &StartResponse{
 		Connection:  connection.Slug,
 		RedirectURL: redirectURL,
@@ -151,11 +190,15 @@ func (s *Service) StartAuth(ctx context.Context, slug, redirectTo string) (*Star
 }
 
 func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, email, displayName string, attributes map[string]interface{}) (*CallbackResult, error) {
+	repo, err := s.requireRepository()
+	if err != nil {
+		return nil, err
+	}
 	_ = subject
 	_ = email
 	_ = displayName
 
-	connection, err := s.repo.GetConnectionBySlug(ctx, slug)
+	connection, err := repo.GetConnectionBySlug(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +212,11 @@ func (s *Service) CompleteAuth(ctx context.Context, slug, relayState, subject, e
 	if state.Connection != connection.Slug {
 		return nil, ErrInvalidRelayState
 	}
-	if !s.consumeRequestID(state.RequestID, s.now()) {
+	consumed, err := repo.ConsumeAuthRequest(ctx, state.RequestID, connection.Slug, s.now())
+	if err != nil {
+		return nil, fmt.Errorf("consume SSO auth request: %w", err)
+	}
+	if !consumed {
 		return nil, ErrInvalidRelayState
 	}
 
@@ -346,7 +393,11 @@ type authnRequestEnvelope struct {
 
 func buildAuthnRequest(connection store.Connection, requestID string) (string, error) {
 	if strings.TrimSpace(requestID) == "" {
-		requestID = newSAMLRequestID()
+		var err error
+		requestID, err = newSAMLRequestID()
+		if err != nil {
+			return "", fmt.Errorf("generate SAML request ID: %w", err)
+		}
 	}
 	env := authnRequestEnvelope{
 		XmlnsSamlp:   "urn:oasis:names:tc:SAML:2.0:protocol",
@@ -391,7 +442,7 @@ func (s *Service) verifyRelayState(value string) (*callbackState, error) {
 	if err != nil {
 		return nil, ErrInvalidRelayState
 	}
-	if !platformcrypto.VerifyEnvelope(relayStateKind, s.stateSecret, payload, parts[1], 15*time.Minute, s.now()) {
+	if !platformcrypto.VerifyEnvelope(relayStateKind, s.stateSecret, payload, parts[1], authRequestTTL, s.now()) {
 		return nil, ErrInvalidRelayState
 	}
 	var state callbackState
@@ -401,30 +452,12 @@ func (s *Service) verifyRelayState(value string) (*callbackState, error) {
 	return &state, nil
 }
 
-func (s *Service) consumeRequestID(requestID string, now time.Time) bool {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return false
+func newSAMLRequestID() (string, error) {
+	entropy, err := platformcrypto.RandomBytes(32)
+	if err != nil {
+		return "", err
 	}
-	if s == nil {
-		return false
-	}
-	const replayWindow = 30 * time.Minute
-	cutoff := now.Add(-replayWindow)
-
-	s.replayMu.Lock()
-	defer s.replayMu.Unlock()
-
-	for id, seenAt := range s.seenRequest {
-		if seenAt.Before(cutoff) {
-			delete(s.seenRequest, id)
-		}
-	}
-	if _, exists := s.seenRequest[requestID]; exists {
-		return false
-	}
-	s.seenRequest[requestID] = now
-	return true
+	return "_" + base64.RawURLEncoding.EncodeToString(entropy), nil
 }
 
 func stringSliceValue(value interface{}) []string {
@@ -747,10 +780,6 @@ func findElementByLocalName(root *etree.Element, localName string) *etree.Elemen
 		}
 	}
 	return nil
-}
-
-func newSAMLRequestID() string {
-	return "_" + fmt.Sprintf("%d", time.Now().UTC().UnixNano())
 }
 
 func matchesRequestID(expected string, values ...string) bool {

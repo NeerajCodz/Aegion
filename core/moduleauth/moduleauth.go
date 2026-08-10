@@ -5,8 +5,6 @@ package moduleauth
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -177,7 +175,7 @@ func (m *Manager) parse(token string) (Claims, error) {
 		return Claims{}, ErrTokenInvalid
 	}
 	expected, err := m.signature(payload)
-	if err != nil || subtle.ConstantTimeCompare(signature, expected) != 1 {
+	if err != nil || !platformcrypto.ConstantTimeCompare(signature, expected) {
 		return Claims{}, ErrTokenInvalid
 	}
 	var claims Claims
@@ -234,8 +232,8 @@ func NewCredential() (raw string, hash string, err error) {
 }
 
 func randomValue(size int) (string, error) {
-	value := make([]byte, size)
-	if _, err := rand.Read(value); err != nil {
+	value, err := platformcrypto.RandomBytes(size)
+	if err != nil {
 		return "", fmt.Errorf("generate random credential value: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(value), nil

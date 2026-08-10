@@ -9,6 +9,10 @@ services:
   # PostgreSQL - Expose port for local tools
   # ─────────────────────────────────────────────────────────────────────────
   postgres:
+    environment:
+      POSTGRES_DB: aegion
+      POSTGRES_USER: aegion
+      POSTGRES_PASSWORD: aegion
     ports:
       - "127.0.0.1:5432:5432"
 
@@ -18,6 +22,21 @@ services:
   redis:
     ports:
       - "127.0.0.1:6379:6379"
+
+  migration:
+    build:
+      context: ..
+      dockerfile: build/Dockerfile.core
+    environment:
+      AEGION_ENV: development
+      AEGION_DATABASE_URL: postgres://aegion:aegion@postgres:5432/aegion?sslmode=disable
+      AEGION_CACHE_URL: redis://redis:6379/0
+      AEGION_SECRETS_COOKIE: dev-cookie-secret-change-me-32chars!
+      AEGION_SECRETS_CIPHER: dev-cipher-secret-change-me-32chars!
+      AEGION_SECRETS_INTERNAL: dev-internal-secret-change-me-32ch!
+    volumes:
+      - ../configs/aegion.yaml:/config/aegion.yaml:ro
+      - ../configs/schemas:/config/schemas:ro
 
   # ─────────────────────────────────────────────────────────────────────────
   # Aegion Core - Development configuration
@@ -49,35 +68,6 @@ services:
       - ../configs/schemas:/config/schemas:ro
       - aegion-data:/data
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Password Module - Development
-  # ─────────────────────────────────────────────────────────────────────────
-  module-password:
-    build:
-      context: ..
-      dockerfile: modules/password/Dockerfile
-    ports:
-      - "9001:9001"
-    environment:
-      MODULE_LOG_LEVEL: debug
-      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
-    volumes:
-      - ../configs/modules/password.yaml:/config/password.yaml:ro
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Magic Link Module - Development
-  # ─────────────────────────────────────────────────────────────────────────
-  module-magic-link:
-    build:
-      context: ..
-      dockerfile: modules/magic_link/Dockerfile
-    ports:
-      - "9002:9002"
-    environment:
-      MODULE_LOG_LEVEL: debug
-      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
-    volumes:
-      - ../configs/modules/magic_link.yaml:/config/magic_link.yaml:ro
 
   # ─────────────────────────────────────────────────────────────────────────
   # Admin Module - Development
@@ -86,11 +76,9 @@ services:
     build:
       context: ..
       dockerfile: modules/admin/Dockerfile
-    ports:
-      - "9003:9003"
+    # Module ports stay private even in development; exercise them through core.
     environment:
       MODULE_LOG_LEVEL: debug
-      AEGION_INTERNAL_SECRET: dev-internal-secret-change-me-32ch!
       AEGION_ADMIN_OBSERVABILITY_ENABLED: "true"
       AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL: http://otel-collector:13133
       AEGION_ADMIN_OBS_PROMETHEUS_URL: http://prometheus:9090/-/healthy

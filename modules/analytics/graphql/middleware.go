@@ -506,8 +506,7 @@ func (srl *SimpleRequestLogger) LogRequest(
 ) {
 	srl.logger.DebugContext(ctx, "GraphQL request",
 		"operationName", operationName,
-		"queryLength", len(query),
-		"variables", variables)
+		"queryLength", len(query))
 }
 
 // LogResponse logs a GraphQL response.

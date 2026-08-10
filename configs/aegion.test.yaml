@@ -39,7 +39,6 @@ module_versions:
   analytics:    "latest"
   policy:     "latest"
   proxy:      "latest"
-  cli:        "latest"
 
 module_registry:
   base_url: ""

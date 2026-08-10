@@ -64,18 +64,24 @@ func NewProxy(config Config, rules *RuleEngine, logger any) *Proxy {
 
 	log := xlog.Adapt(logger)
 
-	// Create HTTP transport
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   config.Transport.DialTimeout,
-			KeepAlive: config.Transport.KeepAlive,
-		}).DialContext,
-		MaxIdleConns:          config.Transport.MaxIdleConns,
-		MaxIdleConnsPerHost:   config.Transport.MaxIdleConnsPerHost,
-		IdleConnTimeout:       config.Transport.IdleConnTimeout,
-		TLSHandshakeTimeout:   config.Transport.TLSHandshakeTimeout,
-		ExpectContinueTimeout: config.Transport.ExpectContinueTimeout,
+	// Use a supplied constrained egress transport when present. The default
+	// transport remains for deployments without an operator egress policy.
+	var transport http.RoundTripper
+	if config.EgressTransport != nil {
+		transport = config.EgressTransport
+	} else {
+		transport = &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   config.Transport.DialTimeout,
+				KeepAlive: config.Transport.KeepAlive,
+			}).DialContext,
+			MaxIdleConns:          config.Transport.MaxIdleConns,
+			MaxIdleConnsPerHost:   config.Transport.MaxIdleConnsPerHost,
+			IdleConnTimeout:       config.Transport.IdleConnTimeout,
+			TLSHandshakeTimeout:   config.Transport.TLSHandshakeTimeout,
+			ExpectContinueTimeout: config.Transport.ExpectContinueTimeout,
+		}
 	}
 
 	proxy := &Proxy{
@@ -108,6 +114,7 @@ func NewProxy(config Config, rules *RuleEngine, logger any) *Proxy {
 				Interval:       config.HealthCheckInterval,
 				Timeout:        config.Transport.DialTimeout,
 				Logger:         log,
+				Transport:      config.EgressTransport,
 				ExpectedBody:   upstream.HealthCheckExpectedBody,
 				ExpectedStatus: http.StatusOK,
 			})

@@ -50,6 +50,10 @@ message RegisterRequest {
 
   // Bootstrap credential issued out-of-band by core; required for registration.
   string bootstrap_secret = 10;
+
+  // Private HTTP listener address registered for core-owned public routing.
+  // It MUST be reachable only on the module network.
+  string http_address = 11;
 }
 
 message RegisterResponse {

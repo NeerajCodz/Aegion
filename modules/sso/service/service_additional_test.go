@@ -22,6 +22,8 @@ type ssoRepoStub struct {
 	getConnectionDomainFn func(ctx context.Context, domain string) (*store.Connection, error)
 	upsertConnectionFn    func(ctx context.Context, connection store.Connection) (*store.Connection, error)
 	deleteConnectionFn    func(ctx context.Context, slug string) error
+	createAuthRequestFn   func(ctx context.Context, requestID, connectionSlug string, expiresAt time.Time) error
+	consumeAuthRequestFn  func(ctx context.Context, requestID, connectionSlug string, now time.Time) (bool, error)
 }
 
 func (s *ssoRepoStub) ListConnections(ctx context.Context, includeDisabled bool) ([]store.Connection, error) {
@@ -57,6 +59,20 @@ func (s *ssoRepoStub) DeleteConnection(ctx context.Context, slug string) error {
 		return s.deleteConnectionFn(ctx, slug)
 	}
 	return nil
+}
+
+func (s *ssoRepoStub) CreateAuthRequest(ctx context.Context, requestID, connectionSlug string, expiresAt time.Time) error {
+	if s.createAuthRequestFn != nil {
+		return s.createAuthRequestFn(ctx, requestID, connectionSlug, expiresAt)
+	}
+	return nil
+}
+
+func (s *ssoRepoStub) ConsumeAuthRequest(ctx context.Context, requestID, connectionSlug string, now time.Time) (bool, error) {
+	if s.consumeAuthRequestFn != nil {
+		return s.consumeAuthRequestFn(ctx, requestID, connectionSlug, now)
+	}
+	return strings.TrimSpace(requestID) != "", nil
 }
 
 type roundTripFunc func(req *http.Request) (*http.Response, error)
@@ -136,13 +152,13 @@ func TestServiceAdditionalStartAndCompleteErrorBranches(t *testing.T) {
 	secret := []byte("01234567890123456789012345678901")
 	ctx := context.Background()
 
-	t.Run("new with nil repo uses default memory store", func(t *testing.T) {
+	t.Run("new with nil repo does not create a memory fallback", func(t *testing.T) {
 		svc := New(nil, secret)
-		if svc.repo == nil {
-			t.Fatal("expected default repository to be configured")
+		if svc.repo != nil {
+			t.Fatal("expected nil repository to remain unavailable")
 		}
-		if _, err := svc.ListConnections(ctx); err != nil {
-			t.Fatalf("ListConnections() error = %v", err)
+		if _, err := svc.ListConnections(ctx); !errors.Is(err, ErrRepositoryUnavailable) {
+			t.Fatalf("ListConnections(nil repository) error = %v", err)
 		}
 	})
 
@@ -182,6 +198,18 @@ func TestServiceAdditionalStartAndCompleteErrorBranches(t *testing.T) {
 		}, secret)
 		if _, err := svc.StartAuth(ctx, "acme", "/after"); err == nil {
 			t.Fatalf("StartAuth(invalid SSO URL) expected error")
+		}
+
+		svc = New(&ssoRepoStub{
+			getConnectionSlugFn: func(context.Context, string) (*store.Connection, error) {
+				return &store.Connection{Slug: "acme", Enabled: true, SSOURL: "https://idp.example.com/sso"}, nil
+			},
+			createAuthRequestFn: func(context.Context, string, string, time.Time) error {
+				return boom
+			},
+		}, secret)
+		if _, err := svc.StartAuth(ctx, "acme", "/after"); !errors.Is(err, boom) {
+			t.Fatalf("StartAuth(persist request error) = %v", err)
 		}
 	})
 
@@ -438,24 +466,22 @@ func TestServiceAdditionalRelayAndHelperBranches(t *testing.T) {
 		}
 
 		now := time.Now().UTC()
-		svc := New(store.New(), secret)
-		svc.seenRequest["old-id"] = now.Add(-31 * time.Minute)
-		if ok := svc.consumeRequestID("new-id", now); !ok {
-			t.Fatalf("consumeRequestID(new-id) expected true")
+		ctx := context.Background()
+		repo := store.New()
+		if err := repo.CreateAuthRequest(ctx, "request-1", "acme", now.Add(authRequestTTL)); err != nil {
+			t.Fatalf("CreateAuthRequest() error = %v", err)
 		}
-		if _, ok := svc.seenRequest["old-id"]; ok {
-			t.Fatalf("consumeRequestID() should prune expired replay IDs")
+		consumed, err := repo.ConsumeAuthRequest(ctx, "request-1", "acme", now)
+		if err != nil || !consumed {
+			t.Fatalf("ConsumeAuthRequest(first) consumed=%t err=%v", consumed, err)
 		}
-		if ok := svc.consumeRequestID("new-id", now.Add(time.Second)); ok {
-			t.Fatalf("consumeRequestID(replay) expected false")
+		consumed, err = repo.ConsumeAuthRequest(ctx, "request-1", "acme", now.Add(time.Second))
+		if err != nil || consumed {
+			t.Fatalf("ConsumeAuthRequest(replay) consumed=%t err=%v", consumed, err)
 		}
-		if ok := svc.consumeRequestID("   ", now); ok {
-			t.Fatalf("consumeRequestID(blank) expected false")
-		}
-
-		var nilSvc *Service
-		if ok := nilSvc.consumeRequestID("id", now); ok {
-			t.Fatalf("consumeRequestID(nil receiver) expected false")
+		consumed, err = repo.ConsumeAuthRequest(ctx, " ", "acme", now)
+		if err != nil || consumed {
+			t.Fatalf("ConsumeAuthRequest(blank) consumed=%t err=%v", consumed, err)
 		}
 	})
 }

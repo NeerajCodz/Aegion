@@ -32,10 +32,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate tagged manifest
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          STRICT_DIGESTS: "true"
+      - name: Validate release manifest template
         run: bash ./scripts/check-release-manifest.sh
 
   # ---------------------------------------------------------------------------
@@ -98,9 +95,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run release preflight suite
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          STRICT_DIGESTS: "true"
         run: bash ./scripts/run-release-preflight.sh
 
   # ---------------------------------------------------------------------------
@@ -187,6 +181,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      core_digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -222,6 +218,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -307,10 +304,17 @@ jobs:
         run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Prepare release assets
+        env:
+          CORE_DIGEST: ${{ needs.build-docker.outputs.core_digest }}
         run: |
           mkdir -p release
           find artifacts -type f -exec mv {} release/ \;
-          cp build/release-manifest.json "release/aegion-release-${{ steps.version.outputs.version }}.json"
+          bash scripts/render-release-manifest.sh \
+            build/release-manifest.json \
+            "release/aegion-release-${{ steps.version.outputs.version }}.json" \
+            "core=${CORE_DIGEST}"
+          STRICT_DIGESTS=true bash scripts/check-release-manifest.sh \
+            "release/aegion-release-${{ steps.version.outputs.version }}.json"
           ls -la release/
 
       - name: Create release notes

@@ -588,9 +588,9 @@ func DefaultConfig() *Config {
 		},
 		GraphQL: GraphQLAPIConfig{
 			Enabled:             true,
-			Endpoint:            "/graphql",
-			Introspection:       true,
-			Playground:          true,
+			Endpoint:            "/graphql/analytics",
+			Introspection:       false,
+			Playground:          false,
 			MaxQueryDepth:       10,
 			MaxQueryComplexity:  1000,
 			QueryTimeoutSeconds: 30,

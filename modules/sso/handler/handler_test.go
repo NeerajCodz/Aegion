@@ -9,10 +9,38 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 
 	"github.com/aegion/aegion/modules/sso/service"
 	"github.com/aegion/aegion/modules/sso/store"
 )
+
+const testIdentityContextSecret = "01234567890123456789012345678901"
+
+func authenticatedIdentityHeaders(t *testing.T) http.Header {
+	return signedIdentityHeadersAt(t, time.Now().UTC())
+}
+
+func signedIdentityHeadersAt(t *testing.T, at time.Time) http.Header {
+	t.Helper()
+	headers := make(http.Header, len(signedIdentityHeaders)+1)
+	headers.Set("X-User-ID", "identity-1")
+	headers.Set("X-User-Session-ID", "session-1")
+	headers.Set("X-User-AAL", "aal2")
+	signature, err := platformcrypto.SignIdentityHeaders(
+		[]byte(testIdentityContextSecret),
+		headers,
+		signedIdentityHeaders,
+		at,
+	)
+	if err != nil {
+		t.Fatalf("sign identity headers: %v", err)
+	}
+	headers.Set("X-Aegion-Signature", signature)
+	return headers
+}
 
 type stubSSOService struct{}
 
@@ -68,25 +96,50 @@ func (s *captureSSOService) CompleteAuth(_ context.Context, _ string, relayState
 	return &service.CallbackResult{Connection: "acme", Subject: "sub", RedirectTo: "/after"}, nil
 }
 
-func TestSSOHandlersRequireManagementToken(t *testing.T) {
-	h := New(stubSSOService{})
-	mux := http.NewServeMux()
-	h.RegisterRoutes(mux)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sso/admin/connections", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
-	}
+func TestSSOManagementRequiresVerifiedIdentityContext(t *testing.T) {
+	t.Run("missing signing secret disables management", func(t *testing.T) {
+		h := New(stubSSOService{})
+		mux := http.NewServeMux()
+		h.RegisterRoutes(mux)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sso/admin/connections", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected %d, got %d", http.StatusServiceUnavailable, rec.Code)
+		}
+	})
+
+	t.Run("unsigned or expired identity context is rejected", func(t *testing.T) {
+		h := New(stubSSOService{}, Config{IdentityContextSecret: []byte(testIdentityContextSecret)})
+		mux := http.NewServeMux()
+		h.RegisterRoutes(mux)
+
+		unsigned := httptest.NewRequest(http.MethodGet, "/api/v1/sso/admin/connections", nil)
+		unsigned.Header.Set("X-User-ID", "identity-1")
+		unsigned.Header.Set("X-User-Session-ID", "session-1")
+		unsigned.Header.Set("X-User-AAL", "aal2")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, unsigned)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("unsigned context status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		}
+
+		now := time.Now().UTC()
+		h.now = func() time.Time { return now }
+		expired := httptest.NewRequest(http.MethodGet, "/api/v1/sso/admin/connections", nil)
+		expired.Header = signedIdentityHeadersAt(t, now.Add(-2*time.Minute))
+		rec = httptest.NewRecorder()
+		mux.ServeHTTP(rec, expired)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expired context status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		}
+	})
 }
 
 func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
-	h := New(stubSSOService{}, Config{ManagementToken: "secret"})
+	h := New(stubSSOService{}, Config{IdentityContextSecret: []byte(testIdentityContextSecret)})
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
-	authHeader := http.Header{}
-	authHeader.Set("Authorization", "Bearer secret")
-
 	t.Run("public list", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/sso/connections", nil)
 		rec := httptest.NewRecorder()
@@ -108,7 +161,8 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 	t.Run("admin save", func(t *testing.T) {
 		body, _ := json.Marshal(service.ConnectionUpsertRequest{Slug: "acme", DisplayName: "Acme", EntityID: "urn:acme", SSOURL: "https://idp.example.com"})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/sso/admin/connections", bytes.NewReader(body))
-		req.Header = authHeader.Clone()
+		req.Header = authenticatedIdentityHeaders(t)
+		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -119,10 +173,20 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 	t.Run("start", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]string{"redirect_to": "/after"})
 		req := httptest.NewRequest(http.MethodPost, "/self-service/sso/acme/start", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("generic API protocol route is not exposed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sso/acme/start", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
 		}
 	})
 
@@ -136,7 +200,7 @@ func TestSSOHandlersServePublicAndAdminRoutes(t *testing.T) {
 	})
 
 	t.Run("callback enforces browser-safe local redirect", func(t *testing.T) {
-		h := New(unsafeRedirectSSOService{}, Config{ManagementToken: "secret"})
+		h := New(unsafeRedirectSSOService{}, Config{IdentityContextSecret: []byte(testIdentityContextSecret)})
 		mux := http.NewServeMux()
 		h.RegisterRoutes(mux)
 

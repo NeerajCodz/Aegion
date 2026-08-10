@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/modules/mfa/service"
+	"github.com/google/uuid"
 )
 
 const maxJSONBodyBytes int64 = 1 << 20
@@ -25,14 +27,32 @@ type MFAService interface {
 	RevokeTrustedDevice(ctx context.Context, identityID, token string) error
 }
 
+// Option configures trusted request identity handling.
+type Option func(*Handler)
+
+// WithIdentitySigningSecret enables validation of identity context injected by
+// the core module proxy.
+func WithIdentitySigningSecret(secret []byte) Option {
+	return func(h *Handler) {
+		h.identitySigningSecret = append(h.identitySigningSecret[:0], secret...)
+	}
+}
+
 // Handler exposes HTTP routes for the MFA module.
 type Handler struct {
-	svc MFAService
+	svc                   MFAService
+	identitySigningSecret []byte
 }
 
 // New creates a new MFA handler.
-func New(svc MFAService) *Handler {
-	return &Handler{svc: svc}
+func New(svc MFAService, opts ...Option) *Handler {
+	h := &Handler{svc: svc}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(h)
+		}
+	}
+	return h
 }
 
 // RegisterRoutes registers module routes on the provided mux.
@@ -54,14 +74,18 @@ func (h *Handler) handleStartTOTPEnrollment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		IdentityID  string `json:"identity_id"`
 		AccountName string `json:"account_name"`
 	}
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	resp, err := h.svc.StartTOTPEnrollment(r.Context(), req.IdentityID, req.AccountName)
+	identityID, err := h.identityIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	resp, err := h.svc.StartTOTPEnrollment(r.Context(), identityID, req.AccountName)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -74,12 +98,24 @@ func (h *Handler) handleFinishTOTPEnrollment(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	var req service.TOTPEnrollmentFinishRequest
+	var req struct {
+		EnrollmentID string `json:"enrollment_id"`
+		Code         string `json:"code"`
+	}
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	resp, err := h.svc.CompleteTOTPEnrollment(r.Context(), &req)
+	identityID, err := h.identityIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	resp, err := h.svc.CompleteTOTPEnrollment(r.Context(), &service.TOTPEnrollmentFinishRequest{
+		IdentityID:   identityID,
+		EnrollmentID: req.EnrollmentID,
+		Code:         req.Code,
+	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -93,14 +129,18 @@ func (h *Handler) handleVerifyTOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		IdentityID string `json:"identity_id"`
-		Code       string `json:"code"`
+		Code string `json:"code"`
 	}
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.svc.VerifyTOTP(r.Context(), req.IdentityID, req.Code); err != nil {
+	identityID, err := h.identityIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if err := h.svc.VerifyTOTP(r.Context(), identityID, req.Code); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -113,14 +153,18 @@ func (h *Handler) handleVerifyBackupCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
-		IdentityID string `json:"identity_id"`
-		Code       string `json:"code"`
+		Code string `json:"code"`
 	}
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := h.svc.VerifyBackupCode(r.Context(), req.IdentityID, req.Code); err != nil {
+	identityID, err := h.identityIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if err := h.svc.VerifyBackupCode(r.Context(), identityID, req.Code); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -132,14 +176,17 @@ func (h *Handler) handleRegenerateBackupCodes(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	var req struct {
-		IdentityID string `json:"identity_id"`
-	}
+	var req struct{}
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	codes, err := h.svc.RegenerateBackupCodes(r.Context(), req.IdentityID)
+	identityID, err := h.identityIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	codes, err := h.svc.RegenerateBackupCodes(r.Context(), identityID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -154,14 +201,18 @@ func (h *Handler) handleTrustedDevice(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var req struct {
-			IdentityID string `json:"identity_id"`
-			Label      string `json:"label"`
+			Label string `json:"label"`
 		}
 		if err := decodeJSONBody(w, r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		token, expiresAt, err := h.svc.RememberTrustedDevice(r.Context(), req.IdentityID, req.Label)
+		identityID, err := h.identityIDFromRequest(r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		token, expiresAt, err := h.svc.RememberTrustedDevice(r.Context(), identityID, req.Label)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -173,14 +224,18 @@ func (h *Handler) handleTrustedDevice(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodDelete:
 		var req struct {
-			IdentityID string `json:"identity_id"`
-			Token      string `json:"token"`
+			Token string `json:"token"`
 		}
 		if err := decodeJSONBody(w, r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if err := h.svc.RevokeTrustedDevice(r.Context(), req.IdentityID, req.Token); err != nil {
+		identityID, err := h.identityIDFromRequest(r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		if err := h.svc.RevokeTrustedDevice(r.Context(), identityID, req.Token); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -188,6 +243,47 @@ func (h *Handler) handleTrustedDevice(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+const (
+	identityIDHeader        = "X-User-ID"
+	identitySessionIDHeader = "X-User-Session-ID"
+	identityAALHeader       = "X-User-AAL"
+	identitySignatureHeader = "X-Aegion-Signature"
+	identityContextMaxAge   = time.Minute
+)
+
+var signedIdentityHeaders = []string{
+	identityIDHeader,
+	identitySessionIDHeader,
+	identityAALHeader,
+}
+
+func (h *Handler) identityIDFromRequest(r *http.Request) (string, error) {
+	if len(h.identitySigningSecret) == 0 {
+		return "", errors.New("identity context verifier is not configured")
+	}
+	if !platformcrypto.VerifyIdentityHeaders(
+		h.identitySigningSecret,
+		r.Header,
+		signedIdentityHeaders,
+		r.Header.Get(identitySignatureHeader),
+		identityContextMaxAge,
+		time.Now().UTC(),
+	) {
+		return "", errors.New("invalid signed identity context")
+	}
+	identityID, err := uuid.Parse(strings.TrimSpace(r.Header.Get(identityIDHeader)))
+	if err != nil || identityID == uuid.Nil {
+		return "", errors.New("invalid signed identity")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(r.Header.Get(identitySessionIDHeader))); err != nil {
+		return "", errors.New("invalid signed session")
+	}
+	if strings.TrimSpace(r.Header.Get(identityAALHeader)) == "" {
+		return "", errors.New("invalid signed authentication assurance level")
+	}
+	return identityID.String(), nil
 }
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst interface{}) error {

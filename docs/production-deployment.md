@@ -80,25 +80,26 @@ chmod 600 deploy/secrets/*.txt
 Edit `configs/aegion.production.yaml`:
 
 ```yaml
-# Production module configuration
+# Production module configuration. Deployment manifests—not core—start
+# external module workloads.
 module_versions:
-  # Mature modules (production-ready)
-  password: "1.0.0"        # Enable password auth
-  magic_link: "1.0.0"      # Enable passwordless
-  admin: "1.0.0"           # Enable admin panel
-  
-  # Optional mature modules
-  oauth2: "1.0.0"          # Uncomment if needed
-  policy: "1.0.0"          # Uncomment if needed
-  
-  # Experimental modules (DO NOT enable in production)
-  # mfa: "latest"          # Not production-ready
-  # passkeys: "latest"     # Not production-ready
-  # social: "latest"       # Not production-ready
-  # sso: "latest"          # Not production-ready
-  # introspection: "latest" # Not production-ready
-  # cli: "latest"          # Not production-ready
-  # proxy: "latest"        # Not production-ready
+  password: "1.0.0"
+  magic_link: "1.0.0"
+  policy: "1.0.0"
+  admin: "1.0.0"
+  analytics: "1.0.0"
+  oauth2: "1.0.0"
+  introspection: "1.0.0"
+  mfa: "1.0.0"
+  passkeys: "1.0.0"
+  social: "1.0.0"
+  sso: "1.0.0"
+  proxy: "1.0.0"
+
+# The CLI is an on-demand operator job; it is not in module_versions.
+# For every enabled external module, provide its image, HTTPS public URL,
+# database URL, mTLS CA/client certificate/key, and credential file under
+# modules.<id>. Core rejects an incomplete production module record.
 
 # Environment
 environment: production    # CRITICAL: Enables production validation
@@ -540,19 +541,22 @@ kubectl logs deployment/aegion-core -n aegion | grep "validation"
 # - Use production-grade secrets (not placeholders)
 ```
 
-#### 2. Modules Not Starting
+#### 2. External Module Is Unavailable
 
-**Cause**: Dependency validation failure or image pull issues  
-**Solution**: Check module dependencies and registry access
+**Cause**: The deployment has not started the module, registration failed, or
+the module readiness check is failing. Core does not create or restart external
+module workloads.
 
 ```bash
-# Check orchestrator logs
-kubectl logs deployment/aegion-core -n aegion | grep "module"
+# Check the module workload and its private readiness endpoint.
+kubectl get pods -n aegion
+kubectl logs deployment/aegion-analytics -n aegion
 
-# Verify images exist
-docker pull ghcr.io/aegion/module-password:1.0.0
+# Check core registry and gateway health.
+kubectl logs deployment/aegion-core -n aegion | grep "registry"
 
-# Check module dependencies in aegion.yaml
+# Confirm each enabled module has its image, mounted mTLS material, bootstrap
+# credential, private advertise address, and complete production config.
 ```
 
 #### 3. High Memory Usage

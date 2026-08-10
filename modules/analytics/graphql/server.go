@@ -2,7 +2,6 @@ package graphql
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -11,11 +10,15 @@ import (
 	"strings"
 	"time"
 
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+
 	"github.com/aegion/aegion/internal/xlog"
+
+	"github.com/aegion/aegion/modules/analytics/rbac"
 	"github.com/go-chi/chi/v5"
 )
 
-// Server handles GraphQL HTTP and WebSocket requests.
+// Server handles authenticated GraphQL HTTP requests.
 type Server struct {
 	logger              *xlog.Logger
 	resolver            *Resolver
@@ -188,8 +191,12 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "application/json") {
+		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-
+	w.Header().Set("Cache-Control", "no-store")
 	// Check rate limit
 	clientID := getClientID(r)
 	if !s.rateLimiter.AllowRequest(r.Context(), clientID) {
@@ -417,19 +424,39 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if _, err := validateGraphQLToken(token); err != nil {
+		claims, err := validateGraphQLTokenClaims(token)
+		if err != nil {
 			s.logger.WarnContext(r.Context(), "invalid graphql auth token", "error", err)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next(w, r)
+		manager := rbac.NewManager()
+		role := rbac.RoleGuest
+		if claims.Role != "" {
+			role = rbac.Role(claims.Role)
+		}
+		if err := manager.SetUserRole(claims.Subject, role); err != nil {
+			s.logger.WarnContext(r.Context(), "invalid graphql role claim", "error", err)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), "userID", claims.Subject)
+		ctx = context.WithValue(ctx, "token", token)
+		ctx = context.WithValue(ctx, "role", claims.Role)
+		next(w, r.WithContext(rbac.WithManager(ctx, manager)))
 	}
+}
+
+// HTTPHandler returns the authenticated handler for the configured GraphQL
+// endpoint. Composition roots should mount it at exactly one public path.
+func (s *Server) HTTPHandler() http.Handler {
+	return s.requireAuth(s.HandleQuery)
 }
 
 // RegisterRoutes registers GraphQL routes on the given HTTP router.
 func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 	if strings.TrimSpace(basePath) == "" {
-		basePath = "/graphql"
+		basePath = "/graphql/analytics"
 	}
 	playgroundPath := strings.TrimRight(basePath, "/") + "/playground"
 	introspectionPath := strings.TrimRight(basePath, "/") + "/introspection"
@@ -492,7 +519,7 @@ func (s *Server) RegisterRoutes(mux interface{}, basePath string) error {
 func getClientID(r *http.Request) string {
 	// Try to get from authorization header
 	if auth := r.Header.Get("Authorization"); auth != "" {
-		sum := sha256.Sum256([]byte(auth))
+		sum := platformcrypto.SHA256Digest([]byte(auth))
 		return "auth:" + hex.EncodeToString(sum[:8])
 	}
 	// Fall back to IP address

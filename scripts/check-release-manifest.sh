@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validate build/release-manifest.json schema and module coverage.
+# Validate the release-manifest template or a generated digest-pinned manifest.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,8 +30,7 @@ manifest_path = Path(sys.argv[1])
 release_tag = sys.argv[2].strip()
 strict_digests = sys.argv[3].strip().lower() == "true"
 
-errors = []
-
+errors: list[str] = []
 SEMVER_RE = re.compile(r"^(?:v)?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 HEX_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -49,6 +48,16 @@ except json.JSONDecodeError as exc:
 if not isinstance(manifest, dict):
     print("::error::Release manifest must be a JSON object")
     sys.exit(1)
+
+kind = manifest.get("kind", "release")
+if kind not in {"template", "release"}:
+    errors.append("kind must be either 'template' or 'release'")
+if strict_digests and kind != "release":
+    errors.append("strict digest validation requires a generated release manifest, not a template")
+
+schema_version = manifest.get("schema_version")
+if schema_version != 2:
+    errors.append("schema_version must be 2")
 
 version = manifest.get("version")
 if not isinstance(version, str) or not SEMVER_RE.match(version):
@@ -82,88 +91,64 @@ if "min_core_version" in compatibility and (
 ):
     errors.append("compatibility.min_core_version must be a semantic version string")
 
-
-def extract_module_versions(config_path: Path) -> set[str]:
-    modules: set[str] = set()
-    if not config_path.exists():
-        return modules
-
-    in_section = False
-    section_indent = 0
-    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        indent = len(raw_line) - len(raw_line.lstrip(" "))
-        if not in_section:
-            if stripped == "module_versions:":
-                in_section = True
-                section_indent = indent
-            continue
-
-        if indent <= section_indent:
-            in_section = False
-            if stripped == "module_versions:":
-                in_section = True
-                section_indent = indent
-            continue
-
-        key_match = re.match(r"^([A-Za-z0-9_]+)\s*:", stripped)
-        if key_match:
-            modules.add(key_match.group(1))
-
-    return modules
-
+# Images are a release concern, not a signal for core to start a module.  The
+# only source of an artifact is a Dockerfile that actually exists in this tree.
+artifacts = {"core": Path("build/Dockerfile.core")}
+for dockerfile in Path("modules").glob("*/Dockerfile"):
+    artifacts[dockerfile.parent.name] = dockerfile
 
 embedded_modules = {"password", "magic_link", "policy"}
-external_modules = {
-    "admin",
-    "analytics",
-    "cli",
-    "introspection",
-    "mfa",
-    "oauth2",
-    "passkeys",
-    "proxy",
-    "social",
-    "sso",
-}
-configured_modules = set()
-for config_file in (
-    Path("configs/aegion.yaml"),
-    Path("configs/aegion.example.yaml"),
-    Path("configs/aegion.test.yaml"),
-    Path("configs/aegion.staging.yaml"),
-    Path("configs/aegion.production.yaml"),
-):
-    configured_modules.update(extract_module_versions(config_file))
+known_modules = embedded_modules | set(artifacts)
 
-unknown_modules = configured_modules - embedded_modules - external_modules
-for module in sorted(unknown_modules):
-    errors.append(f"configured module {module!r} is not in the module plan")
+maturity_path = Path("build/release-maturity.json")
+try:
+    maturity = json.loads(maturity_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as exc:
+    errors.append(f"cannot read {maturity_path}: {exc}")
+    maturity = {}
 
-required_modules = {"core"} | (configured_modules & external_modules)
+maturity_modules = maturity.get("modules", {}) if isinstance(maturity, dict) else {}
+if not isinstance(maturity_modules, dict):
+    errors.append("release-maturity.modules must be an object")
+    maturity_modules = {}
+
+# Every GA workload with a build artifact must be represented.  Non-GA images
+# may be present for a release candidate, but no image may claim an embedded or
+# absent module artifact.
+required_modules = {"core"}
+for module, metadata in maturity_modules.items():
+    if module == "core" or not isinstance(metadata, dict):
+        continue
+    deployment = metadata.get("deployment")
+    if metadata.get("status") == "GA" and deployment not in {"embedded", "embedded-default"}:
+        if module not in artifacts:
+            errors.append(f"GA module {module!r} has no Dockerfile artifact")
+        else:
+            required_modules.add(module)
+
 for module in sorted(images):
     if module in embedded_modules:
-        errors.append(f"images.{module} must not exist because {module} is embedded")
-    elif module not in required_modules:
-        errors.append(f"images.{module} is not declared by the module plan")
+        errors.append(f"images.{module} must not exist because {module} is embedded in core")
+    elif module not in known_modules:
+        errors.append(f"images.{module} is not a known release artifact")
+    elif module not in artifacts:
+        errors.append(f"images.{module} has no Dockerfile artifact")
+
+for module, entry in sorted(images.items()):
+    if not isinstance(entry, dict):
+        errors.append(f"images.{module} must be an object")
 
 normalized_version = version[1:] if isinstance(version, str) and version.startswith("v") else version
-
 for module in sorted(required_modules):
     entry = images.get(module)
     if not isinstance(entry, dict):
-        errors.append(f"images.{module} is required and must be an object")
+        errors.append(f"images.{module} is required for a GA release and must be an object")
         continue
 
     tag = entry.get("tag")
     digest = entry.get("digest")
     if not isinstance(tag, str) or not tag:
         errors.append(f"images.{module}.tag must be a non-empty string")
-    if not isinstance(digest, str) or not digest:
-        errors.append(f"images.{module}.digest must be a non-empty string")
 
     expected_module_segment = "core" if module == "core" else module.replace("_", "-")
     expected_repo = f"aegion/aegion-{expected_module_segment}"
@@ -180,18 +165,39 @@ for module in sorted(required_modules):
                 f"images.{module}.tag version '{tag_version}' must match manifest version '{normalized_version}'"
             )
 
-    if isinstance(digest, str):
-        if strict_digests:
-            if not HEX_DIGEST_RE.match(digest):
-                errors.append(
-                    f"images.{module}.digest must be a sha256 hex digest in strict mode"
-                )
-            elif digest == "sha256:" + ("0" * 64):
-                errors.append(
-                    f"images.{module}.digest cannot be all zeroes in strict mode"
-                )
-        elif not digest.startswith("sha256:"):
-            errors.append(f"images.{module}.digest must start with 'sha256:'")
+    if kind == "template":
+        if digest is not None:
+            errors.append(f"images.{module}.digest must be null in a release manifest template")
+    elif not isinstance(digest, str) or not HEX_DIGEST_RE.match(digest):
+        errors.append(f"images.{module}.digest must be a sha256 hex digest in a generated release manifest")
+    elif digest == "sha256:" + ("0" * 64):
+        errors.append(f"images.{module}.digest cannot be all zeroes")
+
+# Validate optional candidate images using the same repository/tag/digest
+# contract. This keeps the template useful without making every configured
+# development module a mandatory production artifact.
+for module, entry in sorted(images.items()):
+    if module in required_modules or not isinstance(entry, dict):
+        continue
+    tag = entry.get("tag")
+    digest = entry.get("digest")
+    expected_module_segment = "core" if module == "core" else module.replace("_", "-")
+    expected_repo = f"aegion/aegion-{expected_module_segment}"
+    if not isinstance(tag, str) or not tag.startswith(f"{expected_repo}:"):
+        errors.append(f"images.{module}.tag must start with '{expected_repo}:'")
+    elif isinstance(normalized_version, str):
+        tag_version = tag.rsplit(":", 1)[-1]
+        if tag_version not in {normalized_version, f"v{normalized_version}"}:
+            errors.append(
+                f"images.{module}.tag version '{tag_version}' must match manifest version '{normalized_version}'"
+            )
+    if kind == "template":
+        if digest is not None:
+            errors.append(f"images.{module}.digest must be null in a release manifest template")
+    elif not isinstance(digest, str) or not HEX_DIGEST_RE.match(digest):
+        errors.append(f"images.{module}.digest must be a sha256 hex digest in a generated release manifest")
+    elif digest == "sha256:" + ("0" * 64):
+        errors.append(f"images.{module}.digest cannot be all zeroes")
 
 if release_tag:
     cleaned_tag = release_tag.removeprefix("refs/tags/")
@@ -209,6 +215,6 @@ if errors:
 
 mode = "strict" if strict_digests else "standard"
 print(
-    f"Release manifest validation passed ({mode} mode) with {len(required_modules)} required modules."
+    f"Release manifest validation passed ({mode} mode) with {len(images)} declared images and {len(required_modules)} GA artifacts."
 )
 PY

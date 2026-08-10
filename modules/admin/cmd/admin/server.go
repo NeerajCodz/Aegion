@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -42,21 +40,6 @@ type Server struct {
 
 	adminPath string
 	spaServer *SPAFileServer
-}
-
-type RegistrationRequest struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Version   string            `json:"version"`
-	Endpoints []Endpoint        `json:"endpoints"`
-	HealthURL string            `json:"health_url"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-}
-
-type Endpoint struct {
-	Type string `json:"type"`
-	URL  string `json:"url"`
-	Path string `json:"path"`
 }
 
 type dashboardObservabilityEndpoint struct {
@@ -136,6 +119,17 @@ type dashboardObservabilityResponse struct {
 
 func (s *Server) setupRouter() chi.Router {
 	s.ensureRoutingAssets()
+	return s.setupRouterAt("/api/admin")
+}
+
+// setupPublicRouter binds the admin module to the core-owned public prefix.
+// buildRuntime fixes the configured SPA and SCIM paths before this is called.
+func (s *Server) setupPublicRouter() chi.Router {
+	s.ensureRoutingAssets()
+	return s.setupRouterAt(adminPublicRoutePrefix + "/api/admin")
+}
+
+func (s *Server) setupRouterAt(apiPath string) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -152,7 +146,7 @@ func (s *Server) setupRouter() chi.Router {
 	r.Get("/health/ready", s.handleReady)
 
 	// Admin API routes
-	r.Route("/api/admin", func(r chi.Router) {
+	r.Route(apiPath, func(r chi.Router) {
 		r.With(s.Handler.RequireAdmin, handler.RequirePermission(s.Handler, service.PermConfigRead)).
 			Get("/dashboard/config", s.handleDashboardConfig)
 		r.Group(func(r chi.Router) {
@@ -187,7 +181,7 @@ func (s *Server) setupRouter() chi.Router {
 		})
 	}
 
-	// Serve embedded SPA
+	// Serve the embedded SPA and its assets under the catalog prefix.
 	r.Mount(s.adminPath, s.spaHandler())
 
 	// Fallback route for SPA routing
@@ -838,76 +832,6 @@ func (s *Server) spaFallback(w http.ResponseWriter, r *http.Request) {
 
 	// Regular 404 for non-admin paths
 	http.NotFound(w, r)
-}
-
-func (s *Server) registerWithCore(ctx context.Context) error {
-	s.ensureRoutingAssets()
-	if s.Config.Core.ServiceURL == "" {
-		xlog.Default().WarnContext(ctx, "Core service URL not configured, skipping registration")
-		return nil
-	}
-
-	serverAddr := fmt.Sprintf("%s:%d", s.Config.Server.Address, s.Config.Server.Port)
-	if s.Config.Server.Address == "0.0.0.0" {
-		// Use hostname instead of 0.0.0.0 for registration
-		serverAddr = fmt.Sprintf("localhost:%d", s.Config.Server.Port)
-	}
-
-	// Registration payload
-	registration := RegistrationRequest{
-		ID:      "admin",
-		Name:    "Admin Module",
-		Version: "1.0.0",
-		Endpoints: []Endpoint{
-			{
-				Type: "http",
-				URL:  fmt.Sprintf("http://%s", serverAddr),
-				Path: "/api/admin",
-			},
-		},
-		HealthURL: fmt.Sprintf("http://%s/health", serverAddr),
-		Metadata: map[string]string{
-			"spa_path":    s.adminPath,
-			"description": "Aegion Administration Interface",
-		},
-	}
-
-	body, err := json.Marshal(registration)
-	if err != nil {
-		return fmt.Errorf("failed to marshal registration: %w", err)
-	}
-
-	// Register with core service
-	registrationURL := fmt.Sprintf("%s/internal/registry/modules", s.Config.Core.ServiceURL)
-	req, err := http.NewRequestWithContext(ctx, "POST", registrationURL, bytes.NewBuffer(body))
-	if err != nil {
-		return fmt.Errorf("failed to create registration request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if s.Config.Core.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+s.Config.Core.APIKey)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to register with core: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("registration failed with status %d", resp.StatusCode)
-	}
-
-	xlog.Default().InfoContext(ctx, "Successfully registered with core service",
-		"core_url", s.Config.Core.ServiceURL,
-		"module_id", registration.ID,
-	)
-
-	return nil
 }
 
 // SPAFileServer handles serving static files with fallback to index.html

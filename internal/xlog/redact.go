@@ -1,10 +1,11 @@
 package xlog
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 )
 
 var defaultDenyPatterns = []string{
@@ -62,7 +63,7 @@ func (r *Redactor) Apply(key string, value any) any {
 	}
 	for _, pattern := range r.hash {
 		if normalized == pattern {
-			sum := sha256.Sum256([]byte(fmt.Sprint(value)))
+			sum := platformcrypto.SHA256Digest([]byte(fmt.Sprint(value)))
 			return hex.EncodeToString(sum[:])
 		}
 	}

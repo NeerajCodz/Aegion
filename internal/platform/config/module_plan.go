@@ -109,12 +109,6 @@ var moduleCatalog = map[string]moduleDefinition{
 			{Method: "*", Prefix: "/graphql/analytics"},
 		},
 	},
-	"cli": {
-		id:                  "cli",
-		mode:                ModuleModeExternal,
-		dependencies:        []string{"core"},
-		internalPermissions: []string{"admin:read", "admin:manage"},
-	},
 	"introspection": {
 		id:           "introspection",
 		mode:         ModuleModeExternal,

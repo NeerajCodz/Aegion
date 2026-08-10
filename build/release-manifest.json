@@ -1,50 +1,52 @@
 {
+  "schema_version": 2,
+  "kind": "template",
   "version": "1.0.0",
-  "release_date": "2026-01-01",
+  "release_date": "2026-08-10",
   "images": {
     "core": {
       "tag": "aegion/aegion-core:1.0.0",
-      "digest": "sha256:placeholder"
-    },
-    "analytics": {
-      "tag": "aegion/aegion-analytics:1.0.0",
-      "digest": "sha256:placeholder"
-    },
-    "mfa": {
-      "tag": "aegion/aegion-mfa:1.0.0",
-      "digest": "sha256:placeholder"
-    },
-    "passkeys": {
-      "tag": "aegion/aegion-passkeys:1.0.0",
-      "digest": "sha256:placeholder"
-    },
-    "social": {
-      "tag": "aegion/aegion-social:1.0.0",
-      "digest": "sha256:placeholder"
-    },
-    "sso": {
-      "tag": "aegion/aegion-sso:1.0.0",
-      "digest": "sha256:placeholder"
-    },
-    "oauth2": {
-      "tag": "aegion/aegion-oauth2:1.0.0",
-      "digest": "sha256:placeholder"
-    },
-    "introspection": {
-      "tag": "aegion/aegion-introspection:1.0.0",
-      "digest": "sha256:placeholder"
+      "digest": null
     },
     "admin": {
       "tag": "aegion/aegion-admin:1.0.0",
-      "digest": "sha256:placeholder"
+      "digest": null
     },
-    "proxy": {
-      "tag": "aegion/aegion-proxy:1.0.0",
-      "digest": "sha256:placeholder"
+    "analytics": {
+      "tag": "aegion/aegion-analytics:1.0.0",
+      "digest": null
     },
     "cli": {
       "tag": "aegion/aegion-cli:1.0.0",
-      "digest": "sha256:placeholder"
+      "digest": null
+    },
+    "introspection": {
+      "tag": "aegion/aegion-introspection:1.0.0",
+      "digest": null
+    },
+    "mfa": {
+      "tag": "aegion/aegion-mfa:1.0.0",
+      "digest": null
+    },
+    "oauth2": {
+      "tag": "aegion/aegion-oauth2:1.0.0",
+      "digest": null
+    },
+    "passkeys": {
+      "tag": "aegion/aegion-passkeys:1.0.0",
+      "digest": null
+    },
+    "proxy": {
+      "tag": "aegion/aegion-proxy:1.0.0",
+      "digest": null
+    },
+    "social": {
+      "tag": "aegion/aegion-social:1.0.0",
+      "digest": null
+    },
+    "sso": {
+      "tag": "aegion/aegion-sso:1.0.0",
+      "digest": null
     }
   },
   "compatibility": {

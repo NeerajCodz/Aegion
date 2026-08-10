@@ -21,7 +21,7 @@ TESTS_SKIPPED=0
 # Cleanup function
 cleanup() {
     echo -e "${BLUE}Cleaning up containers and networks...${NC}"
-    docker compose -f deploy/docker-compose.yml down -v --remove-orphans 2>/dev/null || true
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml down -v --remove-orphans 2>/dev/null || true
 }
 
 trap cleanup EXIT
@@ -289,7 +289,7 @@ main() {
     
     # Build all Docker images first
     log "Building Docker images..."
-    if ! docker compose -f deploy/docker-compose.yml build; then
+    if ! docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml build aegion migration; then
         error "Failed to build Docker images"
         exit 1
     fi
@@ -297,7 +297,7 @@ main() {
     
     # Start infrastructure (postgres, redis)
     log "Starting infrastructure services..."
-    docker compose -f deploy/docker-compose.yml up -d postgres redis
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d postgres redis
     
     # Wait for infrastructure to be healthy
     test_container_health "aegion-postgres-1" || exit 1
@@ -307,45 +307,15 @@ main() {
     log ""
     log "TEST 1: Core Service"
     log "===================="
-    docker compose -f deploy/docker-compose.yml up -d aegion
+    docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d aegion
     test_container_health "aegion-aegion-1" || true
     test_http "http://localhost:8080/health" 200 || true
     test_http "http://localhost:8080/.well-known/aegion/meta" 200 || true
     test_nonroot_user "aegion-aegion-1" || true
     
-    # Test 2: Password module
-    log ""
-    log "TEST 2: Password Module"
-    log "======================="
-    docker compose -f deploy/docker-compose.yml up -d module-password
-    test_container_health "aegion-module-password-1" || true
-    test_http "http://localhost:9001/health" 200 || true
-    test_nonroot_user "aegion-module-password-1" || true
-    
-    # Test 3: Magic Link module
-    log ""
-    log "TEST 3: Magic Link Module"
-    log "========================="
-    docker compose -f deploy/docker-compose.yml up -d module-magic-link
-    test_container_health "aegion-module-magic-link-1" || true
-    test_http "http://localhost:9002/health" 200 || true
-    test_nonroot_user "aegion-module-magic-link-1" || true
-    
-    # Test 4: Admin module
-    log ""
-    log "TEST 4: Admin Module"
-    log "===================="
-    docker compose -f deploy/docker-compose.yml up -d module-admin
-    test_container_health "aegion-module-admin-1" || true
-    test_http "http://localhost:9003/health" 200 || true
-    test_nonroot_user "aegion-module-admin-1" || true
-    
-    # Test 5: Inter-module communication
-    log ""
-    log "TEST 5: Inter-Module Communication"
-    log "==================================="
-    test_module_isolation "aegion-module-password-1" "aegion-module-magic-link-1" || true
-    
+    # External modules are independently scheduled private workloads. This
+    # legacy smoke script deliberately does not start or probe embedded-module
+    # containers or unpublished module ports.
     # Test 6: Security hardening
     log ""
     log "TEST 6: Security Hardening"
@@ -366,7 +336,7 @@ main() {
     log ""
     log "Container Logs (last 20 lines each):"
     log "====================================="
-    for container in aegion-aegion-1 aegion-module-password-1 aegion-module-magic-link-1 aegion-module-admin-1; do
+    for container in aegion-aegion-1; do
         if docker ps --format '{{.Names}}' | grep -q "$container"; then
             log "--- $container ---"
             docker logs --tail 20 "$container" 2>&1 || true

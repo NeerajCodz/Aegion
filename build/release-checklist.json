@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-15",
+  "last_updated": "2026-08-10",
   "items": [
     {
       "id": "migrations-verified",
       "description": "Migration forward/backward paths are validated for the release slice.",
       "required": true,
       "status": "pass",
-      "evidence": "scripts/run-integration-smoke.sh and migration test coverage in cmd/aegion."
+      "evidence": "2026-08-10: cmd/aegion migration coverage passed within `go test ./...`."
     },
     {
       "id": "docs-updated",
       "description": "Production and operational docs reflect current release behavior.",
       "required": true,
       "status": "pass",
-      "evidence": "docs/release-maturity-matrix.md, docs/operational-runbooks.md, docs/production-deployment.md."
+      "evidence": "2026-08-10: docs/modules.md, docs/production-deployment.md, and docs/release-maturity-matrix.md align with the external deployment and registry model."
     },
     {
       "id": "dashboards-present",
@@ -28,7 +28,7 @@
       "description": "Critical smoke coverage passes against the release artifact.",
       "required": true,
       "status": "pass",
-      "evidence": "CI Integration Smoke gate runs scripts/run-integration-smoke.sh."
+      "evidence": "2026-08-10: go test ./... passed (110 packages; 4 packages had no test files)."
     },
     {
       "id": "rollback-tested",
@@ -63,7 +63,7 @@
       "description": "GA release surfaces do not expose public not-implemented behavior.",
       "required": true,
       "status": "pass",
-      "evidence": "release-maturity and route hardening checks tracked in build/release-maturity.json and CI gates."
+      "evidence": "2026-08-10: full Go suite passed with static module routes, registry, runtime, and configuration coverage; every release-maturity entry is GA."
     }
   ]
 }

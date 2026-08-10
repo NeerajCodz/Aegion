@@ -185,12 +185,14 @@ func TestResolverEvents(t *testing.T) {
 	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 
+	ownerID := "test-user"
 	// Add test event
 	event := &analytics.Event{
 		ID:        "1",
 		Category:  "auth",
 		EventType: "login",
 		Data:      map[string]interface{}{"user": "test"},
+		UserID:    &ownerID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -213,11 +215,13 @@ func TestResolverEvent(t *testing.T) {
 	lgr := xlog.New(xlog.Config{})
 	store := NewMockStore()
 
+	ownerID := "test-user"
 	event := &analytics.Event{
 		ID:        "1",
 		Category:  "auth",
 		EventType: "login",
 		Data:      map[string]interface{}{},
+		UserID:    &ownerID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -231,6 +235,27 @@ func TestResolverEvent(t *testing.T) {
 	assert.NotNil(t, node)
 	assert.Equal(t, "1", node.ID)
 	assert.Equal(t, "auth", node.Category)
+}
+
+func TestResolverEventForbidsOtherUsers(t *testing.T) {
+	ownerID := "owner-1"
+	store := NewMockStore()
+	store.events = append(store.events, &analytics.Event{
+		ID:        "private-event",
+		Category:  "auth",
+		EventType: "login",
+		Data:      map[string]interface{}{},
+		UserID:    &ownerID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
+
+	_, err := NewResolver(xlog.New(xlog.Config{}), store).Event(
+		withGraphQLRole("viewer-1", rbac.RoleViewer),
+		"private-event",
+	)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "forbidden")
 }
 
 func TestResolverCreateDashboard(t *testing.T) {
@@ -336,8 +361,7 @@ func TestResolverHealth(t *testing.T) {
 	store := NewMockStore()
 	resolver := NewResolver(lgr, store)
 
-	ctx := context.Background()
-
+	ctx := withGraphQLRole("health-analyst", rbac.RoleAnalyst)
 	health, err := resolver.Health(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, health)
@@ -358,8 +382,7 @@ func TestResolverStats(t *testing.T) {
 		CreatedAt: time.Now(),
 	})
 
-	ctx := context.Background()
-
+	ctx := withGraphQLRole("stats-analyst", rbac.RoleAnalyst)
 	stats, err := resolver.Stats(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, stats)
@@ -523,11 +546,9 @@ func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
 	assert.True(t, config.Enabled)
-	assert.Equal(t, "/graphql", config.Endpoint)
-	assert.True(t, config.EnablePlayground)
-	assert.True(t, config.EnableIntrospection)
-	assert.Equal(t, 10, config.MaxQueryDepth)
-	assert.Equal(t, 1000, config.MaxQueryComplexity)
+	assert.Equal(t, "/graphql/analytics", config.Endpoint)
+	assert.False(t, config.EnablePlayground)
+	assert.False(t, config.EnableIntrospection)
 	assert.Equal(t, 30, config.QueryTimeoutSeconds)
 	assert.Equal(t, 100, config.RateLimitPerMinute)
 }

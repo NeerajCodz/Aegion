@@ -38,9 +38,9 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Enabled:             true,
-		Endpoint:            "/graphql",
-		EnableIntrospection: true,
-		EnablePlayground:    true,
+		Endpoint:            "/graphql/analytics",
+		EnableIntrospection: false,
+		EnablePlayground:    false,
 		MaxQueryDepth:       10,
 		MaxQueryComplexity:  1000,
 		QueryTimeoutSeconds: 30,
@@ -102,8 +102,13 @@ type InitOptions struct {
 	QueryExecutor      QueryExecutor
 }
 
-// Initialize initializes the GraphQL module.
 func Initialize(ctx context.Context, opts InitOptions) (*Module, error) {
+	if opts.Config == nil {
+		return nil, fmt.Errorf("graphql config is required")
+	}
+	if opts.Store == nil {
+		return nil, fmt.Errorf("graphql store is required")
+	}
 	// Validate config
 	if err := opts.Config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid graphql config: %w", err)
@@ -145,12 +150,15 @@ func Initialize(ctx context.Context, opts InitOptions) (*Module, error) {
 		requestLogger = NewSimpleRequestLogger(logger)
 	}
 
-	// Set up query executor if not provided
+	// Set up the production query executor if not provided.
 	queryExecutor := opts.QueryExecutor
 	if queryExecutor == nil {
-		queryExecutor = NewSimpleQueryExecutor(resolver, logger)
+		var err error
+		queryExecutor, err = NewResolverExecutor(resolver)
+		if err != nil {
+			return nil, fmt.Errorf("initialize GraphQL executor: %w", err)
+		}
 	}
-
 	// Create server
 	server := NewServer(
 		logger,

@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
+	"github.com/aegion/aegion/internal/platform/moduleserver"
 	"github.com/aegion/aegion/modules/oauth2/handler"
 	"github.com/aegion/aegion/modules/oauth2/service/oidc"
 	"github.com/aegion/aegion/modules/oauth2/store"
@@ -42,6 +45,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 	origStop := stopSignalsHook
 	origListen := listenAndServeHook
 	origShutdown := shutdownServerHook
+	origRunModule := runModuleServerHook
 	t.Cleanup(func() {
 		os.Args = origArgs
 		flag.CommandLine = origFlagSet
@@ -55,7 +59,14 @@ func TestMainFatalHookBranches(t *testing.T) {
 		stopSignalsHook = origStop
 		listenAndServeHook = origListen
 		shutdownServerHook = origShutdown
+		runModuleServerHook = origRunModule
 	})
+	secretFile := filepath.Join(t.TempDir(), "identity-signing-secret")
+	if err := os.WriteFile(secretFile, []byte("01234567890123456789012345678901"), 0o600); err != nil {
+		t.Fatalf("write identity signing secret: %v", err)
+	}
+	t.Setenv("AEGION_MODULE_IDENTITY_SIGNING_SECRET_FILE", secretFile)
+	t.Setenv("AEGION_ENV", "development")
 
 	expectFatal := func(setup func(), want string) {
 		t.Helper()
@@ -96,6 +107,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 		loadConfigHook = func(string) (*Config, error) {
 			cfg := &Config{}
 			applyDefaults(cfg)
+			cfg.Database.URL = "postgres://demo:demo@127.0.0.1:1/demo?sslmode=disable"
 			return cfg, nil
 		}
 		connectDBHook = func(context.Context, *Config) (*pgxpool.Pool, error) { return nil, errors.New("db failed") }
@@ -117,6 +129,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 		loadConfigHook = func(string) (*Config, error) {
 			cfg := &Config{}
 			applyDefaults(cfg)
+			cfg.Database.URL = "postgres://demo:demo@127.0.0.1:1/demo?sslmode=disable"
 			return cfg, nil
 		}
 		connectDBHook = func(context.Context, *Config) (*pgxpool.Pool, error) { return pool, nil }
@@ -133,6 +146,7 @@ func TestMainFatalHookBranches(t *testing.T) {
 			}()
 		}
 		stopSignalsHook = func(c chan<- os.Signal) {}
+		runModuleServerHook = func(moduleserver.Config) error { return errors.New("runtime failed") }
 
 		os.Args = []string{"oauth2-server"}
 		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -280,7 +294,7 @@ func TestStaticJWKSProviderAndBuildHandlerBranches(t *testing.T) {
 		newOAuth2SigningKeyPairHook = func() (*platformjwt.KeyPair, error) { return nil, errors.New("signing init failed") }
 		defer func() {
 			r := recover()
-			if r == nil || !strings.Contains(r.(string), "initialize oauth2 signing keys") {
+			if r == nil || !strings.Contains(fmt.Sprint(r), "initialize oauth2 signing keys") {
 				t.Fatalf("expected signing key panic, got %v", r)
 			}
 		}()
@@ -303,7 +317,7 @@ func TestStaticJWKSProviderAndBuildHandlerBranches(t *testing.T) {
 		}
 		defer func() {
 			r := recover()
-			if r == nil || !strings.Contains(r.(string), "initialize oauth2 jwks provider") {
+			if r == nil || !strings.Contains(fmt.Sprint(r), "initialize oauth2 jwks provider") {
 				t.Fatalf("expected jwks panic, got %v", r)
 			}
 		}()

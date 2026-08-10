@@ -1,0 +1,90 @@
+{{- if .Values.cli.enabled }}
+{{- if not .Values.cli.command }}
+{{- fail "cli.command is required when the operator CLI Job is enabled" }}
+{{- end }}
+{{- $fullName := include "aegion.fullname" . -}}
+{{- $cli := .Values.cli -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullName }}-cli
+  labels:
+    {{- include "aegion.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cli-operator
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "aegion.name" . }}
+        app.kubernetes.io/component: cli-operator
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: stage-operator-secrets
+          image: {{ required "cli.secretCopyImage is required" $cli.secretCopyImage }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              install -d -m 0700 -o 65532 -g 65532 /output
+              install -m 0400 -o 65532 -g 65532 /input/api-key/api-key /output/api-key
+              install -m 0400 -o 65532 -g 65532 /input/client/tls.crt /output/client.crt
+              install -m 0400 -o 65532 -g 65532 /input/client/tls.key /output/client.key
+              install -m 0444 -o 65532 -g 65532 /input/ca/ca.crt /output/ca.crt
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: api-key-input, mountPath: /input/api-key, readOnly: true}
+            - {name: client-tls-input, mountPath: /input/client, readOnly: true}
+            - {name: control-plane-ca-input, mountPath: /input/ca, readOnly: true}
+            - {name: staged-secrets, mountPath: /output}
+      containers:
+        - name: cli
+          image: {{ required "cli.image.repository is required" $cli.image.repository }}:{{ required "cli.image.tag is required" $cli.image.tag }}@{{ required "cli.image.digest is required" $cli.image.digest }}
+          imagePullPolicy: IfNotPresent
+          args:
+            {{- toYaml $cli.command | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml $cli.resources | nindent 12 }}
+          env:
+            - {name: AEGION_CLI_API_URL, value: {{ printf "https://%s-core:%v/aegion" $fullName $.Values.core.service.port | quote }}}
+            - {name: AEGION_CLI_CA_CERT_FILE, value: /var/run/aegion/cli/ca.crt}
+            - {name: AEGION_CLI_CLIENT_CERT_FILE, value: /var/run/aegion/cli/client.crt}
+            - {name: AEGION_CLI_CLIENT_KEY_FILE, value: /var/run/aegion/cli/client.key}
+            - {name: AEGION_CLI_API_KEY_FILE, value: /var/run/aegion/cli/api-key}
+          volumeMounts:
+            - {name: staged-secrets, mountPath: /var/run/aegion/cli, readOnly: true}
+      volumes:
+        - name: api-key-input
+          secret:
+            secretName: {{ required "cli.apiKeySecret is required" $cli.apiKeySecret }}
+            items: [{key: api-key, path: api-key}]
+        - name: client-tls-input
+          secret:
+            secretName: {{ required "cli.clientTLSSecret is required" $cli.clientTLSSecret }}
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+        - name: control-plane-ca-input
+          secret:
+            secretName: {{ required "core.secrets.controlPlaneCA is required" .Values.core.secrets.controlPlaneCA }}
+            items: [{key: ca.crt, path: ca.crt}]
+        - name: staged-secrets
+          emptyDir: {medium: Memory}
+{{- end }}
