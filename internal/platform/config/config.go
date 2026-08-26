@@ -24,7 +24,8 @@ type Config struct {
 	Database       DatabaseConfig                    `yaml:"database"`
 	Cache          CacheConfig                       `yaml:"cache"`
 	Secrets        SecretsConfig                     `yaml:"secrets"`
-	Log            LogConfig                         `yaml:"log"`
+	Log            LogConfig                         `yaml:"log"` // Deprecated: use Loza.
+	Loza           LozaConfig                        `yaml:"loza"`
 	Operator       OperatorConfig                    `yaml:"operator"`
 	Courier        CourierConfig                     `yaml:"courier"`
 	Sessions       SessionsConfig                    `yaml:"sessions"`
@@ -120,6 +121,24 @@ type LogConfig struct {
 	CloudRegion      string   `yaml:"cloud_region"`
 	IncludeRequestID bool     `yaml:"include_request_id"`
 	RedactFields     []string `yaml:"redact_fields"`
+}
+
+// LozaConfig configures the application-to-collector event pipeline.
+// Credentials are intentionally sourced only from environment variables or files.
+type LozaConfig struct {
+	CollectorURL      string   `yaml:"collector_url"`
+	CollectorName     string   `yaml:"collector_name"`
+	Environment       string   `yaml:"environment"`
+	Insecure          bool     `yaml:"insecure"`
+	BatchSize         int      `yaml:"batch_size"`
+	FlushInterval     Duration `yaml:"flush_interval"`
+	MaxRetries        int      `yaml:"max_retries"`
+	MaxBackoff        Duration `yaml:"max_backoff"`
+	Timeout           Duration `yaml:"timeout"`
+	ConnectionTimeout Duration `yaml:"connection_timeout"`
+	EnableCompression bool     `yaml:"enable_compression"`
+	QueueSize         int      `yaml:"queue_size"`
+	RedactFields      []string `yaml:"redact_fields"`
 }
 
 // OperatorConfig configures the bootstrap operator.
@@ -476,6 +495,36 @@ func applyDefaults(cfg *Config) {
 	if cfg.Database.MaxOpenConns == 0 {
 		cfg.Database.MaxOpenConns = 25
 	}
+	if cfg.Loza.CollectorName == "" {
+		cfg.Loza.CollectorName = "aegion"
+	}
+	if cfg.Loza.Environment == "" {
+		cfg.Loza.Environment = os.Getenv("AEGION_ENV")
+		if cfg.Loza.Environment == "" {
+			cfg.Loza.Environment = "development"
+		}
+	}
+	if cfg.Loza.BatchSize == 0 {
+		cfg.Loza.BatchSize = 100
+	}
+	if cfg.Loza.FlushInterval == 0 {
+		cfg.Loza.FlushInterval = Duration(5 * time.Second)
+	}
+	if cfg.Loza.MaxRetries == 0 {
+		cfg.Loza.MaxRetries = 3
+	}
+	if cfg.Loza.MaxBackoff == 0 {
+		cfg.Loza.MaxBackoff = Duration(30 * time.Second)
+	}
+	if cfg.Loza.Timeout == 0 {
+		cfg.Loza.Timeout = Duration(10 * time.Second)
+	}
+	if cfg.Loza.ConnectionTimeout == 0 {
+		cfg.Loza.ConnectionTimeout = Duration(5 * time.Second)
+	}
+	if cfg.Loza.QueueSize == 0 {
+		cfg.Loza.QueueSize = 8192
+	}
 	if cfg.Database.MaxIdleConns == 0 {
 		cfg.Database.MaxIdleConns = 10
 	}
@@ -648,6 +697,17 @@ func applyEnvOverrides(cfg *Config) error {
 		return err
 	} else if ok {
 		cfg.Cache.URL = v
+	}
+	if v := os.Getenv("AEGION_LOZA_COLLECTOR_URL"); v != "" {
+		cfg.Loza.CollectorURL = v
+	}
+	if v := os.Getenv("AEGION_LOZA_COLLECTOR_NAME"); v != "" {
+		cfg.Loza.CollectorName = v
+	}
+	if v := os.Getenv("AEGION_LOZA_INSECURE"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.Loza.Insecure = parsed
+		}
 	}
 	if v := os.Getenv("AEGION_LOG_LEVEL"); v != "" {
 		cfg.Log.Level = v
