@@ -122,10 +122,10 @@ type runtimeProxySettingsPatch struct {
 func SetupRoutes(s *Server) chi.Router {
 	r := chi.NewRouter()
 
-	// Global middleware stack
+	// Global middleware stack. requestLogger owns the single canonical
+	// request event and panic recovery boundary.
 	r.Use(middleware.RequestID)
 	r.Use(s.requestLogger)
-	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(s.cfg.Server.RequestTimeout.Duration()))
 
 	// CORS

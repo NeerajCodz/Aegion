@@ -5,15 +5,20 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
+	lozasdk "github.com/astraive/loza/sdks/go"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 
 	"github.com/aegion/aegion/core/authtoken"
 	"github.com/aegion/aegion/core/courier"
@@ -25,6 +30,7 @@ import (
 	"github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	"github.com/aegion/aegion/internal/platform/database"
+	"github.com/aegion/aegion/internal/platform/observability"
 	policypb "github.com/aegion/aegion/internal/proto/policy/v1"
 	"github.com/aegion/aegion/internal/xlog"
 	magiclinkservice "github.com/aegion/aegion/modules/magic_link/service"
@@ -728,22 +734,39 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		ctx := r.Context()
+		ctx := aegionloza.Start(r.Context(), lozasdk.Default(), lozasdk.Params{
+			Event:     "aegion.http_request",
+			Kind:      "request",
+			Method:    r.Method,
+			Path:      r.URL.Path,
+			RequestID: r.Header.Get("X-Request-ID"),
+			StartedAt: start,
+		})
 
 		defer func() {
-			// Use wide events pattern - one context-rich log per request
-			s.log.LogWideEvent(ctx, "HTTP request", map[string]any{
-				"http.method":      r.Method,
-				"http.path":        r.URL.Path,
-				"http.status":      ww.Status(),
-				"latency_ms":       time.Since(start).Milliseconds(),
-				"http.user_agent":  r.UserAgent(),
-				"http.remote_addr": r.RemoteAddr,
-				"outcome":          map[bool]string{true: "success", false: "error"}[ww.Status() < 400],
-			})
+			if recovered := recover(); recovered != nil {
+				http.Error(ww, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				_ = lozasdk.Default().FinishError(ctx, fmt.Errorf("panic recovered: %v", recovered),
+					lozasdk.String("error.type", "panic"),
+					lozasdk.String("error.stack", string(debug.Stack())),
+				)
+				_ = lozasdk.Default().Emit(ctx)
+				return
+			}
+
+			status := ww.Status()
+			route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
+			_ = lozasdk.Default().Set(ctx,
+				lozasdk.String("http.route", route),
+				lozasdk.String("http.user_agent", r.UserAgent()),
+				lozasdk.Int("http.status_code", status),
+				lozasdk.Int64("http.response.body_size", int64(ww.BytesWritten())),
+			)
+			_ = lozasdk.Default().Finish(ctx, aegionloza.OutcomeForHTTP(status, ctx.Err()))
+			_ = lozasdk.Default().Emit(ctx)
 		}()
 
-		next.ServeHTTP(ww, r)
+		next.ServeHTTP(ww, r.WithContext(ctx))
 	})
 }
 
