@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	platformconfig "github.com/aegion/aegion/internal/platform/config"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/platform/moduleserver"
 	"github.com/aegion/aegion/internal/xlog"
 	analytics "github.com/aegion/aegion/modules/analytics"
@@ -71,6 +73,21 @@ func main() {
 	if err := validateRuntimeConfig(cfg); err != nil {
 		fatal(err)
 		return
+	}
+
+	var shutdownLoza func(context.Context) error
+	if endpoint := strings.TrimSpace(os.Getenv("AEGION_LOZA_COLLECTOR_URL")); endpoint != "" {
+		_, shutdownLoza, err = aegionloza.Initialize(platformconfig.LozaConfig{
+			CollectorURL: endpoint,
+			Environment:  os.Getenv("AEGION_ENV"),
+		}, "aegion.analytics", version)
+		if err != nil {
+			fatal(fmt.Errorf("initialize Loza: %w", err))
+			return
+		}
+		defer func() {
+			_ = shutdownLoza(context.Background())
+		}()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -142,8 +159,12 @@ func main() {
 	}
 
 	readiness := func(checkCtx context.Context) error {
-		if err := db.Health(checkCtx); err != nil { return fmt.Errorf("analytics database: %w", err) }
-		if err := backend.Health(checkCtx); err != nil { return fmt.Errorf("analytics storage: %w", err) }
+		if err := db.Health(checkCtx); err != nil {
+			return fmt.Errorf("analytics database: %w", err)
+		}
+		if err := backend.Health(checkCtx); err != nil {
+			return fmt.Errorf("analytics storage: %w", err)
+		}
 		return checkSchema(checkCtx, db)
 	}
 	routes := []string{analyticsRESTPrefix}
@@ -154,43 +175,61 @@ func main() {
 	}
 	if err := moduleserver.Run(moduleserver.Config{
 		Module: "analytics", Version: version,
-		ListenAddr: moduleserver.EnvOrDefault("AEGION_ANALYTICS_LISTEN_ADDR", "0.0.0.0:8080"),
+		ListenAddr:   moduleserver.EnvOrDefault("AEGION_ANALYTICS_LISTEN_ADDR", "0.0.0.0:8080"),
 		Capabilities: capabilities,
-		Routes: routes,
-		Readiness: readiness,
+		Routes:       routes,
+		Readiness:    readiness,
 		RegisterHTTPRoutes: func(mux *http.ServeMux) {
 			mux.Handle(analyticsRESTPrefix+"/", http.StripPrefix(analyticsRESTPrefix, protectedRoutes(handler, log, cfg.REST)))
 			if graphqlServer != nil {
 				mux.Handle(analyticsGraphQLPrefix, graphqlServer.HTTPHandler())
 			}
 		},
-	}); err != nil { fatal(err) }
+	}); err != nil {
+		fatal(err)
+	}
 }
 
 func protectedRoutes(h *rest.Handler, log *xlog.Logger, cfg analytics.RestAPIConfig) http.Handler {
 	r := chi.NewRouter()
 	r.Use(rest.AuthMiddleware(log), rest.RateLimitMiddleware(log, cfg.RateLimitPerMinute), rest.QueryTimeoutMiddleware(time.Duration(cfg.QueryTimeoutSeconds)*time.Second))
 	r.Route("/events", func(r chi.Router) {
-		r.Get("/", h.ListEvents); r.Post("/search", h.SearchEvents); r.Get("/{id}", h.GetEvent)
-		r.Get("/{id}/related", h.GetRelatedEvents); r.Post("/export", h.ExportEventsBlob)
+		r.Get("/", h.ListEvents)
+		r.Post("/search", h.SearchEvents)
+		r.Get("/{id}", h.GetEvent)
+		r.Get("/{id}/related", h.GetRelatedEvents)
+		r.Post("/export", h.ExportEventsBlob)
 	})
 	r.Route("/dashboards", func(r chi.Router) {
-		r.Get("/", h.ListDashboards); r.Post("/", h.CreateDashboard); r.Get("/{id}", h.GetDashboard)
-		r.Put("/{id}", h.UpdateDashboard); r.Delete("/{id}", h.DeleteDashboard)
-		r.Post("/{id}/share", h.ShareDashboard); r.Post("/{id}/components/{componentId}/execute", h.ExecuteDashboardQuery)
+		r.Get("/", h.ListDashboards)
+		r.Post("/", h.CreateDashboard)
+		r.Get("/{id}", h.GetDashboard)
+		r.Put("/{id}", h.UpdateDashboard)
+		r.Delete("/{id}", h.DeleteDashboard)
+		r.Post("/{id}/share", h.ShareDashboard)
+		r.Post("/{id}/components/{componentId}/execute", h.ExecuteDashboardQuery)
 	})
 	r.Route("/queries", func(r chi.Router) {
-		r.Get("/", h.ListQueries); r.Post("/", h.SaveQuery); r.Get("/{id}/execute", h.ExecuteQuery); r.Delete("/{id}", h.DeleteQuery)
+		r.Get("/", h.ListQueries)
+		r.Post("/", h.SaveQuery)
+		r.Get("/{id}/execute", h.ExecuteQuery)
+		r.Delete("/{id}", h.DeleteQuery)
 	})
 	return r
 }
 
 func loadConfig(path string) (*analytics.Config, error) {
 	data, err := os.ReadFile(path)
-	if err != nil { return nil, fmt.Errorf("read analytics configuration: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("read analytics configuration: %w", err)
+	}
 	var cfg analytics.Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil { return nil, fmt.Errorf("parse analytics configuration: %w", err) }
-	if err := cfg.Validate(); err != nil { return nil, fmt.Errorf("validate analytics configuration: %w", err) }
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse analytics configuration: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validate analytics configuration: %w", err)
+	}
 	return &cfg, nil
 }
 

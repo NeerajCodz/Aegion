@@ -23,6 +23,7 @@ import (
 
 	platformconfig "github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/platform/moduleserver"
 	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/xlog"
@@ -129,6 +130,7 @@ type mainDeps struct {
 	loadConfig      func(path string) (*Config, error)
 	cryptoSelfCheck func() error
 	setupLogger     func(logConfig LogConfig)
+	initializeLoza  func(platformconfig.LozaConfig, string, string) (func(context.Context) error, error)
 	parseDBConfig   func(connString string) (*pgxpool.Config, error)
 	newDBPool       func(ctx context.Context, config *pgxpool.Config) (*pgxpool.Pool, error)
 	pingDB          func(ctx context.Context, db *pgxpool.Pool) error
@@ -144,8 +146,12 @@ func defaultMainDeps() mainDeps {
 		loadConfig:      loadConfig,
 		cryptoSelfCheck: platformcrypto.RuntimeSelfCheck,
 		setupLogger:     setupLogger,
-		parseDBConfig:   pgxpool.ParseConfig,
-		newDBPool:       pgxpool.NewWithConfig,
+		initializeLoza: func(cfg platformconfig.LozaConfig, service, version string) (func(context.Context) error, error) {
+			_, shutdown, err := aegionloza.Initialize(cfg, service, version)
+			return shutdown, err
+		},
+		parseDBConfig: pgxpool.ParseConfig,
+		newDBPool:     pgxpool.NewWithConfig,
 		pingDB: func(ctx context.Context, db *pgxpool.Pool) error {
 			return db.Ping(ctx)
 		},
@@ -203,6 +209,24 @@ func run(args []string, deps mainDeps) error {
 	cfg, err := deps.loadConfig(flags.configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	var shutdownLoza func(context.Context) error
+	if deps.initializeLoza != nil &&
+		strings.TrimSpace(getEnv("AEGION_LOZA_COLLECTOR_URL", "")) != "" {
+		shutdownLoza, err = deps.initializeLoza(platformconfig.LozaConfig{
+			CollectorURL: getEnv("AEGION_LOZA_COLLECTOR_URL", ""),
+			Environment:  cfg.Observability.Telemetry.Environment,
+			Insecure:     cfg.Observability.Telemetry.Insecure,
+		}, "aegion.admin", adminModuleVersion)
+		if err != nil {
+			return fmt.Errorf("failed to initialize Loza: %w", err)
+		}
+		defer func() {
+			if shutdownLoza != nil {
+				_ = shutdownLoza(context.Background())
+			}
+		}()
 	}
 
 	deps.setupLogger(cfg.Log)

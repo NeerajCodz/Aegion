@@ -19,6 +19,7 @@ import (
 	"github.com/aegion/aegion/core/workers"
 	"github.com/aegion/aegion/internal/platform/config"
 	"github.com/aegion/aegion/internal/platform/database"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/xlog"
 )
@@ -66,6 +67,7 @@ type mainDeps struct {
 	loadConfig        func(path string) (*config.Config, error)
 	validateConfig    func(cfg *config.Config) error
 	resolveModulePlan func(cfg *config.Config) (config.ModulePlan, error)
+	initializeLoza    func(config.LozaConfig, string, string) (func(context.Context) error, error)
 	newLogger         func(cfg xlog.Config) *xlog.Logger
 	connectDB         func(ctx context.Context, cfg database.Config) (*database.DB, error)
 	newMigrator       func(db *database.DB) migrator
@@ -139,8 +141,12 @@ func defaultMainDeps() mainDeps {
 			return cfg.Validate()
 		},
 		resolveModulePlan: config.ResolveModulePlan,
-		newLogger:         xlog.New,
-		connectDB:         database.Connect,
+		initializeLoza: func(cfg config.LozaConfig, service, version string) (func(context.Context) error, error) {
+			_, shutdown, err := aegionloza.Initialize(cfg, service, version)
+			return shutdown, err
+		},
+		newLogger: xlog.New,
+		connectDB: database.Connect,
 		newMigrator: func(db *database.DB) migrator {
 			return database.NewMigrator(db, migrations, "migrations")
 		},
@@ -268,15 +274,31 @@ func run(args []string, deps mainDeps) int {
 		RedactFields:     cfg.Log.RedactFields,
 	})
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var shutdownLoza func(context.Context) error
+	if deps.initializeLoza != nil &&
+		(strings.TrimSpace(cfg.Loza.CollectorURL) != "" ||
+			strings.TrimSpace(os.Getenv("AEGION_LOZA_COLLECTOR_URL")) != "") {
+		shutdownLoza, err = deps.initializeLoza(cfg.Loza, "aegion.core", version)
+		if err != nil {
+			_, _ = fmt.Fprintf(deps.stderr, "Failed to initialize Loza: %v\n", err)
+			return 1
+		}
+		defer func() {
+			if shutdownLoza != nil {
+				_ = shutdownLoza(context.Background())
+			}
+		}()
+	}
+
 	log.Info("Starting Aegion",
 		"version", version,
 		"config", f.configPath,
 		"workers", f.enableWorkers,
 		"admin_bootstrap", f.adminBootstrap,
 	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var telemetry telemetryProvider
 	if deps.newObservability != nil {

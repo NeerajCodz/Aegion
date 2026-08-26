@@ -40,6 +40,9 @@ func New(cfg Config) *Logger {
 	}
 
 	sinks := cfg.Sinks
+	if len(sinks) == 0 {
+		sinks = []Sink{lozaSink{}}
+	}
 	l := &Logger{
 		cfg:      cfg,
 		sink:     NewMultiSink(sinks...),

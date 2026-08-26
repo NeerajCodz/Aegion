@@ -72,7 +72,62 @@ export interface DashboardStats {
   total_identities: number;
   active_sessions: number;
   identities_last_24h: number;
+  identities_last_7d?: number;
+  identities_last_30d?: number;
   mfa_adoption_rate: number;
+  passkey_adoption_rate?: number;
+  active_ip_bans?: number;
+  active_operators?: number;
+  total_operators?: number;
+  total_roles?: number;
+  total_oauth2_clients?: number;
+  active_oauth2_tokens?: number;
+  system_status?: 'healthy' | 'degraded' | 'critical';
+}
+
+export interface TimeSeriesPoint {
+  timestamp: string;
+  new_identities: number;
+  active_sessions: number;
+  auth_successes: number;
+  auth_failures: number;
+}
+
+export interface DashboardTimeSeries {
+  range: '24h' | '7d' | '30d' | '90d';
+  points: TimeSeriesPoint[];
+}
+
+export interface AuthBreakdown {
+  passkeys_count: number;
+  passwords_count: number;
+  social_oidc_count: number;
+  enterprise_sso_count: number;
+  mfa_totp_count: number;
+  mfa_webauthn_count: number;
+  mfa_backup_codes_count: number;
+}
+
+export interface ThreatIndicator {
+  id: string;
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  description: string;
+  action_url?: string;
+  action_label?: string;
+}
+
+export interface SecurityPosture {
+  risk_score: number;
+  risk_level: 'strong' | 'moderate' | 'critical';
+  mfa_coverage_pct: number;
+  passkey_coverage_pct: number;
+  session_pressure_ratio: number;
+  failed_logins_last_24h: number;
+  active_ip_bans_count: number;
+  wildcard_scim_tokens: number;
+  unrotated_oauth_secrets: number;
+  threat_indicators: ThreatIndicator[];
 }
 
 export type HealthState = 'healthy' | 'degraded' | 'offline';
@@ -110,17 +165,17 @@ export interface ObservabilityTelemetrySummary {
   instance_id: string;
   traces_enabled: boolean;
   metrics_enabled: boolean;
-  logs_enabled: boolean;
+  events_enabled: boolean;
   traces_endpoint: string;
   metrics_endpoint: string;
-  logs_endpoint: string;
+  events_endpoint: string;
   trace_sampling_ratio: number;
   metric_export_interval: string;
   trace_export_timeout: string;
   insecure_exporter: boolean;
   traces_endpoint_present: boolean;
   metrics_endpoint_present: boolean;
-  logs_endpoint_present: boolean;
+  events_endpoint_present: boolean;
 }
 
 export interface ObservabilityGuardrailsSummary {
