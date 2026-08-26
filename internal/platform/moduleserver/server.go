@@ -17,9 +17,10 @@ import (
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/platform/securefile"
 	corepb "github.com/aegion/aegion/internal/proto/core"
-	"github.com/aegion/aegion/internal/xlog"
+	lozasdk "github.com/astraive/loza/sdks/go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -117,17 +118,6 @@ func Run(cfg Config) error {
 		return fmt.Errorf("[%s] resolve control-plane configuration: %w", cfg.Module, err)
 	}
 
-	log := xlog.New(xlog.Config{
-		Level:            os.Getenv("AEGION_LOG_LEVEL"),
-		Format:           os.Getenv("AEGION_LOG_FORMAT"),
-		ServiceName:      cfg.Module,
-		ServiceNamespace: os.Getenv("AEGION_LOG_NAMESPACE"),
-		Environment:      os.Getenv("AEGION_ENV"),
-		CloudRegion:      os.Getenv("AEGION_CLOUD_REGION"),
-		Developer:        os.Getenv("DEV_NAME"),
-		ServiceVersion:   cfg.Version,
-	})
-
 	if err := cryptoRuntimeSelfCheck(); err != nil {
 		return fmt.Errorf("[%s] crypto runtime self-check failed: %w", cfg.Module, err)
 	}
@@ -223,13 +213,12 @@ func Run(cfg Config) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("module server listening",
-			"module", cfg.Module,
-			"listen_addr", cfg.ListenAddr,
-			"version", cfg.Version,
-		)
+		emitModuleEvent(cfg, "aegion.http_server", "success", nil,
+			lozasdk.String("http.listen_addr", cfg.ListenAddr))
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			emitModuleEvent(cfg, "aegion.http_server", "error", err,
+				lozasdk.String("http.listen_addr", cfg.ListenAddr))
 			errCh <- err
 			return
 		}
@@ -253,7 +242,44 @@ func Run(cfg Config) error {
 	if grpcServer != nil {
 		grpcServer.GracefulStop()
 	}
-	return srv.Shutdown(ctx)
+	shutdownErr := srv.Shutdown(ctx)
+	emitModuleEvent(cfg, "aegion.shutdown", outcomeForModuleError(shutdownErr), shutdownErr,
+		lozasdk.String("shutdown.phase", "http"))
+	if flushErr := lozasdk.Flush(ctx); shutdownErr == nil {
+		shutdownErr = flushErr
+	}
+	return shutdownErr
+}
+
+func outcomeForModuleError(err error) string {
+	if err == nil {
+		return "success"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	return "error"
+}
+func emitModuleEvent(cfg Config, eventName, outcome string, err error, attrs ...lozasdk.Attr) {
+	logger := lozasdk.Default()
+	ctx := aegionloza.Start(context.Background(), logger, lozasdk.Params{
+		Event:   eventName,
+		Kind:    "system",
+		Service: "aegion.module." + cfg.Module,
+		Version: cfg.Version,
+	})
+	if len(attrs) > 0 {
+		_ = logger.Set(ctx, attrs...)
+	}
+	if err != nil {
+		_ = logger.FinishError(ctx, err)
+	} else {
+		_ = logger.Finish(ctx, aegionloza.NormalizeOutcome(outcome))
+	}
+	_ = logger.Emit(ctx)
 }
 
 func startGRPCServer(cfg Config) (*grpc.Server, <-chan error, error) {
@@ -261,11 +287,10 @@ func startGRPCServer(cfg Config) (*grpc.Server, <-chan error, error) {
 		return nil, nil, fmt.Errorf("[%s] module gRPC requires a client-authenticating TLS configuration", cfg.Module)
 	}
 	errCh := make(chan error, 1)
-	log := xlog.Default().WithComponent("moduleserver.grpc")
 	server := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(cfg.GRPCServerTLS.Clone())),
-		grpc.UnaryInterceptor(log.UnaryServerInterceptor()),
-		grpc.StreamInterceptor(log.StreamServerInterceptor()),
+		grpc.UnaryInterceptor(aegionloza.UnaryServerInterceptor()),
+		grpc.StreamInterceptor(aegionloza.StreamServerInterceptor()),
 	)
 	if cfg.RegisterGRPC != nil {
 		cfg.RegisterGRPC(server)
@@ -275,12 +300,13 @@ func startGRPCServer(cfg Config) (*grpc.Server, <-chan error, error) {
 		return nil, nil, fmt.Errorf("[%s] gRPC listen failed: %w", cfg.Module, err)
 	}
 	go func() {
-		log.Info("module gRPC server listening",
-			"module", cfg.Module,
-			"listen_addr", cfg.GRPCListenAddr,
-			"version", cfg.Version,
-		)
+		emitModuleEvent(cfg, "aegion.rpc", "success", nil,
+			lozasdk.String("rpc.system", "grpc"),
+			lozasdk.String("rpc.listen_addr", cfg.GRPCListenAddr))
 		if err := server.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			emitModuleEvent(cfg, "aegion.rpc", "error", err,
+				lozasdk.String("rpc.system", "grpc"),
+				lozasdk.String("rpc.listen_addr", cfg.GRPCListenAddr))
 			errCh <- err
 			return
 		}
