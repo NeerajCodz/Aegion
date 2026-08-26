@@ -29,7 +29,7 @@ module_registry:
 # Server Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 server:
-  port: 8080
+  port: ${AEGION_CORE_CONTAINER_PORT:-8080}
   host: 0.0.0.0
 
   tls:

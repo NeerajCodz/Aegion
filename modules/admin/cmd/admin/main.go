@@ -579,6 +579,9 @@ func loadConfig(path string) (*Config, error) {
 	if value := getEnv("AEGION_LOZA_COLLECTOR_URL", ""); value != "" {
 		cfg.Observability.Endpoints.LozaCollector = value
 	}
+	if value := getEnv("AEGION_ADMIN_OBS_LOZA_URL", ""); value != "" {
+		cfg.Observability.Endpoints.LozaCollector = value
+	}
 	if value := getEnv("AEGION_ADMIN_OBS_PROMETHEUS_URL", ""); value != "" {
 		cfg.Observability.Endpoints.Prometheus = value
 	}

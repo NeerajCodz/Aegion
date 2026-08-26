@@ -1,0 +1,239 @@
+name: aegion
+
+services:
+  postgres:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: postgres
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT}:${POSTGRES_CONTAINER_PORT}"
+
+  redis:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: redis
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT}:${REDIS_CONTAINER_PORT}"
+
+  loza-collector:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: loza-collector
+    image: ${LOZA_IMAGE}
+    ports:
+      - "127.0.0.1:${LOZA_HTTP_HOST_PORT}:${LOZA_HTTP_CONTAINER_PORT}"
+      - "127.0.0.1:${LOZA_GRPC_HOST_PORT}:${LOZA_GRPC_CONTAINER_PORT}"
+      - "127.0.0.1:${LOZA_GRAPHQL_HOST_PORT}:${LOZA_GRAPHQL_CONTAINER_PORT}"
+      - "127.0.0.1:${LOZA_TAIL_HOST_PORT}:${LOZA_TAIL_CONTAINER_PORT}"
+
+  migration:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: migration
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile.core
+    volumes:
+      - ../../configs/aegion.yaml:/config/aegion.yaml:ro
+      - ../../configs/schemas:/config/schemas:ro
+    environment:
+      AEGION_CONFIG_PATH: /config/aegion.yaml
+      AEGION_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_CONTAINER_PORT}/${POSTGRES_DB}?sslmode=disable
+      AEGION_CACHE_URL: redis://redis:${REDIS_CONTAINER_PORT}/0
+
+  aegion:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: aegion
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile.core
+    volumes:
+      - ../../configs/aegion.yaml:/config/aegion.yaml:ro
+      - ../../configs/schemas:/config/schemas:ro
+    ports:
+      - "127.0.0.1:${AEGION_CORE_HOST_PORT}:${AEGION_CORE_CONTAINER_PORT}"
+      - "127.0.0.1:${AEGION_PPROF_HOST_PORT}:${AEGION_PPROF_CONTAINER_PORT}"
+      - "127.0.0.1:${AEGION_REGISTRY_HOST_PORT}:${AEGION_REGISTRY_CONTAINER_PORT}"
+    environment:
+      AEGION_CONFIG_PATH: /config/aegion.yaml
+      AEGION_PORT: ${AEGION_CORE_CONTAINER_PORT}
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_REGISTRY_GRPC_LISTEN_ADDR: 0.0.0.0:${AEGION_REGISTRY_CONTAINER_PORT}
+      AEGION_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_CONTAINER_PORT}/${POSTGRES_DB}?sslmode=disable
+      AEGION_CACHE_URL: redis://redis:${REDIS_CONTAINER_PORT}/0
+
+  module-admin:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-admin
+    build:
+      context: ../..
+      dockerfile: modules/admin/Dockerfile
+    volumes:
+      - ../../configs/modules/admin.yaml:/config/admin.yaml:ro
+    ports:
+      - "127.0.0.1:${AEGION_ADMIN_HOST_PORT}:${AEGION_ADMIN_CONTAINER_PORT}"
+    environment:
+      AEGION_CONFIG_PATH: /config/admin.yaml
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_ADMIN_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_ADMIN_CONTAINER_PORT}
+      AEGION_ADMIN_OBS_LOZA_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/health
+      AEGION_ADMIN_OBS_PROMETHEUS_URL: http://prometheus:${PROMETHEUS_CONTAINER_PORT}/-/healthy
+      AEGION_ADMIN_OBS_GRAFANA_URL: http://grafana:${GRAFANA_CONTAINER_PORT}/api/health
+      AEGION_ADMIN_OBS_TEMPO_URL: http://tempo:${TEMPO_CONTAINER_PORT}/ready
+
+  module-analytics:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-analytics
+    build:
+      context: ../..
+      dockerfile: modules/analytics/Dockerfile
+    ports:
+      - "127.0.0.1:${AEGION_ANALYTICS_HOST_PORT}:${AEGION_ANALYTICS_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_ANALYTICS_LISTEN_ADDR: 0.0.0.0:${AEGION_ANALYTICS_CONTAINER_PORT}
+
+  module-oauth2:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-oauth2
+    ports:
+      - "127.0.0.1:${AEGION_OAUTH2_HOST_PORT}:${AEGION_OAUTH2_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_OAUTH2_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_OAUTH2_CONTAINER_PORT}
+
+  module-social:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-social
+    ports:
+      - "127.0.0.1:${AEGION_SOCIAL_HOST_PORT}:${AEGION_SOCIAL_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_SOCIAL_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_SOCIAL_CONTAINER_PORT}
+
+  module-sso:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-sso
+    ports:
+      - "127.0.0.1:${AEGION_SSO_HOST_PORT}:${AEGION_SSO_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_SSO_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_SSO_CONTAINER_PORT}
+
+  module-introspection:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-introspection
+    ports:
+      - "127.0.0.1:${AEGION_INTROSPECTION_HOST_PORT}:${AEGION_INTROSPECTION_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_INTROSPECTION_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_INTROSPECTION_CONTAINER_PORT}
+
+  module-proxy:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-proxy
+    ports:
+      - "127.0.0.1:${AEGION_PROXY_HOST_PORT}:${AEGION_PROXY_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_PROXY_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_PROXY_CONTAINER_PORT}
+
+  module-mfa:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-mfa
+    ports:
+      - "127.0.0.1:${AEGION_MFA_HOST_PORT}:${AEGION_MFA_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_MFA_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_MFA_CONTAINER_PORT}
+
+  module-passkeys:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: module-passkeys
+    ports:
+      - "127.0.0.1:${AEGION_PASSKEYS_HOST_PORT}:${AEGION_PASSKEYS_CONTAINER_PORT}"
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:${LOZA_HTTP_CONTAINER_PORT}/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY}
+      AEGION_PASSKEYS_HTTP_LISTEN_ADDR: 0.0.0.0:${AEGION_PASSKEYS_CONTAINER_PORT}
+
+  aegion-cli:
+    extends:
+      file: ../../deploy/docker-compose.yml
+      service: aegion-cli
+
+  otel-collector:
+    image: ${OTEL_COLLECTOR_IMAGE}
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "127.0.0.1:${OTEL_GRPC_HOST_PORT}:${OTEL_GRPC_CONTAINER_PORT}"
+      - "127.0.0.1:${OTEL_HTTP_HOST_PORT}:${OTEL_HTTP_CONTAINER_PORT}"
+      - "127.0.0.1:${OTEL_METRICS_HOST_PORT}:${OTEL_METRICS_CONTAINER_PORT}"
+      - "127.0.0.1:${OTEL_HEALTH_HOST_PORT}:${OTEL_HEALTH_CONTAINER_PORT}"
+    volumes:
+      - ../../deploy/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks: [aegion-internal]
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE}
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT}:${PROMETHEUS_CONTAINER_PORT}"
+    volumes:
+      - ../../deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks: [aegion-internal]
+
+  tempo:
+    image: ${TEMPO_IMAGE}
+    command: ["-config.file=/etc/tempo.yaml"]
+    ports:
+      - "127.0.0.1:${TEMPO_HOST_PORT}:${TEMPO_CONTAINER_PORT}"
+    volumes:
+      - ../../deploy/tempo.yaml:/etc/tempo.yaml:ro
+    networks: [aegion-internal]
+
+  grafana:
+    image: ${GRAFANA_IMAGE}
+    ports:
+      - "127.0.0.1:${GRAFANA_HOST_PORT}:${GRAFANA_CONTAINER_PORT}"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../../deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [aegion-internal]
+
+  mailpit:
+    image: ${MAILPIT_IMAGE}
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_HOST_PORT}:${MAILPIT_UI_CONTAINER_PORT}"
+      - "127.0.0.1:${MAILPIT_SMTP_HOST_PORT}:${MAILPIT_SMTP_CONTAINER_PORT}"
+    networks: [aegion-internal]
+
+networks:
+  aegion-internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  loza-data:
+  aegion-data:
+  grafana-data:
