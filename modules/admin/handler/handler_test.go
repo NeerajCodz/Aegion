@@ -2288,6 +2288,7 @@ func TestDashboardStatsAndSettingsHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "\"total_identities\":10")
 		assert.Contains(t, rec.Body.String(), "\"mfa_adoption_rate\":20")
+		assert.Contains(t, rec.Body.String(), "\"system_status\":\"healthy\"")
 	})
 
 	t.Run("settings get + patch success", func(t *testing.T) {
@@ -2303,6 +2304,275 @@ func TestDashboardStatsAndSettingsHandlers(t *testing.T) {
 		h.UpdateSettings(patchRec, patchReq)
 		assert.Equal(t, http.StatusOK, patchRec.Code)
 		assert.Contains(t, patchRec.Body.String(), "\"mfa_required\":true")
+	})
+}
+func TestDashboardTimeSeriesHandler(t *testing.T) {
+	op := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/timeseries", nil)
+		rec := httptest.NewRecorder()
+		h.DashboardTimeSeries(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("success default 24h range", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/timeseries", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardTimeSeries(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp DashboardTimeSeriesResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, "24h", resp.Range)
+		assert.Len(t, resp.Points, 24)
+	})
+
+	t.Run("success 7d range", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/timeseries?range=7d", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardTimeSeries(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp DashboardTimeSeriesResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, "7d", resp.Range)
+		assert.Len(t, resp.Points, 7)
+	})
+
+	t.Run("success 30d range", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/timeseries?range=30d", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardTimeSeries(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp DashboardTimeSeriesResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, "30d", resp.Range)
+		assert.Len(t, resp.Points, 30)
+	})
+
+	t.Run("success 90d range", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/timeseries?range=90d", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardTimeSeries(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp DashboardTimeSeriesResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, "90d", resp.Range)
+		assert.Len(t, resp.Points, 90)
+	})
+
+	t.Run("success with mapped db rows", func(t *testing.T) {
+		now := time.Now().UTC().Truncate(time.Hour)
+		db := &fakeDB{
+			queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+				switch {
+				case strings.Contains(sql, "FROM core_identities"):
+					return &fakeRows{data: [][]any{
+						{now, int64(5)},
+					}}, nil
+				case strings.Contains(sql, "FROM core_sessions"):
+					return &fakeRows{data: [][]any{
+						{now, int64(8)},
+					}}, nil
+				case strings.Contains(sql, "FROM adm_audit_log"):
+					return &fakeRows{data: [][]any{
+						{now, int64(12), int64(2)},
+					}}, nil
+				default:
+					return &fakeRows{}, nil
+				}
+			},
+		}
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = db
+
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/timeseries?range=24h", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardTimeSeries(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp DashboardTimeSeriesResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, "24h", resp.Range)
+		assert.Len(t, resp.Points, 24)
+
+		lastPoint := resp.Points[len(resp.Points)-1]
+		assert.Equal(t, int64(5), lastPoint.NewIdentities)
+		assert.Equal(t, int64(8), lastPoint.ActiveSessions)
+		assert.Equal(t, int64(12), lastPoint.AuthSuccesses)
+		assert.Equal(t, int64(2), lastPoint.AuthFailures)
+	})
+}
+
+func TestDashboardAuthBreakdownHandler(t *testing.T) {
+	op := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/auth-breakdown", nil)
+		rec := httptest.NewRecorder()
+		h.DashboardAuthBreakdown(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("success with counts", func(t *testing.T) {
+		db := &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "FROM passkeys_credentials"):
+					return fakeRow{vals: []any{int64(15)}}
+				case strings.Contains(sql, "FROM pwd_credentials"):
+					return fakeRow{vals: []any{int64(45)}}
+				case strings.Contains(sql, "FROM soc_identities"):
+					return fakeRow{vals: []any{int64(20)}}
+				case strings.Contains(sql, "FROM sso_identities"):
+					return fakeRow{vals: []any{int64(10)}}
+				case strings.Contains(sql, "factor_type = 'totp'"):
+					return fakeRow{vals: []any{int64(25)}}
+				case strings.Contains(sql, "factor_type = 'webauthn'"):
+					return fakeRow{vals: []any{int64(12)}}
+				case strings.Contains(sql, "factor_type = 'backup_codes'"):
+					return fakeRow{vals: []any{int64(18)}}
+				default:
+					return fakeRow{vals: []any{int64(0)}}
+				}
+			},
+		}
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = db
+
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/auth-breakdown", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardAuthBreakdown(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp AuthBreakdownResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(15), resp.PasskeysCount)
+		assert.Equal(t, int64(45), resp.PasswordsCount)
+		assert.Equal(t, int64(20), resp.SocialOIDCCount)
+		assert.Equal(t, int64(10), resp.EnterpriseSSOCount)
+		assert.Equal(t, int64(25), resp.MFATOTPCount)
+		assert.Equal(t, int64(12), resp.MFAWebAuthnCount)
+		assert.Equal(t, int64(18), resp.MFABackupCodesCount)
+	})
+}
+
+func TestDashboardSecurityPostureHandler(t *testing.T) {
+	op := &store.Operator{ID: uuid.New(), IdentityID: uuid.New(), Role: "admin", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+
+	t.Run("unauthorized", func(t *testing.T) {
+		h := New(&fakeService{store: &fakeStore{}})
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/security-posture", nil)
+		rec := httptest.NewRecorder()
+		h.DashboardSecurityPosture(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("success with threat indicators and risk evaluation", func(t *testing.T) {
+		db := &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "COUNT(DISTINCT ci.id) AS total"):
+					// 100 total, 20 with MFA -> 20% (< 50% triggers threat indicator)
+					return fakeRow{vals: []any{int64(100), int64(20)}}
+				case strings.Contains(sql, "FROM passkeys_credentials"):
+					return fakeRow{vals: []any{int64(10)}}
+				case strings.Contains(sql, "FROM core_sessions") && strings.Contains(sql, "active = TRUE"):
+					return fakeRow{vals: []any{int64(30)}}
+				case strings.Contains(sql, "FROM adm_audit_log"):
+					// 15 failed logins -> (>10 triggers threat indicator)
+					return fakeRow{vals: []any{int64(15)}}
+				case strings.Contains(sql, "FROM adm_ip_bans"):
+					// 2 active IP bans -> triggers info threat indicator
+					return fakeRow{vals: []any{int64(2)}}
+				case strings.Contains(sql, "FROM adm_scim_api_tokens"):
+					// 1 wildcard SCIM token -> triggers warning threat indicator
+					return fakeRow{vals: []any{int64(1)}}
+				case strings.Contains(sql, "FROM oauth2_clients"):
+					// 1 unrotated secret -> triggers info threat indicator
+					return fakeRow{vals: []any{int64(1)}}
+				default:
+					return fakeRow{vals: []any{int64(0)}}
+				}
+			},
+		}
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = db
+
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/security-posture", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardSecurityPosture(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp SecurityPostureResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, 20.0, resp.MFACoveragePct)
+		assert.Equal(t, 10.0, resp.PasskeyCoveragePct)
+		assert.Equal(t, 0.3, resp.SessionPressureRatio)
+		assert.Equal(t, int64(15), resp.FailedLoginsLast24h)
+		assert.Equal(t, int64(2), resp.ActiveIPBansCount)
+		assert.Equal(t, int64(1), resp.WildcardSCIMTokens)
+		assert.Equal(t, int64(1), resp.UnrotatedOAuthSecrets)
+		assert.GreaterOrEqual(t, resp.RiskScore, 60)
+		assert.Equal(t, "critical", resp.RiskLevel)
+		assert.Len(t, resp.ThreatIndicators, 5)
+	})
+
+	t.Run("success strong posture with no threats", func(t *testing.T) {
+		db := &fakeDB{
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "COUNT(DISTINCT ci.id) AS total"):
+					// 100 total, 95 with MFA -> 95% (>= 50% no MFA threat)
+					return fakeRow{vals: []any{int64(100), int64(95)}}
+				case strings.Contains(sql, "FROM passkeys_credentials"):
+					return fakeRow{vals: []any{int64(80)}}
+				case strings.Contains(sql, "FROM core_sessions") && strings.Contains(sql, "active = TRUE"):
+					return fakeRow{vals: []any{int64(50)}}
+				default:
+					return fakeRow{vals: []any{int64(0)}}
+				}
+			},
+		}
+		h := New(&fakeService{store: &fakeStore{}})
+		h.db = db
+
+		req := httptest.NewRequest(http.MethodGet, "/admin/dashboard/security-posture", nil)
+		req = req.WithContext(context.WithValue(req.Context(), contextKeyOperator, op))
+		rec := httptest.NewRecorder()
+		h.DashboardSecurityPosture(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		var resp SecurityPostureResponse
+		err := json.Unmarshal(rec.Body.Bytes(), &resp)
+		assert.NoError(t, err)
+		assert.Equal(t, 95.0, resp.MFACoveragePct)
+		assert.Equal(t, 15, resp.RiskScore)
+		assert.Equal(t, "strong", resp.RiskLevel)
+		assert.Empty(t, resp.ThreatIndicators)
 	})
 }
 

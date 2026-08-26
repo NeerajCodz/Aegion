@@ -190,9 +190,17 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats := DashboardStatsResponse{}
+	stats := DashboardStatsResponse{
+		SystemStatus: "healthy",
+	}
 
-	if err := h.dbConn().QueryRow(r.Context(), `
+	db := h.dbConn()
+	if !isDBAvailable(db) {
+		writeJSON(w, http.StatusOK, stats)
+		return
+	}
+
+	if err := db.QueryRow(r.Context(), `
 		SELECT COUNT(*)
 		FROM core_identities
 		WHERE deleted_at IS NULL
@@ -201,7 +209,7 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.dbConn().QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT COUNT(*)
 		FROM core_sessions
 		WHERE active = TRUE
@@ -211,7 +219,7 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.dbConn().QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT COUNT(*)
 		FROM core_identities
 		WHERE deleted_at IS NULL
@@ -225,7 +233,7 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 		totalIdentities int64
 		aal2Identities  int64
 	)
-	if err := h.dbConn().QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT
 			COUNT(DISTINCT ci.id) AS total,
 			COUNT(DISTINCT CASE WHEN cs.aal = 'aal2' THEN ci.id END) AS aal2
@@ -239,7 +247,423 @@ func (h *Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 		stats.MFAAdoptionRate = float64(aal2Identities) * 100 / float64(totalIdentities)
 	}
 
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM core_identities
+		WHERE deleted_at IS NULL
+		  AND created_at >= NOW() - INTERVAL '7 days'
+	`).Scan(&stats.IdentitiesLast7d)
+
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM core_identities
+		WHERE deleted_at IS NULL
+		  AND created_at >= NOW() - INTERVAL '30 days'
+	`).Scan(&stats.IdentitiesLast30d)
+
+	var passkeyCount int64
+	if err := db.QueryRow(r.Context(), `
+		SELECT COUNT(DISTINCT identity_id)
+		FROM passkeys_credentials
+	`).Scan(&passkeyCount); err == nil && stats.TotalIdentities > 0 {
+		stats.PasskeyAdoptionRate = float64(passkeyCount) * 100 / float64(stats.TotalIdentities)
+	}
+
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM adm_ip_bans
+		WHERE expires_at IS NULL OR expires_at > NOW()
+	`).Scan(&stats.ActiveIPBans)
+
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM adm_operators
+	`).Scan(&stats.TotalOperators)
+	stats.ActiveOperators = stats.TotalOperators
+
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM adm_roles
+	`).Scan(&stats.TotalRoles)
+
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM oauth2_clients
+	`).Scan(&stats.TotalOAuth2Clients)
+
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*)
+		FROM oauth2_tokens
+		WHERE revoked_at IS NULL AND expires_at > NOW()
+	`).Scan(&stats.ActiveOAuth2Tokens)
+
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (h *Handler) DashboardTimeSeries(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	rangeParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("range")))
+	if rangeParam == "" {
+		rangeParam = "24h"
+	}
+	switch rangeParam {
+	case "24h", "7d", "30d", "90d":
+	default:
+		rangeParam = "24h"
+	}
+
+	now := time.Now().UTC()
+	var points []TimeSeriesPoint
+	pointsByTime := make(map[string]*TimeSeriesPoint)
+
+	switch rangeParam {
+	case "24h":
+		start := now.Add(-23 * time.Hour).Truncate(time.Hour)
+		for i := 0; i < 24; i++ {
+			t := start.Add(time.Duration(i) * time.Hour)
+			ts := t.Format(time.RFC3339)
+			pt := TimeSeriesPoint{Timestamp: ts}
+			points = append(points, pt)
+			pointsByTime[t.Format("2006-01-02 15:00")] = &points[len(points)-1]
+		}
+	case "7d":
+		start := now.AddDate(0, 0, -6).Truncate(24 * time.Hour)
+		for i := 0; i < 7; i++ {
+			t := start.AddDate(0, 0, i)
+			ts := t.Format(time.RFC3339)
+			pt := TimeSeriesPoint{Timestamp: ts}
+			points = append(points, pt)
+			pointsByTime[t.Format("2006-01-02")] = &points[len(points)-1]
+		}
+	case "30d":
+		start := now.AddDate(0, 0, -29).Truncate(24 * time.Hour)
+		for i := 0; i < 30; i++ {
+			t := start.AddDate(0, 0, i)
+			ts := t.Format(time.RFC3339)
+			pt := TimeSeriesPoint{Timestamp: ts}
+			points = append(points, pt)
+			pointsByTime[t.Format("2006-01-02")] = &points[len(points)-1]
+		}
+	case "90d":
+		start := now.AddDate(0, 0, -89).Truncate(24 * time.Hour)
+		for i := 0; i < 90; i++ {
+			t := start.AddDate(0, 0, i)
+			ts := t.Format(time.RFC3339)
+			pt := TimeSeriesPoint{Timestamp: ts}
+			points = append(points, pt)
+			pointsByTime[t.Format("2006-01-02")] = &points[len(points)-1]
+		}
+	}
+
+	var intervalStr string
+	var dateTrunc string
+	var timeFormat string
+	if rangeParam == "24h" {
+		intervalStr = "24 hours"
+		dateTrunc = "hour"
+		timeFormat = "2006-01-02 15:00"
+	} else if rangeParam == "7d" {
+		intervalStr = "7 days"
+		dateTrunc = "day"
+		timeFormat = "2006-01-02"
+	} else if rangeParam == "30d" {
+		intervalStr = "30 days"
+		dateTrunc = "day"
+		timeFormat = "2006-01-02"
+	} else {
+		intervalStr = "90 days"
+		dateTrunc = "day"
+		timeFormat = "2006-01-02"
+	}
+
+	if isDBAvailable(h.dbConn()) {
+		rows, err := h.dbConn().Query(r.Context(), fmt.Sprintf(`
+			SELECT DATE_TRUNC('%s', created_at) AS bucket, COUNT(*)
+			FROM core_identities
+			WHERE deleted_at IS NULL
+			  AND created_at >= NOW() - INTERVAL '%s'
+			GROUP BY bucket
+			ORDER BY bucket ASC
+		`, dateTrunc, intervalStr))
+		if err == nil && rows != nil {
+			for rows.Next() {
+				var (
+					bucket time.Time
+					count  int64
+				)
+				if err := rows.Scan(&bucket, &count); err == nil {
+					key := bucket.UTC().Format(timeFormat)
+					if pt, ok := pointsByTime[key]; ok {
+						pt.NewIdentities = count
+					}
+				}
+			}
+			rows.Close()
+		}
+
+		rows, err = h.dbConn().Query(r.Context(), fmt.Sprintf(`
+			SELECT DATE_TRUNC('%s', created_at) AS bucket, COUNT(*)
+			FROM core_sessions
+			WHERE created_at >= NOW() - INTERVAL '%s'
+			GROUP BY bucket
+			ORDER BY bucket ASC
+		`, dateTrunc, intervalStr))
+		if err == nil && rows != nil {
+			for rows.Next() {
+				var (
+					bucket time.Time
+					count  int64
+				)
+				if err := rows.Scan(&bucket, &count); err == nil {
+					key := bucket.UTC().Format(timeFormat)
+					if pt, ok := pointsByTime[key]; ok {
+						pt.ActiveSessions = count
+					}
+				}
+			}
+			rows.Close()
+		}
+
+		rows, err = h.dbConn().Query(r.Context(), fmt.Sprintf(`
+			SELECT DATE_TRUNC('%s', created_at) AS bucket,
+			       COUNT(CASE WHEN action NOT LIKE '%%fail%%' AND action NOT LIKE '%%denied%%' AND action NOT LIKE '%%reject%%' THEN 1 END) AS successes,
+			       COUNT(CASE WHEN action LIKE '%%fail%%' OR action LIKE '%%denied%%' OR action LIKE '%%reject%%' THEN 1 END) AS failures
+			FROM adm_audit_log
+			WHERE created_at >= NOW() - INTERVAL '%s'
+			GROUP BY bucket
+			ORDER BY bucket ASC
+		`, dateTrunc, intervalStr))
+		if err == nil && rows != nil {
+			for rows.Next() {
+				var (
+					bucket    time.Time
+					successes int64
+					failures  int64
+				)
+				if err := rows.Scan(&bucket, &successes, &failures); err == nil {
+					key := bucket.UTC().Format(timeFormat)
+					if pt, ok := pointsByTime[key]; ok {
+						pt.AuthSuccesses = successes
+						pt.AuthFailures = failures
+					}
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	writeJSON(w, http.StatusOK, DashboardTimeSeriesResponse{
+		Range:  rangeParam,
+		Points: points,
+	})
+}
+
+func (h *Handler) DashboardAuthBreakdown(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	resp := AuthBreakdownResponse{}
+
+	db := h.dbConn()
+	if isDBAvailable(db) {
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM passkeys_credentials
+		`).Scan(&resp.PasskeysCount)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM pwd_credentials
+		`).Scan(&resp.PasswordsCount)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM soc_identities
+		`).Scan(&resp.SocialOIDCCount)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM sso_identities
+		`).Scan(&resp.EnterpriseSSOCount)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM mfa_factors
+			WHERE factor_type = 'totp'
+		`).Scan(&resp.MFATOTPCount)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM mfa_factors
+			WHERE factor_type = 'webauthn'
+		`).Scan(&resp.MFAWebAuthnCount)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM mfa_factors
+			WHERE factor_type = 'backup_codes'
+		`).Scan(&resp.MFABackupCodesCount)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DashboardSecurityPosture(w http.ResponseWriter, r *http.Request) {
+	if OperatorFromContext(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	resp := SecurityPostureResponse{
+		RiskScore:        15,
+		RiskLevel:        "strong",
+		ThreatIndicators: []ThreatIndicator{},
+	}
+
+	db := h.dbConn()
+	if isDBAvailable(db) {
+		var totalIdentities, aal2Identities int64
+		if err := db.QueryRow(r.Context(), `
+			SELECT
+				COUNT(DISTINCT ci.id) AS total,
+				COUNT(DISTINCT CASE WHEN cs.aal = 'aal2' THEN ci.id END) AS aal2
+			FROM core_identities ci
+			LEFT JOIN core_sessions cs
+				ON cs.identity_id = ci.id
+			   AND cs.active = TRUE
+			   AND cs.expires_at > NOW()
+			WHERE ci.deleted_at IS NULL
+		`).Scan(&totalIdentities, &aal2Identities); err == nil && totalIdentities > 0 {
+			resp.MFACoveragePct = float64(aal2Identities) * 100 / float64(totalIdentities)
+		}
+
+		var passkeysCount int64
+		if err := db.QueryRow(r.Context(), `
+			SELECT COUNT(DISTINCT identity_id)
+			FROM passkeys_credentials
+		`).Scan(&passkeysCount); err == nil && totalIdentities > 0 {
+			resp.PasskeyCoveragePct = float64(passkeysCount) * 100 / float64(totalIdentities)
+		}
+
+		var activeSessions int64
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM core_sessions
+			WHERE active = TRUE
+			  AND expires_at > NOW()
+		`).Scan(&activeSessions)
+
+		if totalIdentities > 0 {
+			resp.SessionPressureRatio = float64(activeSessions) / float64(totalIdentities)
+		}
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM adm_audit_log
+			WHERE (action LIKE '%fail%' OR action LIKE '%denied%' OR action LIKE '%reject%')
+			  AND created_at >= NOW() - INTERVAL '24 hours'
+		`).Scan(&resp.FailedLoginsLast24h)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM adm_ip_bans
+			WHERE expires_at IS NULL OR expires_at > NOW()
+		`).Scan(&resp.ActiveIPBansCount)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM adm_scim_api_tokens
+			WHERE (permissions->>'wildcard')::boolean = true OR (scopes::text LIKE '%*%')
+		`).Scan(&resp.WildcardSCIMTokens)
+
+		_ = db.QueryRow(r.Context(), `
+			SELECT COUNT(*)
+			FROM oauth2_clients
+			WHERE secret_rotated_at IS NULL
+			  AND created_at < NOW() - INTERVAL '90 days'
+		`).Scan(&resp.UnrotatedOAuthSecrets)
+	}
+	score := 15
+
+	if resp.MFACoveragePct < 50 {
+		score += 25
+		resp.ThreatIndicators = append(resp.ThreatIndicators, ThreatIndicator{
+			ID:          "mfa-low-adoption",
+			Severity:    "warning",
+			Title:       "Low MFA Adoption Rate",
+			Description: fmt.Sprintf("MFA coverage is currently %.1f%% across active identities.", resp.MFACoveragePct),
+			ActionURL:   "/settings",
+			ActionLabel: "Enforce MFA",
+		})
+	}
+
+	if resp.FailedLoginsLast24h > 10 {
+		score += 20
+		resp.ThreatIndicators = append(resp.ThreatIndicators, ThreatIndicator{
+			ID:          "high-failed-logins",
+			Severity:    "warning",
+			Title:       "Elevated Authentication Failures",
+			Description: fmt.Sprintf("%d failed login attempts detected in the last 24 hours.", resp.FailedLoginsLast24h),
+			ActionURL:   "/logs",
+			ActionLabel: "Review Audit Logs",
+		})
+	}
+
+	if resp.ActiveIPBansCount > 0 {
+		resp.ThreatIndicators = append(resp.ThreatIndicators, ThreatIndicator{
+			ID:          "active-ip-threats",
+			Severity:    "info",
+			Title:       "Active IP Threat Bans",
+			Description: fmt.Sprintf("%d IP addresses are currently blocked by security policies.", resp.ActiveIPBansCount),
+			ActionURL:   "/security",
+			ActionLabel: "Manage IP Bans",
+		})
+	}
+
+	if resp.WildcardSCIMTokens > 0 {
+		score += 15
+		resp.ThreatIndicators = append(resp.ThreatIndicators, ThreatIndicator{
+			ID:          "wildcard-scim-tokens",
+			Severity:    "warning",
+			Title:       "Wildcard SCIM Tokens Active",
+			Description: fmt.Sprintf("%d SCIM token(s) have unrestricted wildcard permissions.", resp.WildcardSCIMTokens),
+			ActionURL:   "/scim",
+			ActionLabel: "Review SCIM Tokens",
+		})
+	}
+
+	if resp.UnrotatedOAuthSecrets > 0 {
+		score += 10
+		resp.ThreatIndicators = append(resp.ThreatIndicators, ThreatIndicator{
+			ID:          "unrotated-oauth-secrets",
+			Severity:    "info",
+			Title:       "Stale OAuth2 Client Credentials",
+			Description: fmt.Sprintf("%d OAuth2 client secret(s) have not been rotated in over 90 days.", resp.UnrotatedOAuthSecrets),
+			ActionURL:   "/oauth2",
+			ActionLabel: "Rotate Secrets",
+		})
+	}
+
+	if score > 100 {
+		score = 100
+	}
+	resp.RiskScore = score
+
+	if score >= 60 {
+		resp.RiskLevel = "critical"
+	} else if score >= 30 {
+		resp.RiskLevel = "moderate"
+	} else {
+		resp.RiskLevel = "strong"
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {

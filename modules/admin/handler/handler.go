@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
 	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/admin/service"
@@ -101,10 +101,70 @@ type OperatorView struct {
 
 // DashboardStatsResponse powers the admin dashboard widgets.
 type DashboardStatsResponse struct {
-	TotalIdentities   int64   `json:"total_identities"`
-	ActiveSessions    int64   `json:"active_sessions"`
-	IdentitiesLast24h int64   `json:"identities_last_24h"`
-	MFAAdoptionRate   float64 `json:"mfa_adoption_rate"`
+	TotalIdentities     int64   `json:"total_identities"`
+	ActiveSessions      int64   `json:"active_sessions"`
+	IdentitiesLast24h   int64   `json:"identities_last_24h"`
+	IdentitiesLast7d    int64   `json:"identities_last_7d"`
+	IdentitiesLast30d   int64   `json:"identities_last_30d"`
+	MFAAdoptionRate     float64 `json:"mfa_adoption_rate"`
+	PasskeyAdoptionRate float64 `json:"passkey_adoption_rate"`
+	ActiveIPBans        int64   `json:"active_ip_bans"`
+	ActiveOperators     int64   `json:"active_operators"`
+	TotalOperators      int64   `json:"total_operators"`
+	TotalRoles          int64   `json:"total_roles"`
+	TotalOAuth2Clients  int64   `json:"total_oauth2_clients"`
+	ActiveOAuth2Tokens  int64   `json:"active_oauth2_tokens"`
+	SystemStatus        string  `json:"system_status"` // "healthy" | "degraded" | "critical"
+}
+
+// TimeSeriesPoint represents a single bucketed point in time.
+type TimeSeriesPoint struct {
+	Timestamp      string `json:"timestamp"`
+	NewIdentities  int64  `json:"new_identities"`
+	ActiveSessions int64  `json:"active_sessions"`
+	AuthSuccesses  int64  `json:"auth_successes"`
+	AuthFailures   int64  `json:"auth_failures"`
+}
+
+// DashboardTimeSeriesResponse contains time series metrics for charting.
+type DashboardTimeSeriesResponse struct {
+	Range  string            `json:"range"`
+	Points []TimeSeriesPoint `json:"points"`
+}
+
+// AuthBreakdownResponse contains credential protocol and factor distributions.
+type AuthBreakdownResponse struct {
+	PasskeysCount       int64 `json:"passkeys_count"`
+	PasswordsCount      int64 `json:"passwords_count"`
+	SocialOIDCCount     int64 `json:"social_oidc_count"`
+	EnterpriseSSOCount  int64 `json:"enterprise_sso_count"`
+	MFATOTPCount        int64 `json:"mfa_totp_count"`
+	MFAWebAuthnCount    int64 `json:"mfa_webauthn_count"`
+	MFABackupCodesCount int64 `json:"mfa_backup_codes_count"`
+}
+
+// ThreatIndicator represents an actionable security risk or posture warning.
+type ThreatIndicator struct {
+	ID          string `json:"id"`
+	Severity    string `json:"severity"` // "info" | "warning" | "critical"
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	ActionURL   string `json:"action_url,omitempty"`
+	ActionLabel string `json:"action_label,omitempty"`
+}
+
+// SecurityPostureResponse contains calculated risk metrics and threat indicators.
+type SecurityPostureResponse struct {
+	RiskScore             int               `json:"risk_score"` // 0-100 (lower is better)
+	RiskLevel             string            `json:"risk_level"` // "strong" | "moderate" | "critical"
+	MFACoveragePct        float64           `json:"mfa_coverage_pct"`
+	PasskeyCoveragePct    float64           `json:"passkey_coverage_pct"`
+	SessionPressureRatio  float64           `json:"session_pressure_ratio"`
+	FailedLoginsLast24h   int64             `json:"failed_logins_last_24h"`
+	ActiveIPBansCount     int64             `json:"active_ip_bans_count"`
+	WildcardSCIMTokens    int64             `json:"wildcard_scim_tokens"`
+	UnrotatedOAuthSecrets int64             `json:"unrotated_oauth_secrets"`
+	ThreatIndicators      []ThreatIndicator `json:"threat_indicators"`
 }
 
 // SystemSettingsResponse is the persisted settings contract for admin UI.
@@ -170,6 +230,16 @@ func (h *Handler) dbConn() dbQuerier {
 	return h.service.Store().DB()
 }
 
+func isDBAvailable(db dbQuerier) bool {
+	if db == nil {
+		return false
+	}
+	if pool, ok := db.(*pgxpool.Pool); ok && pool == nil {
+		return false
+	}
+	return true
+}
+
 // RegisterRoutes registers all admin API routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Public auth endpoints
@@ -233,6 +303,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 		// Dashboard and system settings
 		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/stats", h.DashboardStats)
+		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/timeseries", h.DashboardTimeSeries)
+		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/auth-breakdown", h.DashboardAuthBreakdown)
+		r.With(RequirePermission(h, service.PermAuditRead)).Get("/dashboard/security-posture", h.DashboardSecurityPosture)
 		r.With(RequirePermission(h, service.PermAuditRead)).Get("/logs/activity", h.ActivityFeed)
 		r.With(RequirePermission(h, service.PermSecurityRead)).Get("/security/ip-bans", h.ListIPBans)
 		r.With(RequirePermission(h, service.PermSecurityCreate)).Post("/security/ip-bans", h.UpsertIPBan)

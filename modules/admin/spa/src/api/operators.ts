@@ -5,13 +5,15 @@ import type {
   PaginatedResponse,
   LoginCredentials,
   DashboardStats,
+  DashboardTimeSeries,
+  AuthBreakdown,
+  SecurityPosture,
   SystemSettings,
   DashboardConfig,
   ModuleHealthStatus,
   HealthState,
   ObservabilitySummary,
 } from '../types';
-
 const HEALTH_TIMEOUT_MS = 8000;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -217,6 +219,21 @@ export const dashboardApi = {
     return response.data;
   },
 
+  getTimeSeries: async (range = '24h'): Promise<DashboardTimeSeries> => {
+    const response = await apiClient.get<DashboardTimeSeries>(`/admin/dashboard/timeseries?range=${encodeURIComponent(range)}`);
+    return response.data;
+  },
+
+  getAuthBreakdown: async (): Promise<AuthBreakdown> => {
+    const response = await apiClient.get<AuthBreakdown>('/admin/dashboard/auth-breakdown');
+    return response.data;
+  },
+
+  getSecurityPosture: async (): Promise<SecurityPosture> => {
+    const response = await apiClient.get<SecurityPosture>('/admin/dashboard/security-posture');
+    return response.data;
+  },
+
   getConfig: async (): Promise<DashboardConfig> => {
     const response = await apiClient.get<DashboardConfig>('/admin/dashboard/config');
     return response.data;
@@ -224,8 +241,12 @@ export const dashboardApi = {
 
   getHealth: async (): Promise<ModuleHealthStatus[]> => {
     const probes = await Promise.all([
-      probeHealth('service-health', 'Admin Service', '/health'),
-      probeHealth('service-ready', 'Admin Readiness', '/health/ready'),
+      probeHealth('admin-health', 'Admin Core Service', '/health'),
+      probeHealth('admin-ready', 'Admin Readiness Probe', '/health/ready'),
+      probeHealth('setup-status', 'Setup & Config Status', '/api/admin/setup/status'),
+      probeHealth('oauth2-discovery', 'OAuth2 / OIDC Engine', '/.well-known/openid-configuration'),
+      probeHealth('scim-service', 'SCIM 2.0 Provisioning', '/api/admin/scim/tokens'),
+      probeHealth('policy-engine', 'ABAC/ReBAC Policy Engine', '/api/admin/policy/abac-rules'),
     ]);
     return probes;
   },
