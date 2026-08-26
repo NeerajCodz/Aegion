@@ -10,8 +10,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/modules/admin/store"
+	lozasdk "github.com/astraive/loza/sdks/go"
 )
 
 // Context keys for admin data.
@@ -37,25 +39,38 @@ func IPAddressFromContext(ctx context.Context) string {
 	if ip, ok := ctx.Value(contextKeyIPAddress).(string); ok {
 		return ip
 	}
+
 	return ""
+}
+func emitAdminSecurityEvent(ctx context.Context, name, outcome string, err error, attrs ...lozasdk.Attr) {
+	logger := lozasdk.Default()
+	eventCtx := aegionloza.Start(ctx, logger, lozasdk.Params{
+		Event:   name,
+		Kind:    "security",
+		Service: "aegion.module.admin",
+		Custom:  attrs,
+	})
+	if err != nil {
+		_ = logger.FinishError(eventCtx, err)
+	} else {
+		_ = logger.Finish(eventCtx, aegionloza.NormalizeOutcome(outcome))
+	}
+	_ = logger.Emit(eventCtx)
 }
 
 // RequireAdmin middleware validates that the request is from an authenticated operator.
 func (h *Handler) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
 		auth := strings.TrimSpace(r.Header.Get("Authorization"))
 		if strings.HasPrefix(auth, "Bearer "+h.config.APIKeyPrefix) {
 			h.handleAPIKeyAuth(w, r, next, auth)
 			return
 		}
-
-		h.log.WarnContext(r.Context(), "admin auth missing valid api key",
-			"path", r.URL.Path,
-			"method", r.Method,
-			"duration_ms", time.Since(start).Milliseconds(),
-		)
-
+		emitAdminSecurityEvent(r.Context(), "admin.login", "rejected", nil,
+			lozasdk.String("auth.operation", "api_key"),
+			lozasdk.String("policy.decision", "deny"),
+			lozasdk.String("http.method", r.Method),
+			lozasdk.String("http.path", r.URL.Path))
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 	})
 }
@@ -80,29 +95,28 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	// Look up API key
 	key, err := h.service.Store().GetAPIKeyByPrefix(r.Context(), keyPrefix)
 	if err != nil {
-		h.log.WarnContext(r.Context(), "admin api key not found",
-			"prefix", keyPrefix,
-			"path", r.URL.Path,
-		)
+		emitAdminSecurityEvent(r.Context(), "admin.login", "rejected", err,
+			lozasdk.String("auth.operation", "api_key"),
+			lozasdk.String("policy.decision", "deny"),
+			lozasdk.String("http.path", r.URL.Path))
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "Invalid or expired API key")
 		return
 	}
 
 	if !store.ValidateAPIKeyToken(apiKey, key.KeyHash) {
-		h.log.WarnContext(r.Context(), "admin api key hash mismatch",
-			"key_id", key.ID.String(),
-			"operator_id", key.OperatorID.String(),
-		)
+		emitAdminSecurityEvent(r.Context(), "admin.login", "rejected", nil,
+			lozasdk.String("auth.operation", "api_key"),
+			lozasdk.String("policy.decision", "deny"))
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "Invalid or expired API key")
 		return
 	}
 
 	// Check expiration
 	if key.ExpiresAt != nil && time.Now().UTC().After(*key.ExpiresAt) {
-		h.log.WarnContext(r.Context(), "admin api key expired",
-			"key_id", key.ID.String(),
-			"expires_at", key.ExpiresAt.Format(time.RFC3339),
-		)
+		emitAdminSecurityEvent(r.Context(), "admin.login", "rejected", nil,
+			lozasdk.String("auth.operation", "api_key"),
+			lozasdk.String("policy.decision", "deny"),
+			lozasdk.String("error.code", "api_key_expired"))
 		writeError(w, http.StatusUnauthorized, "api_key_expired", "API key has expired")
 		return
 	}
@@ -110,10 +124,9 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	// Get operator for the API key
 	operator, err := h.service.Store().GetOperator(r.Context(), key.OperatorID)
 	if err != nil {
-		h.log.WarnContext(r.Context(), "admin api key operator missing",
-			"key_id", key.ID.String(),
-			"operator_id", key.OperatorID.String(),
-		)
+		emitAdminSecurityEvent(r.Context(), "admin.login", "rejected", err,
+			lozasdk.String("auth.operation", "api_key"),
+			lozasdk.String("policy.decision", "deny"))
 		writeError(w, http.StatusUnauthorized, "invalid_api_key", "API key operator not found")
 		return
 	}
@@ -128,12 +141,12 @@ func (h *Handler) handleAPIKeyAuth(w http.ResponseWriter, r *http.Request, next 
 	ctx = context.WithValue(ctx, contextKeyAuthKeyID, key.ID.String())
 	ctx = observability.WithUserID(ctx, operator.ID.String())
 
-	h.log.InfoContext(ctx, "admin api key auth success",
-		"operator_id", operator.ID.String(),
-		"key_id", key.ID.String(),
-		"path", r.URL.Path,
-		"method", r.Method,
-	)
+	emitAdminSecurityEvent(ctx, "admin.login", "success", nil,
+		lozasdk.String("auth.operation", "api_key"),
+		lozasdk.String("auth.subject_id", operator.ID.String()),
+		lozasdk.String("auth.key_id", key.ID.String()),
+		lozasdk.String("http.path", r.URL.Path),
+		lozasdk.String("http.method", r.Method))
 
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
@@ -144,17 +157,27 @@ func RequirePermission(h *Handler, permission string) func(http.Handler) http.Ha
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			operator := OperatorFromContext(r.Context())
 			if operator == nil {
+				emitAdminSecurityEvent(r.Context(), "admin.permission_decision", "rejected", nil,
+					lozasdk.String("policy.decision", "deny"),
+					lozasdk.String("policy.reason", "missing_operator"),
+					lozasdk.String("auth.operation", permission))
 				writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 				return
 			}
 
-			// Check if operator has the required permission
 			if err := h.service.EvaluateCapability(r.Context(), operator.ID, permission); err != nil {
+				emitAdminSecurityEvent(r.Context(), "admin.permission_decision", "rejected", err,
+					lozasdk.String("policy.decision", "deny"),
+					lozasdk.String("policy.reason", "capability_denied"),
+					lozasdk.String("auth.operation", permission))
 				writeError(w, http.StatusForbidden, "insufficient_permissions",
 					"You do not have permission to perform this action")
 				return
 			}
 
+			emitAdminSecurityEvent(r.Context(), "admin.permission_decision", "success", nil,
+				lozasdk.String("policy.decision", "allow"),
+				lozasdk.String("auth.operation", permission))
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -172,8 +195,7 @@ func (h *Handler) AuditLog(action, resourceType string) func(http.Handler) http.
 
 			next.ServeHTTP(wrapped, r)
 
-			// Log the action after response
-			go h.logAdminAction(r, action, resourceType, wrapped.statusCode)
+			h.logAdminAction(r, action, resourceType, wrapped.statusCode)
 		})
 	}
 }
@@ -230,15 +252,22 @@ func (h *Handler) logAdminAction(r *http.Request, action, resourceType string, s
 	// Log action (best effort)
 	_ = h.service.Store().LogAction(ctx, entry)
 
-	if h.log != nil {
-		h.log.InfoContext(r.Context(), "admin action audited",
-			"action", action,
-			"resource_type", resourceType,
-			"resource_id", resourceID,
-			"status_code", statusCode,
-			"operator_id", fmtUUID(operator),
-		)
-	}
+	eventCtx := aegionloza.Start(r.Context(), lozasdk.Default(), lozasdk.Params{
+		Event:      "admin.audit",
+		Kind:       "audit",
+		Service:    "aegion.module.admin",
+		RequestID:  middleware.GetReqID(r.Context()),
+		StatusCode: statusCode,
+		Custom: []lozasdk.Attr{
+			lozasdk.String("audit.action", action),
+			lozasdk.String("audit.resource_type", resourceType),
+			lozasdk.String("audit.resource_id", resourceID),
+			lozasdk.String("http.method", r.Method),
+			lozasdk.String("http.path", r.URL.Path),
+		},
+	})
+	_ = lozasdk.Default().Finish(eventCtx, aegionloza.OutcomeForHTTP(statusCode, nil))
+	_ = lozasdk.Default().Emit(eventCtx)
 }
 
 func fmtUUID(op *store.Operator) string {

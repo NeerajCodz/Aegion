@@ -3,7 +3,9 @@ package security
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"strconv"
@@ -12,9 +14,10 @@ import (
 	"time"
 
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/platform/trustedproxy"
-	"github.com/aegion/aegion/internal/xlog"
+	lozasdk "github.com/astraive/loza/sdks/go"
 	"github.com/google/uuid"
 )
 
@@ -208,11 +211,7 @@ func SecurityAudit(next http.Handler) http.Handler {
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
 		}
-
-		next.ServeHTTP(wrapped, r)
-
-		// Log security events asynchronously
-		go logSecurityEvent(r, wrapped.statusCode)
+		logSecurityEvent(r, wrapped.statusCode)
 	})
 }
 
@@ -263,7 +262,8 @@ func setRequestIDInContext(ctx context.Context, requestID string) context.Contex
 	return context.WithValue(ctx, contextKeyRequestID, requestID)
 }
 
-// logSecurityEvent logs security-relevant events.
+// logSecurityEvent emits one structured audit event for the completed admin
+// security boundary. Client identity is hashed before it leaves the process.
 func logSecurityEvent(r *http.Request, statusCode int) {
 	ctx := observability.AddTraceToContext(r.Context())
 	traceInfo := observability.GetTraceInfoForLogger(ctx)
@@ -271,25 +271,39 @@ func logSecurityEvent(r *http.Request, statusCode int) {
 	if requestID == "" {
 		requestID = r.Header.Get("X-Request-ID")
 	}
-	route := observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path)
-
-	attrs := []any{
-		"request_id", requestID,
-		"trace_id", traceInfo.TraceID,
-		"span_id", traceInfo.SpanID,
-		"method", r.Method,
-		"route", route,
-		"path", r.URL.Path,
-		"ip", getClientIP(r),
-		"user_agent", r.UserAgent(),
-		"status", statusCode,
-	}
-
+	eventName := "admin.permission_decision"
+	decision := "allow"
+	outcome := "success"
 	if statusCode >= http.StatusBadRequest {
-		xlog.Default().WarnContext(ctx, "admin security event", attrs...)
-	} else {
-		xlog.Default().InfoContext(ctx, "admin security event", attrs...)
+		decision = "deny"
+		outcome = "rejected"
 	}
+	eventCtx := aegionloza.Start(ctx, lozasdk.Default(), lozasdk.Params{
+		Event:      eventName,
+		Kind:       "security",
+		Service:    "aegion.module.admin",
+		RequestID:  requestID,
+		TraceID:    traceInfo.TraceID,
+		SpanID:     traceInfo.SpanID,
+		Method:     r.Method,
+		Path:       r.URL.Path,
+		Route:      observability.HTTPRouteLabel(observability.RoutePattern(r), r.URL.Path),
+		StatusCode: statusCode,
+		Custom: []lozasdk.Attr{
+			lozasdk.String("auth.operation", "admin_request"),
+			lozasdk.String("policy.decision", decision),
+			lozasdk.String("policy.reason", http.StatusText(statusCode)),
+			lozasdk.String("http.user_agent", r.UserAgent()),
+			lozasdk.String("http.client_ip_hash", hashClientIP(r)),
+		},
+	})
+	_ = lozasdk.Default().Finish(eventCtx, outcome)
+	_ = lozasdk.Default().Emit(eventCtx)
+}
+
+func hashClientIP(r *http.Request) string {
+	sum := sha256.Sum256([]byte(getClientIP(r)))
+	return hex.EncodeToString(sum[:])
 }
 
 func ensureCSRFCookie(w http.ResponseWriter, r *http.Request) (string, error) {

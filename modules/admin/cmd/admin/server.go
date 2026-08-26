@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	lozasdk "github.com/astraive/loza/sdks/go"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	platformobservability "github.com/aegion/aegion/internal/platform/observability"
 	"github.com/aegion/aegion/internal/xlog"
 	admin "github.com/aegion/aegion/modules/admin"
@@ -211,27 +213,27 @@ func (s *Server) logRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-
+		eventCtx := aegionloza.Start(r.Context(), lozasdk.Default(), lozasdk.Params{
+			Event:     "admin.http_request",
+			Kind:      "request",
+			Service:   "aegion.module.admin",
+			Method:    r.Method,
+			Path:      r.URL.Path,
+			RequestID: middleware.GetReqID(r.Context()),
+			StartedAt: start,
+		})
 		defer func() {
-			ctx := r.Context()
-			requestID := middleware.GetReqID(ctx)
-			operatorID := ""
-			if operator := handler.OperatorFromContext(ctx); operator != nil {
-				operatorID = operator.ID.String()
-			}
-
-			xlog.Default().InfoContext(ctx, "request completed",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"status", ww.Status(),
-				"bytes", ww.BytesWritten(),
-				"duration", time.Since(start),
-				"request_id", requestID,
-				"operator_id", operatorID,
+			status := ww.Status()
+			_ = lozasdk.Default().Set(eventCtx,
+				lozasdk.String("http.route", platformobservability.HTTPRouteLabel(platformobservability.RoutePattern(r), r.URL.Path)),
+				lozasdk.Int("http.status_code", status),
+				lozasdk.Int64("http.response.body_size", int64(ww.BytesWritten())),
+				lozasdk.String("http.user_agent", r.UserAgent()),
 			)
+			_ = lozasdk.Default().Finish(eventCtx, aegionloza.OutcomeForHTTP(status, eventCtx.Err()))
+			_ = lozasdk.Default().Emit(eventCtx)
 		}()
-
-		next.ServeHTTP(ww, r)
+		next.ServeHTTP(ww, r.WithContext(eventCtx))
 	})
 }
 
