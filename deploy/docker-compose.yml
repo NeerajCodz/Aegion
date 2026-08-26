@@ -29,6 +29,24 @@ services:
     networks: [aegion-internal]
     restart: unless-stopped
 
+  loza-collector:
+    image: ${LOZA_COLLECTOR_IMAGE:-ghcr.io/astraive/loza-collector:v0.3.3}
+    environment:
+      LOZA_EVENTBUS: memory
+      COLLECTOR_RELIABILITY_MODE: direct
+      COLLECTOR_AUTH_SERVER_SECRET: ${LOZA_COLLECTOR_AUTH_SERVER_SECRET:-dev-server-secret-change-me}
+      COLLECTOR_INGEST_KEY_SECRET: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
+    volumes:
+      - loza-data:/app
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9308/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [aegion-internal]
+    restart: unless-stopped
+
+
   migration:
     image: ${AEGION_CORE_IMAGE:-aegion/aegion-core:dev}
     command: ["migrate", "--config", "/config/aegion.yaml"]
@@ -42,6 +60,9 @@ services:
 
   aegion:
     image: ${AEGION_CORE_IMAGE:-aegion/aegion-core:dev}
+    environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -53,6 +74,8 @@ services:
   module-admin:
     image: ${AEGION_MODULE_ADMIN_IMAGE:-aegion/aegion-admin:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: admin
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9003
     depends_on:
@@ -66,6 +89,8 @@ services:
   module-analytics:
     image: ${AEGION_MODULE_ANALYTICS_IMAGE:-aegion/aegion-analytics:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: analytics
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:8082
     depends_on:
@@ -79,6 +104,8 @@ services:
   module-oauth2:
     image: ${AEGION_MODULE_OAUTH2_IMAGE:-aegion/aegion-oauth2:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: oauth2
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9005
     depends_on:
@@ -92,6 +119,8 @@ services:
   module-social:
     image: ${AEGION_MODULE_SOCIAL_IMAGE:-aegion/aegion-social:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: social
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9006
     depends_on:
@@ -105,6 +134,8 @@ services:
   module-sso:
     image: ${AEGION_MODULE_SSO_IMAGE:-aegion/aegion-sso:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: sso
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9007
     depends_on:
@@ -118,6 +149,8 @@ services:
   module-introspection:
     image: ${AEGION_MODULE_INTROSPECTION_IMAGE:-aegion/aegion-introspection:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: introspection
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9008
     depends_on:
@@ -131,6 +164,8 @@ services:
   module-proxy:
     image: ${AEGION_MODULE_PROXY_IMAGE:-aegion/aegion-proxy:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: proxy
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9009
     depends_on:
@@ -144,6 +179,8 @@ services:
   module-mfa:
     image: ${AEGION_MODULE_MFA_IMAGE:-aegion/aegion-mfa:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: mfa
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9003
     depends_on:
@@ -157,6 +194,8 @@ services:
   module-passkeys:
     image: ${AEGION_MODULE_PASSKEYS_IMAGE:-aegion/aegion-passkeys:dev}
     environment:
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/events
+      AEGION_LOZA_API_KEY: ${AEGION_LOZA_API_KEY:-dev-ingest-key-change-me}
       AEGION_MODULE_ID: passkeys
       AEGION_HTTP_LISTEN_ADDR: 0.0.0.0:9004
     depends_on:
@@ -186,3 +225,4 @@ volumes:
   postgres-data:
   redis-data:
   aegion-data:
+  loza-data:

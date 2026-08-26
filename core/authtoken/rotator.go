@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/core/eventbus"
-	"github.com/aegion/aegion/internal/xlog"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
+	lozasdk "github.com/astraive/loza/sdks/go"
 )
 
 // Event types for secret rotation.
@@ -93,7 +94,7 @@ func (r *Rotator) Rotate(ctx context.Context, newSecret []byte) error {
 				"grace_period_seconds": r.gracePeriod.Seconds(),
 			},
 		}); err != nil {
-			xlog.Default().ErrorContext(ctx, "failed to publish secret rotation started event", "error", err)
+			emitSecurityEvent(ctx, "security.secret_rotation_publish", err)
 		}
 	}
 
@@ -110,9 +111,8 @@ func (r *Rotator) completeRotation(ctx context.Context, currentSecret []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Remove old secret, keep only current
 	if err := r.generator.SetSecrets(currentSecret); err != nil {
-		xlog.Default().ErrorContext(ctx, "failed to finalize rotated secret", "error", err)
+		emitSecurityEvent(ctx, "security.secret_rotation_finalize", err)
 	}
 
 	r.rotationTimer = nil
@@ -125,7 +125,7 @@ func (r *Rotator) completeRotation(ctx context.Context, currentSecret []byte) {
 			EntityType:   "secret",
 			Payload:      map[string]interface{}{},
 		}); err != nil {
-			xlog.Default().ErrorContext(ctx, "failed to publish secret rotation completed event", "error", err)
+			emitSecurityEvent(ctx, "security.secret_rotation_publish", err)
 		}
 	}
 }
@@ -161,7 +161,7 @@ func (r *Rotator) RotateWithCallback(ctx context.Context, newSecret []byte, onCo
 				"grace_period_seconds": r.gracePeriod.Seconds(),
 			},
 		}); err != nil {
-			xlog.Default().ErrorContext(ctx, "failed to publish secret rotation started event", "error", err)
+			emitSecurityEvent(ctx, "security.secret_rotation_publish", err)
 		}
 	}
 
@@ -214,4 +214,14 @@ func (r *Rotator) Stop() {
 		r.rotationTimer.Stop()
 		r.rotationTimer = nil
 	}
+}
+
+func emitSecurityEvent(ctx context.Context, eventName string, eventErr error) {
+	eventCtx := aegionloza.Start(ctx, lozasdk.Default(), lozasdk.Params{
+		Event:   eventName,
+		Kind:    "security",
+		Service: "aegion.core.authtoken",
+	})
+	_ = lozasdk.Default().FinishError(eventCtx, eventErr)
+	_ = lozasdk.Default().Emit(eventCtx)
 }
