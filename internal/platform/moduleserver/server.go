@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/aegion/aegion/internal/platform/config"
 	platformcrypto "github.com/aegion/aegion/internal/platform/crypto"
 	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/platform/securefile"
@@ -126,6 +128,19 @@ func Run(cfg Config) error {
 	}
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = "0.0.0.0:9000"
+	}
+	var shutdownLoza func(context.Context) error
+	if strings.TrimSpace(os.Getenv("AEGION_LOZA_COLLECTOR_URL")) != "" {
+		var initErr error
+		_, shutdownLoza, initErr = aegionloza.Initialize(configFromEnvironment(), "aegion.module."+cfg.Module, cfg.Version)
+		if initErr != nil {
+			return fmt.Errorf("[%s] initialize Loza: %w", cfg.Module, initErr)
+		}
+		defer func() {
+			if shutdownLoza != nil {
+				_ = shutdownLoza(context.Background())
+			}
+		}()
 	}
 	if len(cfg.GRPCServices) > 0 && cfg.RegisterGRPC == nil {
 		return fmt.Errorf("[%s] advertises gRPC services without registering an implementation", cfg.Module)
@@ -262,6 +277,16 @@ func outcomeForModuleError(err error) string {
 		return "cancelled"
 	}
 	return "error"
+}
+
+func configFromEnvironment() config.LozaConfig {
+	insecure, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("AEGION_LOZA_INSECURE")))
+	return config.LozaConfig{
+		CollectorURL:  os.Getenv("AEGION_LOZA_COLLECTOR_URL"),
+		CollectorName: os.Getenv("AEGION_LOZA_COLLECTOR_NAME"),
+		Environment:   os.Getenv("AEGION_ENV"),
+		Insecure:      insecure,
+	}
 }
 func emitModuleEvent(cfg Config, eventName, outcome string, err error, attrs ...lozasdk.Attr) {
 	logger := lozasdk.Default()
