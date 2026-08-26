@@ -15,8 +15,10 @@ import (
 	"time"
 
 	platformjwt "github.com/aegion/aegion/internal/platform/jwt"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/xlog"
 	"github.com/aegion/aegion/modules/analytics/rbac"
+	lozasdk "github.com/astraive/loza/sdks/go"
 )
 
 // Middleware represents a GraphQL middleware function.
@@ -75,36 +77,52 @@ func AuthMiddleware(logger *xlog.Logger, requiredForFields map[string]bool) Midd
 	}
 }
 
-// InstrumentationMiddleware adds tracing and logging to GraphQL requests.
-func InstrumentationMiddleware(logger *xlog.Logger) Middleware {
+// InstrumentationMiddleware emits one canonical event for each GraphQL request.
+func InstrumentationMiddleware(_ *xlog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			traceID := generateTraceID()
-
-			// Add trace ID to context
 			ctx := context.WithValue(r.Context(), "traceID", traceID)
 			ctx = context.WithValue(ctx, "startTime", start)
-
-			// Log request
-			logger.InfoContext(ctx, "GraphQL request started",
-				"traceID", traceID,
-				"method", r.Method,
-				"path", r.URL.Path,
-				"ip", getClientIP(r))
-
-			// Call next handler
-			next.ServeHTTP(w, r.WithContext(ctx))
-
-			// Log response
-			duration := time.Since(start)
-			logger.InfoContext(ctx, "GraphQL request completed",
-				"traceID", traceID,
-				"method", r.Method,
-				"path", r.URL.Path,
-				"duration", duration)
+			eventCtx := aegionloza.Start(ctx, lozasdk.Default(), lozasdk.Params{
+				Event:     "analytics.graphql_request",
+				Kind:      "request",
+				Service:   "aegion.module.analytics",
+				TraceID:   traceID,
+				Method:    r.Method,
+				Path:      r.URL.Path,
+				StartedAt: start,
+			})
+			wrapped := &instrumentedResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			defer func() {
+				_ = lozasdk.Default().Set(eventCtx,
+					lozasdk.Int("http.status_code", wrapped.statusCode),
+					lozasdk.String("http.user_agent", r.UserAgent()),
+				)
+				_ = lozasdk.Default().Finish(eventCtx, aegionloza.OutcomeForHTTP(wrapped.statusCode, eventCtx.Err()))
+				_ = lozasdk.Default().Emit(eventCtx)
+			}()
+			next.ServeHTTP(wrapped, r.WithContext(eventCtx))
 		})
 	}
+}
+
+type instrumentedResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *instrumentedResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *instrumentedResponseWriter) Write(body []byte) (int, error) {
+	if w.statusCode == http.StatusOK {
+		w.statusCode = http.StatusOK
+	}
+	return w.ResponseWriter.Write(body)
 }
 
 // RateLimitMiddleware enforces per-user or per-IP rate limiting.

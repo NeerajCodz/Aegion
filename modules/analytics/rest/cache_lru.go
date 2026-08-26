@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
+	lozasdk "github.com/astraive/loza/sdks/go"
 )
 
 // QueryCacheConfig holds configuration for query result caching
@@ -313,15 +316,29 @@ func (c *LRUQueryCache) cleanupExpired() {
 	}
 }
 
-// reportStats logs cache statistics periodically
+// reportStats emits one wide event per cache statistics interval.
 func (c *LRUQueryCache) reportStats() {
 	for {
 		select {
 		case <-c.statsTick.C:
 			stats := c.GetStats()
-			// In production, this would be logged to a metrics system
-			fmt.Printf("[CACHE STATS] Size: %d/%d, Hits: %d, Misses: %d, Hit Rate: %.2f%%, Evictions: %d\n",
-				stats.Size, stats.MaxSize, stats.Hits, stats.Misses, stats.HitRate*100, stats.Evictions)
+			eventCtx := aegionloza.Start(context.Background(), lozasdk.Default(), lozasdk.Params{
+				Event:   "analytics.cache_stats",
+				Kind:    "system",
+				Service: "aegion.module.analytics",
+				Custom: []lozasdk.Attr{
+					lozasdk.String("cache.name", "analytics.query"),
+					lozasdk.Int("cache.size", stats.Size),
+					lozasdk.Int("cache.max_size", stats.MaxSize),
+					lozasdk.Int64("cache.hits", stats.Hits),
+					lozasdk.Int64("cache.misses", stats.Misses),
+					lozasdk.Int64("cache.evictions", stats.Evictions),
+					lozasdk.Float64("cache.hit_rate", stats.HitRate),
+					lozasdk.Int64("cache.interval_ms", time.Since(stats.LastReset).Milliseconds()),
+				},
+			})
+			_ = lozasdk.Default().Finish(eventCtx, "success")
+			_ = lozasdk.Default().Emit(eventCtx)
 		case <-c.stopCh:
 			return
 		}
