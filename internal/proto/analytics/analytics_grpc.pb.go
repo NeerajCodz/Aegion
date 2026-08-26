@@ -19,16 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AnalyticsService_QueryEvents_FullMethodName      = "/aegion.analytics.AnalyticsService/QueryEvents"
-	AnalyticsService_GetDashboard_FullMethodName     = "/aegion.analytics.AnalyticsService/GetDashboard"
-	AnalyticsService_GetHealthStatus_FullMethodName  = "/aegion.analytics.AnalyticsService/GetHealthStatus"
-	AnalyticsService_ExecuteQuery_FullMethodName     = "/aegion.analytics.AnalyticsService/ExecuteQuery"
-	AnalyticsService_CreateDashboard_FullMethodName  = "/aegion.analytics.AnalyticsService/CreateDashboard"
-	AnalyticsService_UpdateDashboard_FullMethodName  = "/aegion.analytics.AnalyticsService/UpdateDashboard"
-	AnalyticsService_StreamEvents_FullMethodName     = "/aegion.analytics.AnalyticsService/StreamEvents"
-	AnalyticsService_ExportData_FullMethodName       = "/aegion.analytics.AnalyticsService/ExportData"
-	AnalyticsService_BatchQuery_FullMethodName       = "/aegion.analytics.AnalyticsService/BatchQuery"
-	AnalyticsService_IngestXLogEvents_FullMethodName = "/aegion.analytics.AnalyticsService/IngestXLogEvents"
+	AnalyticsService_QueryEvents_FullMethodName     = "/aegion.analytics.AnalyticsService/QueryEvents"
+	AnalyticsService_GetDashboard_FullMethodName    = "/aegion.analytics.AnalyticsService/GetDashboard"
+	AnalyticsService_GetHealthStatus_FullMethodName = "/aegion.analytics.AnalyticsService/GetHealthStatus"
+	AnalyticsService_ExecuteQuery_FullMethodName    = "/aegion.analytics.AnalyticsService/ExecuteQuery"
+	AnalyticsService_CreateDashboard_FullMethodName = "/aegion.analytics.AnalyticsService/CreateDashboard"
+	AnalyticsService_UpdateDashboard_FullMethodName = "/aegion.analytics.AnalyticsService/UpdateDashboard"
+	AnalyticsService_StreamEvents_FullMethodName    = "/aegion.analytics.AnalyticsService/StreamEvents"
+	AnalyticsService_ExportData_FullMethodName      = "/aegion.analytics.AnalyticsService/ExportData"
+	AnalyticsService_BatchQuery_FullMethodName      = "/aegion.analytics.AnalyticsService/BatchQuery"
 )
 
 // AnalyticsServiceClient is the client API for AnalyticsService service.
@@ -49,8 +48,6 @@ type AnalyticsServiceClient interface {
 	ExportData(ctx context.Context, in *ExportDataRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DataChunk], error)
 	// Bidirectional streaming
 	BatchQuery(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[QueryBatch, QueryResult], error)
-	// Internal xlog ingestion
-	IngestXLogEvents(ctx context.Context, in *IngestXLogEventsRequest, opts ...grpc.CallOption) (*IngestXLogEventsResponse, error)
 }
 
 type analyticsServiceClient struct {
@@ -172,16 +169,6 @@ func (c *analyticsServiceClient) BatchQuery(ctx context.Context, opts ...grpc.Ca
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AnalyticsService_BatchQueryClient = grpc.BidiStreamingClient[QueryBatch, QueryResult]
 
-func (c *analyticsServiceClient) IngestXLogEvents(ctx context.Context, in *IngestXLogEventsRequest, opts ...grpc.CallOption) (*IngestXLogEventsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(IngestXLogEventsResponse)
-	err := c.cc.Invoke(ctx, AnalyticsService_IngestXLogEvents_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // AnalyticsServiceServer is the server API for AnalyticsService service.
 // All implementations must embed UnimplementedAnalyticsServiceServer
 // for forward compatibility.
@@ -200,8 +187,6 @@ type AnalyticsServiceServer interface {
 	ExportData(*ExportDataRequest, grpc.ServerStreamingServer[DataChunk]) error
 	// Bidirectional streaming
 	BatchQuery(grpc.BidiStreamingServer[QueryBatch, QueryResult]) error
-	// Internal xlog ingestion
-	IngestXLogEvents(context.Context, *IngestXLogEventsRequest) (*IngestXLogEventsResponse, error)
 	mustEmbedUnimplementedAnalyticsServiceServer()
 }
 
@@ -238,9 +223,6 @@ func (UnimplementedAnalyticsServiceServer) ExportData(*ExportDataRequest, grpc.S
 }
 func (UnimplementedAnalyticsServiceServer) BatchQuery(grpc.BidiStreamingServer[QueryBatch, QueryResult]) error {
 	return status.Error(codes.Unimplemented, "method BatchQuery not implemented")
-}
-func (UnimplementedAnalyticsServiceServer) IngestXLogEvents(context.Context, *IngestXLogEventsRequest) (*IngestXLogEventsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method IngestXLogEvents not implemented")
 }
 func (UnimplementedAnalyticsServiceServer) mustEmbedUnimplementedAnalyticsServiceServer() {}
 func (UnimplementedAnalyticsServiceServer) testEmbeddedByValue()                          {}
@@ -400,24 +382,6 @@ func _AnalyticsService_BatchQuery_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AnalyticsService_BatchQueryServer = grpc.BidiStreamingServer[QueryBatch, QueryResult]
 
-func _AnalyticsService_IngestXLogEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(IngestXLogEventsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AnalyticsServiceServer).IngestXLogEvents(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AnalyticsService_IngestXLogEvents_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AnalyticsServiceServer).IngestXLogEvents(ctx, req.(*IngestXLogEventsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // AnalyticsService_ServiceDesc is the grpc.ServiceDesc for AnalyticsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -448,10 +412,6 @@ var AnalyticsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateDashboard",
 			Handler:    _AnalyticsService_UpdateDashboard_Handler,
-		},
-		{
-			MethodName: "IngestXLogEvents",
-			Handler:    _AnalyticsService_IngestXLogEvents_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

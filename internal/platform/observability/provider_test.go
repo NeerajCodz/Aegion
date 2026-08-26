@@ -2,7 +2,6 @@ package observability
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/log/global"
-	lognoop "go.opentelemetry.io/otel/log/noop"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/sdk/resource"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
@@ -213,46 +210,6 @@ func TestProvider_ShutdownTimeout(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestProviderInitLoggingAndShutdownError(t *testing.T) {
-	t.Run("init logging invalid endpoint fails", func(t *testing.T) {
-		p := &Provider{
-			config: &Config{
-				ServiceName:  "aegion",
-				LogsEndpoint: "://bad-endpoint",
-				Insecure:     true,
-			},
-			resource: resource.Empty(),
-		}
-		err := p.initLogging(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to create log exporter")
-	})
-
-	t.Run("new provider with logs enabled propagates init failure", func(t *testing.T) {
-		cfg := DefaultConfig()
-		cfg.EnableTraces = false
-		cfg.EnableMetrics = false
-		cfg.EnableLogs = true
-		cfg.LogsEndpoint = "://bad-endpoint"
-		_, err := NewProvider(context.Background(), cfg)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to initialize logging")
-	})
-
-	t.Run("shutdown returns last error", func(t *testing.T) {
-		p := &Provider{
-			shutdownFuncs: []func(context.Context) error{
-				func(context.Context) error { return errors.New("first") },
-				func(context.Context) error { return nil },
-				func(context.Context) error { return errors.New("last") },
-			},
-		}
-		err := p.Shutdown(context.Background())
-		require.Error(t, err)
-		assert.Equal(t, "last", err.Error())
-	})
-}
-
 func TestProviderNewProviderErrorPaths(t *testing.T) {
 	t.Run("metrics init error triggers cleanup", func(t *testing.T) {
 		cfg := DefaultConfig()
@@ -335,7 +292,6 @@ func TestProviderInitMethodsSuccessWithLocalCollector(t *testing.T) {
 	t.Cleanup(func() {
 		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 		otel.SetMeterProvider(metricnoop.NewMeterProvider())
-		global.SetLoggerProvider(lognoop.NewLoggerProvider())
 	})
 
 	endpoint := strings.TrimPrefix(collector.URL, "http://")
@@ -352,15 +308,14 @@ func TestProviderInitMethodsSuccessWithLocalCollector(t *testing.T) {
 			Insecure:             true,
 		},
 		resource:      resource.Empty(),
-		shutdownFuncs: make([]func(context.Context) error, 0, 3),
+		shutdownFuncs: make([]func(context.Context) error, 0, 2),
 	}
 
 	require.NoError(t, p.initTracing(context.Background()))
 	require.NoError(t, p.initMetrics(context.Background()))
-	require.NoError(t, p.initLogging(context.Background()))
 	assert.NotNil(t, p.Tracer)
 	assert.NotNil(t, p.Meter)
-	assert.Len(t, p.shutdownFuncs, 3)
+	assert.Len(t, p.shutdownFuncs, 2)
 }
 
 func TestProviderInitTracingAndNewProviderTracingErrorPaths(t *testing.T) {

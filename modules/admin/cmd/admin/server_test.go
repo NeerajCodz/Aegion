@@ -115,7 +115,6 @@ func TestSetupPublicRouterOnlyMountsCoreOwnedPrefix(t *testing.T) {
 	}
 }
 
-
 func TestSPAFileServerBehavior(t *testing.T) {
 	spa := NewSPAFileServer()
 
@@ -564,7 +563,7 @@ func TestHandleDashboardObservability(t *testing.T) {
 	}
 	s.Config.Observability.Enabled = true
 	s.Config.Observability.ProbeTimeout = 200 * time.Millisecond
-	s.Config.Observability.Endpoints.OTelCollector = healthy.URL
+	s.Config.Observability.Endpoints.LozaCollector = healthy.URL
 	s.Config.Observability.Endpoints.Prometheus = degraded.URL
 	s.Config.Observability.Endpoints.Grafana = "http://127.0.0.1:1"
 
@@ -583,8 +582,8 @@ func TestHandleDashboardObservability(t *testing.T) {
 	if !resp.Enabled {
 		t.Fatalf("expected observability to be enabled")
 	}
-	if len(resp.Stack) != 5 {
-		t.Fatalf("expected 5 probes, got %d", len(resp.Stack))
+	if len(resp.Stack) != 4 {
+		t.Fatalf("expected 4 probes, got %d", len(resp.Stack))
 	}
 
 	statusByKey := make(map[string]dashboardObservabilityProbe, len(resp.Stack))
@@ -592,8 +591,8 @@ func TestHandleDashboardObservability(t *testing.T) {
 		statusByKey[probe.Key] = probe
 	}
 
-	if got := statusByKey["otel-collector"]; got.Status != "healthy" || got.StatusCode != http.StatusOK {
-		t.Fatalf("expected healthy otel collector probe, got status=%q code=%d", got.Status, got.StatusCode)
+	if got := statusByKey["loza-collector"]; got.Status != "healthy" || got.StatusCode != http.StatusOK {
+		t.Fatalf("expected healthy Loza collector probe, got status=%q code=%d", got.Status, got.StatusCode)
 	}
 	if got := statusByKey["prometheus"]; got.Status != "degraded" || got.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("expected degraded prometheus probe, got status=%q code=%d", got.Status, got.StatusCode)

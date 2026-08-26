@@ -46,7 +46,7 @@ func TestServerAdditionalRoutingAndObservabilityBranches(t *testing.T) {
 		cfg := &Config{}
 		cfg.Observability.Enabled = true
 		cfg.Observability.ProbeTimeout = 0
-		cfg.Observability.Endpoints.OTelCollector = "://bad-url"
+		cfg.Observability.Endpoints.LozaCollector = "://bad-url"
 		s := &Server{Config: cfg}
 
 		rec := httptest.NewRecorder()

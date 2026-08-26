@@ -26,18 +26,17 @@ The admin module is configured through YAML files and environment variables.
 | `AEGION_ADMIN_TRUST_FORWARDED_HEADERS` | Trust `X-Forwarded-For` and `X-Real-IP` for client IP derivation | `false` |
 | `AEGION_ADMIN_OBSERVABILITY_ENABLED` | Enable dashboard observability backend probes | `false` |
 | `AEGION_ADMIN_OBSERVABILITY_PROBE_TIMEOUT` | Probe timeout duration (Go duration format) | `5s` |
-| `AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL` | OTel collector health URL | `http://otel-collector:13133` |
+| `AEGION_LOZA_COLLECTOR_URL` | Loza collector health URL | `http://loza-collector:9308/health` |
 | `AEGION_ADMIN_OBS_PROMETHEUS_URL` | Prometheus health URL | `http://prometheus:9090/-/healthy` |
 | `AEGION_ADMIN_OBS_GRAFANA_URL` | Grafana health URL | `http://grafana:3000/api/health` |
 | `AEGION_ADMIN_OBS_TEMPO_URL` | Tempo readiness URL | `http://tempo:3200/ready` |
-| `AEGION_ADMIN_OBS_LOKI_URL` | Loki readiness URL | `http://loki:3100/ready` |
+| `AEGION_LOZA_COLLECTOR_URL` | Loza collector health URL | `http://loza-collector:9308/health` |
 | `OTEL_SERVICE_NAME` | Telemetry service name surfaced in admin observability | `aegion` |
 | `AEGION_SERVICE_VERSION` | Telemetry service version surfaced in admin observability | `v1.0.0` |
 | `AEGION_ENVIRONMENT` | Telemetry environment label | `development` |
 | `AEGION_INSTANCE_ID` | Telemetry instance identifier | Hostname |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP traces export endpoint | `http://localhost:4318` |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | OTLP metrics export endpoint | `http://localhost:4318` |
-| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | OTLP logs export endpoint | `http://localhost:4318` |
 | `OTEL_TRACES_SAMPLER_ARG` | Trace sampling ratio | `1.0` |
 | `OTEL_METRIC_EXPORT_INTERVAL` | Metrics export interval | `30s` |
 | `OTEL_BSP_EXPORT_TIMEOUT` | Trace export timeout | `10s` |
@@ -75,11 +74,11 @@ observability:
   enabled: false
   probe_timeout: 5s
   endpoints:
-    otel_collector: "${AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL:-http://otel-collector:13133}"
+    loza_collector: "${AEGION_LOZA_COLLECTOR_URL:-http://loza-collector:9308/health}"
     prometheus: "${AEGION_ADMIN_OBS_PROMETHEUS_URL:-http://prometheus:9090/-/healthy}"
     grafana: "${AEGION_ADMIN_OBS_GRAFANA_URL:-http://grafana:3000/api/health}"
     tempo: "${AEGION_ADMIN_OBS_TEMPO_URL:-http://tempo:3200/ready}"
-    loki: "${AEGION_ADMIN_OBS_LOKI_URL:-http://loki:3100/ready}"
+    loza_collector: "${AEGION_LOZA_COLLECTOR_URL:-http://loza-collector:9308/health}"
   telemetry:
     service_name: "${OTEL_SERVICE_NAME:-aegion}"
     service_version: "${AEGION_SERVICE_VERSION:-v1.0.0}"
@@ -87,7 +86,6 @@ observability:
     instance_id: "${AEGION_INSTANCE_ID:-}"
     traces_endpoint: "${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://localhost:4318}"
     metrics_endpoint: "${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-http://localhost:4318}"
-    logs_endpoint: "${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-http://localhost:4318}"
     trace_sampling_ratio: 1.0
     metric_export_interval: 30s
     trace_export_timeout: 10s

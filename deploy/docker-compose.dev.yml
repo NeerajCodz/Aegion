@@ -58,7 +58,6 @@ services:
       AEGION_CACHE_URL: redis://redis:6379/0
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: otel-collector:4318
       OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: otel-collector:4318
-      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: otel-collector:4318
       # Development secrets (DO NOT USE IN PRODUCTION)
       AEGION_SECRETS_COOKIE: dev-cookie-secret-change-me-32chars!
       AEGION_SECRETS_CIPHER: dev-cipher-secret-change-me-32chars!
@@ -80,11 +79,10 @@ services:
     environment:
       MODULE_LOG_LEVEL: debug
       AEGION_ADMIN_OBSERVABILITY_ENABLED: "true"
-      AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL: http://otel-collector:13133
+      AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL: http://loza-collector:9308/health
       AEGION_ADMIN_OBS_PROMETHEUS_URL: http://prometheus:9090/-/healthy
       AEGION_ADMIN_OBS_GRAFANA_URL: http://grafana:3000/api/health
       AEGION_ADMIN_OBS_TEMPO_URL: http://tempo:3200/ready
-      AEGION_ADMIN_OBS_LOKI_URL: http://loki:3100/ready
     volumes:
       - ../configs/modules/admin.yaml:/config/admin.yaml:ro
       - ../modules/admin/ui/dist:/app/ui:ro
@@ -92,18 +90,6 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # OpenTelemetry Collector
   # ─────────────────────────────────────────────────────────────────────────
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.106.1
-    command:
-      - --config=/etc/otelcol-contrib/config.yaml
-    ports:
-      - "127.0.0.1:4317:4317"   # OTLP gRPC ingest
-      - "127.0.0.1:4318:4318"   # OTLP HTTP ingest
-      - "127.0.0.1:8888:8888"   # Collector self-metrics
-      - "127.0.0.1:8889:8889"   # Prometheus exporter for app metrics
-      - "127.0.0.1:13133:13133" # Collector health
-    volumes:
-      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
 
   # ─────────────────────────────────────────────────────────────────────────
   # Prometheus
@@ -131,16 +117,6 @@ services:
       - ./tempo.yaml:/etc/tempo.yaml:ro
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Loki (Logs backend)
-  # ─────────────────────────────────────────────────────────────────────────
-  loki:
-    image: grafana/loki:3.1.1
-    command:
-      - -config.file=/etc/loki/local-config.yaml
-    ports:
-      - "127.0.0.1:3100:3100"
-    volumes:
-      - ./loki.yaml:/etc/loki/local-config.yaml:ro
 
   # ─────────────────────────────────────────────────────────────────────────
   # Grafana

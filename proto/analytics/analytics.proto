@@ -87,34 +87,6 @@ message QueryBatch {
   int32 page_size = 4;
 }
 
-// XLogEvent is a completed xlog wide event ready for ingestion.
-message XLogEvent {
-  string event_id = 1;
-  string event_name = 2;
-  string event_kind = 3;
-  string event_outcome = 4;
-  string service_name = 5;
-  string service_version = 6;
-  string environment = 7;
-  string request_id = 8;
-  string trace_id = 9;
-  string user_id = 10;
-  string session_id = 11;
-  google.protobuf.Struct fields = 12;
-  int64 duration_ms = 13;
-  string timestamp = 14;
-}
-
-// IngestXLogEventsRequest batches xlog events from internal services.
-message IngestXLogEventsRequest {
-  repeated XLogEvent events = 1;
-}
-
-// IngestXLogEventsResponse returns ingestion counts without failing traffic.
-message IngestXLogEventsResponse {
-  int32 accepted = 1;
-  int32 rejected = 2;
-}
 
 // AnalyticsService provides gRPC endpoints for analytics operations.
 service AnalyticsService {
@@ -133,6 +105,4 @@ service AnalyticsService {
   // Bidirectional streaming
   rpc BatchQuery(stream QueryBatch) returns (stream QueryResult);
 
-  // Internal xlog ingestion
-  rpc IngestXLogEvents(IngestXLogEventsRequest) returns (IngestXLogEventsResponse);
 }

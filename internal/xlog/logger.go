@@ -18,7 +18,7 @@ var (
 	defaultLogger *Logger
 )
 
-// New creates a logger. JSON stdout is always present.
+// New creates a logger. Events are delivered only to explicitly configured sinks.
 func New(cfg Config) *Logger {
 	if cfg.ServiceName == "" {
 		cfg.ServiceName = "aegion"
@@ -39,8 +39,7 @@ func New(cfg Config) *Logger {
 		cfg.Clock = func() time.Time { return time.Now().UTC() }
 	}
 
-	sinks := []Sink{NewJSONSink(os.Stdout)}
-	sinks = append(sinks, cfg.Sinks...)
+	sinks := cfg.Sinks
 	l := &Logger{
 		cfg:      cfg,
 		sink:     NewMultiSink(sinks...),

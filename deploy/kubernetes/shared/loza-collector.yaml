@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: loza-collector-secrets
+  namespace: aegion
+type: Opaque
+stringData:
+  auth-server-secret: ${LOZA_COLLECTOR_AUTH_SERVER_SECRET}
+  ingest-key: ${LOZA_INGEST_KEY}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: loza-data
+  namespace: aegion
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loza-collector
+  namespace: aegion
+  labels:
+    app: loza-collector
+spec:
+  type: ClusterIP
+  selector:
+    app: loza-collector
+  ports:
+    - name: http
+      port: 9308
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loza-collector
+  namespace: aegion
+  labels:
+    app: loza-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loza-collector
+  template:
+    metadata:
+      labels:
+        app: loza-collector
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: loza-collector
+          image: ${LOZA_COLLECTOR_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9308
+              protocol: TCP
+          env:
+            - name: LOZA_EVENTBUS
+              value: memory
+            - name: COLLECTOR_RELIABILITY_MODE
+              value: direct
+            - name: COLLECTOR_AUTH_SERVER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: loza-collector-secrets
+                  key: auth-server-secret
+            - name: COLLECTOR_INGEST_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: loza-collector-secrets
+                  key: ingest-key
+          volumeMounts:
+            - name: data
+              mountPath: /app
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: loza-data

@@ -1,344 +1,87 @@
-# Observability System – Developer Guide
+# Aegion observability
 
-This document defines how to **implement, operate, and debug a production-grade observability pipeline** for a distributed Go service using OpenTelemetry (OTEL).
-
----
-
-## Overview
-
-The system consists of:
-
-* Go-based HTTP service (e.g., Echo)
-* Embedded OpenTelemetry SDK
-* OpenTelemetry Collector (sidecar)
-* Remote observability backend (Tempo, Prometheus, Loki, etc.)
-
----
+Aegion emits operational and security events as Loza wide events. Loza is the sole application event pipeline; applications do not write operational records to analytics DuckDB, stdout JSON, Loki, or an OTLP logs exporter.
 
 ## Architecture
 
-### Data Flow
-
-```
-Application (OTEL SDK)
-        │
-        │ OTLP (gRPC :4317)
+```text
+Aegion core and modules
+        │ authenticated, batched Loza events
         ▼
-OpenTelemetry Collector (sidecar)
+Loza Collector (:9308)
+        │ validation, redaction, deduplication, durability, retention
+        ▼
+Collector-owned DuckDB
         │
-        ├── Traces → Tempo
-        ├── Metrics → Prometheus (remote write)
-        └── Logs → Loki
+        └── LQL query API / CLI
 ```
 
----
+Traces and metrics remain separate signals. Loza events carry correlation fields such as `event_id`, `trace_id`, `request_id`, `service`, `environment`, `method`, `path`, `status_code`, `outcome`, and `duration_ms`.
 
-### Key Principles
+## Event lifecycle
 
-* Application sends telemetry only to **localhost Collector**
-* Collector handles:
+Each request, job, workflow, message, security action, or audit operation creates one lifecycle event, enriches it while work executes, and emits it once the outcome is known. Success and failure outcomes are explicit. Errors are structured (`error.type`, `error.message`, `error.stack`, and optional cause fields), never flattened into a free-form log line.
 
-  * Authentication
-  * Batching & retries
-  * Resource enrichment
-  * Cardinality control
-* No credentials in application code
-* Sidecar pattern (one Collector per service instance)
+Event kinds:
 
----
+- `request`: HTTP, RPC, and API boundaries
+- `job`: background work
+- `workflow`: multi-step operations
+- `message`: queue processing
+- `system`: startup, health, and shutdown
+- `security`: authentication and authorization decisions
+- `audit`: compliance-sensitive administrative actions
 
-## Environment Behavior
+Sensitive values are never event attributes. Do not set passwords, API keys, bearer tokens, authorization headers, cookies, session values, raw bodies, email addresses, or client IPs. Use identifiers or approved hashes where correlation is required.
 
-### Local Development
+## Configuration
 
-* Telemetry is optional (can be disabled)
-* Default: no external dependencies required
-
-### Production
-
-* Telemetry enabled by default
-* Collector sidecar is mandatory
-* Backend connectivity required
-
----
-
-## Resource Configuration
-
-All signals must share a consistent OTEL Resource.
-
-### Required Attributes
-
-* `service.name`
-* `service.version`
-* `deployment.environment`
-* `service.instance.id`
-
----
-
-## Tracing
-
-### Automatic Instrumentation
-
-Enable:
-
-* HTTP server spans (per request)
-* Middleware tracing
-* Database / external calls (if supported)
-
----
-
-### Custom Spans
-
-Use spans for business operations.
-
-```go
-ctx, span := tracer.Start(ctx, "create_user")
-defer span.End()
-```
-
----
-
-### Guidelines
-
-* Use meaningful span names (low cardinality)
-* Add attributes instead of encoding data in span names
-* Propagate context across all boundaries
-
----
-
-## Metrics
-
-### Required Metrics
-
-* Request latency (histogram)
-* Request count (counter)
-* Error count (counter)
-* Runtime metrics (GC, memory, goroutines)
-
----
-
-### Example
-
-```go
-requestCounter.Add(ctx, 1,
-    metric.WithAttributes(attribute.String("route", "/users")),
-)
-```
-
----
-
-### Guidelines
-
-* Use **low-cardinality labels only**
-* Prefer histograms for latency
-* Avoid dynamic values (user IDs, request IDs)
-
----
-
-## Logging
-
-Aegion uses `internal/xlog` as the canonical logging path. xlog emits one
-wide event per service hop, job, worker run, message, security decision, or
-audit action. Existing `internal/platform/logger` and `slog` default logging
-are bridged into xlog so legacy call sites still produce xlog-shaped records.
-
-Every event must include `event.name`, `event.kind`, `event.outcome`,
-`timestamp`, `duration_ms`, `service.name`, `service.version`, and
-`environment`. Field names are dot-separated lowercase keys such as
-`request.id`, `trace.id`, `http.status_code`, and `user.id`.
-
-### Example
-
-```go
-event := xlog.Default().Start(ctx, "identity.created", xlog.WithKind(xlog.KindWorkflow))
-defer event.Emit()
-
-event.Set("identity.id", identityID)
-event.Set("tenant.id", tenantID)
-event.Success()
-```
-
-### Rules
-
-* Emit exactly one parent event per operation; add context to that event instead of scattering debug logs.
-* Use xlog HTTP middleware and gRPC interceptors for request boundaries.
-* Do not set raw secrets or PII. xlog redacts tokens, passwords, cookies, authorization headers, and hashes configured PII fields.
-* xlog always writes JSON locally and can batch events to the analytics module over internal gRPC using best-effort delivery.
-* Analytics ingestion failures must never fail user traffic.
-
----
-
-## Correlation
-
-All signals must be correlated:
-
-* Logs ↔ Traces via `trace_id` and `span_id`
-* Metrics ↔ Traces via exemplars (when supported)
-
----
-
-## Cardinality Control
-
-### Strategy
-
-| Signal  | High Cardinality |
-| ------- | ---------------- |
-| Traces  | Allowed          |
-| Logs    | Allowed          |
-| Metrics | Restricted       |
-
----
-
-### Rules
-
-* Keep high-cardinality data out of metric labels
-* Use Collector processors to drop or transform labels
-
----
-
-## Collector Responsibilities
-
-The sidecar Collector is responsible for:
-
-* Authentication with backend
-* Batching and retry logic
-* Memory limiting
-* Resource detection (cloud/container)
-* Attribute filtering for metrics
-
----
-
-## Deployment Model
-
-* One Collector sidecar per service instance
-* OTLP push model (no scraping)
-* Resilient to network failures
-
----
-
-## Failure Handling
-
-System must degrade gracefully:
-
-* If Collector is unavailable → app continues without telemetry
-* If backend is unavailable → Collector buffers/retries
-
----
-
-## Debugging Guide
-
-### Verify Telemetry Locally
-
-* Check app is sending to `localhost:4317`
-* Enable debug exporter in Collector
-
----
-
-### Missing Traces
-
-* Verify context propagation
-* Check sampling configuration
-* Inspect Collector logs
-
----
-
-### Broken Trace Chains
-
-* Ensure context is passed across goroutines and services
-* Validate HTTP headers (`traceparent`)
-
----
-
-### Metrics Issues
-
-* Check label cardinality
-* Verify exporter configuration
-
----
-
-### Logs Not Correlated
-
-* Ensure logger extracts trace/span from context
-
----
-
-### Collector Issues
-
-* Inspect Collector logs
-* Validate exporters and endpoints
-
----
-
-## Best Practices
-
-* Keep span names low cardinality
-* Use attributes for detail
-* Avoid sensitive data in logs
-* Prefer histograms over averages
-* Maintain consistent service identity
-
----
-
-## Workflow Summary
+Required process settings:
 
 ```bash
-# 1. Instrument service (traces, metrics, logs)
-
-# 2. Run Collector sidecar
-
-# 3. Verify local telemetry
-
-# 4. Deploy with Collector in production
-
-# 5. Use dashboards + traces for debugging
+AEGION_LOZA_COLLECTOR_URL=http://loza-collector:9308/events
+AEGION_LOZA_API_KEY_FILE=/run/secrets/loza_ingest_key
 ```
 
----
+Production requires an HTTPS collector URL and an API key supplied through a secret file. Development may use the local memory event bus and an explicitly configured insecure HTTP endpoint.
 
-## Aegion Docker Compose Stack (Grafana + Prometheus + OTel)
+Collector configuration must enable authentication, validation, redaction, size limits, deduplication, and the DuckDB primary exporter. The collector owns retention, deletion, and query behavior.
 
-This repository includes a full local observability stack in `deploy/docker-compose.dev.yml`:
+## Local stack
 
-- OpenTelemetry Collector
-- Prometheus
-- Grafana
-- Tempo
-- Loki
-
-Run it with:
+The base Compose stack includes a Loza collector. The development overlay adds the normal metrics, tracing, and dashboard services:
 
 ```bash
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up -d
 ```
 
-Default localhost-only endpoints (bound to `127.0.0.1`):
+Local Loza endpoints:
 
-- Grafana: `http://localhost:3000` (`${GRAFANA_ADMIN_USER}` / `${GRAFANA_ADMIN_PASSWORD}`; defaults to `aegion-admin` / `change-me-now`)
-- Prometheus: `http://localhost:9090`
-- Tempo: `http://localhost:3200`
-- Loki: `http://localhost:3100`
-- OTel Collector health: `http://localhost:13133`
+- ingest: `http://localhost:9308/events`
+- health: `http://localhost:9308/health`
+- readiness: `http://localhost:9308/readyz`
 
-Admin dashboard integration:
+Use the collector's LQL query interface or CLI for event investigation. Analytics domain tables remain in the analytics database and are queried through analytics APIs; they are not redirected into Loza.
 
-- `GET /api/admin/dashboard/observability` returns stack probe health for Grafana, Prometheus, Tempo, Loki, and OTel Collector.
-- The Admin SPA telemetry tab renders this as the integrated observability matrix.
+## Operations
 
----
+Check collector health and readiness before investigating application behavior. Query by `request_id`, `trace_id`, `service`, `event`, `outcome`, and time range. For slow operations, use `duration_ms`; for failures, use structured error fields. Event delivery failures must be visible as collector delivery failures, not hidden by a stdout fallback.
 
-## Key Principles
+The Admin observability endpoint reports configured infrastructure health and the Loza collector health URL. It does not expose credentials or event payloads.
 
-* Separation of concerns (app vs Collector)
-* Push-based telemetry
-* Correlated signals
-* Controlled cardinality
-* Graceful degradation
+## Deployment requirements
 
----
+- Run one authenticated Loza collector deployment per environment or an approved shared collector.
+- Persist the collector DuckDB volume and protect it as operational telemetry data.
+- Supply ingest keys and collector secrets through secret files or a secret manager.
+- Use HTTPS for production application-to-collector traffic.
+- Keep collector and SDK versions pinned and upgrade them together.
+- Do not reintroduce Loki, OTLP log export, analytics xlog RPC, or stdout fallback.
 
-If needed, next steps:
+## Troubleshooting
 
-* Provide OTEL Go SDK setup code
-* Provide Collector config (otel-collector.yaml)
-* Add Grafana dashboards & alerting rules
-* Add sampling strategies (tail/head-based)
+1. Check `GET /health` and `GET /readyz` on the collector.
+2. Verify `AEGION_LOZA_COLLECTOR_URL` includes `/events`.
+3. Verify the API key file is readable by the application user and matches the collector ingest key.
+4. Inspect collector delivery and validation failures through its operational interface.
+5. Query by `trace_id` or `request_id`; avoid searching raw bodies or secrets.

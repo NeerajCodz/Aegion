@@ -712,253 +712,6 @@ func (x *QueryBatch) GetPageSize() int32 {
 	return 0
 }
 
-// XLogEvent is a completed xlog wide event ready for ingestion.
-type XLogEvent struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	EventId        string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
-	EventName      string                 `protobuf:"bytes,2,opt,name=event_name,json=eventName,proto3" json:"event_name,omitempty"`
-	EventKind      string                 `protobuf:"bytes,3,opt,name=event_kind,json=eventKind,proto3" json:"event_kind,omitempty"`
-	EventOutcome   string                 `protobuf:"bytes,4,opt,name=event_outcome,json=eventOutcome,proto3" json:"event_outcome,omitempty"`
-	ServiceName    string                 `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
-	ServiceVersion string                 `protobuf:"bytes,6,opt,name=service_version,json=serviceVersion,proto3" json:"service_version,omitempty"`
-	Environment    string                 `protobuf:"bytes,7,opt,name=environment,proto3" json:"environment,omitempty"`
-	RequestId      string                 `protobuf:"bytes,8,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	TraceId        string                 `protobuf:"bytes,9,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
-	UserId         string                 `protobuf:"bytes,10,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	SessionId      string                 `protobuf:"bytes,11,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Fields         *structpb.Struct       `protobuf:"bytes,12,opt,name=fields,proto3" json:"fields,omitempty"`
-	DurationMs     int64                  `protobuf:"varint,13,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
-	Timestamp      string                 `protobuf:"bytes,14,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *XLogEvent) Reset() {
-	*x = XLogEvent{}
-	mi := &file_analytics_analytics_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *XLogEvent) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*XLogEvent) ProtoMessage() {}
-
-func (x *XLogEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_analytics_analytics_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use XLogEvent.ProtoReflect.Descriptor instead.
-func (*XLogEvent) Descriptor() ([]byte, []int) {
-	return file_analytics_analytics_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *XLogEvent) GetEventId() string {
-	if x != nil {
-		return x.EventId
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetEventName() string {
-	if x != nil {
-		return x.EventName
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetEventKind() string {
-	if x != nil {
-		return x.EventKind
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetEventOutcome() string {
-	if x != nil {
-		return x.EventOutcome
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetServiceName() string {
-	if x != nil {
-		return x.ServiceName
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetServiceVersion() string {
-	if x != nil {
-		return x.ServiceVersion
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetEnvironment() string {
-	if x != nil {
-		return x.Environment
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetRequestId() string {
-	if x != nil {
-		return x.RequestId
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetTraceId() string {
-	if x != nil {
-		return x.TraceId
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetUserId() string {
-	if x != nil {
-		return x.UserId
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *XLogEvent) GetFields() *structpb.Struct {
-	if x != nil {
-		return x.Fields
-	}
-	return nil
-}
-
-func (x *XLogEvent) GetDurationMs() int64 {
-	if x != nil {
-		return x.DurationMs
-	}
-	return 0
-}
-
-func (x *XLogEvent) GetTimestamp() string {
-	if x != nil {
-		return x.Timestamp
-	}
-	return ""
-}
-
-// IngestXLogEventsRequest batches xlog events from internal services.
-type IngestXLogEventsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Events        []*XLogEvent           `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *IngestXLogEventsRequest) Reset() {
-	*x = IngestXLogEventsRequest{}
-	mi := &file_analytics_analytics_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *IngestXLogEventsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*IngestXLogEventsRequest) ProtoMessage() {}
-
-func (x *IngestXLogEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_analytics_analytics_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use IngestXLogEventsRequest.ProtoReflect.Descriptor instead.
-func (*IngestXLogEventsRequest) Descriptor() ([]byte, []int) {
-	return file_analytics_analytics_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *IngestXLogEventsRequest) GetEvents() []*XLogEvent {
-	if x != nil {
-		return x.Events
-	}
-	return nil
-}
-
-// IngestXLogEventsResponse returns ingestion counts without failing traffic.
-type IngestXLogEventsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Accepted      int32                  `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	Rejected      int32                  `protobuf:"varint,2,opt,name=rejected,proto3" json:"rejected,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *IngestXLogEventsResponse) Reset() {
-	*x = IngestXLogEventsResponse{}
-	mi := &file_analytics_analytics_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *IngestXLogEventsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*IngestXLogEventsResponse) ProtoMessage() {}
-
-func (x *IngestXLogEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_analytics_analytics_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use IngestXLogEventsResponse.ProtoReflect.Descriptor instead.
-func (*IngestXLogEventsResponse) Descriptor() ([]byte, []int) {
-	return file_analytics_analytics_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *IngestXLogEventsResponse) GetAccepted() int32 {
-	if x != nil {
-		return x.Accepted
-	}
-	return 0
-}
-
-func (x *IngestXLogEventsResponse) GetRejected() int32 {
-	if x != nil {
-		return x.Rejected
-	}
-	return 0
-}
-
 var File_analytics_analytics_proto protoreflect.FileDescriptor
 
 const file_analytics_analytics_proto_rawDesc = "" +
@@ -1028,33 +781,7 @@ const file_analytics_analytics_proto_rawDesc = "" +
 	"\n" +
 	"parameters\x18\x03 \x03(\tR\n" +
 	"parameters\x12\x1b\n" +
-	"\tpage_size\x18\x04 \x01(\x05R\bpageSize\"\xd9\x03\n" +
-	"\tXLogEvent\x12\x19\n" +
-	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1d\n" +
-	"\n" +
-	"event_name\x18\x02 \x01(\tR\teventName\x12\x1d\n" +
-	"\n" +
-	"event_kind\x18\x03 \x01(\tR\teventKind\x12#\n" +
-	"\revent_outcome\x18\x04 \x01(\tR\feventOutcome\x12!\n" +
-	"\fservice_name\x18\x05 \x01(\tR\vserviceName\x12'\n" +
-	"\x0fservice_version\x18\x06 \x01(\tR\x0eserviceVersion\x12 \n" +
-	"\venvironment\x18\a \x01(\tR\venvironment\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\b \x01(\tR\trequestId\x12\x19\n" +
-	"\btrace_id\x18\t \x01(\tR\atraceId\x12\x17\n" +
-	"\auser_id\x18\n" +
-	" \x01(\tR\x06userId\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\v \x01(\tR\tsessionId\x12/\n" +
-	"\x06fields\x18\f \x01(\v2\x17.google.protobuf.StructR\x06fields\x12\x1f\n" +
-	"\vduration_ms\x18\r \x01(\x03R\n" +
-	"durationMs\x12\x1c\n" +
-	"\ttimestamp\x18\x0e \x01(\tR\ttimestamp\"N\n" +
-	"\x17IngestXLogEventsRequest\x123\n" +
-	"\x06events\x18\x01 \x03(\v2\x1b.aegion.analytics.XLogEventR\x06events\"R\n" +
-	"\x18IngestXLogEventsResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\x05R\baccepted\x12\x1a\n" +
-	"\brejected\x18\x02 \x01(\x05R\brejected2\xfa\x06\n" +
+	"\tpage_size\x18\x04 \x01(\x05R\bpageSize2\x8f\x06\n" +
 	"\x10AnalyticsService\x12Z\n" +
 	"\vQueryEvents\x12$.aegion.analytics.QueryEventsRequest\x1a%.aegion.analytics.QueryEventsResponse\x12V\n" +
 	"\fGetDashboard\x12%.aegion.analytics.GetDashboardRequest\x1a\x1f.aegion.analytics.DashboardData\x12J\n" +
@@ -1066,8 +793,7 @@ const file_analytics_analytics_proto_rawDesc = "" +
 	"\n" +
 	"ExportData\x12#.aegion.analytics.ExportDataRequest\x1a\x1b.aegion.analytics.DataChunk0\x01\x12M\n" +
 	"\n" +
-	"BatchQuery\x12\x1c.aegion.analytics.QueryBatch\x1a\x1d.aegion.analytics.QueryResult(\x010\x01\x12i\n" +
-	"\x10IngestXLogEvents\x12).aegion.analytics.IngestXLogEventsRequest\x1a*.aegion.analytics.IngestXLogEventsResponseB3Z1github.com/aegion/aegion/internal/proto/analyticsb\x06proto3"
+	"BatchQuery\x12\x1c.aegion.analytics.QueryBatch\x1a\x1d.aegion.analytics.QueryResult(\x010\x01B3Z1github.com/aegion/aegion/internal/proto/analyticsb\x06proto3"
 
 var (
 	file_analytics_analytics_proto_rawDescOnce sync.Once
@@ -1081,72 +807,65 @@ func file_analytics_analytics_proto_rawDescGZIP() []byte {
 	return file_analytics_analytics_proto_rawDescData
 }
 
-var file_analytics_analytics_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_analytics_analytics_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_analytics_analytics_proto_goTypes = []any{
-	(*QueryEventsRequest)(nil),       // 0: aegion.analytics.QueryEventsRequest
-	(*QueryEventsResponse)(nil),      // 1: aegion.analytics.QueryEventsResponse
-	(*GetDashboardRequest)(nil),      // 2: aegion.analytics.GetDashboardRequest
-	(*DashboardData)(nil),            // 3: aegion.analytics.DashboardData
-	(*ExecuteQueryRequest)(nil),      // 4: aegion.analytics.ExecuteQueryRequest
-	(*CreateDashboardRequest)(nil),   // 5: aegion.analytics.CreateDashboardRequest
-	(*UpdateDashboardRequest)(nil),   // 6: aegion.analytics.UpdateDashboardRequest
-	(*StreamEventsRequest)(nil),      // 7: aegion.analytics.StreamEventsRequest
-	(*ExportDataRequest)(nil),        // 8: aegion.analytics.ExportDataRequest
-	(*QueryBatch)(nil),               // 9: aegion.analytics.QueryBatch
-	(*XLogEvent)(nil),                // 10: aegion.analytics.XLogEvent
-	(*IngestXLogEventsRequest)(nil),  // 11: aegion.analytics.IngestXLogEventsRequest
-	(*IngestXLogEventsResponse)(nil), // 12: aegion.analytics.IngestXLogEventsResponse
-	(*Filter)(nil),                   // 13: aegion.analytics.Filter
-	(SortOrder)(0),                   // 14: aegion.analytics.SortOrder
-	(*Event)(nil),                    // 15: aegion.analytics.Event
-	(*Dashboard)(nil),                // 16: aegion.analytics.Dashboard
-	(*Metric)(nil),                   // 17: aegion.analytics.Metric
-	(*structpb.Struct)(nil),          // 18: google.protobuf.Struct
-	(ExportFormat)(0),                // 19: aegion.analytics.ExportFormat
-	(*Empty)(nil),                    // 20: aegion.analytics.Empty
-	(*HealthStatus)(nil),             // 21: aegion.analytics.HealthStatus
-	(*QueryResult)(nil),              // 22: aegion.analytics.QueryResult
-	(*DataChunk)(nil),                // 23: aegion.analytics.DataChunk
+	(*QueryEventsRequest)(nil),     // 0: aegion.analytics.QueryEventsRequest
+	(*QueryEventsResponse)(nil),    // 1: aegion.analytics.QueryEventsResponse
+	(*GetDashboardRequest)(nil),    // 2: aegion.analytics.GetDashboardRequest
+	(*DashboardData)(nil),          // 3: aegion.analytics.DashboardData
+	(*ExecuteQueryRequest)(nil),    // 4: aegion.analytics.ExecuteQueryRequest
+	(*CreateDashboardRequest)(nil), // 5: aegion.analytics.CreateDashboardRequest
+	(*UpdateDashboardRequest)(nil), // 6: aegion.analytics.UpdateDashboardRequest
+	(*StreamEventsRequest)(nil),    // 7: aegion.analytics.StreamEventsRequest
+	(*ExportDataRequest)(nil),      // 8: aegion.analytics.ExportDataRequest
+	(*QueryBatch)(nil),             // 9: aegion.analytics.QueryBatch
+	(*Filter)(nil),                 // 10: aegion.analytics.Filter
+	(SortOrder)(0),                 // 11: aegion.analytics.SortOrder
+	(*Event)(nil),                  // 12: aegion.analytics.Event
+	(*Dashboard)(nil),              // 13: aegion.analytics.Dashboard
+	(*Metric)(nil),                 // 14: aegion.analytics.Metric
+	(*structpb.Struct)(nil),        // 15: google.protobuf.Struct
+	(ExportFormat)(0),              // 16: aegion.analytics.ExportFormat
+	(*Empty)(nil),                  // 17: aegion.analytics.Empty
+	(*HealthStatus)(nil),           // 18: aegion.analytics.HealthStatus
+	(*QueryResult)(nil),            // 19: aegion.analytics.QueryResult
+	(*DataChunk)(nil),              // 20: aegion.analytics.DataChunk
 }
 var file_analytics_analytics_proto_depIdxs = []int32{
-	13, // 0: aegion.analytics.QueryEventsRequest.filters:type_name -> aegion.analytics.Filter
-	14, // 1: aegion.analytics.QueryEventsRequest.sort_order:type_name -> aegion.analytics.SortOrder
-	15, // 2: aegion.analytics.QueryEventsResponse.events:type_name -> aegion.analytics.Event
-	16, // 3: aegion.analytics.DashboardData.dashboard:type_name -> aegion.analytics.Dashboard
-	15, // 4: aegion.analytics.DashboardData.events:type_name -> aegion.analytics.Event
-	17, // 5: aegion.analytics.DashboardData.metrics:type_name -> aegion.analytics.Metric
-	18, // 6: aegion.analytics.CreateDashboardRequest.config:type_name -> google.protobuf.Struct
-	18, // 7: aegion.analytics.UpdateDashboardRequest.config:type_name -> google.protobuf.Struct
-	13, // 8: aegion.analytics.StreamEventsRequest.filters:type_name -> aegion.analytics.Filter
-	19, // 9: aegion.analytics.ExportDataRequest.format:type_name -> aegion.analytics.ExportFormat
-	13, // 10: aegion.analytics.ExportDataRequest.filters:type_name -> aegion.analytics.Filter
-	18, // 11: aegion.analytics.XLogEvent.fields:type_name -> google.protobuf.Struct
-	10, // 12: aegion.analytics.IngestXLogEventsRequest.events:type_name -> aegion.analytics.XLogEvent
-	0,  // 13: aegion.analytics.AnalyticsService.QueryEvents:input_type -> aegion.analytics.QueryEventsRequest
-	2,  // 14: aegion.analytics.AnalyticsService.GetDashboard:input_type -> aegion.analytics.GetDashboardRequest
-	20, // 15: aegion.analytics.AnalyticsService.GetHealthStatus:input_type -> aegion.analytics.Empty
-	4,  // 16: aegion.analytics.AnalyticsService.ExecuteQuery:input_type -> aegion.analytics.ExecuteQueryRequest
-	5,  // 17: aegion.analytics.AnalyticsService.CreateDashboard:input_type -> aegion.analytics.CreateDashboardRequest
-	6,  // 18: aegion.analytics.AnalyticsService.UpdateDashboard:input_type -> aegion.analytics.UpdateDashboardRequest
-	7,  // 19: aegion.analytics.AnalyticsService.StreamEvents:input_type -> aegion.analytics.StreamEventsRequest
-	8,  // 20: aegion.analytics.AnalyticsService.ExportData:input_type -> aegion.analytics.ExportDataRequest
-	9,  // 21: aegion.analytics.AnalyticsService.BatchQuery:input_type -> aegion.analytics.QueryBatch
-	11, // 22: aegion.analytics.AnalyticsService.IngestXLogEvents:input_type -> aegion.analytics.IngestXLogEventsRequest
-	1,  // 23: aegion.analytics.AnalyticsService.QueryEvents:output_type -> aegion.analytics.QueryEventsResponse
-	3,  // 24: aegion.analytics.AnalyticsService.GetDashboard:output_type -> aegion.analytics.DashboardData
-	21, // 25: aegion.analytics.AnalyticsService.GetHealthStatus:output_type -> aegion.analytics.HealthStatus
-	22, // 26: aegion.analytics.AnalyticsService.ExecuteQuery:output_type -> aegion.analytics.QueryResult
-	16, // 27: aegion.analytics.AnalyticsService.CreateDashboard:output_type -> aegion.analytics.Dashboard
-	16, // 28: aegion.analytics.AnalyticsService.UpdateDashboard:output_type -> aegion.analytics.Dashboard
-	15, // 29: aegion.analytics.AnalyticsService.StreamEvents:output_type -> aegion.analytics.Event
-	23, // 30: aegion.analytics.AnalyticsService.ExportData:output_type -> aegion.analytics.DataChunk
-	22, // 31: aegion.analytics.AnalyticsService.BatchQuery:output_type -> aegion.analytics.QueryResult
-	12, // 32: aegion.analytics.AnalyticsService.IngestXLogEvents:output_type -> aegion.analytics.IngestXLogEventsResponse
-	23, // [23:33] is the sub-list for method output_type
-	13, // [13:23] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	10, // 0: aegion.analytics.QueryEventsRequest.filters:type_name -> aegion.analytics.Filter
+	11, // 1: aegion.analytics.QueryEventsRequest.sort_order:type_name -> aegion.analytics.SortOrder
+	12, // 2: aegion.analytics.QueryEventsResponse.events:type_name -> aegion.analytics.Event
+	13, // 3: aegion.analytics.DashboardData.dashboard:type_name -> aegion.analytics.Dashboard
+	12, // 4: aegion.analytics.DashboardData.events:type_name -> aegion.analytics.Event
+	14, // 5: aegion.analytics.DashboardData.metrics:type_name -> aegion.analytics.Metric
+	15, // 6: aegion.analytics.CreateDashboardRequest.config:type_name -> google.protobuf.Struct
+	15, // 7: aegion.analytics.UpdateDashboardRequest.config:type_name -> google.protobuf.Struct
+	10, // 8: aegion.analytics.StreamEventsRequest.filters:type_name -> aegion.analytics.Filter
+	16, // 9: aegion.analytics.ExportDataRequest.format:type_name -> aegion.analytics.ExportFormat
+	10, // 10: aegion.analytics.ExportDataRequest.filters:type_name -> aegion.analytics.Filter
+	0,  // 11: aegion.analytics.AnalyticsService.QueryEvents:input_type -> aegion.analytics.QueryEventsRequest
+	2,  // 12: aegion.analytics.AnalyticsService.GetDashboard:input_type -> aegion.analytics.GetDashboardRequest
+	17, // 13: aegion.analytics.AnalyticsService.GetHealthStatus:input_type -> aegion.analytics.Empty
+	4,  // 14: aegion.analytics.AnalyticsService.ExecuteQuery:input_type -> aegion.analytics.ExecuteQueryRequest
+	5,  // 15: aegion.analytics.AnalyticsService.CreateDashboard:input_type -> aegion.analytics.CreateDashboardRequest
+	6,  // 16: aegion.analytics.AnalyticsService.UpdateDashboard:input_type -> aegion.analytics.UpdateDashboardRequest
+	7,  // 17: aegion.analytics.AnalyticsService.StreamEvents:input_type -> aegion.analytics.StreamEventsRequest
+	8,  // 18: aegion.analytics.AnalyticsService.ExportData:input_type -> aegion.analytics.ExportDataRequest
+	9,  // 19: aegion.analytics.AnalyticsService.BatchQuery:input_type -> aegion.analytics.QueryBatch
+	1,  // 20: aegion.analytics.AnalyticsService.QueryEvents:output_type -> aegion.analytics.QueryEventsResponse
+	3,  // 21: aegion.analytics.AnalyticsService.GetDashboard:output_type -> aegion.analytics.DashboardData
+	18, // 22: aegion.analytics.AnalyticsService.GetHealthStatus:output_type -> aegion.analytics.HealthStatus
+	19, // 23: aegion.analytics.AnalyticsService.ExecuteQuery:output_type -> aegion.analytics.QueryResult
+	13, // 24: aegion.analytics.AnalyticsService.CreateDashboard:output_type -> aegion.analytics.Dashboard
+	13, // 25: aegion.analytics.AnalyticsService.UpdateDashboard:output_type -> aegion.analytics.Dashboard
+	12, // 26: aegion.analytics.AnalyticsService.StreamEvents:output_type -> aegion.analytics.Event
+	20, // 27: aegion.analytics.AnalyticsService.ExportData:output_type -> aegion.analytics.DataChunk
+	19, // 28: aegion.analytics.AnalyticsService.BatchQuery:output_type -> aegion.analytics.QueryResult
+	20, // [20:29] is the sub-list for method output_type
+	11, // [11:20] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_analytics_analytics_proto_init() }
@@ -1161,7 +880,7 @@ func file_analytics_analytics_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_analytics_analytics_proto_rawDesc), len(file_analytics_analytics_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

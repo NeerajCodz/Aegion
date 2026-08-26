@@ -2,11 +2,9 @@ package grpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/aegion/aegion/internal/xlog"
 	"google.golang.org/grpc/codes"
@@ -54,70 +52,6 @@ func NewService(log *xlog.Logger, store Store, syncManager SyncManager, config C
 		syncManager: syncManager,
 		config:      config,
 	}
-}
-
-func (s *Service) IngestXLogEvents(ctx context.Context, req *pb.IngestXLogEventsRequest) (*pb.IngestXLogEventsResponse, error) {
-	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "request cannot be nil")
-	}
-	event := s.logger.Start(ctx, "analytics.ingest_xlog", xlog.WithKind(xlog.KindSystem))
-
-	accepted := int32(0)
-	rejected := int32(0)
-	for _, evt := range req.Events {
-		if evt == nil || strings.TrimSpace(evt.EventName) == "" {
-			rejected++
-			continue
-		}
-		data := map[string]interface{}{}
-		if evt.Fields != nil {
-			data = evt.Fields.AsMap()
-		}
-		data["xlog.event_kind"] = evt.EventKind
-		data["xlog.event_outcome"] = evt.EventOutcome
-		data["xlog.service_name"] = evt.ServiceName
-		data["xlog.service_version"] = evt.ServiceVersion
-		data["xlog.environment"] = evt.Environment
-		data["xlog.request_id"] = evt.RequestId
-		data["xlog.trace_id"] = evt.TraceId
-		data["xlog.duration_ms"] = evt.DurationMs
-		payload, err := json.Marshal(data)
-		if err != nil {
-			rejected++
-			continue
-		}
-		createdAt := strings.TrimSpace(evt.Timestamp)
-		if createdAt == "" {
-			createdAt = time.Now().UTC().Format(time.RFC3339Nano)
-		}
-		userID := nullableUUID(evt.UserId)
-		sessionID := nullableUUID(evt.SessionId)
-		sql := fmt.Sprintf(
-			"INSERT INTO analytics_events (category, event_type, user_id, session_id, data, created_at, updated_at) VALUES ('xlog', '%s', %s, %s, '%s', '%s', '%s')",
-			sanitizeSQLLiteral(evt.EventName),
-			userID,
-			sessionID,
-			sanitizeSQLLiteral(string(payload)),
-			sanitizeSQLLiteral(createdAt),
-			sanitizeSQLLiteral(createdAt),
-		)
-		if _, err := s.store.ExecuteQuery(ctx, sql, nil); err != nil {
-			event.Set("error", err.Error()).Set("event_name", evt.EventName)
-			rejected++
-			continue
-		}
-		accepted++
-	}
-
-	event.Set("accepted", accepted).Set("rejected", rejected)
-	if rejected > 0 {
-		event.Rejected(fmt.Errorf("some events rejected"))
-	} else {
-		event.Success()
-	}
-	_ = event.Emit()
-
-	return &pb.IngestXLogEventsResponse{Accepted: accepted, Rejected: rejected}, nil
 }
 
 func (s *Service) QueryEvents(ctx context.Context, req *pb.QueryEventsRequest) (*pb.QueryEventsResponse, error) {

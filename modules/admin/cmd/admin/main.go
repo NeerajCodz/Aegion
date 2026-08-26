@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
 	"net"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -84,11 +84,10 @@ type Config struct {
 		Enabled      bool          `yaml:"enabled"`
 		ProbeTimeout time.Duration `yaml:"probe_timeout"`
 		Endpoints    struct {
-			OTelCollector string `yaml:"otel_collector"`
+			LozaCollector string `yaml:"loza_collector"`
 			Prometheus    string `yaml:"prometheus"`
 			Grafana       string `yaml:"grafana"`
 			Tempo         string `yaml:"tempo"`
-			Loki          string `yaml:"loki"`
 		} `yaml:"endpoints"`
 		Telemetry struct {
 			ServiceName          string        `yaml:"service_name"`
@@ -111,15 +110,15 @@ type Config struct {
 }
 
 const (
-	adminModuleVersion      = "1.0.0"
-	adminPublicRoutePrefix  = "/aegion"
+	adminModuleVersion     = "1.0.0"
+	adminPublicRoutePrefix = "/aegion"
 )
+
 type mainFlags struct {
 	configPath string
 	version    bool
 	migrate    bool
 }
-
 
 type moduleRuntime struct {
 	registerHTTPRoutes func(*http.ServeMux)
@@ -538,20 +537,14 @@ func loadConfig(path string) (*Config, error) {
 	if cfg.Observability.ProbeTimeout == 0 {
 		cfg.Observability.ProbeTimeout = 5 * time.Second
 	}
-	if cfg.Observability.Endpoints.OTelCollector == "" {
-		cfg.Observability.Endpoints.OTelCollector = "http://otel-collector:13133"
-	}
-	if cfg.Observability.Endpoints.Prometheus == "" {
-		cfg.Observability.Endpoints.Prometheus = "http://prometheus:9090/-/healthy"
+	if cfg.Observability.Endpoints.LozaCollector == "" {
+		cfg.Observability.Endpoints.LozaCollector = "http://loza-collector:9308/health"
 	}
 	if cfg.Observability.Endpoints.Grafana == "" {
 		cfg.Observability.Endpoints.Grafana = "http://grafana:3000/api/health"
 	}
 	if cfg.Observability.Endpoints.Tempo == "" {
 		cfg.Observability.Endpoints.Tempo = "http://tempo:3200/ready"
-	}
-	if cfg.Observability.Endpoints.Loki == "" {
-		cfg.Observability.Endpoints.Loki = "http://loki:3100/ready"
 	}
 	applyObservabilityTelemetryDefaults(&cfg)
 
@@ -561,8 +554,8 @@ func loadConfig(path string) (*Config, error) {
 	}
 	cfg.Observability.Enabled = getEnvBool("AEGION_ADMIN_OBSERVABILITY_ENABLED", cfg.Observability.Enabled)
 	cfg.Observability.ProbeTimeout = getEnvDuration("AEGION_ADMIN_OBSERVABILITY_PROBE_TIMEOUT", cfg.Observability.ProbeTimeout)
-	if value := getEnv("AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL", ""); value != "" {
-		cfg.Observability.Endpoints.OTelCollector = value
+	if value := getEnv("AEGION_LOZA_COLLECTOR_URL", ""); value != "" {
+		cfg.Observability.Endpoints.LozaCollector = value
 	}
 	if value := getEnv("AEGION_ADMIN_OBS_PROMETHEUS_URL", ""); value != "" {
 		cfg.Observability.Endpoints.Prometheus = value
@@ -572,9 +565,6 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if value := getEnv("AEGION_ADMIN_OBS_TEMPO_URL", ""); value != "" {
 		cfg.Observability.Endpoints.Tempo = value
-	}
-	if value := getEnv("AEGION_ADMIN_OBS_LOKI_URL", ""); value != "" {
-		cfg.Observability.Endpoints.Loki = value
 	}
 	if value := getEnv("OTEL_SERVICE_NAME", ""); value != "" {
 		cfg.Observability.Telemetry.ServiceName = value
@@ -594,16 +584,12 @@ func loadConfig(path string) (*Config, error) {
 	if value := getEnv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", ""); value != "" {
 		cfg.Observability.Telemetry.MetricsEndpoint = value
 	}
-	if value := getEnv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", ""); value != "" {
-		cfg.Observability.Telemetry.LogsEndpoint = value
-	}
 	cfg.Observability.Telemetry.TraceSamplingRatio = getEnvFloat64("OTEL_TRACES_SAMPLER_ARG", cfg.Observability.Telemetry.TraceSamplingRatio)
 	cfg.Observability.Telemetry.MetricExportInterval = getEnvDuration("OTEL_METRIC_EXPORT_INTERVAL", cfg.Observability.Telemetry.MetricExportInterval)
 	cfg.Observability.Telemetry.TraceExportTimeout = getEnvDuration("OTEL_BSP_EXPORT_TIMEOUT", cfg.Observability.Telemetry.TraceExportTimeout)
 	cfg.Observability.Telemetry.Insecure = getEnvBool("OTEL_EXPORTER_OTLP_INSECURE", cfg.Observability.Telemetry.Insecure)
 	cfg.Observability.Telemetry.EnableTraces = getEnvBool("AEGION_OBS_ENABLE_TRACES", cfg.Observability.Telemetry.EnableTraces)
 	cfg.Observability.Telemetry.EnableMetrics = getEnvBool("AEGION_OBS_ENABLE_METRICS", cfg.Observability.Telemetry.EnableMetrics)
-	cfg.Observability.Telemetry.EnableLogs = getEnvBool("AEGION_OBS_ENABLE_LOGS", cfg.Observability.Telemetry.EnableLogs)
 
 	return &cfg, nil
 }
@@ -725,7 +711,6 @@ func safeInt32(value int) int32 {
 		return int32(value)
 	}
 }
-
 
 func setupLogger(logConfig LogConfig) {
 	xlog.New(xlog.Config{

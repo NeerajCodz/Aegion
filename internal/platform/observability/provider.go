@@ -7,13 +7,10 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -28,9 +25,8 @@ type Provider struct {
 	resource *resource.Resource
 
 	// Providers
-	traceProvider  *sdktrace.TracerProvider
-	meterProvider  *sdkmetric.MeterProvider
-	loggerProvider *log.LoggerProvider
+	traceProvider *sdktrace.TracerProvider
+	meterProvider *sdkmetric.MeterProvider
 
 	// Public interfaces
 	Tracer trace.Tracer
@@ -72,14 +68,7 @@ func NewProvider(ctx context.Context, config *Config) (*Provider, error) {
 			return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 		}
 	}
-
-	// Initialize logging if enabled
-	if config.EnableLogs {
-		if err := provider.initLogging(ctx); err != nil {
-			_ = provider.Shutdown(ctx) // Clean up what we've created so far
-			return nil, fmt.Errorf("failed to initialize logging: %w", err)
-		}
-	}
+	// Loza is the sole application event pipeline; OTEL carries traces and metrics only.
 
 	// Set up global propagators for trace context
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
@@ -192,43 +181,6 @@ func (p *Provider) initMetrics(ctx context.Context) error {
 	return nil
 }
 
-// initLogging initializes the logger provider and exporter
-func (p *Provider) initLogging(ctx context.Context) error {
-	// Create OTLP HTTP log exporter
-	opts := []otlploghttp.Option{
-		otlploghttp.WithEndpoint(p.config.LogsEndpoint),
-	}
-
-	// Add headers if configured
-	if len(p.config.Headers) > 0 {
-		opts = append(opts, otlploghttp.WithHeaders(p.config.Headers))
-	}
-
-	// Use insecure connection if configured
-	if p.config.Insecure {
-		opts = append(opts, otlploghttp.WithInsecure())
-	}
-
-	logExporter, err := otlploghttp.New(ctx, opts...)
-	if err != nil {
-		return fmt.Errorf("failed to create log exporter: %w", err)
-	}
-
-	// Create logger provider with batch processor
-	p.loggerProvider = log.NewLoggerProvider(
-		log.WithProcessor(log.NewBatchProcessor(logExporter)),
-		log.WithResource(p.resource),
-	)
-
-	// Set global logger provider
-	global.SetLoggerProvider(p.loggerProvider)
-
-	// Add shutdown function
-	p.shutdownFuncs = append(p.shutdownFuncs, p.loggerProvider.Shutdown)
-
-	return nil
-}
-
 // Shutdown gracefully shuts down all OpenTelemetry providers
 func (p *Provider) Shutdown(ctx context.Context) error {
 	// Create a context with timeout for shutdown
@@ -255,7 +207,7 @@ func (p *Provider) IsMetricsEnabled() bool {
 	return p.config.EnableMetrics
 }
 
-// IsLoggingEnabled returns whether logging is enabled
+// IsLoggingEnabled reports whether the legacy OTEL log exporter is active.
 func (p *Provider) IsLoggingEnabled() bool {
-	return p.config.EnableLogs
+	return false
 }

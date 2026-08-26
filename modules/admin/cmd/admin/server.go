@@ -69,9 +69,11 @@ type dashboardTelemetrySummary struct {
 	TracesEnabled          bool    `json:"traces_enabled"`
 	MetricsEnabled         bool    `json:"metrics_enabled"`
 	LogsEnabled            bool    `json:"logs_enabled"`
+	EventsEnabled          bool    `json:"events_enabled"`
 	TracesEndpoint         string  `json:"traces_endpoint"`
 	MetricsEndpoint        string  `json:"metrics_endpoint"`
 	LogsEndpoint           string  `json:"logs_endpoint"`
+	EventsEndpoint         string  `json:"events_endpoint"`
 	TraceSamplingRatio     float64 `json:"trace_sampling_ratio"`
 	MetricExportInterval   string  `json:"metric_export_interval"`
 	TraceExportTimeout     string  `json:"trace_export_timeout"`
@@ -79,6 +81,7 @@ type dashboardTelemetrySummary struct {
 	TracesEndpointPresent  bool    `json:"traces_endpoint_present"`
 	MetricsEndpointPresent bool    `json:"metrics_endpoint_present"`
 	LogsEndpointPresent    bool    `json:"logs_endpoint_present"`
+	EventsEndpointPresent  bool    `json:"events_endpoint_present"`
 }
 
 type dashboardGuardrailsSummary struct {
@@ -381,9 +384,10 @@ func (s *Server) dashboardTelemetrySummary() dashboardTelemetrySummary {
 	if metricsEndpoint == "" {
 		metricsEndpoint = defaults.MetricsEndpoint
 	}
-	logsEndpoint := strings.TrimSpace(cfg.LogsEndpoint)
-	if logsEndpoint == "" {
-		logsEndpoint = defaults.LogsEndpoint
+	logsEndpoint := ""
+	eventsEndpoint := strings.TrimSpace(s.Config.Observability.Endpoints.LozaCollector)
+	if eventsEndpoint == "" {
+		eventsEndpoint = "http://loza-collector:9308/events"
 	}
 	traceSamplingRatio := cfg.TraceSamplingRatio
 	if traceSamplingRatio == 0 {
@@ -399,11 +403,9 @@ func (s *Server) dashboardTelemetrySummary() dashboardTelemetrySummary {
 	}
 	tracesEnabled := cfg.EnableTraces
 	metricsEnabled := cfg.EnableMetrics
-	logsEnabled := cfg.EnableLogs
-	if !tracesEnabled && !metricsEnabled && !logsEnabled {
+	if !tracesEnabled && !metricsEnabled {
 		tracesEnabled = defaults.EnableTraces
 		metricsEnabled = defaults.EnableMetrics
-		logsEnabled = defaults.EnableLogs
 	}
 
 	return dashboardTelemetrySummary{
@@ -413,17 +415,20 @@ func (s *Server) dashboardTelemetrySummary() dashboardTelemetrySummary {
 		InstanceID:             instanceID,
 		TracesEnabled:          tracesEnabled,
 		MetricsEnabled:         metricsEnabled,
-		LogsEnabled:            logsEnabled,
+		LogsEnabled:            false,
+		EventsEnabled:          true,
 		TracesEndpoint:         tracesEndpoint,
 		MetricsEndpoint:        metricsEndpoint,
 		LogsEndpoint:           logsEndpoint,
+		EventsEndpoint:         eventsEndpoint,
 		TraceSamplingRatio:     traceSamplingRatio,
 		MetricExportInterval:   metricExportInterval.String(),
 		TraceExportTimeout:     traceExportTimeout.String(),
 		InsecureExporter:       cfg.Insecure,
 		TracesEndpointPresent:  tracesEndpoint != "",
 		MetricsEndpointPresent: metricsEndpoint != "",
-		LogsEndpointPresent:    logsEndpoint != "",
+		LogsEndpointPresent:    false,
+		EventsEndpointPresent:  eventsEndpoint != "",
 	}
 }
 
@@ -557,11 +562,10 @@ func securityAllowForwardedHeaders() bool {
 
 func (s *Server) dashboardObservabilityEndpoints() []dashboardObservabilityEndpoint {
 	return []dashboardObservabilityEndpoint{
-		{Key: "otel-collector", Label: "OTel Collector", URL: strings.TrimSpace(s.Config.Observability.Endpoints.OTelCollector)},
+		{Key: "loza-collector", Label: "Loza Collector", URL: strings.TrimSpace(s.Config.Observability.Endpoints.LozaCollector)},
 		{Key: "prometheus", Label: "Prometheus", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Prometheus)},
 		{Key: "grafana", Label: "Grafana", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Grafana)},
 		{Key: "tempo", Label: "Tempo", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Tempo)},
-		{Key: "loki", Label: "Loki", URL: strings.TrimSpace(s.Config.Observability.Endpoints.Loki)},
 	}
 }
 

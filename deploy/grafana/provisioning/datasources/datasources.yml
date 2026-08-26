@@ -9,12 +9,6 @@ datasources:
     isDefault: true
     editable: false
 
-  - name: Loki
-    uid: loki
-    type: loki
-    access: proxy
-    url: http://loki:3100
-    editable: false
 
   - name: Tempo
     uid: tempo
@@ -23,5 +17,3 @@ datasources:
     url: http://tempo:3200
     editable: false
     jsonData:
-      tracesToLogsV2:
-        datasourceUid: loki

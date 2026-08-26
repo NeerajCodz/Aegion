@@ -47,19 +47,17 @@ server:
 		t.Fatalf("write config: %v", err)
 	}
 
-	t.Setenv("AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL", "http://otel-custom:13133")
+	t.Setenv("AEGION_LOZA_COLLECTOR_URL", "http://loza-custom:9308/health")
 	t.Setenv("AEGION_ADMIN_OBS_GRAFANA_URL", "http://grafana-custom:3000/api/health")
 	t.Setenv("AEGION_ADMIN_OBS_TEMPO_URL", "http://tempo-custom:3200/ready")
-	t.Setenv("AEGION_ADMIN_OBS_LOKI_URL", "http://loki-custom:3100/ready")
 
 	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		t.Fatalf("loadConfig error = %v", err)
 	}
-	if cfg.Observability.Endpoints.OTelCollector != "http://otel-custom:13133" ||
+	if cfg.Observability.Endpoints.LozaCollector != "http://loza-custom:9308/health" ||
 		cfg.Observability.Endpoints.Grafana != "http://grafana-custom:3000/api/health" ||
-		cfg.Observability.Endpoints.Tempo != "http://tempo-custom:3200/ready" ||
-		cfg.Observability.Endpoints.Loki != "http://loki-custom:3100/ready" {
+		cfg.Observability.Endpoints.Tempo != "http://tempo-custom:3200/ready" {
 		t.Fatalf("unexpected observability endpoints: %#v", cfg.Observability.Endpoints)
 	}
 }

@@ -206,6 +206,13 @@ spec:
               protocol: TCP
 
           env:
+            - name: AEGION_LOZA_COLLECTOR_URL
+              value: "http://loza-collector:9308/events"
+            - name: AEGION_LOZA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: loza-collector-secrets
+                  key: ingest-key
             - name: MODULE_PORT
               value: "8082"
             - name: GRPC_PORT

@@ -30,8 +30,6 @@ exporters:
     namespace: aegion
     const_labels:
       deployment: docker-dev
-  loki:
-    endpoint: http://loki:3100/loki/api/v1/push
   debug:
     verbosity: normal
 
@@ -50,10 +48,6 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, resource, batch]
       exporters: [prometheus]
-    logs:
-      receivers: [otlp]
-      processors: [memory_limiter, resource, batch]
-      exporters: [loki]
   telemetry:
     logs:
       level: info
