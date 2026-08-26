@@ -12,8 +12,8 @@ This guide covers deploying Aegion to production environments with enterprise-gr
 - [ ] **Cache**: Redis 7+ with persistence enabled
 - [ ] **Container Runtime**: Docker 24+ or Kubernetes 1.28+
 - [ ] **Load Balancer**: HTTPS/TLS 1.3 capable
-- [ ] **Monitoring**: Prometheus + Grafana or equivalent
-- [ ] **Logging**: ELK Stack, Loki, or CloudWatch
+- [ ] **Operational events**: Authenticated Loza Collector with persistent collector-owned DuckDB
+- [ ] **Metrics/traces**: Prometheus + Grafana and Tempo or equivalent
 - [ ] **DNS**: Configured domain with valid SSL certificates
 
 ### Security Requirements

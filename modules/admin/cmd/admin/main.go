@@ -96,14 +96,12 @@ type Config struct {
 			InstanceID           string        `yaml:"instance_id"`
 			TracesEndpoint       string        `yaml:"traces_endpoint"`
 			MetricsEndpoint      string        `yaml:"metrics_endpoint"`
-			LogsEndpoint         string        `yaml:"logs_endpoint"`
 			TraceSamplingRatio   float64       `yaml:"trace_sampling_ratio"`
 			MetricExportInterval time.Duration `yaml:"metric_export_interval"`
 			TraceExportTimeout   time.Duration `yaml:"trace_export_timeout"`
 			Insecure             bool          `yaml:"insecure"`
 			EnableTraces         bool          `yaml:"enable_traces"`
 			EnableMetrics        bool          `yaml:"enable_metrics"`
-			EnableLogs           bool          `yaml:"enable_logs"`
 		} `yaml:"telemetry"`
 	} `yaml:"observability"`
 	Log LogConfig `yaml:"log"`
@@ -615,9 +613,6 @@ func applyObservabilityTelemetryDefaults(cfg *Config) {
 	if cfg.Observability.Telemetry.MetricsEndpoint == "" {
 		cfg.Observability.Telemetry.MetricsEndpoint = defaults.MetricsEndpoint
 	}
-	if cfg.Observability.Telemetry.LogsEndpoint == "" {
-		cfg.Observability.Telemetry.LogsEndpoint = defaults.LogsEndpoint
-	}
 	if cfg.Observability.Telemetry.TraceSamplingRatio == 0 {
 		cfg.Observability.Telemetry.TraceSamplingRatio = defaults.TraceSamplingRatio
 	}
@@ -628,11 +623,9 @@ func applyObservabilityTelemetryDefaults(cfg *Config) {
 		cfg.Observability.Telemetry.TraceExportTimeout = defaults.TraceExportTimeout
 	}
 	if !cfg.Observability.Telemetry.EnableTraces &&
-		!cfg.Observability.Telemetry.EnableMetrics &&
-		!cfg.Observability.Telemetry.EnableLogs {
+		!cfg.Observability.Telemetry.EnableMetrics {
 		cfg.Observability.Telemetry.EnableTraces = defaults.EnableTraces
 		cfg.Observability.Telemetry.EnableMetrics = defaults.EnableMetrics
-		cfg.Observability.Telemetry.EnableLogs = defaults.EnableLogs
 	}
 }
 

@@ -43,7 +43,6 @@ The admin module is configured through YAML files and environment variables.
 | `OTEL_EXPORTER_OTLP_INSECURE` | Allow insecure OTLP transport | `false` |
 | `AEGION_OBS_ENABLE_TRACES` | Enable traces signal | `true` |
 | `AEGION_OBS_ENABLE_METRICS` | Enable metrics signal | `true` |
-| `AEGION_OBS_ENABLE_LOGS` | Enable logs signal | `true` |
 
 ### Configuration File Structure
 
@@ -92,7 +91,6 @@ observability:
     insecure: false
     enable_traces: true
     enable_metrics: true
-    enable_logs: true
 
 log:
   level: "info"  # debug, info, warn, error

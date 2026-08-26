@@ -68,11 +68,9 @@ type dashboardTelemetrySummary struct {
 	InstanceID             string  `json:"instance_id"`
 	TracesEnabled          bool    `json:"traces_enabled"`
 	MetricsEnabled         bool    `json:"metrics_enabled"`
-	LogsEnabled            bool    `json:"logs_enabled"`
 	EventsEnabled          bool    `json:"events_enabled"`
 	TracesEndpoint         string  `json:"traces_endpoint"`
 	MetricsEndpoint        string  `json:"metrics_endpoint"`
-	LogsEndpoint           string  `json:"logs_endpoint"`
 	EventsEndpoint         string  `json:"events_endpoint"`
 	TraceSamplingRatio     float64 `json:"trace_sampling_ratio"`
 	MetricExportInterval   string  `json:"metric_export_interval"`
@@ -80,7 +78,6 @@ type dashboardTelemetrySummary struct {
 	InsecureExporter       bool    `json:"insecure_exporter"`
 	TracesEndpointPresent  bool    `json:"traces_endpoint_present"`
 	MetricsEndpointPresent bool    `json:"metrics_endpoint_present"`
-	LogsEndpointPresent    bool    `json:"logs_endpoint_present"`
 	EventsEndpointPresent  bool    `json:"events_endpoint_present"`
 }
 
@@ -384,7 +381,6 @@ func (s *Server) dashboardTelemetrySummary() dashboardTelemetrySummary {
 	if metricsEndpoint == "" {
 		metricsEndpoint = defaults.MetricsEndpoint
 	}
-	logsEndpoint := ""
 	eventsEndpoint := strings.TrimSpace(s.Config.Observability.Endpoints.LozaCollector)
 	if eventsEndpoint == "" {
 		eventsEndpoint = "http://loza-collector:9308/events"
@@ -415,11 +411,9 @@ func (s *Server) dashboardTelemetrySummary() dashboardTelemetrySummary {
 		InstanceID:             instanceID,
 		TracesEnabled:          tracesEnabled,
 		MetricsEnabled:         metricsEnabled,
-		LogsEnabled:            false,
 		EventsEnabled:          true,
 		TracesEndpoint:         tracesEndpoint,
 		MetricsEndpoint:        metricsEndpoint,
-		LogsEndpoint:           logsEndpoint,
 		EventsEndpoint:         eventsEndpoint,
 		TraceSamplingRatio:     traceSamplingRatio,
 		MetricExportInterval:   metricExportInterval.String(),
@@ -427,7 +421,6 @@ func (s *Server) dashboardTelemetrySummary() dashboardTelemetrySummary {
 		InsecureExporter:       cfg.Insecure,
 		TracesEndpointPresent:  tracesEndpoint != "",
 		MetricsEndpointPresent: metricsEndpoint != "",
-		LogsEndpointPresent:    false,
 		EventsEndpointPresent:  eventsEndpoint != "",
 	}
 }

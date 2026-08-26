@@ -26,7 +26,6 @@ func TestDefaultConfig(t *testing.T) {
 	assert.NotEmpty(t, cfg.InstanceID)
 	assert.True(t, cfg.EnableTraces)
 	assert.True(t, cfg.EnableMetrics)
-	assert.True(t, cfg.EnableLogs)
 	assert.Equal(t, 1.0, cfg.TraceSamplingRatio)
 	assert.True(t, cfg.Insecure)
 }
@@ -56,7 +55,6 @@ func TestProvider_NewProvider(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.EnableTraces = false // Disable for testing
 	cfg.EnableMetrics = false
-	cfg.EnableLogs = false
 
 	provider, err := NewProvider(context.Background(), cfg)
 	require.NoError(t, err)
@@ -100,7 +98,6 @@ func TestProvider_ResourceAttributes(t *testing.T) {
 		InstanceID:     "test-instance",
 		EnableTraces:   false,
 		EnableMetrics:  false,
-		EnableLogs:     false,
 	}
 
 	provider, err := NewProvider(context.Background(), cfg)
@@ -166,11 +163,9 @@ func TestProvider_EnabledFlags(t *testing.T) {
 			cfg := DefaultConfig()
 			cfg.EnableTraces = tt.enableTraces
 			cfg.EnableMetrics = tt.enableMetrics
-			cfg.EnableLogs = tt.enableLogs
 			// Use localhost endpoints that don't require connection
 			cfg.TracesEndpoint = "http://localhost:4318/v1/traces"
 			cfg.MetricsEndpoint = "http://localhost:4318/v1/metrics"
-			cfg.LogsEndpoint = "http://localhost:4318/v1/logs"
 
 			provider, err := NewProvider(context.Background(), cfg)
 
@@ -184,7 +179,6 @@ func TestProvider_EnabledFlags(t *testing.T) {
 
 			assert.Equal(t, tt.enableTraces, provider.IsTracingEnabled())
 			assert.Equal(t, tt.enableMetrics, provider.IsMetricsEnabled())
-			assert.Equal(t, tt.enableLogs, provider.IsLoggingEnabled())
 
 			err = provider.Shutdown(context.Background())
 			assert.NoError(t, err)
@@ -196,7 +190,6 @@ func TestProvider_ShutdownTimeout(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.EnableTraces = false
 	cfg.EnableMetrics = false
-	cfg.EnableLogs = false
 
 	provider, err := NewProvider(context.Background(), cfg)
 	require.NoError(t, err)
@@ -215,7 +208,6 @@ func TestProviderNewProviderErrorPaths(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.EnableTraces = false
 		cfg.EnableMetrics = true
-		cfg.EnableLogs = false
 		cfg.MetricsEndpoint = "://bad-endpoint"
 		_, err := NewProvider(context.Background(), cfg)
 		require.Error(t, err)
@@ -226,7 +218,6 @@ func TestProviderNewProviderErrorPaths(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.EnableTraces = true
 		cfg.EnableMetrics = false
-		cfg.EnableLogs = false
 		cfg.TracesEndpoint = "://bad-endpoint"
 		provider, err := NewProvider(context.Background(), cfg)
 		if err != nil {
@@ -301,7 +292,6 @@ func TestProviderInitMethodsSuccessWithLocalCollector(t *testing.T) {
 			ServiceVersion:       "v1.0.0",
 			TracesEndpoint:       endpoint,
 			MetricsEndpoint:      endpoint,
-			LogsEndpoint:         endpoint,
 			Headers:              map[string]string{"x-test": "1"},
 			TraceSamplingRatio:   1.0,
 			MetricExportInterval: time.Hour,
@@ -346,7 +336,6 @@ func TestProviderInitTracingAndNewProviderTracingErrorPaths(t *testing.T) {
 		cfg := DefaultConfig()
 		cfg.EnableTraces = true
 		cfg.EnableMetrics = false
-		cfg.EnableLogs = false
 		cfg.TracesEndpoint = "localhost:4317"
 		cfg.Insecure = true
 

@@ -22,7 +22,6 @@ type Config struct {
 	// OTLP endpoints
 	TracesEndpoint  string `yaml:"traces_endpoint"`
 	MetricsEndpoint string `yaml:"metrics_endpoint"`
-	LogsEndpoint    string `yaml:"logs_endpoint"`
 
 	// Headers for authentication (e.g., API keys)
 	Headers map[string]string `yaml:"headers"`
@@ -40,7 +39,6 @@ type Config struct {
 	// Enable/disable telemetry components
 	EnableTraces  bool `yaml:"enable_traces"`
 	EnableMetrics bool `yaml:"enable_metrics"`
-	EnableLogs    bool `yaml:"enable_logs"`
 }
 
 // DefaultConfig returns a default configuration
@@ -54,7 +52,6 @@ func DefaultConfig() *Config {
 		InstanceID:           getEnvOrDefault("AEGION_INSTANCE_ID", hostname),
 		TracesEndpoint:       getEnvOrDefault("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://localhost:4318"),
 		MetricsEndpoint:      getEnvOrDefault("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4318"),
-		LogsEndpoint:         getEnvOrDefault("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://localhost:4318"),
 		Headers:              make(map[string]string),
 		TraceSamplingRatio:   1.0, // 100% sampling for development
 		MetricExportInterval: 30 * time.Second,
@@ -62,7 +59,6 @@ func DefaultConfig() *Config {
 		Insecure:             true, // Default to insecure for development
 		EnableTraces:         true,
 		EnableMetrics:        true,
-		EnableLogs:           true,
 	}
 }
 

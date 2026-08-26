@@ -206,8 +206,3 @@ func (p *Provider) IsTracingEnabled() bool {
 func (p *Provider) IsMetricsEnabled() bool {
 	return p.config.EnableMetrics
 }
-
-// IsLoggingEnabled reports whether the legacy OTEL log exporter is active.
-func (p *Provider) IsLoggingEnabled() bool {
-	return false
-}

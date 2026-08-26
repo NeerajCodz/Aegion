@@ -297,9 +297,9 @@ curl http://localhost:8080/.well-known/aegion/meta
 
 ### Observability Stack
 
-- **Traces**: OpenTelemetry → Jaeger/Zipkin
-- **Metrics**: Prometheus → Grafana
-- **Logs**: Structured JSON → ELK Stack/Loki
+- **Operational events**: Aegion → authenticated Loza Collector → collector-owned DuckDB/LQL
+- **Traces**: OpenTelemetry → Tempo
+- **Metrics**: OpenTelemetry → Prometheus → Grafana
 
 ## Recommendations
 
