@@ -79,7 +79,7 @@ services:
     environment:
       MODULE_LOG_LEVEL: debug
       AEGION_ADMIN_OBSERVABILITY_ENABLED: "true"
-      AEGION_ADMIN_OBS_OTEL_COLLECTOR_URL: http://loza-collector:9308/health
+      AEGION_LOZA_COLLECTOR_URL: http://loza-collector:9308/health
       AEGION_ADMIN_OBS_PROMETHEUS_URL: http://prometheus:9090/-/healthy
       AEGION_ADMIN_OBS_GRAFANA_URL: http://grafana:3000/api/health
       AEGION_ADMIN_OBS_TEMPO_URL: http://tempo:3200/ready
@@ -90,6 +90,20 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # OpenTelemetry Collector
   # ─────────────────────────────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.1
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP gRPC ingest
+      - "127.0.0.1:4318:4318"   # OTLP HTTP ingest
+      - "127.0.0.1:8888:8888"   # Collector self-metrics
+      - "127.0.0.1:8889:8889"   # Prometheus exporter for app metrics
+      - "127.0.0.1:13133:13133" # Collector health
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks: [aegion-internal]
+
 
   # ─────────────────────────────────────────────────────────────────────────
   # Prometheus
@@ -142,6 +156,7 @@ services:
     ports:
       - "127.0.0.1:8025:8025"   # Web UI
       - "127.0.0.1:1025:1025"   # SMTP
+    image: axllent/mailpit:v1.21.8
 
 volumes:
   grafana-data:
