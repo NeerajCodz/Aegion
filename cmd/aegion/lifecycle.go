@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/aegion/aegion/core/workers"
+	aegionloza "github.com/aegion/aegion/internal/platform/loza"
 	"github.com/aegion/aegion/internal/xlog"
+	lozasdk "github.com/astraive/loza/sdks/go"
 )
 
 // LifecycleConfig holds the lifecycle manager configuration.
@@ -29,7 +31,25 @@ type Lifecycle struct {
 
 	shutdownOnce sync.Once
 	draining     bool
-	mu           sync.RWMutex
+
+	mu sync.RWMutex
+}
+
+func emitLifecycleEvent(ctx context.Context, eventName, outcome string, err error, attrs ...lozasdk.Attr) {
+	logger := lozasdk.Default()
+	eventCtx := aegionloza.Start(ctx, logger, lozasdk.Params{
+		Event: eventName,
+		Kind:  "system",
+	})
+	if len(attrs) > 0 {
+		_ = logger.Set(eventCtx, attrs...)
+	}
+	if err != nil {
+		_ = logger.FinishError(eventCtx, err)
+	} else {
+		_ = logger.Finish(eventCtx, aegionloza.NormalizeOutcome(outcome))
+	}
+	_ = logger.Emit(eventCtx)
 }
 
 // NewLifecycle creates a new lifecycle manager.
@@ -59,36 +79,33 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 	}
 
 	l.shutdownOnce.Do(func() {
-		l.log.Info("Starting graceful shutdown")
-
-		// Mark as draining
 		l.setDraining(true)
 
 		var wg sync.WaitGroup
 
-		// 1. Stop accepting new HTTP connections and drain existing
+		// Stop accepting new HTTP connections and drain existing requests.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			l.log.Info("Draining HTTP connections")
-			if err := l.drainHTTP(ctx); err != nil {
-				l.log.Error("Error draining HTTP", "error", err)
+			err := l.drainHTTP(ctx)
+			if err != nil {
 				recordShutdownErr(err)
 			}
+			emitLifecycleEvent(ctx, "aegion.shutdown", outcomeForError(err), err,
+				lozasdk.String("shutdown.phase", "http_drain"))
 		}()
 
-		// 2. Stop background workers
+		// Stop background workers.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if l.workerManager != nil {
-				l.log.Info("Stopping background workers")
 				l.workerManager.Stop()
-				l.log.Info("Background workers stopped")
 			}
+			emitLifecycleEvent(ctx, "aegion.worker_shutdown", "success", nil,
+				lozasdk.String("shutdown.phase", "workers"))
 		}()
 
-		// Wait for HTTP drain and workers with timeout
 		done := make(chan struct{})
 		go func() {
 			wg.Wait()
@@ -97,35 +114,54 @@ func (l *Lifecycle) Shutdown(ctx context.Context) error {
 
 		select {
 		case <-done:
-			l.log.Info("HTTP and workers shutdown complete")
+			emitLifecycleEvent(ctx, "aegion.shutdown", "success", nil,
+				lozasdk.String("shutdown.phase", "http_workers_complete"))
 		case <-ctx.Done():
-			l.log.Warn("Shutdown timeout reached for HTTP/workers")
+			recordShutdownErr(ctx.Err())
+			emitLifecycleEvent(ctx, "aegion.shutdown", "timeout", ctx.Err(),
+				lozasdk.String("shutdown.phase", "http_workers_timeout"))
 		}
 
-		// 3. Cleanup registry (deregister all modules)
-		l.log.Info("Cleaning up service registry")
-		if err := l.cleanupRegistry(ctx); err != nil {
-			l.log.Error("Error cleaning up registry", "error", err)
+		registryErr := l.cleanupRegistry(ctx)
+		if registryErr != nil {
+			recordShutdownErr(registryErr)
 		}
+		emitLifecycleEvent(ctx, "aegion.module_registry", outcomeForError(registryErr), registryErr,
+			lozasdk.String("shutdown.phase", "registry_cleanup"))
 
-		// 4. Shutdown server components
-		l.log.Info("Shutting down server components")
-		if err := l.server.Shutdown(ctx); err != nil {
-			l.log.Error("Error shutting down server", "error", err)
-			recordShutdownErr(err)
+		serverErr := l.server.Shutdown(ctx)
+		if serverErr != nil {
+			recordShutdownErr(serverErr)
 		}
+		emitLifecycleEvent(ctx, "aegion.shutdown", outcomeForError(serverErr), serverErr,
+			lozasdk.String("shutdown.phase", "server"))
 
-		// 5. Shutdown observability provider
 		if l.observability != nil {
-			l.log.Info("Shutting down observability provider")
-			if err := l.observability.Shutdown(ctx); err != nil {
-				l.log.Error("Error shutting down observability provider", "error", err)
-				recordShutdownErr(err)
+			observabilityErr := l.observability.Shutdown(ctx)
+			if observabilityErr != nil {
+				recordShutdownErr(observabilityErr)
 			}
+			emitLifecycleEvent(ctx, "aegion.shutdown", outcomeForError(observabilityErr), observabilityErr,
+				lozasdk.String("shutdown.phase", "observability"))
 		}
+
+		emitLifecycleEvent(ctx, "aegion.shutdown", outcomeForError(shutdownErr), shutdownErr)
 	})
 
 	return shutdownErr
+}
+
+func outcomeForError(err error) string {
+	if err == nil {
+		return "success"
+	}
+	if err == context.DeadlineExceeded {
+		return "timeout"
+	}
+	if err == context.Canceled {
+		return "cancelled"
+	}
+	return "error"
 }
 
 // drainHTTP gracefully drains HTTP connections.
@@ -135,13 +171,11 @@ func (l *Lifecycle) drainHTTP(ctx context.Context) error {
 	drainCtx, cancel := context.WithTimeout(ctx, drainTimeout)
 	defer cancel()
 
-	// Shutdown HTTP server (stops accepting new connections)
+	// Shutdown HTTP server (stops accepting new connections).
 	if err := l.httpServer.Shutdown(drainCtx); err != nil {
 		if err == context.DeadlineExceeded {
-			l.log.Warn("HTTP drain timeout, forcing close")
 			return l.httpServer.Close()
 		}
-		l.log.Error("Error shutting down HTTP server", "error", err)
 		return err
 	}
 
@@ -154,21 +188,12 @@ func (l *Lifecycle) cleanupRegistry(ctx context.Context) error {
 		return nil
 	}
 
-	// Get all registered modules
 	modules := l.server.registry.ListModules(nil)
-
-	l.log.Info("Deregistering modules", "count", len(modules))
-
-	// Deregister each module
 	for _, module := range modules {
-		if _, err := l.server.registry.Deregister(module.ID); err != nil {
-			l.log.Warn("Failed to deregister module",
-				"module_id", module.ID,
-				"error", err,
-			)
-		}
+		_, err := l.server.registry.Deregister(module.ID)
+		emitLifecycleEvent(ctx, "aegion.module_registry", outcomeForError(err), err,
+			lozasdk.String("module.id", module.ID))
 	}
-
 	return nil
 }
 
@@ -234,22 +259,22 @@ func (h *ShutdownHooks) Register(name string, fn ShutdownHook) {
 }
 
 // Run executes all hooks in reverse order (LIFO).
-func (h *ShutdownHooks) Run(ctx context.Context, log *xlog.Logger) error {
+func (h *ShutdownHooks) Run(ctx context.Context, _ *xlog.Logger) error {
 	h.mu.Lock()
 	hooks := make([]namedHook, len(h.hooks))
 	copy(hooks, h.hooks)
 	h.mu.Unlock()
 
-	// Run in reverse order
 	var lastErr error
 	for i := len(hooks) - 1; i >= 0; i-- {
 		hook := hooks[i]
-		log.Info("Running shutdown hook", "hook", hook.name)
-		if err := hook.fn(ctx); err != nil {
-			log.Error("Shutdown hook failed", "error", err, "hook", hook.name)
+		err := hook.fn(ctx)
+		emitLifecycleEvent(ctx, "aegion.shutdown", outcomeForError(err), err,
+			lozasdk.String("shutdown.phase", "hook"),
+			lozasdk.String("shutdown.hook", hook.name))
+		if err != nil {
 			lastErr = err
 		}
 	}
-
 	return lastErr
 }
