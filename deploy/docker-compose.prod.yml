@@ -105,10 +105,12 @@ x-module-control-plane: &module-control-plane
 
 
   loza-collector:
-    image: ${LOZA_COLLECTOR_IMAGE:?LOZA_COLLECTOR_IMAGE is required}
+    image: ${LOZA_COLLECTOR_IMAGE:-astraive/loza}
     environment:
       COLLECTOR_AUTH_SERVER_SECRET: ${LOZA_COLLECTOR_AUTH_SERVER_SECRET:?LOZA_COLLECTOR_AUTH_SERVER_SECRET is required}
       COLLECTOR_INGEST_KEY_SECRET: ${LOZA_INGEST_KEY:?LOZA_INGEST_KEY is required}
+      COLLECTOR_ADMIN_KEY_SECRET: ${LOZA_ADMIN_KEY:?LOZA_ADMIN_KEY is required}
+      LOZA_STORAGE_ENCRYPTION_KEY: ${LOZA_STORAGE_ENCRYPTION_KEY:?LOZA_STORAGE_ENCRYPTION_KEY is required}
       LOZA_EVENTBUS: memory
       COLLECTOR_RELIABILITY_MODE: direct
     volumes:
